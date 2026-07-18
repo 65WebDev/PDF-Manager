@@ -1481,6 +1481,7 @@
       background: rgba(255, 255, 255, 0.06);
       border-right: 1px solid rgba(255, 255, 255, 0.12);
       color: rgba(255, 255, 255, 0.55);
+      min-height: 44px;
     }
     .pe-props-drag:hover { background: rgba(255, 255, 255, 0.1); color: rgba(255, 255, 255, 0.85); }
     .pe-props.pe-props-dragging .pe-props-drag,
@@ -1491,6 +1492,19 @@
       background-size: 4px 5.3px;
       background-position: 0 0;
       opacity: 0.95; pointer-events: none;
+    }
+    /* Collapsed: only the left drag strip remains (tap strip to expand). */
+    .pe-props.pe-props-collapsed {
+      padding: 0;
+    }
+    .pe-props.pe-props-collapsed .pe-props-body {
+      display: none;
+    }
+    .pe-props.pe-props-collapsed .pe-props-drag {
+      border-right: none;
+      border-radius: 8px;
+      min-height: 52px;
+      cursor: pointer;
     }
     .pe-props-body {
       display: flex; flex-direction: column; gap: 8px;
@@ -1659,6 +1673,19 @@
     #pageEditModal.pe-obj-select-mode .pe-stage-wrap { cursor: default; }
     #pageEditModal.pe-obj-select-mode .pe-stage-wrap .pe-obj { cursor: default; }
     #pageEditModal.pe-obj-select-mode.pe-obj-marquee-active .pe-stage-wrap { cursor: crosshair; }
+    /* Hand mode: objects must not receive hits (no select / sticky hover /
+       native long-press on comment text). Touches fall through to the stage. */
+    #pageEditModal.pe-hand-mode #peObjLayer {
+      pointer-events: none !important;
+    }
+    #pageEditModal.pe-hand-mode #peObjLayer .pe-obj,
+    #pageEditModal.pe-hand-mode #peObjLayer .pe-obj-callout-box {
+      pointer-events: none !important;
+    }
+    #pageEditModal.pe-hand-mode .pe-obj:hover:not(.sel),
+    #pageEditModal.pe-hand-mode .pe-obj-callout-box:hover:not(.sel) {
+      outline: none !important;
+    }
     /*#peObjLayer normally covers the whole stage with pointer-events:auto
        (its default), which is what lets a mousedown on blank canvas still
        bubble up to #peStage's own marquee/pan handler today. That same full
@@ -4758,7 +4785,7 @@
     <div id="peCropHint" class="pe-crop-hint" aria-hidden="true">Выделите область кадрирования</div>
     <div class="pe-stage-wrap" id="peStageWrap">
       <div class="pe-props" id="peProps">
-        <div class="pe-props-drag" id="pePropsDragHandle" title="Переместить панель. Двойной клик — вернуть на место по умолчанию" aria-label="Переместить панель инструментов">
+        <div class="pe-props-drag" id="pePropsDragHandle" title="Переместить панель. Одинарный тап — свернуть. Двойной клик — вернуть на место по умолчанию" aria-label="Переместить или свернуть панель инструментов">
           <span class="pe-props-drag-grips" aria-hidden="true"></span>
         </div>
         <div class="pe-props-body">
@@ -21240,7 +21267,9 @@ function peUpdateFreehandCursor() {
 function peUpdatePanUi() {
   const modal = document.getElementById('pageEditModal');
   if (!modal || !peState) return;
-  const handReady = peCanPan() && peState.tool === 'select' && !peState.objSelectMode && !peState.sel && !peState.drag;
+  const handMode = peState.tool === 'select' && !peState.objSelectMode;
+  modal.classList.toggle('pe-hand-mode', handMode);
+  const handReady = peCanPan() && handMode && !peState.sel && !peState.drag;
   modal.classList.toggle('pe-pan-ready', handReady);
   if (peState.tool !== 'crop' || peState.drag) {
     modal.classList.remove('pe-crop-pan-ready');
@@ -23548,10 +23577,11 @@ async function pageEditClose(force) {
 
 function peResetEditorUiState() {
   const props = document.getElementById('peProps');
-  if (props) props.classList.remove('visible', 'pe-props-shape-only', 'pe-props-dragging');
+  if (props) props.classList.remove('visible', 'pe-props-shape-only', 'pe-props-dragging', 'pe-props-collapsed');
+  pePropsCollapsed = false;
   const modal = document.getElementById('pageEditModal');
   if (modal) {
-    modal.classList.remove('pe-obj-select-mode', 'pe-obj-marquee-active', 'pe-crop-mode');
+    modal.classList.remove('pe-obj-select-mode', 'pe-obj-marquee-active', 'pe-crop-mode', 'pe-hand-mode');
   }
   document.getElementById('peToolObjSelect')?.classList.remove('active');
   peCloseShapeMenu();
@@ -23591,7 +23621,7 @@ function peDestroy() {
   peUpdateCropHint();
   const modal = document.getElementById('pageEditModal');
   if (modal) {
-    modal.classList.remove('open', 'modal-overlay-active', 'pe-pan-ready', 'pe-panning', 'pe-crop-mode', 'pe-crop-pan-ready', 'pe-crop-panning', 'pe-redact-has-selection');
+    modal.classList.remove('open', 'modal-overlay-active', 'pe-pan-ready', 'pe-panning', 'pe-hand-mode', 'pe-crop-mode', 'pe-crop-pan-ready', 'pe-crop-panning', 'pe-redact-has-selection');
     modal.setAttribute('aria-hidden', 'true');
   }
   window.removeEventListener('resize', peOnWinResize);
@@ -23623,9 +23653,7 @@ function peOnWinResize() {
   // (that rebuilds/blurs contentEditable and makes the OSK flash).
   if (peState.inlineEditId) {
     peUpdatePropsPosition();
-    // Scroll is gated by peTextKbScrollQuietUntil so the OSK open gesture
-    // is not killed by an immediate wrap.scrollTop change.
-    peScrollInlineEditorAboveKeyboard();
+    peScrollInlineEditorAboveKeyboard(true);
     return;
   }
   const wrap = document.getElementById('peStageWrap');
@@ -24922,9 +24950,9 @@ function peInlineEditorDomEl() {
 }
 
 /**
- * Immediately scroll the stage so the editor sits in the upper portion of the
- * wrap — call this on create, before the keyboard animation, so a block near
- * the page bottom is not covered once the OSK appears.
+ * Scroll so the editor will remain visible above a typical mobile OSK.
+ * Uses an estimated keyboard height when visualViewport has not shrunk yet,
+ * so a block created near the page bottom is already clear before typing.
  */
 function peScrollInlineEditorIntoWrapSafeZone() {
   if (!peState?.inlineEditId) return;
@@ -24933,27 +24961,33 @@ function peScrollInlineEditorIntoWrapSafeZone() {
   if (!el || !wrap) return;
   const wr = wrap.getBoundingClientRect();
   const er = el.getBoundingClientRect();
-  // Keep the caret band in the upper ~36% of the wrap viewport.
-  const targetBottom = wr.top + wrap.clientHeight * 0.36;
-  if (er.bottom > targetBottom) {
-    wrap.scrollTop += er.bottom - targetBottom;
+  const vv = window.visualViewport;
+  const vvH = vv ? vv.height : window.innerHeight;
+  // If the OSK is not open yet, reserve ~48% of the window for it.
+  const kbOpen = vv && vv.height < window.innerHeight * 0.85;
+  const kbReserve = kbOpen
+    ? Math.max(0, wr.bottom - (vv.offsetTop + vv.height))
+    : Math.round(Math.min(window.innerHeight * 0.52, Math.max(260, window.innerHeight * 0.45)));
+  const usableBottom = wr.top + Math.max(140, wrap.clientHeight - kbReserve) * 0.72;
+  if (er.bottom > usableBottom) {
+    wrap.scrollTop += er.bottom - usableBottom;
   }
-  if (er.top < wr.top + 12) {
-    wrap.scrollTop += er.top - (wr.top + 12);
+  if (er.top < wr.top + 10) {
+    wrap.scrollTop += er.top - (wr.top + 10);
   }
 }
 
 /** Fine-tune against the real visualViewport once the OSK has settled. */
-function peScrollInlineEditorAboveKeyboard() {
+function peScrollInlineEditorAboveKeyboard(force) {
   if (!peState?.inlineEditId) return;
-  if (Date.now() < peTextKbScrollQuietUntil) return;
+  if (!force && Date.now() < peTextKbScrollQuietUntil) return;
   const el = peInlineEditorDomEl();
   const wrap = document.getElementById('peStageWrap');
   if (!el || !wrap) return;
   const vv = window.visualViewport;
   const viewTop = vv ? vv.offsetTop : 0;
   const viewBottom = vv ? (vv.offsetTop + vv.height) : window.innerHeight;
-  const margin = 28;
+  const margin = 36;
   const er = el.getBoundingClientRect();
   let scrolled = false;
   if (er.bottom > viewBottom - margin) {
@@ -24972,7 +25006,9 @@ function peScrollInlineEditorAboveKeyboard() {
 
 function peOnVisualViewportForText() {
   if (!peState?.inlineEditId) return;
-  peScrollInlineEditorAboveKeyboard();
+  // Prefer real keyboard geometry as soon as it changes.
+  peScrollInlineEditorAboveKeyboard(true);
+  peFocusInlineEditorNow();
 }
 
 function peBindTextKeyboardGuards(on) {
@@ -24988,26 +25024,32 @@ function peBindTextKeyboardGuards(on) {
 }
 
 /**
- * After a new text block is focused: keep OSK up, then nudge if still covered.
- * Immediate wrap safe-zone scroll runs at create time (see peBeginInlineEdit).
+ * After a new text block is focused: keep OSK up and keep the caret visible.
+ * Immediate safe-zone scroll runs at create; retries catch late OSK layout.
  */
 function peScheduleTextEditVisibility(o) {
   if (!peState || !o) return;
-  peArmTextKeyboardQuiet(350);
+  peArmTextKeyboardQuiet(80);
   peBindTextKeyboardGuards(true);
   clearTimeout(peTextKbTimer);
   const editId = o.id;
-  const run = () => {
+  const pass = (force) => {
     if (!peState || peState.inlineEditId !== editId) return;
     const el = peInlineEditorDomEl();
     if (el && document.activeElement !== el) {
       peState.inlineEditFocusPending = true;
       peFocusInlineEditorNow();
     }
-    peScrollInlineEditorAboveKeyboard();
+    if (force) peScrollInlineEditorAboveKeyboard(true);
+    else peScrollInlineEditorIntoWrapSafeZone();
   };
-  // After typical OSK animation; quiet window has ended by then.
-  peTextKbTimer = setTimeout(run, 420);
+  // Immediate + a few passes while the OSK animates in.
+  pass(false);
+  peTextKbTimer = setTimeout(() => {
+    pass(true);
+    setTimeout(() => pass(true), 180);
+    setTimeout(() => pass(true), 420);
+  }, 60);
 }
 
 function peInlineTextObj() {
@@ -25158,8 +25200,7 @@ function peBeginCalloutEdit(o) {
   peState.inlineEditFocusPending = true;
   peSelect(o, { skipSelectionHistory: true });
   peScrollInlineEditorIntoWrapSafeZone();
-  peArmTextKeyboardQuiet(350);
-  // peSelect already redraws; focus sync inside the user gesture for OSK.
+  peArmTextKeyboardQuiet(80);
   peFocusInlineEditorNow();
   peFocusInlineEditorIfNeeded();
   if (typeof isTouchDevice !== 'undefined' && isTouchDevice) {
@@ -25200,11 +25241,10 @@ function peBeginInlineEdit(o, opts) {
   peState.inlineEditFocusPending = true;
   const skipSelectionHistory = !!(opts && opts.isNewDraft) || peState.draftTextId === o.id;
   peSelect(o, { skipSelectionHistory });
-  // Scroll into the upper wrap band before focus so a bottom-of-page block
-  // is already clear of where the OSK will land.
+  // Scroll above the estimated keyboard BEFORE focus so the new block is
+  // already visible; focus then opens the OSK without covering it.
   peScrollInlineEditorIntoWrapSafeZone();
-  peArmTextKeyboardQuiet(350);
-  // Focus immediately after DOM rebuild (same user gesture → keep OSK up).
+  peArmTextKeyboardQuiet(80);
   peFocusInlineEditorNow();
   if (typeof isTouchDevice !== 'undefined' && isTouchDevice) {
     peBindTextKeyboardGuards(true);
@@ -26719,11 +26759,33 @@ function peUpdatePropsPosition() {
   props.style.top = def.top + 'px';
 }
 
+let pePropsCollapsed = false;
+
+function peSyncPropsCollapsedUi() {
+  const props = document.getElementById('peProps');
+  const handle = document.getElementById('pePropsDragHandle');
+  if (!props) return;
+  props.classList.toggle('pe-props-collapsed', !!pePropsCollapsed);
+  if (handle) {
+    handle.title = pePropsCollapsed
+      ? 'Показать панель'
+      : 'Переместить панель. Одинарный тап — свернуть. Двойной клик — вернуть на место по умолчанию';
+    handle.setAttribute('aria-label', pePropsCollapsed ? 'Показать панель инструментов' : 'Переместить или свернуть панель');
+  }
+}
+
+function peSetPropsCollapsed(on) {
+  pePropsCollapsed = !!on;
+  peSyncPropsCollapsedUi();
+  peUpdatePropsPosition();
+}
+
 function peInitPropsPanelDrag() {
   const props = document.getElementById('peProps');
   const handle = document.getElementById('pePropsDragHandle');
   if (!props || !handle || props.dataset.peDragInit === '1') return;
   props.dataset.peDragInit = '1';
+  peSyncPropsCollapsedUi();
 
   peBindPointerDown(handle, (e) => {
     if (!props.classList.contains('visible')) return;
@@ -26735,16 +26797,20 @@ function peInitPropsPanelDrag() {
       startX: e.clientX,
       startY: e.clientY,
       startLeft: rect.left,
-      startTop: rect.top
+      startTop: rect.top,
+      moved: false
     };
     props.classList.add('pe-props-dragging');
     peCapturePointer(e, handle);
   });
 
+  let pePropsCollapseTapTimer = null;
   handle.addEventListener('dblclick', (e) => {
     if (!props.classList.contains('visible')) return;
     e.preventDefault();
     e.stopPropagation();
+    clearTimeout(pePropsCollapseTapTimer);
+    if (pePropsCollapsed) peSetPropsCollapsed(false);
     peResetPropsPanelPos();
   });
 
@@ -26752,16 +26818,30 @@ function peInitPropsPanelDrag() {
     if (!pePropsDrag) return;
     const dx = e.clientX - pePropsDrag.startX;
     const dy = e.clientY - pePropsDrag.startY;
-    const c = peClampPropsPanelPos(pePropsDrag.startLeft + dx, pePropsDrag.startTop + dy, props);
-    if (pePropsDragMode) peSetPropsCustomPos(pePropsDragMode, c);
-    props.style.left = c.left + 'px';
-    props.style.top = c.top + 'px';
+    if (Math.hypot(dx, dy) >= 5) pePropsDrag.moved = true;
+    if (pePropsDrag.moved) {
+      const c = peClampPropsPanelPos(pePropsDrag.startLeft + dx, pePropsDrag.startTop + dy, props);
+      if (pePropsDragMode) peSetPropsCustomPos(pePropsDragMode, c);
+      props.style.left = c.left + 'px';
+      props.style.top = c.top + 'px';
+    }
   }, () => {
     if (!pePropsDrag) return;
     props.classList.remove('pe-props-dragging');
-    if (pePropsDragMode) peSavePropsPanelPos(pePropsDragMode);
+    const wasTap = !pePropsDrag.moved;
+    if (pePropsDrag.moved && pePropsDragMode) peSavePropsPanelPos(pePropsDragMode);
     pePropsDrag = null;
     pePropsDragMode = null;
+    if (!wasTap) return;
+    // Tap strip: expand immediately if collapsed; defer collapse so dblclick
+    // (reset position) is not eaten by a collapse/expand flicker.
+    if (pePropsCollapsed) {
+      clearTimeout(pePropsCollapseTapTimer);
+      peSetPropsCollapsed(false);
+    } else {
+      clearTimeout(pePropsCollapseTapTimer);
+      pePropsCollapseTapTimer = setTimeout(() => peSetPropsCollapsed(true), 280);
+    }
   });
 }
 
@@ -26782,6 +26862,8 @@ function peUpdateProps() {
   if (opRow) opRow.style.display = 'none';
   if (shapeW) shapeW.classList.remove('visible');
   props.classList.remove('visible', 'pe-props-shape-only');
+  // Keep collapse state across peUpdateProps rebuilds of visibility.
+  peSyncPropsCollapsedUi();
 
   if (peSelectionHasMixedTypes()) return;
 
@@ -28838,10 +28920,25 @@ function peObjMouseDown(e, o) {
       }
       peSelSnapBeforePinch = null;
     }
+    // Draw tools: first finger may have started a shape/redact/text — cancel.
     if (peState.drag) {
-      peState.drag = null;
-      peStopAutoScroll();
-      document.getElementById('pageEditModal')?.classList.remove('pe-panning', 'pe-crop-panning');
+      if (!peCancelActiveDraw()) {
+        peState.drag = null;
+        peStopAutoScroll();
+        document.getElementById('pageEditModal')?.classList.remove('pe-panning', 'pe-crop-panning');
+      }
+    }
+    if (peState.draftTextId && peState.inlineEditId === peState.draftTextId) {
+      // Empty text block created by the first finger of a pinch — drop it.
+      peEndInlineEdit(false);
+    } else if (peState.draftShapeId) {
+      const draft = peState.objects.find(x => x.id === peState.draftShapeId);
+      if (draft) {
+        peState.objects = peState.objects.filter(x => x !== draft);
+        peState.draftShapeId = null;
+        peSelect(null, { keepTool: true });
+        peRedrawObjects();
+      }
     }
     pePinchActive = true;
     pePinchStartDist = peTouchDist(e.touches[0], e.touches[1]);
@@ -29191,12 +29288,12 @@ function peObjMouseDown(e, o) {
     }
     if (tool === 'select' && peState.objSelectMode) {
       e.preventDefault();
-      const wrapEl = document.getElementById('peStageWrap');
       const now = Date.now();
       const tapDist = Math.hypot(e.clientX - peObjMarqueeTap.x, e.clientY - peObjMarqueeTap.y);
       const isDbl = (now - peObjMarqueeTap.t) < 550 && tapDist < 48;
       peObjMarqueeTap = { t: now, x: e.clientX, y: e.clientY };
-      // Marquee only on double-tap; single tap+drag pans like Hand.
+      // Marquee only on double-tap; single finger always pans like Hand
+      // (start pan-view immediately — no hold threshold / peCanPan gate).
       if (isDbl) {
         peState.drag = {
           kind: 'obj-marquee',
@@ -29204,19 +29301,14 @@ function peObjMouseDown(e, o) {
           additive: e.shiftKey,
           baseIds: e.shiftKey ? peGetSelectedObjects().map(o => o.id) : null
         };
+        peUpdatePanUi();
       } else {
-        peState.drag = {
-          kind: 'obj-select-gesture',
-          startX: pt.x, startY: pt.y, curX: pt.x, curY: pt.y,
-          startClientX: e.clientX, startClientY: e.clientY,
-          startTime: now,
-          scrollLeft: wrapEl ? wrapEl.scrollLeft : 0,
-          scrollTop: wrapEl ? wrapEl.scrollTop : 0,
-          additive: e.shiftKey,
-          baseIds: null
-        };
+        peStartPanView(e);
+        if (peState.drag && peState.drag.kind === 'pan-view') {
+          peState.drag.fromObjSelectTap = true;
+          peState.drag.additive = e.shiftKey;
+        }
       }
-      peUpdatePanUi();
       return;
     }
     if (tool === 'select' && !peState.sel && peCanPan()) {
