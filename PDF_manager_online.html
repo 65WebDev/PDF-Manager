@@ -1700,7 +1700,11 @@
       justify-content: flex-start;
       align-items: flex-start;
     }
-    /* Invisible textarea: arm OSK on the real tap, then transfer focus. */
+    /*
+      Mobile text/callout editing uses a real <textarea> overlay.
+      contentEditable often never opens the OSK inside touch-action:none stages.
+      Idle: inert 1×1. Active: sits over the block and keeps the keyboard.
+    */
     #peOskProxy {
       position: fixed;
       left: 0;
@@ -1710,7 +1714,7 @@
       margin: 0;
       padding: 0;
       border: 0;
-      opacity: 0.01;
+      opacity: 0;
       resize: none;
       overflow: hidden;
       caret-color: transparent;
@@ -1719,6 +1723,30 @@
       pointer-events: none;
       z-index: 2147483000;
       font-size: 16px; /* avoid iOS input zoom */
+      box-sizing: border-box;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    #peOskProxy.pe-osk-active {
+      opacity: 1;
+      pointer-events: auto;
+      caret-color: auto;
+      background: rgba(255, 255, 255, 0.02);
+      outline: none;
+      border: none;
+      -webkit-user-select: text;
+      user-select: text;
+    }
+    .pe-obj-text.pe-mobile-overlay-host,
+    .pe-callout-text.pe-mobile-overlay-host {
+      color: transparent !important;
+      -webkit-text-fill-color: transparent;
+      caret-color: transparent;
+    }
+    .pe-toolbar.pe-tb-tools-wrap .pe-toolbar-tail {
+      justify-content: space-between;
+      max-width: 100%;
+      box-sizing: border-box;
     }
     .pe-stage-focus-spacer {
       width: 100%;
@@ -4013,7 +4041,8 @@
       }
       /* Overlay toggle must not steal flex width from tool icons (36×36).
          Tail gets a local inset so Cancel/Save sit clear of the absolute button. */
-      #pageEditModal:not(.pe-menu-collapsed) .pe-toolbar-tail {
+      /* Stage 3: JS aligns tail to Crop/Delete; otherwise leave room for hamburger. */
+      #pageEditModal:not(.pe-menu-collapsed) .pe-toolbar:not(.pe-tb-tools-wrap) .pe-toolbar-tail {
         padding-right: 40px;
         box-sizing: border-box;
       }
@@ -23445,7 +23474,7 @@ function editSelectedPage() {
       const btn = e.target.closest('button[data-action="comment"]');
       if (btn && typeof isTouchDevice !== 'undefined' && isTouchDevice
           && typeof peArmOskProxy === 'function') {
-        peArmOskProxy();
+        peArmOskProxy(e.clientX, e.clientY);
       }
     }, true);
     textCopyMenu.addEventListener('mousedown', (e) => {
@@ -24344,14 +24373,20 @@ function peRedrawObjects() {
       inner.innerHTML = o.html != null ? o.html : peEscapeHtml(o.text || '').replace(/\n/g, '<br>');
       if (peState.inlineEditId === o.id) {
         inner.classList.add('pe-inline-edit');
-        inner.contentEditable = 'true';
         inner.spellcheck = false;
+        if (peUsesMobileEditOverlay()) {
+          // Real typing happens in #peOskProxy; host is display-only.
+          inner.contentEditable = 'false';
+          inner.classList.add('pe-mobile-overlay-host');
+        } else {
+          inner.contentEditable = 'true';
+          inner.addEventListener('input', () => {
+            o.html = inner.innerHTML;
+            o.text = peEditablePlainText(inner);
+            peSyncTextEmptyClass(inner, o);
+          });
+        }
         peSyncTextEmptyClass(inner, o);
-        inner.addEventListener('input', () => {
-          o.html = inner.innerHTML;
-          o.text = peEditablePlainText(inner);
-          peSyncTextEmptyClass(inner, o);
-        });
       }
       el.appendChild(inner);
       el.addEventListener('dblclick', (ev) => {
@@ -24676,31 +24711,37 @@ function peAppendCalloutBox(layer, o, W, H) {
   textEl.style.fontSize = fontPx + 'px';
   textEl.innerHTML = o.html != null ? o.html : peEscapeHtml(o.text || '').replace(/\n/g, '<br>');
   if (isEditing) {
-    textEl.contentEditable = 'true';
     textEl.spellcheck = false;
+    if (peUsesMobileEditOverlay()) {
+      textEl.contentEditable = 'false';
+      textEl.classList.add('pe-mobile-overlay-host');
+    } else {
+      textEl.contentEditable = 'true';
+      textEl.addEventListener('input', () => {
+        o.html = textEl.innerHTML;
+        o.text = peEditablePlainText(textEl);
+      });
+      textEl.addEventListener('blur', () => {
+        setTimeout(() => {
+          if (!peState || peState.inlineEditId !== o.id) return;
+          if (peState.drag && (peState.drag.kind === 'callout-box-move'
+              || peState.drag.kind === 'resize-callout-box')) return;
+          if (peState._calloutKeepEdit) return;
+          if (document.activeElement && document.activeElement.closest
+              && document.activeElement.closest('.pe-obj-callout-box[data-pe-id="' + o.id + '"]')) return;
+          const bgPop = document.getElementById('peCalloutBgPopup');
+          if (bgPop && bgPop.classList.contains('open')) return;
+          peEndCalloutEdit(true);
+        }, 0);
+      });
+    }
     peBindPointerDown(textEl, (e) => {
       if (peCalloutBorderHit(box, e.clientX, e.clientY)) {
         peStartCalloutBoxMove(e, o);
         return;
       }
       e.stopPropagation();
-    });
-    textEl.addEventListener('input', () => {
-      o.html = textEl.innerHTML;
-      o.text = peEditablePlainText(textEl);
-    });
-    textEl.addEventListener('blur', () => {
-      setTimeout(() => {
-        if (!peState || peState.inlineEditId !== o.id) return;
-        if (peState.drag && (peState.drag.kind === 'callout-box-move'
-            || peState.drag.kind === 'resize-callout-box')) return;
-        if (peState._calloutKeepEdit) return;
-        if (document.activeElement && document.activeElement.closest
-            && document.activeElement.closest('.pe-obj-callout-box[data-pe-id="' + o.id + '"]')) return;
-        const bgPop = document.getElementById('peCalloutBgPopup');
-        if (bgPop && bgPop.classList.contains('open')) return;
-        peEndCalloutEdit(true);
-      }, 0);
+      if (peUsesMobileEditOverlay()) peFocusInlineEditorNow();
     });
   }
   box.appendChild(textEl);
@@ -25076,6 +25117,7 @@ function peSyncInlineEditsFromDom() {
   // Insurance: if the user leaves the editing mode while the
   // piquere - close it (the changes have already been applied).
   if (peColorPreview) peCloseColorPickerSession();
+  if (peMobileEditActive) peSyncMobileEditOverlayToObj();
   document.querySelectorAll('#peObjLayer .pe-obj-text.pe-inline-edit').forEach(el => {
     const id = parseInt(el.dataset.peId, 10);
     const o = peState.objects.find(x => x.id === id);
@@ -25312,33 +25354,168 @@ function peEnableHlComment(o) {
   peCommitEditorHistory();
 }
 
-/** Focus proxy textarea during the user gesture so the OSK can open. */
-function peArmOskProxy() {
-  const t = document.getElementById('peOskProxy');
+/** Touch devices: edit via real <textarea> (contentEditable rarely opens OSK). */
+let peMobileEditActive = null; // { id, type }
+let peMobileEditListenersBound = false;
+
+function peUsesMobileEditOverlay() {
+  return typeof isTouchDevice !== 'undefined' && isTouchDevice;
+}
+
+function peOskEl() {
+  return document.getElementById('peOskProxy');
+}
+
+function peEscapeHtmlLite(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/** Arm the textarea during the user gesture (before the editor DOM exists). */
+function peArmOskProxy(clientX, clientY) {
+  const t = peOskEl();
   if (!t) return false;
+  t.classList.add('pe-osk-active');
+  t.setAttribute('aria-hidden', 'false');
+  const x = (clientX != null && isFinite(clientX)) ? clientX : (window.innerWidth / 2);
+  const y = (clientY != null && isFinite(clientY)) ? clientY : (window.innerHeight * 0.45);
+  t.style.left = Math.max(4, Math.round(x - 16)) + 'px';
+  t.style.top = Math.max(4, Math.round(y - 10)) + 'px';
+  t.style.width = '48px';
+  t.style.height = '28px';
+  t.style.fontSize = '16px';
+  t.style.color = '#111';
+  if (!t.value) t.value = '';
   try {
-    t.value = '';
-    t.focus({ preventScroll: true });
-    try { t.setSelectionRange(0, 0); } catch (_) {}
+    t.focus();
+    try { t.setSelectionRange(t.value.length, t.value.length); } catch (_) {}
   } catch (_) {
     try { t.focus(); } catch (__) {}
   }
   return document.activeElement === t;
 }
 
-function peBlurOskProxy() {
-  const t = document.getElementById('peOskProxy');
+function peBindMobileEditListeners() {
+  if (peMobileEditListenersBound) return;
+  const t = peOskEl();
   if (!t) return;
+  peMobileEditListenersBound = true;
+  t.addEventListener('input', peOnMobileEditInput);
+  t.addEventListener('keydown', peOnMobileEditKeydown);
+}
+
+function peOnMobileEditKeydown(e) {
+  if (!peMobileEditActive || !peState) return;
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    const o = peState.objects.find(x => x.id === peMobileEditActive.id);
+    if (o && o.type === 'callout') peEndCalloutEdit(true);
+    else peFinishTextInlineEdit({ keepTool: true, keepSelection: true });
+  }
+}
+
+function peOnMobileEditInput() {
+  if (!peState || !peMobileEditActive) return;
+  const o = peState.objects.find(x => x.id === peMobileEditActive.id);
+  const t = peOskEl();
+  if (!o || !t) return;
+  const text = t.value;
+  o.text = text;
+  const html = (typeof peEscapeHtml === 'function' ? peEscapeHtml(text) : peEscapeHtmlLite(text))
+    .replace(/\n/g, '<br>');
+  o.html = html;
+  const el = peInlineEditorDomEl();
+  if (el) {
+    el.textContent = text;
+    if (typeof peSyncTextEmptyClass === 'function') peSyncTextEmptyClass(el, o);
+  }
+  pePositionMobileEditOverlay();
+}
+
+function pePositionMobileEditOverlay() {
+  const t = peOskEl();
+  if (!t || !peMobileEditActive) return;
+  const el = peInlineEditorDomEl();
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  if (!(r.width >= 0) || !(r.height >= 0)) return;
+  const cs = getComputedStyle(el);
+  const fontPx = parseFloat(cs.fontSize) || 16;
+  const w = Math.max(r.width, Math.ceil(fontPx * 2.2));
+  const h = Math.max(r.height, Math.ceil(fontPx * 1.35));
+  t.style.left = Math.round(r.left) + 'px';
+  t.style.top = Math.round(r.top) + 'px';
+  t.style.width = Math.round(w) + 'px';
+  t.style.height = Math.round(h) + 'px';
+  t.style.fontSize = cs.fontSize || (fontPx + 'px');
+  t.style.fontFamily = cs.fontFamily || 'sans-serif';
+  t.style.fontWeight = cs.fontWeight || 'normal';
+  t.style.fontStyle = cs.fontStyle || 'normal';
+  t.style.lineHeight = cs.lineHeight || 'normal';
+  t.style.textAlign = cs.textAlign || 'left';
+  // Prefer the object's color (host text is forced transparent).
+  const o = peState && peState.objects.find(x => x.id === peMobileEditActive.id);
+  t.style.color = (o && o.color) || cs.color || '#111';
+  t.style.background = (o && o.type === 'callout')
+    ? (o.bg || 'rgba(255, 248, 180, 0.95)')
+    : 'rgba(255,255,255,0.02)';
+}
+
+/** Keep a real textarea focused for the whole mobile edit session. */
+function peStartMobileEditOverlay(o) {
+  if (!peUsesMobileEditOverlay() || !o) return false;
+  const t = peOskEl();
+  if (!t) return false;
+  peBindMobileEditListeners();
+  const alreadyFocused = document.activeElement === t;
+  peMobileEditActive = { id: o.id, type: o.type };
+  t.classList.add('pe-osk-active');
+  t.setAttribute('aria-hidden', 'false');
+  if (t.value !== (o.text || '')) t.value = o.text || '';
+  const el = peInlineEditorDomEl();
+  if (el) {
+    el.contentEditable = 'false';
+    el.classList.add('pe-mobile-overlay-host', 'pe-inline-edit');
+    el.textContent = o.text || '';
+    if (typeof peSyncTextEmptyClass === 'function') peSyncTextEmptyClass(el, o);
+  }
+  pePositionMobileEditOverlay();
+  try {
+    if (!alreadyFocused) t.focus();
+    try { t.setSelectionRange(t.value.length, t.value.length); } catch (_) {}
+  } catch (_) {
+    try { t.focus(); } catch (__) {}
+  }
+  if (peState) peState.inlineEditFocusPending = false;
+  return document.activeElement === t;
+}
+
+function peStopMobileEditOverlay() {
+  const t = peOskEl();
+  const host = document.querySelector('.pe-mobile-overlay-host');
+  if (host) host.classList.remove('pe-mobile-overlay-host');
+  peMobileEditActive = null;
+  if (!t) return;
+  t.classList.remove('pe-osk-active');
+  t.setAttribute('aria-hidden', 'true');
+  t.value = '';
+  ['left', 'top', 'width', 'height', 'fontSize', 'fontFamily', 'fontWeight',
+    'fontStyle', 'lineHeight', 'textAlign', 'color', 'background'].forEach((k) => {
+    try { t.style[k] = ''; } catch (_) {}
+  });
   try { if (document.activeElement === t) t.blur(); } catch (_) {}
 }
 
-/** Move focus from the OSK proxy (or cold) onto the real editor element. */
-function peTransferOskFocusTo(el) {
-  if (!el) return false;
-  try { el.focus({ preventScroll: true }); } catch (_) { try { el.focus(); } catch (__) {} }
-  const focused = document.activeElement === el;
-  if (focused) peBlurOskProxy();
-  return focused;
+function peSyncMobileEditOverlayToObj() {
+  if (!peState || !peMobileEditActive) return;
+  const t = peOskEl();
+  const o = peState.objects.find(x => x.id === peMobileEditActive.id);
+  if (!t || !o) return;
+  const text = t.value;
+  o.text = text;
+  o.html = (typeof peEscapeHtml === 'function' ? peEscapeHtml(text) : peEscapeHtmlLite(text))
+    .replace(/\n/g, '<br>');
 }
 
 /** Focus the active inline editor. Returns true if focus was applied. */
@@ -25348,6 +25525,12 @@ function peFocusInlineEditorNow() {
   const editId = peState.inlineEditId;
   const o = peState.objects.find(x => x.id === editId);
   if (!o) return false;
+  // Mobile: keep the real textarea focused — never hand off to contentEditable.
+  if (peUsesMobileEditOverlay() && (o.type === 'text' || o.type === 'callout')) {
+    const ok = peStartMobileEditOverlay(o);
+    if (ok) peState.inlineEditFocusPending = false;
+    return ok;
+  }
   let el = null;
   if (o.type === 'text') {
     el = document.querySelector('#peObjLayer [data-pe-id="' + o.id + '"].pe-obj-text');
@@ -25356,8 +25539,8 @@ function peFocusInlineEditorNow() {
       '#peObjLayer .pe-obj-callout-box[data-pe-id="' + o.id + '"] .pe-callout-text');
   }
   if (!el) return false;
-  const focused = peTransferOskFocusTo(el);
-  // Only clear pending on success — otherwise rAF retries can still run.
+  try { el.focus({ preventScroll: true }); } catch (_) { try { el.focus(); } catch (__) {} }
+  const focused = document.activeElement === el;
   if (focused) peState.inlineEditFocusPending = false;
   if (focused) {
     try {
@@ -25707,29 +25890,27 @@ function peBindTextKeyboardGuards(on) {
  */
 function peScheduleTextEditVisibility(o) {
   if (!peState || !o) return;
-  peArmTextKeyboardQuiet(160);
+  peArmTextKeyboardQuiet(280);
   peBindTextKeyboardGuards(true);
   clearTimeout(peTextKbTimer);
   const editId = o.id;
   const refocus = () => {
     if (!peState || peState.inlineEditId !== editId) return;
-    const el = peInlineEditorDomEl();
-    if (el && document.activeElement !== el) {
-      peState.inlineEditFocusPending = true;
-      peFocusInlineEditorNow();
-    }
+    peState.inlineEditFocusPending = true;
+    peFocusInlineEditorNow();
+    if (peMobileEditActive) pePositionMobileEditOverlay();
   };
-  const pass = () => {
+  const pass = (allowScroll) => {
     if (!peState || peState.inlineEditId !== editId) return;
     const obj = peState.objects.find(x => x.id === editId) || o;
     refocus();
-    peEnsureEditorKbScrollRoom({ estimate: peKeyboardOcclusionPx() < 48 });
+    // Wait until the OSK is actually up before scrolling — early scroll kills it.
+    const kb = peKeyboardOcclusionPx();
+    if (!allowScroll && kb < 48) return;
+    peEnsureEditorKbScrollRoom({ estimate: kb < 48 });
     peScrollInlineEditorIntoWrapSafeZone();
     peScrollInlineEditorAboveKeyboard(true);
-    // Re-assert focus after layout — scroll must not leave the caret unfocused.
     refocus();
-    // If the fixed mini-panel still covers the caret after scroll, nudge the
-    // block down the page (scroll alone cannot move content past scrollTop=0).
     if (obj && obj.type === 'text') {
       const ed = peInlineEditorDomEl();
       if (ed && peElCoveredByPropsPanel(ed)) {
@@ -25744,14 +25925,13 @@ function peScheduleTextEditVisibility(o) {
   // Focus-only first: let the OSK latch before any pad/scroll layout changes.
   refocus();
   peTextKbTimer = setTimeout(() => {
-    pass();
-    setTimeout(pass, 80);
-    setTimeout(pass, 160);
-    setTimeout(pass, 280);
-    setTimeout(pass, 450);
-    setTimeout(pass, 700);
-    setTimeout(pass, 1000);
-  }, 60);
+    pass(false);
+    setTimeout(() => pass(false), 120);
+    setTimeout(() => pass(true), 280);
+    setTimeout(() => pass(true), 450);
+    setTimeout(() => pass(true), 700);
+    setTimeout(() => pass(true), 1000);
+  }, 40);
 }
 
 function peInlineTextObj() {
@@ -25850,6 +26030,10 @@ function peStartInlineTextMove(e, o) {
   peState.inlineEditFocusPending = false;
   clearTimeout(peTextKbTimer);
   peTextKbTimer = null;
+  const osk = peOskEl();
+  if (osk && document.activeElement === osk) {
+    try { osk.blur(); } catch (_) {}
+  }
   const el = peInlineTextEl();
   if (el) {
     el.classList.add('pe-text-border-drag');
@@ -25943,6 +26127,7 @@ function peEndCalloutEdit(keepSelection) {
   const o = peState.objects.find(x => x.id === peState.inlineEditId);
   if (!o || o.type !== 'callout') return;
   peSyncInlineEditsFromDom();
+  peStopMobileEditOverlay();
   peState.inlineEditId = null;
   peState.inlineEditFocusPending = false;
   clearTimeout(peTextKbTimer);
@@ -25991,6 +26176,7 @@ function peBeginInlineEdit(o, opts) {
 function peEndInlineEditForToolSwitch() {
   if (!peState) return false;
   peSyncInlineEditsFromDom();
+  peStopMobileEditOverlay();
   const removed = pePruneEmptyTextObjects();
   const hadInline = !!peState.inlineEditId;
   peState.inlineEditId = null;
@@ -26010,6 +26196,7 @@ function peEndInlineEditForToolSwitch() {
 function peFinishTextInlineEdit(opts) {
   if (!peState?.inlineEditId) return;
   peSyncInlineEditsFromDom();
+  peStopMobileEditOverlay();
   peRemoveEmptyInlineText();
   peState.inlineEditId = null;
   peState.inlineEditFocusPending = false;
@@ -26032,6 +26219,7 @@ function peFinishTextInlineEdit(opts) {
 function peEndInlineEdit(keepSelection) {
   if (!peState) return;
   peSyncInlineEditsFromDom();
+  peStopMobileEditOverlay();
   peRemoveEmptyInlineText();
   peState.inlineEditId = null;
   peState.inlineEditFocusPending = false;
@@ -28926,6 +29114,7 @@ function peToggleTextMarkupsAtFracs(action, fracs) {
     }
     if (typeof isTouchDevice !== 'undefined' && isTouchDevice) peArmOskProxy();
     peCreateCalloutFromFracs(fracs);
+    if (typeof isTouchDevice !== 'undefined' && isTouchDevice) peFocusInlineEditorNow();
     return fracs;
   }
 
@@ -30906,7 +31095,7 @@ function peObjMouseDown(e, o) {
       peCommitEditorHistory();
       // Arm OSK on this gesture BEFORE any layout scroll (scroll kills mobile keyboards).
       if (touchLike || (typeof isTouchDevice !== 'undefined' && isTouchDevice)) {
-        peArmOskProxy();
+        peArmOskProxy(e.clientX, e.clientY);
       }
       const o = { id: ++peState.seq, type: 'text', text: '', fontPt: 16, color: '#d90000', x: pt.x / W, y: pt.y / H };
       peState.objects.push(o);
@@ -31198,7 +31387,7 @@ function peObjMouseDown(e, o) {
   peTextSelCtxMenu.addEventListener('pointerdown', (e) => {
     const btn = e.target.closest('button[data-action="comment"]');
     if (btn && typeof isTouchDevice !== 'undefined' && isTouchDevice) {
-      peArmOskProxy();
+      peArmOskProxy(e.clientX, e.clientY);
     }
   }, true);
   peTextSelCtxMenu.addEventListener('mousedown', (e) => {
@@ -31901,6 +32090,65 @@ function peObjMouseDown(e, o) {
 
   // Move the right tail (scale + Cancel/Save) if there is not enough width.
   // The children of the tail are tied together (flex-wrap: nowrap) - only the entire block is transferred.
+  /**
+   * Stage 3: align title + scale left with Crop, and Cancel/Save right with Delete.
+   * Fixes the scale block overflowing the left edge when the tail is centered.
+   */
+  function peLayoutToolbarEdgeAlign() {
+    const bar = document.querySelector('#pageEditModal .pe-toolbar');
+    const title = bar?.querySelector('.pe-title');
+    const crop = document.getElementById('peToolCrop');
+    const del = document.getElementById('peDeleteObj');
+    const tail = document.getElementById('peToolbarTail');
+    if (!bar || !title) return;
+
+    const reset = () => {
+      title.style.transform = '';
+      if (tail) {
+        tail.style.paddingLeft = '';
+        tail.style.paddingRight = '';
+        tail.style.justifyContent = '';
+      }
+    };
+
+    if (!document.getElementById('pageEditModal')?.classList.contains('open')
+        || !bar.classList.contains('pe-tb-tools-wrap')
+        || !crop || !del || !tail
+        || crop.offsetParent == null || del.offsetParent == null) {
+      reset();
+      return;
+    }
+
+    const barRect = bar.getBoundingClientRect();
+    const cropRect = crop.getBoundingClientRect();
+    const delRect = del.getBoundingClientRect();
+    if (!(cropRect.width > 0) || !(delRect.width > 0)) {
+      reset();
+      return;
+    }
+
+    const barStyles = getComputedStyle(bar);
+    const barPadL = parseFloat(barStyles.paddingLeft) || 0;
+    const barPadR = parseFloat(barStyles.paddingRight) || 0;
+    const cropL = cropRect.left - barRect.left;
+    const delR = delRect.right - barRect.left;
+
+    // Title left == Crop left (transform so flex flow / lead layout stay put).
+    title.style.transform = '';
+    const titleLeft = title.getBoundingClientRect().left - barRect.left;
+    const dx = Math.round(cropL - titleLeft);
+    title.style.transform = dx ? ('translateX(' + dx + 'px)') : '';
+
+    // Tail: scale starts at Crop; Cancel/Save end at Delete.
+    // padding is relative to the flex content box (inside bar padding).
+    const padL = Math.max(0, Math.round(cropL - barPadL));
+    const contentRight = barRect.width - barPadR;
+    const padR = Math.max(0, Math.round(contentRight - delR));
+    tail.style.justifyContent = 'space-between';
+    tail.style.paddingLeft = padL + 'px';
+    tail.style.paddingRight = padR + 'px';
+  }
+
   /** Place ←→ as a tight pair, equally spaced between title and Object-select. */
   function peLayoutMenuToggleOverDelete() {
     const modal = document.getElementById('pageEditModal');
@@ -31943,6 +32191,9 @@ function peObjMouseDown(e, o) {
     const next = document.getElementById('pePageNext');
     if (!bar || !title || !nav || !objBtn || !prev || !next) return;
     if (!document.getElementById('pageEditModal')?.classList.contains('open')) return;
+
+    // Clear prior edge-align transform before measuring title for nav/lead.
+    title.style.transform = '';
 
     const barRect = bar.getBoundingClientRect();
     const titleRect = title.getBoundingClientRect();
@@ -32011,6 +32262,7 @@ function peObjMouseDown(e, o) {
             lead.style.marginLeft = Math.max(0, Math.round(leadDesiredLeft - leadNaturalLeft)) + 'px';
           }
           peLayoutMenuToggleOverDelete();
+          peLayoutToolbarEdgeAlign();
           return;
         }
       }
@@ -32055,9 +32307,11 @@ function peObjMouseDown(e, o) {
         }
       }
       peLayoutMenuToggleOverDelete();
+      peLayoutToolbarEdgeAlign();
       return;
     }
     if (lead) lead.style.marginLeft = '';
+    peLayoutToolbarEdgeAlign();
     peLayoutMenuToggleOverDelete();
 
     const objRect = objBtn.getBoundingClientRect();
