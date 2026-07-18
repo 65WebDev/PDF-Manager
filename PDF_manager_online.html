@@ -2997,6 +2997,11 @@
       background: #ffebee;
       color: #e74c3c;
     }
+    .page .quick-actions .edit-quick svg {
+      width: 20px;
+      height: 20px;
+      display: block;
+    }
 
     /*Hiding quick actions on pages marked for deletion*/
     .page.to-delete .quick-actions {
@@ -3857,6 +3862,27 @@
         line-height: 1;
         transform: scaleX(-1) scaleY(-1);
       }
+      .page .quick-actions .edit-quick svg {
+        width: 22px;
+        height: 22px;
+      }
+
+      /*Page editor: keep toolbar usable on phones (wrap already handled in JS)*/
+      #pageEditModal .pe-toolbar {
+        padding-top: max(8px, env(safe-area-inset-top, 0px));
+        padding-left: max(8px, env(safe-area-inset-left, 0px));
+        padding-right: max(8px, env(safe-area-inset-right, 0px));
+      }
+      #pageEditModal .pe-btn {
+        -webkit-tap-highlight-color: transparent;
+        touch-action: manipulation;
+      }
+      #pageEditModal .pe-scale {
+        font-size: 14px;
+        gap: 8px;
+        padding: 4px 10px;
+      }
+      #pageEditModal .pe-scale input[type=range] { width: 72px; }
       .page.to-delete .quick-actions,
       .dragging-active .page .quick-actions,
       body.rubber-selecting .page .quick-actions {
@@ -4516,7 +4542,7 @@
     </div>
   </div>
 
-  <!--Single page editor (desktop; suitable for the mobile version - call openPageEditor(idx))-->
+  <!--Single page editor (desktop + mobile; mobile opens via page quick-actions Edit)-->
   <div id="pageEditModal" aria-hidden="true">
     <div class="pe-toolbar">
       <span class="pe-title">Страница <span id="peTitleNum"></span></span>
@@ -9666,6 +9692,7 @@
           p.style.removeProperty('--mobile-qa-top');
         });
 
+      if (typeof peState !== 'undefined' && peState) return;
       if (isDragActive || rubberActive || rubberArmed) return;
       if (selectedPages.size !== 1) return;
 
@@ -11589,6 +11616,20 @@
         }
       };
 
+      const btnEdit = document.createElement('button');
+      btnEdit.className = 'edit-quick';
+      btnEdit.title = 'Редактировать страницу';
+      btnEdit.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg>';
+      btnEdit.onclick = (e) => {
+        e.stopImmediatePropagation();
+        e.stopPropagation();
+        const currentIdx = parseInt(div.dataset.index, 10);
+        if (markedForDeletion.has(currentIdx)) return;
+        if (typeof pageEditAvailable === 'function' && !pageEditAvailable()) return;
+        div.classList.remove('mobile-quick-visible', 'keep-actions-visible', 'actions-fading');
+        if (typeof openPageEditor === 'function') openPageEditor(currentIdx);
+      };
+
       const btnDelete = document.createElement('button');
       btnDelete.innerHTML = '🗑';
       btnDelete.title = 'Удалить страницу';
@@ -11602,6 +11643,7 @@
 
       quickActions.appendChild(btnRotateLeft);
       quickActions.appendChild(btnRotateRight);
+      quickActions.appendChild(btnEdit);
       quickActions.appendChild(btnDelete);
       div.appendChild(quickActions);
 
@@ -20712,7 +20754,7 @@ function pmSearchToggleOpen() {
 })();
 
 // ═══════════════════════════════════════════════════════════════════════
-// SINGLE PAGE EDITOR (desktop): RMB by page → “Edit...”.
+// SINGLE PAGE EDITOR: desktop RMB / top-menu Edit; mobile page quick-actions Edit.
 // Tools: frame (CropBox), text, image, marker, comment
 // (real PDF abstract), rotate. Text/images/markers when
 // When saved, objects are written to PDF metadata (editable when
@@ -20721,7 +20763,6 @@ function pmSearchToggleOpen() {
 // In the manager preview, objects are drawn from metadata on top of PDF.
 // Token comments are stored in metadata; open in the editor
 // by clicking on the marker. When exporting - PDF annotations (hidden in the application).
-// Groundwork for the mobile version: call openPageEditor(idx) from the long-press menu.
 // ═══════════════════════════════════════════════════════════════════════
 let peState = null;   // null = editor is closed
 let peSavedPageSelection = null;
@@ -21815,7 +21856,7 @@ function peApplyZoomSlider(val, anchorX, anchorY, options = {}) {
 }
 
 function pageEditAvailable() {
-  return !isTouchDevice && !!pdfDoc && !isLoading;
+  return !!pdfDoc && !isLoading;
 }
 
 function peSavePageSelectionForRestore(snapshot) {
