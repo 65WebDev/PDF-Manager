@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'PDF_manager_online.html'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate version info
+        run: |
+          BUILD="build-${{ github.run_number }}"
+          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          DATE_HUMAN=$(date -u +"%Y-%m-%d %H:%M UTC")
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          cat > version.json <<EOF
+          {
+            "build": "${BUILD}",
+            "number": ${{ github.run_number }},
+            "commit": "${{ github.sha }}",
+            "shortCommit": "${SHORT_SHA}",
+            "date": "${DATE}",
+            "downloadUrl": "https://github.com/${{ github.repository }}/releases/latest/download/PDF_manager_online.html"
+          }
+          EOF
+          cat > release-notes.md <<EOF
+          Автоматическая сборка менеджера PDF.
+
+          - **Сборка:** #${{ github.run_number }}
+          - **Коммит:** \`${{ github.sha }}\`
+          - **Дата:** ${DATE_HUMAN}
+
+          ### Скачать
+          Нажмите на файл \`PDF_manager_online.html\` ниже или используйте [прямую ссылку](https://github.com/${{ github.repository }}/releases/latest/download/PDF_manager_online.html).
+          EOF
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: Сборка #${{ github.run_number }}
+          body_path: release-notes.md
+          files: |
+            PDF_manager_online.html
+            version.json
+          generate_release_notes: true

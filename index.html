@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Менеджер документов PDF — скачать</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      background: linear-gradient(160deg, #1a2a3a 0%, #2c3e50 45%, #34495e 100%);
+      color: #ecf0f1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      width: min(520px, 100%);
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 16px;
+      padding: 32px 28px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+      backdrop-filter: blur(8px);
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 1.6rem;
+      line-height: 1.25;
+    }
+    .subtitle {
+      margin: 0 0 24px;
+      color: #bdc3c7;
+      line-height: 1.5;
+    }
+    .actions {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+    a.btn {
+      display: block;
+      text-align: center;
+      text-decoration: none;
+      padding: 14px 18px;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 1rem;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    a.btn:hover { transform: translateY(-1px); }
+    a.btn-primary {
+      background: #3498db;
+      color: #fff;
+      box-shadow: 0 8px 20px rgba(52, 152, 219, 0.35);
+    }
+    a.btn-secondary {
+      background: #27ae60;
+      color: #fff;
+      box-shadow: 0 8px 20px rgba(39, 174, 96, 0.3);
+    }
+    .meta {
+      padding: 14px 16px;
+      border-radius: 10px;
+      background: rgba(0, 0, 0, 0.2);
+      font-size: 0.92rem;
+      line-height: 1.6;
+      color: #d5dbdb;
+    }
+    .meta strong { color: #fff; }
+    .meta a { color: #85c1e9; }
+    .hint {
+      margin-top: 18px;
+      font-size: 0.85rem;
+      color: #95a5a6;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>Менеджер документов PDF</h1>
+    <p class="subtitle">Один HTML-файл — работает в браузере без установки.</p>
+
+    <div class="actions">
+      <a class="btn btn-primary" href="PDF_manager_online.html">Открыть онлайн</a>
+      <a class="btn btn-secondary" id="downloadBtn" href="https://github.com/5451165-bot/PDF-Manager/releases/latest/download/PDF_manager_online.html">
+        Скачать последнюю версию
+      </a>
+    </div>
+
+    <div class="meta" id="versionInfo">Загрузка информации о версии…</div>
+
+    <p class="hint">
+      После скачивания откройте файл двойным щелчком. Интернет нужен только для загрузки библиотек при первом запуске.
+    </p>
+  </main>
+
+  <script>
+    (async function () {
+      const el = document.getElementById('versionInfo');
+      const downloadBtn = document.getElementById('downloadBtn');
+      try {
+        const res = await fetch('version.json', { cache: 'no-store' });
+        if (!res.ok) throw new Error('no version');
+        const v = await res.json();
+        if (v.downloadUrl) downloadBtn.href = v.downloadUrl;
+        const date = v.date ? new Date(v.date).toLocaleString('ru-RU') : '—';
+        el.innerHTML =
+          '<strong>Текущая сборка:</strong> ' + (v.build || '—') +
+          '<br><strong>Коммит:</strong> <a href="https://github.com/5451165-bot/PDF-Manager/commit/' + (v.commit || '') + '">' + (v.shortCommit || '—') + '</a>' +
+          '<br><strong>Дата:</strong> ' + date;
+      } catch {
+        el.innerHTML =
+          'Информация о версии появится после первого деплоя.<br>' +
+          '<a href="https://github.com/5451165-bot/PDF-Manager/releases/latest">Все релизы на GitHub</a>';
+      }
+    })();
+  </script>
+</body>
+</html>
