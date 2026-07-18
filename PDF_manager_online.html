@@ -1258,9 +1258,11 @@
       position: relative;
       z-index: 1;
     }
-    /* Stage 3: keep the divider after Hand so it can align with row-2’s divider. */
+    /* Stage 3: no divider after Hand — Crop…Delete are on the next row.
+       Align pe-tools-divider-nav (between ←→ and Object-select) with the
+       row-2 divider (between Shapes and Rotate). */
     .pe-toolbar.pe-tb-tools-wrap .pe-tools-lead > .pe-tools-divider:not(.pe-tools-divider-nav) {
-      display: block;
+      display: none;
     }
     .pe-toolbar.pe-tb-tools-wrap .pe-tools-divider-nav {
       display: block;
@@ -1999,6 +2001,20 @@
     #peCrop.visible { display: block; }
     #peCrop .pe-handle {
       background: #ff8c00; z-index: 2; pointer-events: auto;
+    }
+    /* 2× hit target for crop anchors (visible knob stays 10×10 / 22×10). */
+    #peCrop .pe-handle::after {
+      content: '';
+      position: absolute;
+      inset: -5px;
+    }
+    #peCrop .pe-handle-n::after,
+    #peCrop .pe-handle-s::after {
+      inset: -8px -5px;
+    }
+    #peCrop .pe-handle-w::after,
+    #peCrop .pe-handle-e::after {
+      inset: -5px -8px;
     }
     #peCrop .pe-handle-nw { left: -5px; top: -5px; cursor: nwse-resize; }
     #peCrop .pe-handle-ne { right: -5px; top: -5px; cursor: nesw-resize; }
@@ -3901,7 +3917,8 @@
         /* translate after flip so +2px moves the glyph down on screen */
         transform: translateY(2px) scaleX(-1) scaleY(-1);
       }
-      /* Corner resize handles: 1.5× hit area via invisible padding (knob stays 10px). */
+      /* Corner resize handles: 1.5× hit area via invisible padding (knob stays 10px).
+         Crop anchors use their own 2× ::after rules above. */
       #pageEditModal .pe-text-corner-handle,
       #pageEditModal .pe-handle {
         position: absolute;
@@ -3912,6 +3929,17 @@
         position: absolute;
         /* 10px visible → 15px hit (1.5×): inset -(10*0.25)= -2.5px */
         inset: -2.5px;
+      }
+      #pageEditModal #peCrop .pe-handle::after {
+        inset: -5px;
+      }
+      #pageEditModal #peCrop .pe-handle-n::after,
+      #pageEditModal #peCrop .pe-handle-s::after {
+        inset: -8px -5px;
+      }
+      #pageEditModal #peCrop .pe-handle-w::after,
+      #pageEditModal #peCrop .pe-handle-e::after {
+        inset: -5px -8px;
       }
       /* Object-select: enable PDF text selection on touch (fine-pointer rules
          above never match on phones, so the layer stayed inert). */
@@ -24016,9 +24044,7 @@ function peRedrawObjects() {
             const h = document.createElement('div');
             h.className = 'pe-text-corner-handle ' + cls;
             h.dataset.endpoint = which;
-            h.title = which === 'start'
-              ? (o.shape === 'arrow' ? 'Начало (хвост). Shift — угол кратно 45°' : 'Начало линии. Shift — угол кратно 45°')
-              : (o.shape === 'arrow' ? 'Конец (наконечник). Shift — угол кратно 45°' : 'Конец линии. Shift — угол кратно 45°');
+            // No title tooltips on vector endpoints — not useful on touch / clutter.
             el.appendChild(h);
           });
         } else {
@@ -24882,20 +24908,46 @@ function peFocusInlineEditorIfNeeded() {
   });
 }
 
-/** While true, skip scroll-into-view — scrolling the wrap right as the OSK
- *  opens often dismisses the keyboard on iOS/Android. */
+/** Briefly skip visualViewport-driven scroll (can dismiss OSK if it races focus). */
 let peTextKbScrollQuietUntil = 0;
 
 function peArmTextKeyboardQuiet(ms) {
-  peTextKbScrollQuietUntil = Date.now() + (ms || 700);
+  peTextKbScrollQuietUntil = Date.now() + (ms || 400);
 }
 
-/** Scroll the active inline editor so it stays above the on-screen keyboard. */
+function peInlineEditorDomEl() {
+  if (!peState?.inlineEditId) return null;
+  return peInlineTextEl() || document.querySelector(
+    '#peObjLayer .pe-obj-callout-box[data-pe-id="' + peState.inlineEditId + '"] .pe-callout-text');
+}
+
+/**
+ * Immediately scroll the stage so the editor sits in the upper portion of the
+ * wrap — call this on create, before the keyboard animation, so a block near
+ * the page bottom is not covered once the OSK appears.
+ */
+function peScrollInlineEditorIntoWrapSafeZone() {
+  if (!peState?.inlineEditId) return;
+  const el = peInlineEditorDomEl();
+  const wrap = document.getElementById('peStageWrap');
+  if (!el || !wrap) return;
+  const wr = wrap.getBoundingClientRect();
+  const er = el.getBoundingClientRect();
+  // Keep the caret band in the upper ~36% of the wrap viewport.
+  const targetBottom = wr.top + wrap.clientHeight * 0.36;
+  if (er.bottom > targetBottom) {
+    wrap.scrollTop += er.bottom - targetBottom;
+  }
+  if (er.top < wr.top + 12) {
+    wrap.scrollTop += er.top - (wr.top + 12);
+  }
+}
+
+/** Fine-tune against the real visualViewport once the OSK has settled. */
 function peScrollInlineEditorAboveKeyboard() {
   if (!peState?.inlineEditId) return;
   if (Date.now() < peTextKbScrollQuietUntil) return;
-  const el = peInlineTextEl() || document.querySelector(
-    '#peObjLayer .pe-obj-callout-box[data-pe-id="' + peState.inlineEditId + '"] .pe-callout-text');
+  const el = peInlineEditorDomEl();
   const wrap = document.getElementById('peStageWrap');
   if (!el || !wrap) return;
   const vv = window.visualViewport;
@@ -24912,7 +24964,6 @@ function peScrollInlineEditorAboveKeyboard() {
     wrap.scrollTop += er.top - (viewTop + 12);
     scrolled = true;
   }
-  // Re-assert focus after a layout scroll (some WebKits blur contentEditable).
   if (scrolled && document.activeElement !== el) {
     peState.inlineEditFocusPending = true;
     peFocusInlineEditorNow();
@@ -24937,27 +24988,26 @@ function peBindTextKeyboardGuards(on) {
 }
 
 /**
- * After a new text block is focused, keep the caret above the keyboard.
- * Never zoom here — layout changes dismiss the mobile OSK right after open.
+ * After a new text block is focused: keep OSK up, then nudge if still covered.
+ * Immediate wrap safe-zone scroll runs at create time (see peBeginInlineEdit).
  */
 function peScheduleTextEditVisibility(o) {
   if (!peState || !o) return;
-  peArmTextKeyboardQuiet(750);
+  peArmTextKeyboardQuiet(350);
   peBindTextKeyboardGuards(true);
   clearTimeout(peTextKbTimer);
   const editId = o.id;
   const run = () => {
     if (!peState || peState.inlineEditId !== editId) return;
-    const el = peInlineTextEl() || document.querySelector(
-      '#peObjLayer .pe-obj-callout-box[data-pe-id="' + editId + '"] .pe-callout-text');
+    const el = peInlineEditorDomEl();
     if (el && document.activeElement !== el) {
       peState.inlineEditFocusPending = true;
       peFocusInlineEditorNow();
     }
-    // Quiet window ended — safe to nudge above the keyboard if covered.
     peScrollInlineEditorAboveKeyboard();
   };
-  peTextKbTimer = setTimeout(run, 800);
+  // After typical OSK animation; quiet window has ended by then.
+  peTextKbTimer = setTimeout(run, 420);
 }
 
 function peInlineTextObj() {
@@ -25106,8 +25156,9 @@ function peBeginCalloutEdit(o) {
   }
   peState.inlineEditId = o.id;
   peState.inlineEditFocusPending = true;
-  peArmTextKeyboardQuiet(750);
   peSelect(o, { skipSelectionHistory: true });
+  peScrollInlineEditorIntoWrapSafeZone();
+  peArmTextKeyboardQuiet(350);
   // peSelect already redraws; focus sync inside the user gesture for OSK.
   peFocusInlineEditorNow();
   peFocusInlineEditorIfNeeded();
@@ -25147,9 +25198,12 @@ function peBeginInlineEdit(o, opts) {
   }
   peState.inlineEditId = o.id;
   peState.inlineEditFocusPending = true;
-  peArmTextKeyboardQuiet(750);
   const skipSelectionHistory = !!(opts && opts.isNewDraft) || peState.draftTextId === o.id;
   peSelect(o, { skipSelectionHistory });
+  // Scroll into the upper wrap band before focus so a bottom-of-page block
+  // is already clear of where the OSK will land.
+  peScrollInlineEditorIntoWrapSafeZone();
+  peArmTextKeyboardQuiet(350);
   // Focus immediately after DOM rebuild (same user gesture → keep OSK up).
   peFocusInlineEditorNow();
   if (typeof isTouchDevice !== 'undefined' && isTouchDevice) {
@@ -25748,6 +25802,19 @@ function peSelectionSnapshot() {
     selId: peState.sel ? peState.sel.id : null,
     multi: (peState.multiSel || []).map(o => o.id).sort((a, b) => a - b)
   };
+}
+
+function peRestoreSelectionSnapshot(snap) {
+  if (!peState || !snap) return;
+  const sel = snap.selId != null ? peState.objects.find(x => x.id === snap.selId) : null;
+  const multi = (snap.multi || [])
+    .map(id => peState.objects.find(x => x.id === id))
+    .filter(Boolean);
+  peState.sel = sel || null;
+  peState.multiSel = multi.filter(o => o !== peState.sel);
+  peRedrawObjects();
+  peUpdateProps();
+  peUpdatePanUi();
 }
 
 function peSelectionEqual(a, b) {
@@ -27991,31 +28058,24 @@ function peProcessDrag(clientX, clientY) {
     wrap.scrollLeft = d.scrollLeft - (clientX - d.startClientX);
     wrap.scrollTop = d.scrollTop - (clientY - d.startClientY);
   } else if (d.kind === 'obj-select-gesture') {
-    // Empty-canvas gesture in Object-select: hold then drag → pan (Hand);
-    // quick drag → marquee select.
+    // Single-finger empty-canvas drag in Object-select → pan (Hand).
+    // Marquee is started only from a double-tap (see stage pointerdown).
     const dist = Math.hypot(clientX - d.startClientX, clientY - d.startClientY);
     if (dist < 6) return;
-    const held = Date.now() - (d.startTime || 0);
-    const noSel = !peState.sel && !(peState.multiSel && peState.multiSel.length);
-    if (noSel && peCanPan() && held >= 180) {
+    if (peCanPan()) {
       peState.drag = {
         kind: 'pan-view',
         startClientX: d.startClientX,
         startClientY: d.startClientY,
         scrollLeft: d.scrollLeft,
-        scrollTop: d.scrollTop
+        scrollTop: d.scrollTop,
+        fromObjSelectTap: true
       };
       document.getElementById('pageEditModal')?.classList.add('pe-panning');
       peProcessDrag(clientX, clientY);
       return;
     }
-    peState.drag = {
-      kind: 'obj-marquee',
-      startX: d.startX, startY: d.startY, curX: pt.x, curY: pt.y,
-      additive: !!d.additive,
-      baseIds: d.baseIds || null
-    };
-    peProcessDrag(clientX, clientY);
+    // Not zoomed enough to pan — ignore the drag (no accidental marquee).
     return;
   } else if (d.kind === 'move-pending-multi') {
     const dx = pt.x - d.startX, dy = pt.y - d.startY;
@@ -28380,9 +28440,37 @@ function peCapturePointer(e, el) {
   try { el.setPointerCapture(e.pointerId); } catch (_) {}
 }
 
+// Pinch: first finger often lands on an object and would select it — suppress.
+let pePinchBlockObjUntil = 0;
+let peSelSnapBeforePinch = null;
+let peObjMarqueeTap = { t: 0, x: 0, y: 0 };
+
 function peObjMouseDown(e, o) {
   if (!peIsPrimaryPointer(e)) return;
   const touchLike = e.pointerType === 'touch' || e.pointerType === 'pen';
+  // Pinch in progress / just started: never treat as object select/move.
+  if (pePinchActive || (touchLike && Date.now() < pePinchBlockObjUntil)) {
+    if (touchLike && e.cancelable) e.preventDefault();
+    e.stopPropagation();
+    return;
+  }
+  if (touchLike) peSelSnapBeforePinch = peSelectionSnapshot();
+  // Corner / rotate handles must win even while the text is being edited —
+  // the early “caret / border-move” return used to swallow them.
+  if (o.type === 'text' && e.target.classList && e.target.classList.contains('pe-text-corner-handle')
+      && peState?.sel === o) {
+    if (touchLike && e.cancelable) e.preventDefault();
+    e.stopPropagation();
+    peStartTextCornerResize(e, o, e.target.dataset.corner);
+    return;
+  }
+  if (o.type === 'text' && e.target.classList && e.target.classList.contains('pe-text-rotate-handle')
+      && peState?.sel === o) {
+    if (touchLike && e.cancelable) e.preventDefault();
+    e.stopPropagation();
+    peStartTextRotate(e, o);
+    return;
+  }
   // While editing text/callout content: allow native caret placement on the
   // inner area (must NOT preventDefault). Border still moves the block.
   if (o.type === 'text' && peState?.inlineEditId === o.id) {
@@ -28734,10 +28822,22 @@ function peObjMouseDown(e, o) {
     pePinchStartDist = 0;
     pePinchLastMidX = null;
     pePinchLastMidY = null;
+    peSelSnapBeforePinch = null;
+    // Keep blocking object hits briefly while fingers lift.
+    pePinchBlockObjUntil = Date.now() + 280;
   }
   wrap.addEventListener('touchstart', (e) => {
     if (!peState || typeof isTouchDevice === 'undefined' || !isTouchDevice) return;
     if (e.touches.length !== 2) return;
+    // First finger often selected an object under it — undo that for pinch.
+    pePinchBlockObjUntil = Date.now() + 500;
+    if (peSelSnapBeforePinch) {
+      const cur = peSelectionSnapshot();
+      if (!peSelectionEqual(cur, peSelSnapBeforePinch)) {
+        peRestoreSelectionSnapshot(peSelSnapBeforePinch);
+      }
+      peSelSnapBeforePinch = null;
+    }
     if (peState.drag) {
       peState.drag = null;
       peStopAutoScroll();
@@ -29092,17 +29192,30 @@ function peObjMouseDown(e, o) {
     if (tool === 'select' && peState.objSelectMode) {
       e.preventDefault();
       const wrapEl = document.getElementById('peStageWrap');
-      // Empty-canvas: hold then drag → pan (Hand); quick drag → marquee.
-      peState.drag = {
-        kind: 'obj-select-gesture',
-        startX: pt.x, startY: pt.y, curX: pt.x, curY: pt.y,
-        startClientX: e.clientX, startClientY: e.clientY,
-        startTime: Date.now(),
-        scrollLeft: wrapEl ? wrapEl.scrollLeft : 0,
-        scrollTop: wrapEl ? wrapEl.scrollTop : 0,
-        additive: e.shiftKey,
-        baseIds: e.shiftKey ? peGetSelectedObjects().map(o => o.id) : null
-      };
+      const now = Date.now();
+      const tapDist = Math.hypot(e.clientX - peObjMarqueeTap.x, e.clientY - peObjMarqueeTap.y);
+      const isDbl = (now - peObjMarqueeTap.t) < 550 && tapDist < 48;
+      peObjMarqueeTap = { t: now, x: e.clientX, y: e.clientY };
+      // Marquee only on double-tap; single tap+drag pans like Hand.
+      if (isDbl) {
+        peState.drag = {
+          kind: 'obj-marquee',
+          startX: pt.x, startY: pt.y, curX: pt.x, curY: pt.y,
+          additive: e.shiftKey,
+          baseIds: e.shiftKey ? peGetSelectedObjects().map(o => o.id) : null
+        };
+      } else {
+        peState.drag = {
+          kind: 'obj-select-gesture',
+          startX: pt.x, startY: pt.y, curX: pt.x, curY: pt.y,
+          startClientX: e.clientX, startClientY: e.clientY,
+          startTime: now,
+          scrollLeft: wrapEl ? wrapEl.scrollLeft : 0,
+          scrollTop: wrapEl ? wrapEl.scrollTop : 0,
+          additive: e.shiftKey,
+          baseIds: null
+        };
+      }
       peUpdatePanUi();
       return;
     }
@@ -29121,6 +29234,9 @@ function peObjMouseDown(e, o) {
     peState.drag.lastClientY = e.clientY;
     peProcessDrag(e.clientX, e.clientY);
   }, () => {
+    // Single-finger gesture ended without becoming a pinch — drop the snap
+    // so a later pinch does not restore a stale selection.
+    if (!pePinchActive) peSelSnapBeforePinch = null;
     if (!peState || !peState.drag) return;
     const d = peState.drag;
     const wasRotate = d.kind === 'rotate-text' || d.kind === 'rotate-shape';
@@ -29193,8 +29309,15 @@ function peObjMouseDown(e, o) {
       peCommitEditorHistory();
     }
     if (d.kind === 'obj-select-gesture') {
-      // Tap without drag: clear selection (same as a tiny marquee).
+      // Single tap without drag: clear selection.
       if (!d.additive) peSelect(null);
+    }
+    if (d.kind === 'pan-view' && d.fromObjSelectTap) {
+      const moved = Math.hypot(
+        (d.lastClientX != null ? d.lastClientX : d.startClientX) - d.startClientX,
+        (d.lastClientY != null ? d.lastClientY : d.startClientY) - d.startClientY
+      );
+      if (moved < 6 && !d.additive) peSelect(null);
     }
     if (d.kind === 'obj-marquee') {
       document.getElementById('pageEditModal')?.classList.remove('pe-obj-marquee-active');
@@ -30046,28 +30169,27 @@ function peObjMouseDown(e, o) {
     // Align nav to the title row (padding-top), not the full multi-row toolbar.
     nav.style.top = Math.max(0, titleRect.top - barRect.top + (titleRect.height - 40) / 2) + 'px';
 
-    // Stage 3: shift Object-select/Hand so the divider after Hand lines up
-    // with the divider before Delete on row 2 (pe-tools-main).
+    // Stage 3: align pe-tools-divider-nav (between ←→ and Object-select)
+    // with the row-2 divider between Shapes and Rotate.
     if (bar.classList.contains('pe-tb-tools-wrap')) {
-      const leadDivider = lead?.querySelector(':scope > .pe-tools-divider:not(.pe-tools-divider-nav)');
+      const navDivider = lead?.querySelector(':scope > .pe-tools-divider-nav');
       const mainDivider = document.querySelector('#peToolsMain > .pe-tools-divider');
       const titleRightRel = titleRect.right - barRect.left;
       const groupGap = minGap;
 
-      // Reset lead offset, place nav temporarily after the title, measure.
+      // Reset lead offset; nav sits just before the lead group.
       if (lead) lead.style.marginLeft = '0px';
       nav.style.left = (titleRightRel + minGap) + 'px';
 
-      if (lead && leadDivider && mainDivider) {
+      if (lead && navDivider && mainDivider) {
         const mainDivLeft = mainDivider.getBoundingClientRect().left;
-        const leadDivLeft = leadDivider.getBoundingClientRect().left;
-        let shift = mainDivLeft - leadDivLeft;
-        // Keep nav+lead clear of the title on the left.
+        const navDivLeft = navDivider.getBoundingClientRect().left;
+        let shift = mainDivLeft - navDivLeft;
+        // Lead must leave room for absolute nav after the title.
         const leadLeft = lead.getBoundingClientRect().left;
         const minLeadLeft = titleRightRel + minGap + navW + groupGap;
         const maxShiftLeft = minLeadLeft - leadLeft;
         if (shift < maxShiftLeft) shift = maxShiftLeft;
-        // Don’t push the lead past the right edge of the bar.
         const barStyles = getComputedStyle(bar);
         const barPadR = parseFloat(barStyles.paddingRight) || 0;
         const leadW = lead.offsetWidth || lead.scrollWidth;
@@ -30076,10 +30198,10 @@ function peObjMouseDown(e, o) {
         if (shift > maxShiftRight) shift = Math.max(maxShiftLeft, maxShiftRight);
 
         lead.style.marginLeft = Math.max(0, Math.round(shift)) + 'px';
-        const leadAfter = lead.getBoundingClientRect().left;
-        nav.style.left = Math.max(0, Math.round(leadAfter - barRect.left - navW - groupGap)) + 'px';
+        // Place ←→ immediately left of the nav divider (inside lead).
+        const navDivAfter = navDivider.getBoundingClientRect().left;
+        nav.style.left = Math.max(0, Math.round(navDivAfter - barRect.left - navW - groupGap)) + 'px';
       } else {
-        // Fallback: previous centered nav+lead group.
         const leadW = lead ? lead.scrollWidth : 0;
         const barStyles = getComputedStyle(bar);
         const barPad = (parseFloat(barStyles.paddingLeft) || 0) + (parseFloat(barStyles.paddingRight) || 0);
