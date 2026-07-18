@@ -1694,6 +1694,32 @@
     .pe-stage-pad.pe-stage-pad-focus {
       justify-content: flex-start;
     }
+    /* During pinch, pin stage to top-left so scroll restore can keep the
+       midpoint under the fingers (flex center + maxScroll≈0 drifts to TL). */
+    .pe-stage-pad.pe-stage-pad-pinching {
+      justify-content: flex-start;
+      align-items: flex-start;
+    }
+    /* Invisible textarea: arm OSK on the real tap, then transfer focus. */
+    #peOskProxy {
+      position: fixed;
+      left: 0;
+      top: 0;
+      width: 1px;
+      height: 1px;
+      margin: 0;
+      padding: 0;
+      border: 0;
+      opacity: 0.01;
+      resize: none;
+      overflow: hidden;
+      caret-color: transparent;
+      color: transparent;
+      background: transparent;
+      pointer-events: none;
+      z-index: 2147483000;
+      font-size: 16px; /* avoid iOS input zoom */
+    }
     .pe-stage-focus-spacer {
       width: 100%;
       height: 0;
@@ -5026,6 +5052,7 @@
         </div>
       </div>
     </div>
+    <textarea id="peOskProxy" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" tabindex="-1" aria-hidden="true"></textarea>
     <input type="file" id="peImgInput" accept="image/png,image/jpeg" style="display:none">
   </div>
 
@@ -21214,6 +21241,49 @@ function peRestoreScrollToAnchor(anchorX, anchorY, fx, fy) {
   const wrap = document.getElementById('peStageWrap');
   const stage = document.getElementById('peStage');
   if (!wrap || !stage) return;
+  const pad = document.getElementById('peStagePad');
+  // During pinch, grow pad edges when the required scroll is out of range so
+  // the finger midpoint can stay put even near the page bottom / when content
+  // still fits the wrap (maxScroll≈0).
+  if (pePinchActive && pad) {
+    for (let i = 0; i < 2; i++) {
+      const sr0 = stage.getBoundingClientRect();
+      const dx0 = (sr0.left + fx * sr0.width) - anchorX;
+      const dy0 = (sr0.top + fy * sr0.height) - anchorY;
+      const nextLeft = wrap.scrollLeft + dx0;
+      const nextTop = wrap.scrollTop + dy0;
+      const maxLeft = Math.max(0, wrap.scrollWidth - wrap.clientWidth);
+      const maxTop = Math.max(0, wrap.scrollHeight - wrap.clientHeight);
+      let grew = false;
+      if (nextTop < -0.5) {
+        const add = Math.ceil(-nextTop + 1);
+        const spacer = document.getElementById('peStageFocusSpacer');
+        const cur = spacer ? (parseFloat(spacer.style.height) || 0) : 0;
+        if (spacer) spacer.style.height = (cur + add) + 'px';
+        grew = true;
+      } else if (nextTop > maxTop + 0.5) {
+        const add = Math.ceil(nextTop - maxTop + 1);
+        const base = parseFloat(pad.style.paddingBottom);
+        const cur = Number.isFinite(base) ? base : 18;
+        pad.style.paddingBottom = (cur + add) + 'px';
+        grew = true;
+      }
+      if (nextLeft < -0.5) {
+        const add = Math.ceil(-nextLeft + 1);
+        const base = parseFloat(pad.style.paddingLeft);
+        const cur = Number.isFinite(base) ? base : 18;
+        pad.style.paddingLeft = (cur + add) + 'px';
+        grew = true;
+      } else if (nextLeft > maxLeft + 0.5) {
+        const add = Math.ceil(nextLeft - maxLeft + 1);
+        const base = parseFloat(pad.style.paddingRight);
+        const cur = Number.isFinite(base) ? base : 18;
+        pad.style.paddingRight = (cur + add) + 'px';
+        grew = true;
+      }
+      if (!grew) break;
+    }
+  }
   const sr = stage.getBoundingClientRect();
   wrap.scrollLeft += (sr.left + fx * sr.width) - anchorX;
   wrap.scrollTop += (sr.top + fy * sr.height) - anchorY;
@@ -23371,7 +23441,18 @@ function editSelectedPage() {
   let gridMarkupBakeChain = Promise.resolve();
 
   if (textCopyMenu) {
+    textCopyMenu.addEventListener('pointerdown', (e) => {
+      const btn = e.target.closest('button[data-action="comment"]');
+      if (btn && typeof isTouchDevice !== 'undefined' && isTouchDevice
+          && typeof peArmOskProxy === 'function') {
+        peArmOskProxy();
+      }
+    }, true);
     textCopyMenu.addEventListener('mousedown', (e) => {
+      if (e.target.closest && e.target.closest('button[data-action="comment"]')) {
+        e.stopPropagation();
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
     });
@@ -23403,6 +23484,11 @@ function editSelectedPage() {
         // Preview “Комментарий” opens the page editor with a movable callout
         // object (bake would only freeze a static drawing).
         if (action === 'comment') {
+          // Arm OSK now — applyPreviewCalloutInEditor is async and loses the gesture.
+          if (typeof isTouchDevice !== 'undefined' && isTouchDevice
+              && typeof peArmOskProxy === 'function') {
+            peArmOskProxy();
+          }
           gridMarkupBakeChain = gridMarkupBakeChain
             .then(() => applyPreviewCalloutInEditor(pageIdx, rects))
             .catch(err => console.error('text callout failed', err));
@@ -25226,6 +25312,35 @@ function peEnableHlComment(o) {
   peCommitEditorHistory();
 }
 
+/** Focus proxy textarea during the user gesture so the OSK can open. */
+function peArmOskProxy() {
+  const t = document.getElementById('peOskProxy');
+  if (!t) return false;
+  try {
+    t.value = '';
+    t.focus({ preventScroll: true });
+    try { t.setSelectionRange(0, 0); } catch (_) {}
+  } catch (_) {
+    try { t.focus(); } catch (__) {}
+  }
+  return document.activeElement === t;
+}
+
+function peBlurOskProxy() {
+  const t = document.getElementById('peOskProxy');
+  if (!t) return;
+  try { if (document.activeElement === t) t.blur(); } catch (_) {}
+}
+
+/** Move focus from the OSK proxy (or cold) onto the real editor element. */
+function peTransferOskFocusTo(el) {
+  if (!el) return false;
+  try { el.focus({ preventScroll: true }); } catch (_) { try { el.focus(); } catch (__) {} }
+  const focused = document.activeElement === el;
+  if (focused) peBlurOskProxy();
+  return focused;
+}
+
 /** Focus the active inline editor. Returns true if focus was applied. */
 function peFocusInlineEditorNow() {
   if (!peState?.inlineEditId) return false;
@@ -25241,8 +25356,7 @@ function peFocusInlineEditorNow() {
       '#peObjLayer .pe-obj-callout-box[data-pe-id="' + o.id + '"] .pe-callout-text');
   }
   if (!el) return false;
-  try { el.focus({ preventScroll: true }); } catch (_) { try { el.focus(); } catch (__) {} }
-  const focused = document.activeElement === el;
+  const focused = peTransferOskFocusTo(el);
   // Only clear pending on success — otherwise rAF retries can still run.
   if (focused) peState.inlineEditFocusPending = false;
   if (focused) {
@@ -25362,6 +25476,8 @@ function peClearEditorKbScrollRoom() {
   peEditorTopPadPx = 0;
   if (pad) {
     pad.style.paddingBottom = '';
+    pad.style.paddingLeft = '';
+    pad.style.paddingRight = '';
     pad.classList.remove('pe-stage-pad-focus');
   }
   if (spacer) spacer.style.height = '0px';
@@ -25591,22 +25707,27 @@ function peBindTextKeyboardGuards(on) {
  */
 function peScheduleTextEditVisibility(o) {
   if (!peState || !o) return;
-  peArmTextKeyboardQuiet(40);
-  peEnsureEditorKbScrollRoom({ estimate: true, forTextCreate: true });
+  peArmTextKeyboardQuiet(160);
   peBindTextKeyboardGuards(true);
   clearTimeout(peTextKbTimer);
   const editId = o.id;
-  const pass = () => {
+  const refocus = () => {
     if (!peState || peState.inlineEditId !== editId) return;
-    const obj = peState.objects.find(x => x.id === editId) || o;
     const el = peInlineEditorDomEl();
     if (el && document.activeElement !== el) {
       peState.inlineEditFocusPending = true;
       peFocusInlineEditorNow();
     }
+  };
+  const pass = () => {
+    if (!peState || peState.inlineEditId !== editId) return;
+    const obj = peState.objects.find(x => x.id === editId) || o;
+    refocus();
     peEnsureEditorKbScrollRoom({ estimate: peKeyboardOcclusionPx() < 48 });
     peScrollInlineEditorIntoWrapSafeZone();
     peScrollInlineEditorAboveKeyboard(true);
+    // Re-assert focus after layout — scroll must not leave the caret unfocused.
+    refocus();
     // If the fixed mini-panel still covers the caret after scroll, nudge the
     // block down the page (scroll alone cannot move content past scrollTop=0).
     if (obj && obj.type === 'text') {
@@ -25615,11 +25736,13 @@ function peScheduleTextEditVisibility(o) {
         if (peNudgeTextObjBelowPropsPanel(obj)) {
           peScrollInlineEditorIntoWrapSafeZone();
           peScrollInlineEditorAboveKeyboard(true);
+          refocus();
         }
       }
     }
   };
-  pass();
+  // Focus-only first: let the OSK latch before any pad/scroll layout changes.
+  refocus();
   peTextKbTimer = setTimeout(() => {
     pass();
     setTimeout(pass, 80);
@@ -25628,7 +25751,7 @@ function peScheduleTextEditVisibility(o) {
     setTimeout(pass, 450);
     setTimeout(pass, 700);
     setTimeout(pass, 1000);
-  }, 20);
+  }, 60);
 }
 
 function peInlineTextObj() {
@@ -25795,15 +25918,20 @@ function peBeginCalloutEdit(o) {
     if (cur && cur.type === 'text') peFinishTextInlineEdit({ keepTool: true, keepSelection: true });
     else if (cur && cur.type === 'callout') peEndCalloutEdit(true);
   }
+  peInlineEditFocusSuppressed = false;
   peState.inlineEditId = o.id;
   peState.inlineEditFocusPending = true;
   peSelect(o, { skipSelectionHistory: true });
-  peScrollInlineEditorIntoWrapSafeZone();
-  peArmTextKeyboardQuiet(80);
+  // Focus FIRST (proxy → editor) while still in the user gesture; scroll later.
+  peArmTextKeyboardQuiet(120);
   peFocusInlineEditorNow();
   peFocusInlineEditorIfNeeded();
   if (typeof isTouchDevice !== 'undefined' && isTouchDevice) {
     peScheduleTextEditVisibility(o);
+  } else {
+    peEnsureEditorKbScrollRoom({ estimate: true });
+    peScrollInlineEditorIntoWrapSafeZone();
+    peFocusInlineEditorNow();
   }
 }
 
@@ -25847,16 +25975,16 @@ function peBeginInlineEdit(o, opts) {
   const skipSelectionHistory = !!(opts && opts.isNewDraft) || peState.draftTextId === o.id;
   peSelect(o, { skipSelectionHistory });
   // Focus FIRST while still inside the user gesture (critical for mobile OSK).
-  // Scroll/pad adjustments come after — they must not precede focus().
-  peArmTextKeyboardQuiet(80);
-  peFocusInlineEditorNow();
-  peEnsureEditorKbScrollRoom({ estimate: true, forTextCreate: !!(opts && opts.isNewDraft) });
-  peScrollInlineEditorIntoWrapSafeZone();
-  // Re-assert focus after layout (DOM still same element).
+  // Scroll/pad adjustments must not precede focus() — they dismiss the OSK.
+  peArmTextKeyboardQuiet(120);
   peFocusInlineEditorNow();
   if (typeof isTouchDevice !== 'undefined' && isTouchDevice) {
     peBindTextKeyboardGuards(true);
     peScheduleTextEditVisibility(o);
+  } else {
+    peEnsureEditorKbScrollRoom({ estimate: true, forTextCreate: !!(opts && opts.isNewDraft) });
+    peScrollInlineEditorIntoWrapSafeZone();
+    peFocusInlineEditorNow();
   }
 }
 
@@ -26714,7 +26842,8 @@ function peSelect(o, opts) {
     peApplyObjSelection(o);
     peUpdateProps();
     peUpdateRedactActionsUi();
-    if (o && o.type === 'text') {
+    // Do not scroll while entering inline edit — layout shifts kill the OSK.
+    if (o && o.type === 'text' && !peState.inlineEditId) {
       requestAnimationFrame(() => peScrollSelectedTextIntoFocusCenter(o));
     } else if (!peState.inlineEditId) {
       peClearEditorKbScrollRoom();
@@ -26727,7 +26856,7 @@ function peSelect(o, opts) {
   peUpdateProps();
   peUpdatePanUi();
   peUpdateRedactActionsUi();
-  if (o && o.type === 'text') {
+  if (o && o.type === 'text' && !peState.inlineEditId) {
     requestAnimationFrame(() => peScrollSelectedTextIntoFocusCenter(o));
   } else if (!peState.inlineEditId) {
     peClearEditorKbScrollRoom();
@@ -28795,6 +28924,7 @@ function peToggleTextMarkupsAtFracs(action, fracs) {
       peDeleteObjects([existing]);
       return fracs;
     }
+    if (typeof isTouchDevice !== 'undefined' && isTouchDevice) peArmOskProxy();
     peCreateCalloutFromFracs(fracs);
     return fracs;
   }
@@ -30391,6 +30521,18 @@ function peObjMouseDown(e, o) {
     pePinchLastAppliedMidY = null;
     peSelSnapBeforePinch = null;
     peCancelTouchObjPending();
+    const pinchPad = document.getElementById('peStagePad');
+    if (pinchPad) {
+      pinchPad.classList.remove('pe-stage-pad-pinching');
+      // Drop temporary side pads from pinch scroll-room expansion.
+      pinchPad.style.paddingLeft = '';
+      pinchPad.style.paddingRight = '';
+      if (!peState?.inlineEditId) {
+        pinchPad.style.paddingBottom = '';
+        const sp = document.getElementById('peStageFocusSpacer');
+        if (sp) sp.style.height = '0px';
+      }
+    }
     // Keep blocking object hits briefly while fingers lift.
     pePinchBlockObjUntil = Date.now() + 350;
   }
@@ -30442,6 +30584,9 @@ function peObjMouseDown(e, o) {
     pePinchLastAppliedMidX = pePinchLastMidX;
     pePinchLastAppliedMidY = pePinchLastMidY;
     pePinchPending = null;
+    // Drop OSK focus pad / flex-center so pinch anchors under the fingers.
+    peClearEditorKbScrollRoom();
+    document.getElementById('peStagePad')?.classList.add('pe-stage-pad-pinching');
     peCancelZoomRender();
     e.preventDefault();
   }, { passive: false });
@@ -30759,20 +30904,15 @@ function peObjMouseDown(e, o) {
       // One undo step after the input is completed rolls back the creation of the entire block
       // (we take a picture only before creating it; commit it when exiting editing).
       peCommitEditorHistory();
-      // Scroll the tap point into the upper band BEFORE creating/focusing so
-      // the OSK covers empty page below, not the new text block.
+      // Arm OSK on this gesture BEFORE any layout scroll (scroll kills mobile keyboards).
       if (touchLike || (typeof isTouchDevice !== 'undefined' && isTouchDevice)) {
-        peScrollStagePointIntoKeyboardSafeZone(pt.x, pt.y);
+        peArmOskProxy();
       }
       const o = { id: ++peState.seq, type: 'text', text: '', fontPt: 16, color: '#d90000', x: pt.x / W, y: pt.y / H };
       peState.objects.push(o);
       peState.draftTextId = o.id;
       peBeginInlineEdit(o, { isNewDraft: true });
       peFocusInlineEditorNow();
-      // peBeginInlineEdit already schedules OSK/center retries on touch.
-      if (typeof isTouchDevice !== 'undefined' && isTouchDevice) {
-        peScheduleTextEditVisibility(o);
-      }
       return;
     }
     if (tool === 'select' && peState.inlineEditId) {
@@ -31055,7 +31195,18 @@ function peObjMouseDown(e, o) {
 
   // mousedown preventDefault keeps the native text selection from collapsing
   // when the user clicks a menu button.
+  peTextSelCtxMenu.addEventListener('pointerdown', (e) => {
+    const btn = e.target.closest('button[data-action="comment"]');
+    if (btn && typeof isTouchDevice !== 'undefined' && isTouchDevice) {
+      peArmOskProxy();
+    }
+  }, true);
   peTextSelCtxMenu.addEventListener('mousedown', (e) => {
+    // Comment needs the OSK proxy to stay focused — don't steal that gesture.
+    if (e.target.closest && e.target.closest('button[data-action="comment"]')) {
+      e.stopPropagation();
+      return;
+    }
     e.preventDefault();
     e.stopPropagation();
   });
@@ -31830,10 +31981,31 @@ function peObjMouseDown(e, o) {
           )) + 'px';
           const navLeft = Math.max(0, Math.round(imgRect.left - barRect.left));
           nav.style.left = navLeft + 'px';
-          // Keep Object-select / Hand clear of the absolute ←→ pair.
-          if (lead) {
+          // Align nav-divider with the Shapes↔Rotate divider so Object-select /
+          // Hand sit strictly above RotL / RotR (same columns as landscape).
+          if (lead && navDivider && mainDivider) {
+            lead.style.marginLeft = '0px';
+            const mainDivLeft = mainDivider.getBoundingClientRect().left;
+            const navDivLeft = navDivider.getBoundingClientRect().left;
+            let shift = mainDivLeft - navDivLeft;
+            const leadLeft = lead.getBoundingClientRect().left;
             const navWNow = nav.offsetWidth
-              || ((prev.offsetWidth || 32) + (next.offsetWidth || 32) + (parseFloat(nav.style.gap) || innerGap));
+              || ((prev.offsetWidth || 32) + (next.offsetWidth || 32)
+                  + (parseFloat(nav.style.gap) || innerGap));
+            const minLeadLeft = navLeft + navWNow + groupGap;
+            const maxShiftLeft = minLeadLeft - leadLeft;
+            if (shift < maxShiftLeft) shift = maxShiftLeft;
+            const barStyles = getComputedStyle(bar);
+            const barPadR = parseFloat(barStyles.paddingRight) || 0;
+            const leadW = lead.offsetWidth || lead.scrollWidth;
+            const maxLeadLeft = barRect.right - barPadR - leadW;
+            const maxShiftRight = maxLeadLeft - leadLeft;
+            if (shift > maxShiftRight) shift = Math.max(maxShiftLeft, maxShiftRight);
+            lead.style.marginLeft = Math.max(0, Math.round(shift)) + 'px';
+          } else if (lead) {
+            const navWNow = nav.offsetWidth
+              || ((prev.offsetWidth || 32) + (next.offsetWidth || 32)
+                  + (parseFloat(nav.style.gap) || innerGap));
             const leadDesiredLeft = navLeft + navWNow + groupGap;
             const leadNaturalLeft = titleRightRel + barGap;
             lead.style.marginLeft = Math.max(0, Math.round(leadDesiredLeft - leadNaturalLeft)) + 'px';
