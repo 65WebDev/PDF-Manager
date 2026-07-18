@@ -25845,10 +25845,14 @@ function peScrollInlineEditorAboveKeyboard(force) {
   const el = peInlineEditorDomEl();
   if (!el) return;
   peScrollElementIntoTextFocusCenter(el, { force: !!force, withPad: true });
-  if (document.activeElement !== el) {
+  const osk = peOskEl();
+  const focused = document.activeElement === el
+    || (peMobileEditActive && osk && document.activeElement === osk);
+  if (!focused) {
     peState.inlineEditFocusPending = true;
     peFocusInlineEditorNow();
   }
+  if (peMobileEditActive) pePositionMobileEditOverlay();
 }
 
 /** When a text block is selected (not necessarily editing), keep it unobscured. */
@@ -25870,6 +25874,7 @@ function peOnVisualViewportForText() {
   peEnsureEditorKbScrollRoom();
   peScrollInlineEditorAboveKeyboard(true);
   peFocusInlineEditorNow();
+  if (peMobileEditActive) pePositionMobileEditOverlay();
 }
 
 function peBindTextKeyboardGuards(on) {
