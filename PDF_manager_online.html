@@ -1171,6 +1171,8 @@
       /* Above .pe-stage-wrap so overflowing menus (shapes) receive hits, not page objects */
       z-index: 30;
     }
+    /* Desktop: editor menu toggle is mobile-only (see coarse pointer rules). */
+    #pageEditModal #peMenuToggleBtn { display: none; }
     .pe-toolbar.pe-tb-tail-wrap,
     .pe-toolbar.pe-tb-tools-wrap {
       flex-wrap: wrap;
@@ -3925,11 +3927,12 @@
         gap: 4px;
         padding: 4px 6px;
       }
-      /*Same rotate glyphs as desktop (no extra scale-up on touch)*/
+      /* Preview mini-panel rotate glyphs: 1.3× and 2px lower */
       .page .quick-actions .rotate-glyph {
         display: inline-block;
         line-height: 1;
-        transform: scaleX(-1) scaleY(-1);
+        /* flip first, then translate so +2px is down on screen */
+        transform: translateY(2px) scale(1.3) scaleX(-1) scaleY(-1);
       }
       .page .quick-actions .edit-quick svg {
         width: 22px;
@@ -3941,6 +3944,54 @@
         padding-top: max(8px, env(safe-area-inset-top, 0px));
         padding-left: max(8px, env(safe-area-inset-left, 0px));
         padding-right: max(8px, env(safe-area-inset-right, 0px));
+      }
+      /* Hide/show editor top menu — same idea as #menuToggleBtn in the preview. */
+      #pageEditModal #peMenuToggleBtn {
+        display: flex;
+        position: absolute;
+        top: max(8px, env(safe-area-inset-top, 0px));
+        right: max(8px, env(safe-area-inset-right, 0px));
+        z-index: 40;
+        width: 42px;
+        height: 42px;
+        padding: 0;
+        border: none;
+        border-radius: 8px;
+        background: #34495e;
+        color: #fff;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        box-shadow: 0 2px 6px rgba(0,0,0,0.25);
+        -webkit-tap-highlight-color: transparent;
+        touch-action: manipulation;
+      }
+      #pageEditModal #peMenuToggleBtn svg {
+        width: 22px;
+        height: 22px;
+        display: block;
+      }
+      #pageEditModal #peMenuToggleBtn:active,
+      #pageEditModal #peMenuToggleBtn.menu-tap-feedback {
+        background: #3498db;
+      }
+      #pageEditModal.pe-menu-collapsed .pe-toolbar {
+        padding: 0;
+        min-height: 0;
+        height: 0;
+        overflow: visible;
+        gap: 0;
+        box-shadow: none;
+        border: none;
+      }
+      #pageEditModal.pe-menu-collapsed .pe-toolbar > *:not(#peMenuToggleBtn) {
+        display: none !important;
+      }
+      #pageEditModal.pe-menu-collapsed #peMenuToggleBtn {
+        position: fixed;
+        top: max(10px, env(safe-area-inset-top, 0px));
+        right: max(16px, env(safe-area-inset-right, 0px));
+        z-index: 130;
       }
       #pageEditModal .pe-btn {
         -webkit-tap-highlight-color: transparent;
@@ -4710,6 +4761,9 @@
   <!--Single page editor (desktop + mobile; mobile opens via page quick-actions Edit)-->
   <div id="pageEditModal" aria-hidden="true">
     <div class="pe-toolbar">
+      <button type="button" id="peMenuToggleBtn" title="Скрыть/показать меню" aria-label="Скрыть/показать меню">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
+      </button>
       <span class="pe-title">Страница <span id="peTitleNum"></span></span>
       <div class="pe-page-nav" id="pePageNav">
         <button class="pe-btn pe-btn-square" id="pePagePrev" type="button" title="Перейти к предыдущей странице" aria-label="Перейти к предыдущей странице">
@@ -20958,7 +21012,12 @@ let peState = null;   // null = editor is closed
 let peSavedPageSelection = null;
 let peAutoScrollTimer = null;
 let peAutoScrollDx = 0, peAutoScrollDy = 0;
+let peAutoScrollSpeed = 14;
 let peLastPointerX = 0, peLastPointerY = 0;
+/** Active touch/pointer tracking for page-text selection handle gestures. */
+let peTextSelPointerDown = false;
+let peTextSelLastClientX = 0;
+let peTextSelLastClientY = 0;
 let peLastZoomMouseX = null, peLastZoomMouseY = null;
 let pePinchActive = false;
 let pePinchStartDist = 0;
@@ -22104,9 +22163,10 @@ function peStopAutoScroll() {
     peAutoScrollTimer = null;
   }
   peAutoScrollDx = peAutoScrollDy = 0;
+  peAutoScrollSpeed = 14;
 }
 
-function peCheckEdgeAutoScroll(clientX, clientY) {
+function peCheckEdgeAutoScroll(clientX, clientY, opts) {
   const textSelDrag = typeof peTextSelHandleDragging !== 'undefined' && peTextSelHandleDragging;
   if (!peState) { peStopAutoScroll(); return; }
   if (!peState.drag && !textSelDrag) { peStopAutoScroll(); return; }
@@ -22124,7 +22184,9 @@ function peCheckEdgeAutoScroll(clientX, clientY) {
   const wrap = document.getElementById('peStageWrap');
   if (!wrap) return;
   const r = wrap.getBoundingClientRect();
-  const TH = 52;
+  // Wider band + faster scroll while adjusting PDF text selection handles.
+  const TH = textSelDrag ? 96 : 52;
+  const speed = textSelDrag ? 22 : 14;
   let dx = 0, dy = 0;
   if (clientX - r.left < TH) dx = -1;
   else if (r.right - clientX < TH) dx = 1;
@@ -22135,6 +22197,7 @@ function peCheckEdgeAutoScroll(clientX, clientY) {
   peAutoScrollDy = dy;
   peLastPointerX = clientX;
   peLastPointerY = clientY;
+  peAutoScrollSpeed = speed;
 
   if (!dx && !dy) { peStopAutoScroll(); return; }
 
@@ -22144,9 +22207,13 @@ function peCheckEdgeAutoScroll(clientX, clientY) {
       if (!peState || (!peState.drag && !stillTextSel)) { peStopAutoScroll(); return; }
       const w = document.getElementById('peStageWrap');
       if (!w) return;
-      const speed = 14;
-      if (peAutoScrollDx) w.scrollLeft += peAutoScrollDx * speed;
-      if (peAutoScrollDy) w.scrollTop += peAutoScrollDy * speed;
+      const spd = peAutoScrollSpeed || 14;
+      if (peAutoScrollDx) w.scrollLeft += peAutoScrollDx * spd;
+      if (peAutoScrollDy) w.scrollTop += peAutoScrollDy * spd;
+      // Text-sel: keep extending toward the frozen pointer after the page moves.
+      if (stillTextSel && typeof peExtendPageTextSelTowardPoint === 'function') {
+        peExtendPageTextSelTowardPoint(peLastPointerX, peLastPointerY);
+      }
       // We continue the drag logic under the “virtual” cursor after scrolling
       if (peState.drag && typeof peContinueDragAt === 'function') {
         peContinueDragAt(peLastPointerX, peLastPointerY);
@@ -23710,13 +23777,34 @@ async function pageEditClose(force) {
   peDestroy();
 }
 
+function peToggleEditorMenu() {
+  const modal = document.getElementById('pageEditModal');
+  const btn = document.getElementById('peMenuToggleBtn');
+  if (!modal || !btn) return;
+  const collapsed = modal.classList.toggle('pe-menu-collapsed');
+  btn.title = collapsed ? 'Показать меню' : 'Скрыть меню';
+  btn.setAttribute('aria-label', collapsed ? 'Показать меню' : 'Скрыть/показать меню');
+  btn.classList.add('menu-tap-feedback');
+  setTimeout(() => btn.classList.remove('menu-tap-feedback'), 160);
+  // Toolbar height change → reflow wrap stages / stage size.
+  requestAnimationFrame(() => {
+    if (typeof peUpdateToolbarWrap === 'function') peUpdateToolbarWrap();
+    if (typeof peOnWinResize === 'function') peOnWinResize();
+  });
+}
+
 function peResetEditorUiState() {
   const props = document.getElementById('peProps');
   if (props) props.classList.remove('visible', 'pe-props-shape-only', 'pe-props-dragging', 'pe-props-collapsed');
   pePropsCollapsed = false;
   const modal = document.getElementById('pageEditModal');
   if (modal) {
-    modal.classList.remove('pe-obj-select-mode', 'pe-obj-marquee-active', 'pe-crop-mode', 'pe-hand-mode');
+    modal.classList.remove('pe-obj-select-mode', 'pe-obj-marquee-active', 'pe-crop-mode', 'pe-hand-mode', 'pe-menu-collapsed');
+  }
+  const peMenuBtn = document.getElementById('peMenuToggleBtn');
+  if (peMenuBtn) {
+    peMenuBtn.title = 'Скрыть/показать меню';
+    peMenuBtn.setAttribute('aria-label', 'Скрыть/показать меню');
   }
   document.getElementById('peToolObjSelect')?.classList.remove('active');
   peCloseShapeMenu();
@@ -23756,7 +23844,7 @@ function peDestroy() {
   peUpdateCropHint();
   const modal = document.getElementById('pageEditModal');
   if (modal) {
-    modal.classList.remove('open', 'modal-overlay-active', 'pe-pan-ready', 'pe-panning', 'pe-hand-mode', 'pe-crop-mode', 'pe-crop-pan-ready', 'pe-crop-panning', 'pe-redact-has-selection');
+    modal.classList.remove('open', 'modal-overlay-active', 'pe-pan-ready', 'pe-panning', 'pe-hand-mode', 'pe-crop-mode', 'pe-crop-pan-ready', 'pe-crop-panning', 'pe-redact-has-selection', 'pe-menu-collapsed');
     modal.setAttribute('aria-hidden', 'true');
   }
   window.removeEventListener('resize', peOnWinResize);
@@ -25864,6 +25952,7 @@ function peSetObjSelectMode(on) {
   if (next) {
     if (peState.tool !== 'select') peSetTool('select');
     else peEndInlineEditForShiftSelect();
+    if (typeof peBindTextSelHandleDragGuards === 'function') peBindTextSelHandleDragGuards();
   }
   peUpdateHandToolUi();
   peUpdatePanUi();
@@ -26732,11 +26821,30 @@ function peBeginColorPreviewIfNeeded(kind, targets, wholeMode) {
   peColorPickerDirty = false;
 }
 
-// Opens a custom picker instead of the system color selection window - a single view
-// for point changes (by text selection), entire (one entire block
-// or the cursor just blinks without highlighting) and multiple (several
-// allocated blocks at once). Pops up right below the field you are using
-// man.
+/** Keep the custom color popup fully inside the visual viewport. */
+function pePositionColorPickerPopup(popup, anchorEl) {
+  if (!popup || !anchorEl) return;
+  const mw = popup.offsetWidth || 190;
+  const mh = popup.offsetHeight || 280;
+  const vv = window.visualViewport;
+  const viewL = (vv ? vv.offsetLeft : 0) + 6;
+  const viewT = (vv ? vv.offsetTop : 0) + 6;
+  const viewR = (vv ? vv.offsetLeft + vv.width : window.innerWidth) - 6;
+  const viewB = (vv ? vv.offsetTop + vv.height : window.innerHeight) - 6;
+  const ar = anchorEl.getBoundingClientRect();
+  let x = ar.left;
+  let y = ar.bottom + 6;
+  // Prefer below the swatch; flip above when it would leave the window.
+  if (y + mh > viewB) y = ar.top - mh - 6;
+  if (y < viewT) y = viewT;
+  if (x + mw > viewR) x = viewR - mw;
+  if (x < viewL) x = viewL;
+  // Final clamp if the popup is taller than the remaining band.
+  if (y + mh > viewB) y = Math.max(viewT, viewB - mh);
+  popup.style.left = Math.round(x) + 'px';
+  popup.style.top = Math.round(y) + 'px';
+}
+
 function peOpenColorPicker(kind, anchorEl, objs) {
   const targets = objs.map(o => ({ obj: o, el: peGetInlineTextEl(o) })).filter(t => t.el);
   if (!targets.length) return;
@@ -26746,13 +26854,13 @@ function peOpenColorPicker(kind, anchorEl, objs) {
   const startHex = document.getElementById(kind === 'bg' ? 'pePropBg' : 'pePropColor').value || '#000000';
   const [r, g, b] = peHexToRgb(startHex);
   const [h, s, v] = peRgbToHsv(r, g, b);
-  peColorPickerState = { h, s, v, kind };
+  peColorPickerState = { h, s, v, kind, anchorEl };
   peUpdateColorPickerUi();
   const popup = document.getElementById('peColorPickerPopup');
   popup.style.display = 'flex';
-  const r2 = anchorEl.getBoundingClientRect();
-  popup.style.left = Math.round(r2.left) + 'px';
-  popup.style.top = Math.round(r2.bottom + 6) + 'px';
+  pePositionColorPickerPopup(popup, anchorEl);
+  // Re-measure after paint (height may change once flex layout settles).
+  requestAnimationFrame(() => pePositionColorPickerPopup(popup, anchorEl));
 }
 
 function peCloseColorPickerUi() {
@@ -27721,11 +27829,13 @@ let peTextSelHandleDragging = false;
 let peTextSelMenuResume = null; // { clientX, clientY, info } | null
 let peTextSelHandleListenersBound = false;
 
-/** Client-space rects for the start/end carets of the current selection. */
+/** Client-space rects for the start/end carets of the current selection.
+ *  Mobile OS handles sit below/above the line — expand vertically more. */
 function peTextSelEndpointHitRects(pad) {
   const sel = window.getSelection();
   if (!sel || !sel.rangeCount || sel.isCollapsed) return [];
-  const p = pad == null ? 36 : pad;
+  const p = pad == null ? 40 : pad;
+  const vExtra = (typeof isTouchDevice !== 'undefined' && isTouchDevice) ? 52 : 20;
   const out = [];
   try {
     const range = sel.getRangeAt(0);
@@ -27740,8 +27850,8 @@ function peTextSelEndpointHitRects(pad) {
       } catch (_) {}
     }
     if (ar) out.push({
-      left: ar.left - p, top: ar.top - p,
-      right: ar.right + p, bottom: ar.bottom + p
+      left: ar.left - p, top: ar.top - p - vExtra,
+      right: ar.right + p, bottom: ar.bottom + p + vExtra
     });
     const b = document.createRange();
     b.setStart(range.endContainer, range.endOffset);
@@ -27754,15 +27864,15 @@ function peTextSelEndpointHitRects(pad) {
       } catch (_) {}
     }
     if (br) out.push({
-      left: br.left - p, top: br.top - p,
-      right: br.right + p, bottom: br.bottom + p
+      left: br.left - p, top: br.top - p - vExtra,
+      right: br.right + p, bottom: br.bottom + p + vExtra
     });
   } catch (_) {}
   return out;
 }
 
 function peClientNearTextSelHandle(clientX, clientY) {
-  const rects = peTextSelEndpointHitRects(44);
+  const rects = peTextSelEndpointHitRects(48);
   for (let i = 0; i < rects.length; i++) {
     const r = rects[i];
     if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) {
@@ -27770,6 +27880,60 @@ function peClientNearTextSelHandle(clientX, clientY) {
     }
   }
   return false;
+}
+
+/** Moving end (focus) of the current page-text selection, in client coords. */
+function pePageTextSelFocusClientPoint() {
+  try {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || sel.isCollapsed) return null;
+    const range = sel.getRangeAt(0);
+    const tip = document.createRange();
+    // Prefer the focus side (the handle the user is dragging).
+    tip.setStart(sel.focusNode || range.endContainer, sel.focusOffset != null ? sel.focusOffset : range.endOffset);
+    tip.collapse(true);
+    let r = tip.getBoundingClientRect();
+    if (!r || (r.width === 0 && r.height === 0)) {
+      const rects = range.getClientRects();
+      if (rects && rects.length) r = rects[rects.length - 1];
+    }
+    if (!r) return null;
+    return { x: r.left + Math.min(r.width, 4) / 2, y: r.top + r.height / 2 };
+  } catch (_) { return null; }
+}
+
+/** After edge auto-scroll, re-extend the selection toward the frozen pointer. */
+function peExtendPageTextSelTowardPoint(clientX, clientY) {
+  if (!peIsEditorPageTextSelection()) return;
+  try {
+    const sel = window.getSelection();
+    if (!sel || typeof sel.modify !== 'function') {
+      // Selection.extend is widely supported for adjusting the focus end.
+      if (sel && typeof sel.extend === 'function' && document.caretRangeFromPoint) {
+        const caret = document.caretRangeFromPoint(clientX, clientY);
+        if (caret) sel.extend(caret.startContainer, caret.startOffset);
+      } else if (sel && typeof sel.extend === 'function' && document.caretPositionFromPoint) {
+        const pos = document.caretPositionFromPoint(clientX, clientY);
+        if (pos) sel.extend(pos.offsetNode, pos.offset);
+      }
+      if (typeof scheduleTextLayerHighlightRender === 'function') scheduleTextLayerHighlightRender();
+      return;
+    }
+  } catch (_) {}
+  try {
+    const sel = window.getSelection();
+    if (!sel) return;
+    if (document.caretRangeFromPoint) {
+      const caret = document.caretRangeFromPoint(clientX, clientY);
+      if (caret && typeof sel.extend === 'function') {
+        sel.extend(caret.startContainer, caret.startOffset);
+      }
+    } else if (document.caretPositionFromPoint && typeof sel.extend === 'function') {
+      const pos = document.caretPositionFromPoint(clientX, clientY);
+      if (pos) sel.extend(pos.offsetNode, pos.offset);
+    }
+    if (typeof scheduleTextLayerHighlightRender === 'function') scheduleTextLayerHighlightRender();
+  } catch (_) {}
 }
 
 function peIsEditorPageTextSelection() {
@@ -27872,6 +28036,9 @@ function peBindTextSelHandleDragGuards() {
     if (e.button != null && e.button !== 0) return;
     const menu = document.getElementById('peTextSelCtxMenu');
     if (menu && menu.contains(e.target)) return;
+    peTextSelPointerDown = true;
+    peTextSelLastClientX = e.clientX;
+    peTextSelLastClientY = e.clientY;
     // Hide while adjusting handles OR while actively re-dragging a selection.
     const nearHandle = peClientNearTextSelHandle(e.clientX, e.clientY);
     const onTextLayer = !!(e.target && e.target.closest && e.target.closest('#peTextLayer'));
@@ -27880,21 +28047,71 @@ function peBindTextSelHandleDragGuards() {
     }
   };
   const onPtrMove = (e) => {
+    if (!peState || !peState.objSelectMode) return;
+    peTextSelLastClientX = e.clientX;
+    peTextSelLastClientY = e.clientY;
+    if (!peTextSelHandleDragging && peTextSelPointerDown && peIsEditorPageTextSelection()
+        && peClientNearTextSelHandle(e.clientX, e.clientY)) {
+      peBeginTextSelHandleDrag(e.clientX, e.clientY);
+    }
     if (!peTextSelHandleDragging) return;
-    if (typeof peCheckEdgeAutoScroll === 'function') {
-      peCheckEdgeAutoScroll(e.clientX, e.clientY);
+    peCheckEdgeAutoScroll(e.clientX, e.clientY);
+  };
+  const onPtrUp = () => {
+    peTextSelPointerDown = false;
+    peEndTextSelHandleDrag();
+  };
+  // Touch: native blue handles often don't deliver pointermove; use touchmove.
+  const onTouchMove = (e) => {
+    if (!peState || !peState.objSelectMode) return;
+    if (!e.touches || !e.touches.length) return;
+    const t = e.touches[0];
+    peTextSelLastClientX = t.clientX;
+    peTextSelLastClientY = t.clientY;
+    if (!peIsEditorPageTextSelection()) return;
+    if (!peTextSelHandleDragging && peClientNearTextSelHandle(t.clientX, t.clientY)) {
+      peBeginTextSelHandleDrag(t.clientX, t.clientY);
+    }
+    if (peTextSelHandleDragging) peCheckEdgeAutoScroll(t.clientX, t.clientY);
+  };
+  const onTouchStart = (e) => {
+    if (!peState || !peState.objSelectMode) return;
+    if (!e.touches || !e.touches.length) return;
+    peTextSelPointerDown = true;
+    const t = e.touches[0];
+    peTextSelLastClientX = t.clientX;
+    peTextSelLastClientY = t.clientY;
+    if (peIsEditorPageTextSelection() && peClientNearTextSelHandle(t.clientX, t.clientY)) {
+      peBeginTextSelHandleDrag(t.clientX, t.clientY);
     }
   };
-  const onPtrUp = () => { peEndTextSelHandleDrag(); };
   document.addEventListener('pointerdown', onPtrDown, true);
   document.addEventListener('pointermove', onPtrMove, true);
   document.addEventListener('pointerup', onPtrUp, true);
   document.addEventListener('pointercancel', onPtrUp, true);
+  document.addEventListener('touchstart', onTouchStart, { capture: true, passive: true });
+  document.addEventListener('touchmove', onTouchMove, { capture: true, passive: true });
+  document.addEventListener('touchend', onPtrUp, { capture: true, passive: true });
+  document.addEventListener('touchcancel', onPtrUp, { capture: true, passive: true });
   document.addEventListener('selectionchange', () => {
-    if (!peTextSelHandleDragging) return;
-    // Keep menu hidden for the whole handle gesture.
-    const menu = document.getElementById('peTextSelCtxMenu');
-    if (menu && menu.classList.contains('visible')) peHideTextSelCtxMenu();
+    if (!peState || !peState.objSelectMode) return;
+    if (!peIsEditorPageTextSelection()) return;
+    // While a finger/pointer is down, any selection change means a handle drag.
+    if (peTextSelPointerDown || peTextSelHandleDragging) {
+      if (!peTextSelHandleDragging) {
+        peBeginTextSelHandleDrag(peTextSelLastClientX, peTextSelLastClientY);
+      }
+      const menu = document.getElementById('peTextSelCtxMenu');
+      if (menu && menu.classList.contains('visible')) {
+        menu.classList.remove('visible');
+        menu.setAttribute('aria-hidden', 'true');
+      }
+      // Scroll toward the moving caret (more reliable than the last touch point
+      // when the OS owns the blue handle gesture).
+      const focusPt = pePageTextSelFocusClientPoint();
+      if (focusPt) peCheckEdgeAutoScroll(focusPt.x, focusPt.y);
+      else peCheckEdgeAutoScroll(peTextSelLastClientX, peTextSelLastClientY);
+    }
   });
 }
 
@@ -29325,9 +29542,9 @@ function peOnObjSelectTextLayerPointerDown(e) {
   const touchLike = e.pointerType === 'touch' || e.pointerType === 'pen';
   if (!touchLike) return false;
   if (pePinchActive || Date.now() < pePinchBlockObjUntil) return true;
+  peBindTextSelHandleDragGuards();
   // Adjusting an existing selection via its endpoint handles — do not pan.
   if (peIsEditorPageTextSelection() && peClientNearTextSelHandle(e.clientX, e.clientY)) {
-    peBindTextSelHandleDragGuards();
     peBeginTextSelHandleDrag(e.clientX, e.clientY);
     return false;
   }
@@ -31306,6 +31523,11 @@ function peObjMouseDown(e, o) {
   }
   window.addEventListener('resize', peUpdateToolbarWrap);
   peInitPropsPanelDrag();
+  document.getElementById('peMenuToggleBtn')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof peToggleEditorMenu === 'function') peToggleEditorMenu();
+  });
 })();
 
 function peShapeSvgInner(kind, stroke) {
