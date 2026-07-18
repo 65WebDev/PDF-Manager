@@ -1286,8 +1286,12 @@
     }
     .pe-btn svg { flex-shrink: 0; display: block; }
     #peToolRedact svg { margin-top: 1px; }
-    .pe-btn:hover:not(:disabled) { background: #3498db; }
-    .pe-btn:hover:not(:disabled) svg { stroke: #fff; }
+    /* Hover only on real hover devices — sticky :hover on touch looks like
+       .active and makes retap “not clear” the tool highlight. */
+    @media (hover: hover) and (pointer: fine) {
+      .pe-btn:hover:not(:disabled) { background: #3498db; }
+      .pe-btn:hover:not(:disabled) svg { stroke: #fff; }
+    }
     .pe-btn:disabled { opacity: .4; cursor: default; }
     .pe-btn.active { background: #3498db; border-color: #8fd0ff; }
     .pe-btn.active svg { stroke: #fff; }
@@ -3890,16 +3894,10 @@
         -webkit-tap-highlight-color: transparent;
         touch-action: manipulation;
       }
-      /*Rotate page controls were 36×36 / 19px — too small vs main-menu glyphs.*/
-      #pageEditModal #peRotL,
-      #pageEditModal #peRotR {
-        width: 48px;
-        height: 48px;
-        font-size: 30px;
-      }
+      /* Same 36×36 hit box as other tool buttons; enlarge only the glyph. */
       #pageEditModal #peRotL .rotate-glyph,
       #pageEditModal #peRotR .rotate-glyph {
-        font-size: 30px;
+        font-size: 28px;
         line-height: 1;
       }
       #pageEditModal .pe-scale {
@@ -25066,7 +25064,15 @@ function peExitDrawToolMode() {
   peCloseShapeMenu();
   peCloseShapeColorPopup();
   peCloseRedactColorPopup();
-  peSetTool('select');
+  // preferHand: land on Hand so Object-select restore cannot leave a draw
+  // button looking selected; also clears sticky :focus on the tapped tool.
+  peSetTool('select', { preferHand: true, clearSelection: true });
+  ['peToolCrop', 'peToolText', 'peToolHl', 'peToolRedact', 'peToolShape'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.remove('active');
+    try { el.blur(); } catch (_) {}
+  });
   peRedrawObjects();
   peUpdateProps();
 }
@@ -25681,7 +25687,10 @@ function peSyncToolButtons() {
     if (!el) return;
     const on = map[tool] === id;
     el.classList.toggle('active', on);
-    if (!on) el.blur();
+    // Drop sticky focus/hover paint on touch after leaving the tool.
+    if (!on) {
+      try { el.blur(); } catch (_) {}
+    }
   });
   if (tool !== 'shape') peCloseShapeMenu();
   peUpdateHandToolUi();
@@ -28488,19 +28497,26 @@ function peObjMouseDown(e, o) {
   wrap.addEventListener('touchmove', (e) => {
     if (!pePinchActive || !peState || e.touches.length !== 2) return;
     e.preventDefault();
-    const dist = peTouchDist(e.touches[0], e.touches[1]);
-    if (pePinchStartDist <= 0) return;
-    const ratio = dist / pePinchStartDist;
-    const SENS = 120;
-    let newSlider = Math.round(pePinchStartSlider + (ratio - 1) * SENS);
-    const min = peScaleSlider ? parseInt(peScaleSlider.min, 10) : 100;
-    const max = peScaleSlider ? parseInt(peScaleSlider.max, 10) : 200;
-    newSlider = Math.max(min, Math.min(max, newSlider));
     const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
     const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+    // Pan: midpoint travel moves the viewport (works together with pinch zoom).
+    if (pePinchLastMidX != null && pePinchLastMidY != null) {
+      wrap.scrollLeft -= (midX - pePinchLastMidX);
+      wrap.scrollTop -= (midY - pePinchLastMidY);
+    }
+    const dist = peTouchDist(e.touches[0], e.touches[1]);
+    if (pePinchStartDist > 0) {
+      const ratio = dist / pePinchStartDist;
+      const SENS = 120;
+      let newSlider = Math.round(pePinchStartSlider + (ratio - 1) * SENS);
+      const min = peScaleSlider ? parseInt(peScaleSlider.min, 10) : 100;
+      const max = peScaleSlider ? parseInt(peScaleSlider.max, 10) : 200;
+      newSlider = Math.max(min, Math.min(max, newSlider));
+      // Zoom around the current midpoint so pinch + pan feel simultaneous.
+      peApplyZoomSlider(newSlider, midX, midY, { debounce: 180, syncSlider: true });
+    }
     pePinchLastMidX = midX;
     pePinchLastMidY = midY;
-    peApplyZoomSlider(newSlider, midX, midY, { debounce: 180, syncSlider: true });
   }, { passive: false });
   wrap.addEventListener('touchend', peEndEditorPinch);
   wrap.addEventListener('touchcancel', peEndEditorPinch);
@@ -28738,20 +28754,12 @@ function peObjMouseDown(e, o) {
     }
     // Draw tools: first blank click only clears selection / ends text edit.
     // Second blank click (nothing focused) starts a new object.
-    // Touch: skip the extra deselect tap — selecting the tool already cleared focus.
     if ((tool === 'shape' || tool === 'text' || tool === 'redact') && peHasActiveObjectFocus()) {
-      const touchDraw = (e.pointerType === 'touch' || e.pointerType === 'pen');
-      if (!touchDraw) {
-        e.preventDefault();
-        peCloseShapeMenu();
-        peCloseShapeColorPopup();
-        peDeselectKeepTool();
-        return;
-      }
+      e.preventDefault();
       peCloseShapeMenu();
       peCloseShapeColorPopup();
       peDeselectKeepTool();
-      // Fall through and start drawing on the same tap.
+      return;
     }
     if (tool === 'redact') {
       e.preventDefault();
@@ -29023,9 +29031,13 @@ function peObjMouseDown(e, o) {
     if (peState.objSelectMode) peSetObjSelectMode(false);
     peSetTool('select', { preferHand: true, clearSelection: true });
   });
-  document.getElementById('peToolCrop').addEventListener('click', () => {
+  document.getElementById('peToolCrop').addEventListener('click', (e) => {
     if (!peState) return;
-    if (peState.tool === 'crop') { peExitCropMode(); return; }
+    if (peState.tool === 'crop') {
+      void peExitCropMode();
+      try { e.currentTarget.blur(); } catch (_) {}
+      return;
+    }
     peEnterCropMode();
   });
   document.getElementById('peCropConfirmBtn').addEventListener('click', () => peCropConfirm());
@@ -29170,17 +29182,25 @@ function peObjMouseDown(e, o) {
     if (peState && peState.cropPdf) pePositionCropActions();
     if (peRedactSelectionTarget()) peUpdateRedactActionsUi();
   }, { passive: true });
-  document.getElementById('peToolText').addEventListener('click', () => {
+  document.getElementById('peToolText').addEventListener('click', (e) => {
     if (!peState) return;
-    if (peState.tool === 'text') { peExitDrawToolMode(); return; }
+    if (peState.tool === 'text') {
+      peExitDrawToolMode();
+      try { e.currentTarget.blur(); } catch (_) {}
+      return;
+    }
     peSetTool('text');
   });
   document.getElementById('peToolHl')?.addEventListener('click', () => {
     // Marker tool temporarily disabled.
   });
-  document.getElementById('peToolRedact')?.addEventListener('click', () => {
+  document.getElementById('peToolRedact')?.addEventListener('click', (e) => {
     if (!peState) return;
-    if (peState.tool === 'redact') { peExitDrawToolMode(); return; }
+    if (peState.tool === 'redact') {
+      peExitDrawToolMode();
+      try { e.currentTarget.blur(); } catch (_) {}
+      return;
+    }
     peSetTool('redact');
   });
   document.getElementById('peRedactConfirmBtn')?.addEventListener('mousedown', (e) => {
@@ -29269,6 +29289,7 @@ function peObjMouseDown(e, o) {
       // Shape kind can be changed by activating the tool again (menu opens on enter).
       peCloseShapeMenu();
       peExitDrawToolMode();
+      try { e.currentTarget.blur(); } catch (_) {}
       return;
     }
     peSetTool('shape');
