@@ -3890,6 +3890,18 @@
         -webkit-tap-highlight-color: transparent;
         touch-action: manipulation;
       }
+      /*Rotate page controls were 36×36 / 19px — too small vs main-menu glyphs.*/
+      #pageEditModal #peRotL,
+      #pageEditModal #peRotR {
+        width: 48px;
+        height: 48px;
+        font-size: 30px;
+      }
+      #pageEditModal #peRotL .rotate-glyph,
+      #pageEditModal #peRotR .rotate-glyph {
+        font-size: 30px;
+        line-height: 1;
+      }
       #pageEditModal .pe-scale {
         font-size: 14px;
         gap: 8px;
@@ -20785,6 +20797,11 @@ let peAutoScrollTimer = null;
 let peAutoScrollDx = 0, peAutoScrollDy = 0;
 let peLastPointerX = 0, peLastPointerY = 0;
 let peLastZoomMouseX = null, peLastZoomMouseY = null;
+let pePinchActive = false;
+let pePinchStartDist = 0;
+let pePinchStartSlider = 100;
+let pePinchLastMidX = null;
+let pePinchLastMidY = null;
 let peTextClickSeq = { id: null, t: 0 };
 let peZoomFullRenderTimer = null;
 let peZoomRenderGen = 0;
@@ -21001,7 +21018,15 @@ async function peRenderStagePdf() {
   stage.style.height = canvas.style.height;
   canvas.getContext('2d').drawImage(off, 0, 0);
   stage.classList.remove('pe-layout-zoom');
-  peRedrawObjects();
+  // Full object rebuild steals contentEditable focus (mobile keyboard dies).
+  // While typing, only reflow existing nodes and re-focus the editor.
+  if (peState.inlineEditId) {
+    peUpdateObjectsLayout();
+    peState.inlineEditFocusPending = true;
+    peFocusInlineEditorIfNeeded();
+  } else {
+    peRedrawObjects();
+  }
   peRedrawCrop();
   peSyncScaleSliderUi(false);
   peUpdatePanUi();
@@ -24704,35 +24729,72 @@ function peEnableHlComment(o) {
   peCommitEditorHistory();
 }
 
+/** Focus the active inline editor. Returns true if focus was applied. */
+function peFocusInlineEditorNow() {
+  if (!peState?.inlineEditId) return false;
+  const editId = peState.inlineEditId;
+  const o = peState.objects.find(x => x.id === editId);
+  if (!o) return false;
+  let el = null;
+  if (o.type === 'text') {
+    el = document.querySelector('#peObjLayer [data-pe-id="' + o.id + '"].pe-obj-text');
+  } else if (o.type === 'callout') {
+    el = document.querySelector(
+      '#peObjLayer .pe-obj-callout-box[data-pe-id="' + o.id + '"] .pe-callout-text');
+  }
+  if (!el) return false;
+  peState.inlineEditFocusPending = false;
+  try { el.focus({ preventScroll: true }); } catch (_) { try { el.focus(); } catch (__) {} }
+  try {
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  } catch (_) {}
+  return document.activeElement === el;
+}
+
 function peFocusInlineEditorIfNeeded() {
   if (!peState?.inlineEditId || !peState.inlineEditFocusPending) return;
+  if (peFocusInlineEditorNow()) return;
   const editId = peState.inlineEditId;
-  const tryFocus = () => {
-    if (!peState || peState.inlineEditId !== editId) return;
-    const o = peState.objects.find(x => x.id === editId);
-    if (!o) return;
-    let el = null;
-    if (o.type === 'text') {
-      el = document.querySelector('#peObjLayer [data-pe-id="' + o.id + '"].pe-obj-text');
-    } else if (o.type === 'callout') {
-      el = document.querySelector(
-        '#peObjLayer .pe-obj-callout-box[data-pe-id="' + o.id + '"] .pe-callout-text');
-    }
-    // DOM not ready yet (e.g. mid zoom-render) — keep pending for the next redraw.
-    if (!el) return;
-    peState.inlineEditFocusPending = false;
-    try { el.focus({ preventScroll: true }); } catch (_) { try { el.focus(); } catch (__) {} }
-    try {
-      const range = document.createRange();
-      range.selectNodeContents(el);
-      range.collapse(false);
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(range);
-    } catch (_) {}
-  };
-  // Double rAF: wait until layout after peRedrawObjects has painted.
-  requestAnimationFrame(() => requestAnimationFrame(tryFocus));
+  // Fallback: DOM may not be painted yet after peRedrawObjects.
+  requestAnimationFrame(() => {
+    if (!peState || peState.inlineEditId !== editId || !peState.inlineEditFocusPending) return;
+    if (peFocusInlineEditorNow()) return;
+    requestAnimationFrame(() => {
+      if (!peState || peState.inlineEditId !== editId || !peState.inlineEditFocusPending) return;
+      peFocusInlineEditorNow();
+    });
+  });
+}
+
+/** Mobile: zoom/scroll so a new text block sits above the on-screen keyboard. */
+function peEnsureTextEditZoom(o, clientX, clientY) {
+  if (!peState || !o) return;
+  const sl = document.getElementById('peScaleSlider');
+  const min = sl ? parseInt(sl.min, 10) : 100;
+  const max = sl ? parseInt(sl.max, 10) : 200;
+  const target = Math.max(peState.zoomSlider || 100, 158);
+  const ax = clientX != null ? clientX : null;
+  const ay = clientY != null ? clientY : null;
+  peApplyZoomSlider(Math.min(max, Math.max(min, target)), ax, ay, {
+    debounce: 220,
+    syncSlider: true
+  });
+  const wrap = document.getElementById('peStageWrap');
+  const stage = document.getElementById('peStage');
+  if (!wrap || !stage) return;
+  const wr = wrap.getBoundingClientRect();
+  const sr = stage.getBoundingClientRect();
+  if (sr.width <= 0 || sr.height <= 0) return;
+  const tx = sr.left + (Number(o.x) || 0) * sr.width;
+  const ty = sr.top + (Number(o.y) || 0) * sr.height;
+  // Keep the caret in the upper ~22% of the wrap so the keyboard does not cover it.
+  wrap.scrollLeft += tx - (wr.left + wr.width * 0.5);
+  wrap.scrollTop += ty - (wr.top + Math.min(wr.height * 0.22, 140));
 }
 
 function peInlineTextObj() {
@@ -28393,6 +28455,56 @@ function peObjMouseDown(e, o) {
   wrap.addEventListener('mousemove', peTrackZoomMouse);
   if (modal) modal.addEventListener('mousemove', peTrackZoomMouse);
 
+  // Mobile page editor: pinch-to-zoom (reuses peApplyZoomSlider anchors).
+  function peTouchDist(t1, t2) {
+    const dx = t1.clientX - t2.clientX;
+    const dy = t1.clientY - t2.clientY;
+    return Math.hypot(dx, dy);
+  }
+  function peEndEditorPinch(e) {
+    if (!pePinchActive) return;
+    if (e.touches && e.touches.length >= 2) return;
+    pePinchActive = false;
+    pePinchStartDist = 0;
+    peFlushZoomRender();
+    pePinchLastMidX = null;
+    pePinchLastMidY = null;
+  }
+  wrap.addEventListener('touchstart', (e) => {
+    if (!peState || typeof isTouchDevice === 'undefined' || !isTouchDevice) return;
+    if (e.touches.length !== 2) return;
+    if (peState.drag) {
+      peState.drag = null;
+      peStopAutoScroll();
+      document.getElementById('pageEditModal')?.classList.remove('pe-panning', 'pe-crop-panning');
+    }
+    pePinchActive = true;
+    pePinchStartDist = peTouchDist(e.touches[0], e.touches[1]);
+    pePinchStartSlider = peState.zoomSlider || 100;
+    pePinchLastMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+    pePinchLastMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+    e.preventDefault();
+  }, { passive: false });
+  wrap.addEventListener('touchmove', (e) => {
+    if (!pePinchActive || !peState || e.touches.length !== 2) return;
+    e.preventDefault();
+    const dist = peTouchDist(e.touches[0], e.touches[1]);
+    if (pePinchStartDist <= 0) return;
+    const ratio = dist / pePinchStartDist;
+    const SENS = 120;
+    let newSlider = Math.round(pePinchStartSlider + (ratio - 1) * SENS);
+    const min = peScaleSlider ? parseInt(peScaleSlider.min, 10) : 100;
+    const max = peScaleSlider ? parseInt(peScaleSlider.max, 10) : 200;
+    newSlider = Math.max(min, Math.min(max, newSlider));
+    const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+    const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+    pePinchLastMidX = midX;
+    pePinchLastMidY = midY;
+    peApplyZoomSlider(newSlider, midX, midY, { debounce: 180, syncSlider: true });
+  }, { passive: false });
+  wrap.addEventListener('touchend', peEndEditorPinch);
+  wrap.addEventListener('touchcancel', peEndEditorPinch);
+
   function peSliderPickAnchor() {
     const r = wrap.getBoundingClientRect();
     let ax = peLastZoomMouseX, ay = peLastZoomMouseY;
@@ -28461,7 +28573,7 @@ function peObjMouseDown(e, o) {
   }, { passive: false });
 
   peBindPointerDown(wrap, (e) => {
-    if (!peState) return;
+    if (!peState || pePinchActive) return;
     if (e.target.closest('#peStage')) return;
     if (peState.tool === 'crop' && !peState.cropPdf) {
       e.preventDefault();
@@ -28552,7 +28664,7 @@ function peObjMouseDown(e, o) {
   // Bubble phase (not capture): capture-phase text/callout border movers call
   // stopPropagation so this handler must not run in capture on the same node.
   peBindPointerDown(stage, (e) => {
-    if (!peState || peState.drag) return;
+    if (!peState || peState.drag || pePinchActive) return;
     if (e.target.closest && e.target.closest('.pe-obj')) return;
     // A click that lands on the PDF text-selection layer (object-select mode
     // only) must start a native text selection, not an object marquee - the
@@ -28563,11 +28675,14 @@ function peObjMouseDown(e, o) {
 
     const tool = peState.tool;
     const isDrawTool = tool === 'shape' || tool === 'text' || tool === 'redact' || tool === 'crop';
-    // Touch: claim the gesture before the scrollable wrap cancels it.
-    if ((e.pointerType === 'touch' || e.pointerType === 'pen') && e.cancelable) {
+    const touchLike = e.pointerType === 'touch' || e.pointerType === 'pen';
+    // Text create must NOT preventDefault — iOS/Android only keep the keyboard
+    // if focus stays inside the same user-gesture without a cancelled touch.
+    const mayCreateText = tool === 'text';
+    if (touchLike && e.cancelable && !mayCreateText) {
       e.preventDefault();
     }
-    peCapturePointer(e, stage);
+    if (!mayCreateText) peCapturePointer(e, stage);
 
     const pt = peStagePoint(e);
     const { w: W, h: H } = peStageSize();
@@ -28690,14 +28805,20 @@ function peObjMouseDown(e, o) {
       return;
     }
     if (tool === 'text') {
-      e.preventDefault();
+      if (!touchLike) e.preventDefault();
       // One undo step after the input is completed rolls back the creation of the entire block
       // (we take a picture only before creating it; commit it when exiting editing).
       peCommitEditorHistory();
       const o = { id: ++peState.seq, type: 'text', text: '', fontPt: 16, color: '#d90000', x: pt.x / W, y: pt.y / H };
       peState.objects.push(o);
       peState.draftTextId = o.id;
+      // Mobile: zoom to the tap first so the caret is readable above the keyboard,
+      // then focus synchronously inside this gesture (async focus drops the keyboard).
+      if (typeof isTouchDevice !== 'undefined' && isTouchDevice) {
+        peEnsureTextEditZoom(o, e.clientX, e.clientY);
+      }
       peBeginInlineEdit(o, { isNewDraft: true });
+      peFocusInlineEditorNow();
       return;
     }
     if (tool === 'select' && peState.inlineEditId) {
@@ -28879,7 +29000,8 @@ function peObjMouseDown(e, o) {
   const peToolbar = document.querySelector('#pageEditModal .pe-toolbar');
   peToolbar?.addEventListener('mousedown', (e) => {
     if (!peState || !peRedactSelectionTarget()) return;
-    if (e.target.closest('#peRedactActions, #peRedactColorPopup, #peCropActions')) return;
+    // Trash must keep the redact selected until its click handler runs.
+    if (e.target.closest('#peRedactActions, #peRedactColorPopup, #peCropActions, #peDeleteObj')) return;
     if (!e.target.closest('button, .pe-btn')) return;
     peDismissRedactSelection();
   }, true);
@@ -29050,14 +29172,16 @@ function peObjMouseDown(e, o) {
   }, { passive: true });
   document.getElementById('peToolText').addEventListener('click', () => {
     if (!peState) return;
-    peSetTool(peState.tool === 'text' ? 'select' : 'text');
+    if (peState.tool === 'text') { peExitDrawToolMode(); return; }
+    peSetTool('text');
   });
   document.getElementById('peToolHl')?.addEventListener('click', () => {
     // Marker tool temporarily disabled.
   });
   document.getElementById('peToolRedact')?.addEventListener('click', () => {
     if (!peState) return;
-    peSetTool(peState.tool === 'redact' ? 'select' : 'redact');
+    if (peState.tool === 'redact') { peExitDrawToolMode(); return; }
+    peSetTool('redact');
   });
   document.getElementById('peRedactConfirmBtn')?.addEventListener('mousedown', (e) => {
     // Capture the pending box on mousedown — click can lose selection before
@@ -29141,12 +29265,8 @@ function peObjMouseDown(e, o) {
     peCancelShapeMenuClose();
     peCloseShapeColorPopup();
     if (peState.tool === 'shape') {
-      // Already in shape mode: open picker to switch kind. Exit only if menu
-      // was already open (second click on the tool icon).
-      if (!peIsShapeMenuOpen()) {
-        peOpenShapeMenu();
-        return;
-      }
+      // Retap active tool icon: clear selection / exit tool (mobile + desktop).
+      // Shape kind can be changed by activating the tool again (menu opens on enter).
       peCloseShapeMenu();
       peExitDrawToolMode();
       return;
@@ -29207,7 +29327,24 @@ function peObjMouseDown(e, o) {
   if (window.PointerEvent) document.addEventListener('pointerdown', peCloseFloatingMenusOnOutside, true);
   else document.addEventListener('mousedown', peCloseFloatingMenusOnOutside, true);
 
-  document.getElementById('peDeleteObj').addEventListener('click', peDeleteSelected);
+  // Stash selection on pointerdown: toolbar mousedown used to dismiss redact
+  // before click, so trash appeared to do nothing on mobile.
+  document.getElementById('peDeleteObj')?.addEventListener('pointerdown', () => {
+    if (!peState) return;
+    const objs = peGetSelectedObjects();
+    peState.__deleteTargetIds = objs.length ? objs.map(o => o.id) : null;
+  }, true);
+  document.getElementById('peDeleteObj').addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    let objs = peGetSelectedObjects();
+    if ((!objs || !objs.length) && peState && peState.__deleteTargetIds) {
+      const ids = new Set(peState.__deleteTargetIds);
+      objs = (peState.objects || []).filter(o => ids.has(o.id));
+    }
+    if (peState) peState.__deleteTargetIds = null;
+    if (objs && objs.length) peDeleteObjects(objs);
+  });
   document.getElementById('peCancelBtn').addEventListener('click', () => { void pageEditClose(false); });
   document.getElementById('peSaveBtn').addEventListener('click', () => { void pageEditSave(); });
   document.getElementById('pePagePrev')?.addEventListener('click', () => { void peNavigateEditorPage(-1); });
