@@ -4120,6 +4120,13 @@
         -webkit-user-select: none;
         pointer-events: none;
       }
+      /* Never expand endOfContent over the page in the editor — with top:0
+         caret probing in word gaps jumps to the start of the layer. */
+      #pageEditModal.pe-obj-select-mode #peTextLayer.pe-text-active .textLayer .endOfContent.active,
+      #peTextLayer.pe-text-active .textLayer .endOfContent.active {
+        top: 100%;
+        pointer-events: none;
+      }
       #pageEditModal.pe-obj-select-mode #peTextLayer.pe-text-active .textLayer ::selection {
         color: rgba(0, 0, 0, 0);
         -webkit-text-fill-color: transparent;
@@ -21072,6 +21079,8 @@ let pePinchStartDist = 0;
 let pePinchStartSlider = 100;
 let pePinchLastMidX = null;
 let pePinchLastMidY = null;
+let pePinchLastAppliedMidX = null;
+let pePinchLastAppliedMidY = null;
 let pePinchRaf = 0;
 let pePinchPending = null;
 let peTextKbTimer = null;
@@ -21239,11 +21248,15 @@ function peUpdateStageMetrics() {
   const { w: availW, h: availH } = peGetWrapAvailSize();
   st.fitScale = Math.min(availW / vp1.width, availH / vp1.height);
   if (st.zoomSlider == null) st.zoomSlider = 100;
-  st.scale = st.fitScale * peSliderToZoomMul(st.zoomSlider);
+  // Live pinch uses a continuous multiplier (avoids integer-slider stair-steps).
+  const mul = (st._liveZoomMul != null && isFinite(st._liveZoomMul))
+    ? st._liveZoomMul
+    : peSliderToZoomMul(st.zoomSlider);
+  st.scale = st.fitScale * mul;
   st.viewport = st.page.getViewport({ scale: st.scale, rotation: finalR });
 }
 
-function peApplyStageLayout() {
+function peApplyStageLayout(options = {}) {
   if (!peState) return;
   peUpdateStageMetrics();
   const st = peState;
@@ -21257,8 +21270,25 @@ function peApplyStageLayout() {
   canvas.style.width = w + 'px';
   canvas.style.height = h + 'px';
   stage.classList.add('pe-layout-zoom');
+  // During pinch, skip crop redraw (no crop) — object layout still needed.
   peUpdateObjectsLayout();
-  peRedrawCrop();
+  if (!options.skipCrop) peRedrawCrop();
+}
+
+/** Continuous zoom used while a pinch gesture is active (midpoint stays put). */
+function peApplyLiveZoomMul(zoomMul, anchorX, anchorY) {
+  if (!peState) return;
+  const sl = document.getElementById('peScaleSlider');
+  const minMul = peSliderToZoomMul(parseInt(sl?.min, 10) || 100);
+  const maxMul = peSliderToZoomMul(parseInt(sl?.max, 10) || 200);
+  zoomMul = Math.max(minMul, Math.min(maxMul, Number(zoomMul) || 1));
+  ({ anchorX, anchorY } = peResolveZoomAnchor(anchorX, anchorY));
+  const { fx, fy } = peStageFracUnderPoint(anchorX, anchorY);
+  peState._liveZoomMul = zoomMul;
+  peState.zoomSlider = peZoomMulToSlider(zoomMul);
+  peApplyStageLayout({ skipCrop: true });
+  peRestoreScrollToAnchor(anchorX, anchorY, fx, fy);
+  peSyncScaleSliderUi(true);
 }
 
 async function peRenderStagePdf() {
@@ -22294,16 +22324,18 @@ function peApplyZoomSlider(val, anchorX, anchorY, options = {}) {
   const sl = document.getElementById('peScaleSlider');
   val = Math.max(parseInt(sl.min, 10),
                  Math.min(parseInt(sl.max, 10), parseInt(val, 10) || 100));
-  if (val === peState.zoomSlider && !options.force) return;
+  // Ending a live pinch always clears the continuous multiplier.
+  if (!options.keepLiveMul) peState._liveZoomMul = null;
+  if (val === peState.zoomSlider && peState._liveZoomMul == null && !options.force) return;
 
   ({ anchorX, anchorY } = peResolveZoomAnchor(anchorX, anchorY));
   const { fx, fy } = peStageFracUnderPoint(anchorX, anchorY);
 
   peState.zoomSlider = val;
-  peApplyStageLayout();
+  peApplyStageLayout({ skipCrop: !!options.skipCrop });
   peRestoreScrollToAnchor(anchorX, anchorY, fx, fy);
   peSyncScaleSliderUi(options.syncSlider !== false);
-  peUpdatePanUi();
+  if (!options.skipPanUi) peUpdatePanUi();
 
   if (options.skipRender) {
     peCancelZoomRender();
@@ -28040,11 +28072,87 @@ function peEditorTextLayerCaretForPoint(clientX, clientY) {
   return { node: text, offset };
 }
 
+/** True when a Selection endpoint landed on the layer root / endOfContent. */
+function peSelectionEndpointSuspicious(node) {
+  if (!node) return true;
+  let el = node.nodeType === 3 ? node.parentElement : node;
+  if (!el) return true;
+  if (el.classList && el.classList.contains('endOfContent')) return true;
+  if (el.closest && el.closest('.endOfContent')) return true;
+  if (el.id === 'peTextLayer') return true;
+  if (el.classList && (el.classList.contains('textLayer')
+      || el.classList.contains('page-text-layer-inner'))) return true;
+  return false;
+}
+
+/**
+ * Repair OS selection jumps (word-gap → page start / endOfContent) using the
+ * nearest glyph under the finger. Safe to call from selectionchange on touch.
+ */
+let peTextSelRepairing = false;
+function peRepairTouchTextSelection() {
+  if (peTextSelRepairing) return;
+  if (typeof isTouchDevice === 'undefined' || !isTouchDevice) return;
+  if (!peState || !peState.objSelectMode) return;
+  if (!peIsEditorPageTextSelection()) return;
+  const ax = peTextSelLastClientX, ay = peTextSelLastClientY;
+  if (ax == null || ay == null) return;
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return;
+  const anchorBad = peSelectionEndpointSuspicious(sel.anchorNode);
+  const focusBad = peSelectionEndpointSuspicious(sel.focusNode);
+  let jumpedToStart = false;
+  try {
+    const tip = document.createRange();
+    tip.setStart(sel.focusNode, sel.focusOffset);
+    tip.collapse(true);
+    const fr = tip.getBoundingClientRect();
+    const layer = document.getElementById('peTextLayer');
+    const lr = layer && layer.getBoundingClientRect();
+    if (fr && lr && (fr.width || fr.height) && lr.height > 0) {
+      const cy = fr.top + fr.height / 2;
+      const focusNearTop = (cy - lr.top) < lr.height * 0.08;
+      const fingerLower = ay > lr.top + lr.height * 0.15;
+      // Classic gap hit: focus teleports to the top of the page.
+      if (focusNearTop && fingerLower && Math.abs(cy - ay) > 48) jumpedToStart = true;
+    }
+  } catch (_) {}
+  if (!anchorBad && !focusBad && !jumpedToStart) return;
+  const caret = peEditorTextLayerCaretForPoint(ax, ay);
+  if (!caret) {
+    // Finger in empty space with a bogus whole-layer selection → clear it.
+    if (anchorBad || focusBad || jumpedToStart) {
+      try {
+        const text = (sel.toString() || '');
+        if (text.length > 80 || jumpedToStart) sel.removeAllRanges();
+      } catch (_) {}
+    }
+    return;
+  }
+  peTextSelRepairing = true;
+  try {
+    if (peTextSelHandleDragging && !anchorBad && typeof sel.extend === 'function') {
+      sel.extend(caret.node, caret.offset);
+    } else if (typeof sel.setBaseAndExtent === 'function') {
+      // Re-seed at the glyph under the finger (undoes the page-start jump).
+      sel.setBaseAndExtent(caret.node, caret.offset, caret.node, caret.offset);
+    } else {
+      const r = document.createRange();
+      r.setStart(caret.node, caret.offset);
+      r.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(r);
+    }
+    if (typeof scheduleTextLayerHighlightRender === 'function') scheduleTextLayerHighlightRender();
+  } catch (_) {
+  } finally {
+    peTextSelRepairing = false;
+  }
+}
+
 /** After edge auto-scroll, re-extend the selection toward the frozen pointer. */
 function peExtendPageTextSelTowardPoint(clientX, clientY) {
   if (!peIsEditorPageTextSelection()) return;
-  // Touch: never fight the OS blue-handle selection with programmatic extend.
-  if (typeof isTouchDevice !== 'undefined' && isTouchDevice) return;
   try {
     const sel = window.getSelection();
     if (!sel || typeof sel.extend !== 'function') return;
@@ -28236,9 +28344,12 @@ function peBindTextSelHandleDragGuards() {
     // Long-press is creating a new selection: cancel a deferred pan, but do
     // NOT enter handle-drag / edge-scroll unless the finger is on a handle.
     if (peTextLayerTouchPending) peTextLayerTouchPending = null;
+    // Fix gap→page-start jumps before other handle logic runs.
+    if (typeof peRepairTouchTextSelection === 'function') peRepairTouchTextSelection();
     if (!(peTextSelPointerDown || peTextSelHandleDragging)) return;
     if (!peTextSelHandleDragging) {
-      // Creating selection via long-press — leave it entirely to the OS.
+      // Creating selection via long-press — leave it entirely to the OS
+      // (after the repair above).
       if (!peClientNearTextSelHandle(peTextSelLastClientX, peTextSelLastClientY)) return;
       peBeginTextSelHandleDrag(peTextSelLastClientX, peTextSelLastClientY);
     }
@@ -28247,7 +28358,7 @@ function peBindTextSelHandleDragGuards() {
       menu.classList.remove('visible');
       menu.setAttribute('aria-hidden', 'true');
     }
-    // Edge-scroll the stage while adjusting handles (no programmatic extend on touch).
+    // Edge-scroll the stage while adjusting handles.
     if (peTextSelHandleDragging) {
       const fx = peTextSelLastClientX, fy = peTextSelLastClientY;
       if (fx != null && fy != null) peCheckEdgeAutoScroll(fx, fy);
@@ -29633,6 +29744,9 @@ function peCancelTouchObjPending() {
   }
 }
 
+let peTouchObjFlushReason = null;
+let peTouchObjFlushHeldMs = 0;
+
 function peFlushTouchObjPending(clientX, clientY, reason) {
   const p = peTouchObjPending;
   if (!p) return;
@@ -29653,6 +29767,8 @@ function peFlushTouchObjPending(clientX, clientY, reason) {
   if (reason === 'tap' && objMenu && objMenu.classList.contains('visible')) return;
   // Re-enter peObjMouseDown with defer bypass to actually select / start move.
   peTouchObjCommit = true;
+  peTouchObjFlushReason = reason || 'tap';
+  peTouchObjFlushHeldMs = p.startTime ? (Date.now() - p.startTime) : 0;
   try {
     const fake = {
       pointerType: 'touch',
@@ -29674,6 +29790,8 @@ function peFlushTouchObjPending(clientX, clientY, reason) {
     }
   } finally {
     peTouchObjCommit = false;
+    peTouchObjFlushReason = null;
+    peTouchObjFlushHeldMs = 0;
   }
 }
 
@@ -29822,6 +29940,7 @@ function peObjMouseDown(e, o) {
       snap: peSelSnapBeforePinch,
       startClientX: e.clientX,
       startClientY: e.clientY,
+      startTime: Date.now(),
       pointerId: e.pointerId,
       shiftKey: !!e.shiftKey,
       target: e.target,
@@ -30067,6 +30186,26 @@ function peObjMouseDown(e, o) {
       peFinishTextInlineEdit({ keepTool: true });
     }
     e.preventDefault(); e.stopPropagation();
+    // Touch: quick single tap → edit; hold or drag → move (no edit).
+    if (touchLike) {
+      const asMove = peTouchObjCommit && peTouchObjFlushReason === 'move';
+      const asTap = peTouchObjCommit && peTouchObjFlushReason === 'tap';
+      const quickTap = asTap && peTouchObjFlushHeldMs < 320;
+      if (quickTap) {
+        peBeginInlineEdit(o);
+        return;
+      }
+      peSelect(o, { keepTool: true });
+      const pt = peStagePoint(e);
+      peState.drag = {
+        kind: 'move-pending', obj: o,
+        startX: pt.x, startY: pt.y,
+        ox: o.x, oy: o.y, ow: o.w || 0, oh: o.h || 0,
+        threshold: asMove ? 0 : 8
+      };
+      peUpdatePanUi();
+      return;
+    }
     peBeginInlineEdit(o);
     return;
   }
@@ -30124,25 +30263,40 @@ function peObjMouseDown(e, o) {
     const dy = t1.clientY - t2.clientY;
     return Math.hypot(dx, dy);
   }
-  function pePinchSliderFromDist(dist) {
-    if (pePinchStartDist <= 0) return pePinchStartSlider;
-    // Multiplicative zoom (not linear on the quadratic slider) + dampening.
+  function pePinchMulFromDist(dist) {
+    if (pePinchStartDist <= 0) {
+      return peState?._liveZoomMul != null
+        ? peState._liveZoomMul
+        : peSliderToZoomMul(pePinchStartSlider);
+    }
+    // Multiplicative zoom + light dampening; keep as a continuous float.
     const startMul = peSliderToZoomMul(pePinchStartSlider);
     const ratio = Math.max(0.25, dist / pePinchStartDist);
-    const damped = Math.pow(ratio, 0.62);
-    const newMul = startMul * damped;
-    const min = peScaleSlider ? parseInt(peScaleSlider.min, 10) : 100;
-    const max = peScaleSlider ? parseInt(peScaleSlider.max, 10) : 200;
-    return Math.max(min, Math.min(max, peZoomMulToSlider(newMul)));
+    const damped = Math.pow(ratio, 0.72);
+    const minMul = peSliderToZoomMul(peScaleSlider ? parseInt(peScaleSlider.min, 10) : 100);
+    const maxMul = peSliderToZoomMul(peScaleSlider ? parseInt(peScaleSlider.max, 10) : 200);
+    return Math.max(minMul, Math.min(maxMul, startMul * damped));
   }
   function peFlushPinchFrame() {
     pePinchRaf = 0;
     if (!pePinchActive || !peState || !pePinchPending) return;
     const { midX, midY, dist } = pePinchPending;
     pePinchPending = null;
-    const newSlider = pePinchSliderFromDist(dist);
-    // Layout-only during the gesture; sharp PDF redraw on finger-up.
-    peApplyZoomSlider(newSlider, midX, midY, { skipRender: true, syncSlider: true });
+    const newMul = pePinchMulFromDist(dist);
+    const prevMul = peState._liveZoomMul != null
+      ? peState._liveZoomMul
+      : peSliderToZoomMul(peState.zoomSlider || 100);
+    // One scroll write path only: keep the midpoint under the fingers.
+    // (Previously touchmove panned AND zoom-restore rewrote scroll → jitter.)
+    if (Math.abs(newMul - prevMul) < 0.0008
+        && pePinchLastAppliedMidX != null && pePinchLastAppliedMidY != null) {
+      wrap.scrollLeft -= (midX - pePinchLastAppliedMidX);
+      wrap.scrollTop -= (midY - pePinchLastAppliedMidY);
+    } else {
+      peApplyLiveZoomMul(newMul, midX, midY);
+    }
+    pePinchLastAppliedMidX = midX;
+    pePinchLastAppliedMidY = midY;
   }
   function peEndEditorPinch(e) {
     if (!pePinchActive) return;
@@ -30154,17 +30308,33 @@ function peObjMouseDown(e, o) {
     if (pePinchPending && peState) {
       const { midX, midY, dist } = pePinchPending;
       pePinchPending = null;
-      peApplyZoomSlider(pePinchSliderFromDist(dist), midX, midY, {
+      const mul = pePinchMulFromDist(dist);
+      peState._liveZoomMul = null;
+      peApplyZoomSlider(peZoomMulToSlider(mul), midX, midY, {
         immediate: true,
-        syncSlider: true
+        syncSlider: true,
+        force: true
+      });
+    } else if (peState && peState._liveZoomMul != null) {
+      const mul = peState._liveZoomMul;
+      const ax = pePinchLastAppliedMidX;
+      const ay = pePinchLastAppliedMidY;
+      peState._liveZoomMul = null;
+      peApplyZoomSlider(peZoomMulToSlider(mul), ax, ay, {
+        immediate: true,
+        syncSlider: true,
+        force: true
       });
     } else {
+      if (peState) peState._liveZoomMul = null;
       peFlushZoomRender();
     }
     pePinchActive = false;
     pePinchStartDist = 0;
     pePinchLastMidX = null;
     pePinchLastMidY = null;
+    pePinchLastAppliedMidX = null;
+    pePinchLastAppliedMidY = null;
     peSelSnapBeforePinch = null;
     peCancelTouchObjPending();
     // Keep blocking object hits briefly while fingers lift.
@@ -30207,8 +30377,11 @@ function peObjMouseDown(e, o) {
     }
     pePinchStartDist = peTouchDist(e.touches[0], e.touches[1]);
     pePinchStartSlider = peState.zoomSlider || 100;
+    peState._liveZoomMul = peSliderToZoomMul(pePinchStartSlider);
     pePinchLastMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
     pePinchLastMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+    pePinchLastAppliedMidX = pePinchLastMidX;
+    pePinchLastAppliedMidY = pePinchLastMidY;
     pePinchPending = null;
     peCancelZoomRender();
     e.preventDefault();
@@ -30218,12 +30391,8 @@ function peObjMouseDown(e, o) {
     e.preventDefault();
     const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
     const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-    // Pan immediately (cheap); zoom layout is rAF-throttled.
-    if (pePinchLastMidX != null && pePinchLastMidY != null) {
-      wrap.scrollLeft -= (midX - pePinchLastMidX);
-      wrap.scrollTop -= (midY - pePinchLastMidY);
-    }
     const dist = peTouchDist(e.touches[0], e.touches[1]);
+    // Do not pan scroll here — peFlushPinchFrame owns scroll (avoids fight).
     pePinchPending = { midX, midY, dist };
     pePinchLastMidX = midX;
     pePinchLastMidY = midY;
@@ -30464,16 +30633,16 @@ function peObjMouseDown(e, o) {
       return;
     }
     // Draw tools: blank click clears selection / ends text edit.
-    // Text keeps two-tap UX (first deselects only). Shape/redact continue
-    // into draw on the same gesture — otherwise the first mobile drag pans
-    // or does nothing after placing a figure.
+    // Text keeps two-tap UX (first deselects only).
+    // Redact: tap outside only deselects — never starts a new box on the same tap.
+    // Shape continues into draw on the same gesture (mobile UX).
     if ((tool === 'shape' || tool === 'text' || tool === 'redact') && peHasActiveObjectFocus()) {
       e.preventDefault();
       peCloseShapeMenu();
       peCloseShapeColorPopup();
       peDeselectKeepTool();
-      if (tool === 'text') return;
-      // shape / redact: fall through and start drawing
+      if (tool === 'text' || tool === 'redact') return;
+      // shape: fall through and start drawing
     }
     if (tool === 'redact') {
       e.preventDefault();
@@ -31523,6 +31692,37 @@ function peObjMouseDown(e, o) {
   // Move the right tail (scale + Cancel/Save) if there is not enough width.
   // The children of the tail are tied together (flex-wrap: nowrap) - only the entire block is transferred.
   /** Place ←→ as a tight pair, equally spaced between title and Object-select. */
+  function peLayoutMenuToggleOverDelete() {
+    const modal = document.getElementById('pageEditModal');
+    const bar = document.querySelector('#pageEditModal .pe-toolbar');
+    const btn = document.getElementById('peMenuToggleBtn');
+    const del = document.getElementById('peDeleteObj');
+    if (!modal || !bar || !btn || !del) return;
+    const portrait = typeof window.matchMedia === 'function'
+      && window.matchMedia('(orientation: portrait)').matches;
+    const coarse = typeof window.matchMedia === 'function'
+      && window.matchMedia('(pointer: coarse)').matches;
+    // Default CSS (top-right) unless portrait mobile stage-3 wrap.
+    if (!coarse || !portrait || modal.classList.contains('pe-menu-collapsed')
+        || !bar.classList.contains('pe-tb-tools-wrap')
+        || !modal.classList.contains('open')) {
+      btn.style.left = '';
+      btn.style.right = '';
+      return;
+    }
+    const barRect = bar.getBoundingClientRect();
+    const delRect = del.getBoundingClientRect();
+    if (!(delRect.width > 0)) {
+      btn.style.left = '';
+      btn.style.right = '';
+      return;
+    }
+    const btnW = btn.offsetWidth || 36;
+    const left = delRect.left - barRect.left + (delRect.width - btnW) / 2;
+    btn.style.right = 'auto';
+    btn.style.left = Math.max(0, Math.round(left)) + 'px';
+  }
+
   function peLayoutPageNavButtons() {
     const bar = document.querySelector('#pageEditModal .pe-toolbar');
     const title = bar?.querySelector('.pe-title');
@@ -31541,21 +31741,39 @@ function peObjMouseDown(e, o) {
     nav.style.gap = innerGap + 'px';
     const navW = nav.offsetWidth || ((prev.offsetWidth || 32) + (next.offsetWidth || 32) + innerGap);
     const barGap = parseFloat(getComputedStyle(bar).gap) || 8;
+    const portrait = typeof window.matchMedia === 'function'
+      && window.matchMedia('(orientation: portrait)').matches;
 
     // Align nav to the title row (padding-top), not the full multi-row toolbar.
     nav.style.top = Math.max(0, titleRect.top - barRect.top + (titleRect.height - 40) / 2) + 'px';
 
-    // Stage 3: align pe-tools-divider-nav (between ←→ and Object-select)
-    // with the row-2 divider between Shapes and Rotate.
+    // Stage 3: in portrait, park ←→ directly above Image + Shapes.
+    // Otherwise align pe-tools-divider-nav with the Shapes↔Rotate divider.
     if (bar.classList.contains('pe-tb-tools-wrap')) {
       const navDivider = lead?.querySelector(':scope > .pe-tools-divider-nav');
       const mainDivider = document.querySelector('#peToolsMain > .pe-tools-divider');
       const titleRightRel = titleRect.right - barRect.left;
       const groupGap = minGap;
+      const imgBtn = document.getElementById('peToolImage');
+      const shapeBtn = document.getElementById('peToolShape');
 
-      // Reset lead offset; nav sits just before the lead group.
       if (lead) lead.style.marginLeft = '0px';
       nav.style.left = (titleRightRel + minGap) + 'px';
+
+      if (portrait && imgBtn && shapeBtn
+          && imgBtn.offsetParent != null && shapeBtn.offsetParent != null) {
+        const imgRect = imgBtn.getBoundingClientRect();
+        const shapeRect = shapeBtn.getBoundingClientRect();
+        if (imgRect.width > 0 && shapeRect.width > 0) {
+          // Match tools-main gap so ← sits over Image and → over Shapes.
+          nav.style.gap = Math.max(0, Math.round(
+            shapeRect.left - imgRect.right
+          )) + 'px';
+          nav.style.left = Math.max(0, Math.round(imgRect.left - barRect.left)) + 'px';
+          peLayoutMenuToggleOverDelete();
+          return;
+        }
+      }
 
       if (lead && navDivider && mainDivider) {
         const mainDivLeft = mainDivider.getBoundingClientRect().left;
@@ -31596,9 +31814,11 @@ function peObjMouseDown(e, o) {
           lead.style.marginLeft = Math.max(0, leadDesiredLeft - leadNaturalLeft) + 'px';
         }
       }
+      peLayoutMenuToggleOverDelete();
       return;
     }
     if (lead) lead.style.marginLeft = '';
+    peLayoutMenuToggleOverDelete();
 
     const objRect = objBtn.getBoundingClientRect();
     const available = objRect.left - titleRect.right;
