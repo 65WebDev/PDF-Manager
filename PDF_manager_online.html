@@ -1651,8 +1651,18 @@
       box-sizing: border-box;
       padding: 18px;
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
+    }
+    .pe-stage-pad.pe-stage-pad-focus {
+      justify-content: flex-start;
+    }
+    .pe-stage-focus-spacer {
+      width: 100%;
+      height: 0;
+      flex: 0 0 auto;
+      pointer-events: none;
     }
     /*Frameless crop mode: light shadow (less than 0.45 frame)*/
     #pageEditModal.pe-crop-mode .pe-stage-pad::before {
@@ -4891,6 +4901,8 @@
         </div>
       </div>
       <div class="pe-stage-pad" id="peStagePad">
+        <!-- Grows while editing so top-of-page text can sit below the fixed mini-panel. -->
+        <div id="peStageFocusSpacer" class="pe-stage-focus-spacer" aria-hidden="true"></div>
         <div id="peStage">
           <canvas id="peCanvas"></canvas>
           <div id="peTextLayer" class="page-text-layer"></div>
@@ -21200,6 +21212,93 @@ async function peRenderStagePdf() {
 // peRenderStagePdf above), so - unlike the preview grid's raster <img>,
 // which needed aspect-ratio correction against a rounded canvas - no scale
 // reconciliation is needed here at all.
+/** Snapshot of a page-text selection as offsets in #peTextLayer plain text. */
+function peCapturePageTextSelAnchor() {
+  try {
+    if (typeof peIsEditorPageTextSelection === 'function' && !peIsEditorPageTextSelection()) return null;
+    const layer = document.getElementById('peTextLayer');
+    const sel = window.getSelection();
+    if (!layer || !sel || !sel.rangeCount || sel.isCollapsed) return null;
+    const range = sel.getRangeAt(0);
+    if (!layer.contains(range.commonAncestorContainer)
+        && !(range.commonAncestorContainer.contains && range.commonAncestorContainer.contains(layer))) {
+      // Selection must live inside the editor text layer.
+      let n = range.commonAncestorContainer;
+      if (n && n.nodeType === 3) n = n.parentElement;
+      if (!(n && n.closest && n.closest('#peTextLayer'))) return null;
+    }
+    const preStart = document.createRange();
+    preStart.selectNodeContents(layer);
+    preStart.setEnd(range.startContainer, range.startOffset);
+    const startOffset = preStart.toString().length;
+    const preEnd = document.createRange();
+    preEnd.selectNodeContents(layer);
+    preEnd.setEnd(range.endContainer, range.endOffset);
+    const endOffset = preEnd.toString().length;
+    if (!(endOffset > startOffset)) return null;
+    return {
+      startOffset,
+      endOffset,
+      text: (sel.toString() || '').replace(/\u00a0/g, ' '),
+      menuWasVisible: !!(document.getElementById('peTextSelCtxMenu')?.classList.contains('visible')),
+      ctx: (typeof peTextSelCtx !== 'undefined' && peTextSelCtx) ? peTextSelCtx : null
+    };
+  } catch (_) { return null; }
+}
+
+function peRestorePageTextSelAnchor(anchor) {
+  if (!anchor) return false;
+  const layer = document.getElementById('peTextLayer');
+  if (!layer) return false;
+  try {
+    const walker = document.createTreeWalker(layer, NodeFilter.SHOW_TEXT, null);
+    let startNode = null, startOff = 0, endNode = null, endOff = 0;
+    let seen = 0;
+    let node;
+    while ((node = walker.nextNode())) {
+      const len = node.nodeValue ? node.nodeValue.length : 0;
+      if (!startNode && seen + len >= anchor.startOffset) {
+        startNode = node;
+        startOff = Math.max(0, anchor.startOffset - seen);
+      }
+      if (!endNode && seen + len >= anchor.endOffset) {
+        endNode = node;
+        endOff = Math.max(0, anchor.endOffset - seen);
+        break;
+      }
+      seen += len;
+    }
+    if (!startNode || !endNode) return false;
+    const range = document.createRange();
+    range.setStart(startNode, Math.min(startOff, startNode.nodeValue.length));
+    range.setEnd(endNode, Math.min(endOff, endNode.nodeValue.length));
+    if (range.collapsed) return false;
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    if (typeof scheduleTextLayerHighlightRender === 'function') scheduleTextLayerHighlightRender();
+    if (anchor.menuWasVisible && typeof peShowTextSelCtxMenu === 'function'
+        && typeof peCaptureEditorTextSelection === 'function') {
+      const info = peCaptureEditorTextSelection() || {
+        kind: 'page',
+        range: range.cloneRange(),
+        text: anchor.text || ''
+      };
+      let x = 0, y = 0;
+      try {
+        const rects = range.getClientRects();
+        if (rects && rects.length) {
+          const last = rects[rects.length - 1];
+          x = last.left + last.width / 2;
+          y = last.bottom + 8;
+        }
+      } catch (_) {}
+      peShowTextSelCtxMenu(x, y, info);
+    }
+    return true;
+  } catch (_) { return false; }
+}
+
 async function peBuildTextLayer(st, gen) {
   const container = document.getElementById('peTextLayer');
   if (!container || !st || !st.page || !st.viewport) return;
@@ -21214,6 +21313,8 @@ async function peBuildTextLayer(st, gen) {
     container.innerHTML = '';
     return;
   }
+  // Pinch/zoom rebuilds this DOM — keep the user's page-text selection.
+  const savedSel = peCapturePageTextSelAnchor();
   if (typeof shieldPageTextLayerEvents === 'function') shieldPageTextLayerEvents(container);
   container.style.left = '0px';
   container.style.top = '0px';
@@ -21236,6 +21337,13 @@ async function peBuildTextLayer(st, gen) {
     if (typeof tightenTextLayerLineGaps === 'function') tightenTextLayerLineGaps(inner);
   } catch (e) {
     console.error('Page-editor text layer error', e);
+  }
+  if (savedSel) {
+    // Restore after layout paints glyph positions.
+    requestAnimationFrame(() => {
+      if (!peState || peState !== st) return;
+      peRestorePageTextSelAnchor(savedSel);
+    });
   }
 }
 
@@ -21392,12 +21500,13 @@ function peEnterCropMode() {
 function peRestoreAfterCrop() {
   if (!peState) return;
   const prev = peState.toolBeforeCrop || 'select';
-  const wasObjSelect = !!peState.objSelectBeforeCrop;
   peState.toolBeforeCrop = null;
   peState.objSelectBeforeCrop = null;
-  if (prev === 'select') {
-    peSetTool('select', wasObjSelect ? {} : { preferHand: true });
-    if (wasObjSelect && !peState.objSelectMode) peSetObjSelectMode(true);
+  if (prev === 'select' || !prev) {
+    // Leaving crop (retap / cancel) lands on Object-select, not Hand.
+    peState.modeBeforeTool = null;
+    peSetTool('select', { clearSelection: true });
+    peSetObjSelectMode(true);
   } else {
     peSetTool(prev);
   }
@@ -21998,15 +22107,19 @@ function peStopAutoScroll() {
 }
 
 function peCheckEdgeAutoScroll(clientX, clientY) {
-  if (!peState || !peState.drag) { peStopAutoScroll(); return; }
-  const edgeKinds = [
-    'crop-draw', 'crop-move', 'crop-resize',
-    'obj-marquee', 'obj-select-gesture',
-    'move', 'move-pending', 'move-multi', 'move-pending-multi',
-    'callout-box-move', 'resize', 'resize-text', 'resize-shape',
-    'resize-callout-box', 'resize-redact', 'resize-hl'
-  ];
-  if (!edgeKinds.includes(peState.drag.kind)) { peStopAutoScroll(); return; }
+  const textSelDrag = typeof peTextSelHandleDragging !== 'undefined' && peTextSelHandleDragging;
+  if (!peState) { peStopAutoScroll(); return; }
+  if (!peState.drag && !textSelDrag) { peStopAutoScroll(); return; }
+  if (peState.drag) {
+    const edgeKinds = [
+      'crop-draw', 'crop-move', 'crop-resize',
+      'obj-marquee', 'obj-select-gesture',
+      'move', 'move-pending', 'move-multi', 'move-pending-multi',
+      'callout-box-move', 'resize', 'resize-text', 'resize-shape',
+      'resize-callout-box', 'resize-redact', 'resize-hl'
+    ];
+    if (!edgeKinds.includes(peState.drag.kind) && !textSelDrag) { peStopAutoScroll(); return; }
+  }
 
   const wrap = document.getElementById('peStageWrap');
   if (!wrap) return;
@@ -22027,14 +22140,15 @@ function peCheckEdgeAutoScroll(clientX, clientY) {
 
   if (!peAutoScrollTimer) {
     peAutoScrollTimer = setInterval(() => {
-      if (!peState || !peState.drag) { peStopAutoScroll(); return; }
+      const stillTextSel = typeof peTextSelHandleDragging !== 'undefined' && peTextSelHandleDragging;
+      if (!peState || (!peState.drag && !stillTextSel)) { peStopAutoScroll(); return; }
       const w = document.getElementById('peStageWrap');
       if (!w) return;
       const speed = 14;
       if (peAutoScrollDx) w.scrollLeft += peAutoScrollDx * speed;
       if (peAutoScrollDy) w.scrollTop += peAutoScrollDy * speed;
       // We continue the drag logic under the “virtual” cursor after scrolling
-      if (typeof peContinueDragAt === 'function') {
+      if (peState.drag && typeof peContinueDragAt === 'function') {
         peContinueDragAt(peLastPointerX, peLastPointerY);
       }
     }, 16);
@@ -25006,12 +25120,13 @@ function pePropsTopOcclusionPx() {
 }
 
 /**
- * Grow #peStagePad top/bottom padding so wrap.scrollTop can bring text into
- * the band not covered by the OSK (bottom) or the mini-panel (top). Without
- * top pad, a fit-to-screen page cannot scroll content out from under #peProps.
+ * Grow bottom pad + top spacer so wrap.scrollTop can bring text into the band
+ * not covered by the OSK (bottom) or the fixed mini-panel (top). The top spacer
+ * is a real block (not padding) so flex centering cannot swallow the offset.
  */
 function peEnsureEditorKbScrollRoom(opts) {
   const pad = document.getElementById('peStagePad');
+  const spacer = document.getElementById('peStageFocusSpacer');
   if (!pad) return;
   const forceEstimate = !!(opts && opts.estimate);
   let needBottom = peKeyboardOcclusionPx();
@@ -25022,37 +25137,37 @@ function peEnsureEditorKbScrollRoom(opts) {
   needBottom = Math.max(0, Math.min(Math.round(window.innerHeight * 0.7), needBottom));
 
   let needTop = pePropsTopOcclusionPx();
-  // When creating/editing near the top, always reserve space for the text panel
-  // even if peUpdateProps has not painted .visible yet on this frame.
-  if (needTop < 48 && peState && (peState.inlineEditId || (opts && opts.forTextCreate))) {
+  // Creating/editing: always reserve room for the text mini-panel (often not
+  // .visible yet on the first frame, and taller than a single toolbar row).
+  if (peState && (peState.inlineEditId || (opts && opts.forTextCreate))) {
     const props = document.getElementById('peProps');
+    let ph = 0;
     if (props) {
-      const ph = props.offsetHeight || 56;
-      needTop = Math.max(needTop, Math.round(ph + 20));
+      try { ph = props.getBoundingClientRect().height || props.offsetHeight || 0; } catch (_) { ph = 0; }
     }
+    if (!(ph > 0)) ph = 96; // portrait text panel (size/color/format rows)
+    needTop = Math.max(needTop, Math.round(ph + 28));
   }
-  needTop = Math.max(0, Math.min(Math.round(window.innerHeight * 0.45), needTop));
+  needTop = Math.max(0, Math.min(Math.round(window.innerHeight * 0.5), needTop));
 
   if (needBottom === peEditorKbPadPx && needTop === peEditorTopPadPx) return;
   peEditorKbPadPx = needBottom;
   peEditorTopPadPx = needTop;
-  // Base .pe-stage-pad padding is 18px.
   pad.style.paddingBottom = (18 + needBottom) + 'px';
-  pad.style.paddingTop = (18 + needTop) + 'px';
-  // flex-start so top padding actually pushes the page below the mini-panel
-  // (centered flex would only shift by ~half the padding).
-  pad.style.alignItems = needTop > 0 ? 'flex-start' : '';
+  pad.classList.toggle('pe-stage-pad-focus', needTop > 0 || needBottom > 0);
+  if (spacer) spacer.style.height = needTop > 0 ? (needTop + 'px') : '0px';
 }
 
 function peClearEditorKbScrollRoom() {
   const pad = document.getElementById('peStagePad');
+  const spacer = document.getElementById('peStageFocusSpacer');
   peEditorKbPadPx = 0;
   peEditorTopPadPx = 0;
   if (pad) {
     pad.style.paddingBottom = '';
-    pad.style.paddingTop = '';
-    pad.style.alignItems = '';
+    pad.classList.remove('pe-stage-pad-focus');
   }
+  if (spacer) spacer.style.height = '0px';
 }
 
 /**
@@ -25123,6 +25238,48 @@ function peScrollStagePointIntoKeyboardSafeZone(stageX, stageY) {
   peScrollScreenYToTextFocusCenter(sr.top + stageY);
 }
 
+/** True if el's top overlaps (or sits under) the visible mini-panel. */
+function peElCoveredByPropsPanel(el) {
+  const props = document.getElementById('peProps');
+  if (!el || !props || !props.classList.contains('visible')
+      || props.classList.contains('pe-props-collapsed')) return false;
+  try {
+    const er = el.getBoundingClientRect();
+    const pr = props.getBoundingClientRect();
+    if (!(pr.height > 0) || !(pr.width > 0)) return false;
+    // Covered when the caret/block top is above the panel's bottom edge
+    // (panel is fixed on top in portrait).
+    return er.top < pr.bottom + 10
+      && er.left < pr.right && er.right > pr.left;
+  } catch (_) { return false; }
+}
+
+/**
+ * Last resort when scroll room is exhausted: shift the text object's page-Y
+ * so its box sits below the mini-panel. Used only while creating/editing.
+ */
+function peNudgeTextObjBelowPropsPanel(o) {
+  if (!peState || !o || o.type !== 'text') return false;
+  const el = document.querySelector('#peObjLayer [data-pe-id="' + o.id + '"].pe-obj-text')
+    || document.querySelector('#peObjLayer [data-pe-id="' + o.id + '"]');
+  const props = document.getElementById('peProps');
+  const stage = document.getElementById('peStage');
+  if (!el || !props || !stage || !props.classList.contains('visible')) return false;
+  if (props.classList.contains('pe-props-collapsed')) return false;
+  const er = el.getBoundingClientRect();
+  const pr = props.getBoundingClientRect();
+  if (!(pr.height > 0) || er.top >= pr.bottom + 12) return false;
+  const { h: H } = peStageSize();
+  if (!(H > 0)) return false;
+  const needPx = (pr.bottom + 18) - er.top;
+  if (!(needPx > 2)) return false;
+  const nextY = Math.min(0.93, (o.y || 0) + needPx / H);
+  if (nextY <= (o.y || 0) + 1e-6) return false;
+  o.y = nextY;
+  peUpdateObjectsLayout();
+  return true;
+}
+
 /** Scroll any element (editor or selected text block) into the safe center. */
 function peScrollElementIntoTextFocusCenter(el, opts) {
   const wrap = document.getElementById('peStageWrap');
@@ -25136,18 +25293,10 @@ function peScrollElementIntoTextFocusCenter(el, opts) {
   const margin = 12;
   const covered = elMid < safe.top + margin || elMid > safe.bottom - margin
     || er.bottom > safe.bottom - 8 || er.top < safe.top + 8;
-  // Also treat overlap with the mini-panel as "covered".
-  let propsHit = false;
-  const props = document.getElementById('peProps');
-  if (props && props.classList.contains('visible') && !props.classList.contains('pe-props-collapsed')) {
-    try {
-      const pr = props.getBoundingClientRect();
-      propsHit = !(er.bottom < pr.top || er.top > pr.bottom || er.right < pr.left || er.left > pr.right);
-    } catch (_) {}
-  }
+  const propsHit = peElCoveredByPropsPanel(el);
   if (!force && !covered && !propsHit) return false;
   // If the block sits under the mini-panel and we still have no scroll room,
-  // add just enough pad to move it to the safe center (selection path).
+  // grow the top spacer before scrolling.
   if ((covered || propsHit) && withPad === false) {
     const maxScroll = Math.max(0, wrap.scrollHeight - wrap.clientHeight);
     const needDelta = elMid - safe.midY;
@@ -25158,8 +25307,26 @@ function peScrollElementIntoTextFocusCenter(el, opts) {
   const safe2 = peGetTextFocusSafeRect();
   const er2 = el.getBoundingClientRect();
   const elMid2 = er2.top + Math.min(Math.max(er2.height, 8), 36) / 2;
-  const delta = elMid2 - safe2.midY;
+  // Prefer the safe-band center, but never leave the caret under the panel.
+  let targetY = safe2.midY;
+  const props = document.getElementById('peProps');
+  if (props && props.classList.contains('visible') && !props.classList.contains('pe-props-collapsed')) {
+    try {
+      const pr = props.getBoundingClientRect();
+      if (pr.height > 0) targetY = Math.max(targetY, pr.bottom + 36);
+    } catch (_) {}
+  }
+  const delta = elMid2 - targetY;
   if (Math.abs(delta) > 4) wrap.scrollTop += delta;
+  // Hard clamp: if still under the panel, push down one more step.
+  if (peElCoveredByPropsPanel(el)) {
+    try {
+      const pr = props.getBoundingClientRect();
+      const er3 = el.getBoundingClientRect();
+      const push = (pr.bottom + 16) - er3.top;
+      if (push > 2) wrap.scrollTop += push;
+    } catch (_) {}
+  }
   return true;
 }
 
@@ -25234,6 +25401,7 @@ function peScheduleTextEditVisibility(o) {
   const editId = o.id;
   const pass = () => {
     if (!peState || peState.inlineEditId !== editId) return;
+    const obj = peState.objects.find(x => x.id === editId) || o;
     const el = peInlineEditorDomEl();
     if (el && document.activeElement !== el) {
       peState.inlineEditFocusPending = true;
@@ -25242,6 +25410,17 @@ function peScheduleTextEditVisibility(o) {
     peEnsureEditorKbScrollRoom({ estimate: peKeyboardOcclusionPx() < 48 });
     peScrollInlineEditorIntoWrapSafeZone();
     peScrollInlineEditorAboveKeyboard(true);
+    // If the fixed mini-panel still covers the caret after scroll, nudge the
+    // block down the page (scroll alone cannot move content past scrollTop=0).
+    if (obj && obj.type === 'text') {
+      const ed = peInlineEditorDomEl();
+      if (ed && peElCoveredByPropsPanel(ed)) {
+        if (peNudgeTextObjBelowPropsPanel(obj)) {
+          peScrollInlineEditorIntoWrapSafeZone();
+          peScrollInlineEditorAboveKeyboard(true);
+        }
+      }
+    }
   };
   pass();
   peTextKbTimer = setTimeout(() => {
@@ -25578,9 +25757,10 @@ function peExitDrawToolMode() {
   peCloseShapeMenu();
   peCloseShapeColorPopup();
   peCloseRedactColorPopup();
-  // preferHand: land on Hand so Object-select restore cannot leave a draw
-  // button looking selected; also clears sticky :focus on the tapped tool.
-  peSetTool('select', { preferHand: true, clearSelection: true });
+  // Retap of an active draw tool → Object-select (not Hand).
+  peState.modeBeforeTool = null;
+  peSetTool('select', { clearSelection: true });
+  peSetObjSelectMode(true);
   ['peToolCrop', 'peToolText', 'peToolHl', 'peToolRedact', 'peToolShape'].forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
@@ -27659,6 +27839,7 @@ function peBeginTextSelHandleDrag(clientX, clientY) {
 function peEndTextSelHandleDrag() {
   if (!peTextSelHandleDragging) return;
   peTextSelHandleDragging = false;
+  peStopAutoScroll();
   const resume = peTextSelMenuResume;
   peTextSelMenuResume = null;
   // Only restore when a page-text selection still exists.
@@ -27698,8 +27879,15 @@ function peBindTextSelHandleDragGuards() {
       peBeginTextSelHandleDrag(e.clientX, e.clientY);
     }
   };
+  const onPtrMove = (e) => {
+    if (!peTextSelHandleDragging) return;
+    if (typeof peCheckEdgeAutoScroll === 'function') {
+      peCheckEdgeAutoScroll(e.clientX, e.clientY);
+    }
+  };
   const onPtrUp = () => { peEndTextSelHandleDrag(); };
   document.addEventListener('pointerdown', onPtrDown, true);
+  document.addEventListener('pointermove', onPtrMove, true);
   document.addEventListener('pointerup', onPtrUp, true);
   document.addEventListener('pointercancel', onPtrUp, true);
   document.addEventListener('selectionchange', () => {
