@@ -12770,6 +12770,11 @@
               // the browser's own anchor entirely instead.
               wordMode: e.detail >= 2
             };
+            // Hide Copy/markup menu while the selection (or its handles) is
+            // being adjusted; it returns on pointerup if a selection remains.
+            if (layer.id === 'peTextLayer' && typeof peBeginTextSelHandleDrag === 'function') {
+              peBeginTextSelHandleDrag(e.clientX, e.clientY);
+            }
             e.stopPropagation();
           }
         }, true);
@@ -23647,6 +23652,9 @@ function peDestroy() {
   clearTimeout(peTextKbTimer);
   peTextKbTimer = null;
   peBindTextKeyboardGuards(false);
+  peClearEditorKbScrollRoom();
+  peTextSelHandleDragging = false;
+  peTextSelMenuResume = null;
   if (pePinchRaf) { cancelAnimationFrame(pePinchRaf); pePinchRaf = 0; }
   pePinchActive = false;
   pePinchPending = null;
@@ -24953,6 +24961,8 @@ function peFocusInlineEditorIfNeeded() {
 
 /** Briefly skip visualViewport-driven scroll (can dismiss OSK if it races focus). */
 let peTextKbScrollQuietUntil = 0;
+/** Extra bottom padding on #peStagePad so bottom-of-page text can scroll above OSK. */
+let peEditorKbPadPx = 0;
 
 function peArmTextKeyboardQuiet(ms) {
   peTextKbScrollQuietUntil = Date.now() + (ms || 400);
@@ -24964,72 +24974,186 @@ function peInlineEditorDomEl() {
     '#peObjLayer .pe-obj-callout-box[data-pe-id="' + peState.inlineEditId + '"] .pe-callout-text');
 }
 
-/**
- * Scroll a stage-local point into the upper band of the wrap BEFORE creating
- * a text block — so when the OSK covers the lower half, the caret is already
- * on-screen. stageX/stageY are CSS px relative to #peStage.
- */
-function peScrollStagePointIntoKeyboardSafeZone(stageX, stageY) {
-  const wrap = document.getElementById('peStageWrap');
-  const stage = document.getElementById('peStage');
-  if (!wrap || !stage) return;
-  const sr = stage.getBoundingClientRect();
-  const wr = wrap.getBoundingClientRect();
-  const pointScreenY = sr.top + stageY;
-  // Park the tap point ~18% down the wrap (well above a typical OSK).
-  const targetScreenY = wr.top + Math.max(72, wrap.clientHeight * 0.18);
-  wrap.scrollTop += pointScreenY - targetScreenY;
+/** Pixels of the layout viewport covered by the on-screen keyboard (approx). */
+function peKeyboardOcclusionPx() {
+  const vv = window.visualViewport;
+  if (!vv) return 0;
+  return Math.max(0, Math.round(window.innerHeight - (vv.offsetTop + vv.height)));
 }
 
-/** Scroll the active editor into the upper wrap band (estimated OSK). */
+/**
+ * Grow #peStagePad bottom padding so wrap.scrollTop can bring bottom-page
+ * content into the visible band above the OSK / mini-panel. Without this,
+ * a fit-to-screen page has no scroll room and bottom taps stay covered.
+ */
+function peEnsureEditorKbScrollRoom(opts) {
+  const pad = document.getElementById('peStagePad');
+  if (!pad) return;
+  const forceEstimate = !!(opts && opts.estimate);
+  let need = peKeyboardOcclusionPx();
+  if (forceEstimate || (need < 96 && typeof isTouchDevice !== 'undefined' && isTouchDevice
+      && peState && (peState.inlineEditId || (opts && opts.forTextCreate)))) {
+    need = Math.max(need, Math.round(window.innerHeight * 0.45));
+  }
+  // Room to park content near the center of the remaining visible area.
+  const props = document.getElementById('peProps');
+  if (props && props.classList.contains('visible') && !props.classList.contains('pe-props-collapsed')) {
+    try {
+      const pr = props.getBoundingClientRect();
+      if (pr.height > 0) need = Math.max(need, Math.round(pr.height + 24));
+    } catch (_) {}
+  }
+  need = Math.max(0, Math.min(Math.round(window.innerHeight * 0.7), need));
+  if (need === peEditorKbPadPx) return;
+  peEditorKbPadPx = need;
+  // Base .pe-stage-pad padding is 18px; replace bottom only.
+  pad.style.paddingBottom = (18 + need) + 'px';
+}
+
+function peClearEditorKbScrollRoom() {
+  const pad = document.getElementById('peStagePad');
+  peEditorKbPadPx = 0;
+  if (pad) pad.style.paddingBottom = '';
+}
+
+/**
+ * Usable screen band for focusing text: visualViewport minus the mini-panel
+ * when it overlaps that band. MidY is where we aim the caret / text block.
+ */
+function peGetTextFocusSafeRect() {
+  const vv = window.visualViewport;
+  let top = vv ? vv.offsetTop : 0;
+  let bottom = vv ? (vv.offsetTop + vv.height) : window.innerHeight;
+  let left = vv ? vv.offsetLeft : 0;
+  let right = vv ? (vv.offsetLeft + vv.width) : window.innerWidth;
+  // Before OSK reports via visualViewport, assume lower ~42% will be covered.
+  if (peState && peState.inlineEditId && peKeyboardOcclusionPx() < 48
+      && typeof isTouchDevice !== 'undefined' && isTouchDevice) {
+    bottom = Math.min(bottom, top + Math.max(160, window.innerHeight * 0.55));
+  }
+  const props = document.getElementById('peProps');
+  if (props && props.classList.contains('visible') && !props.classList.contains('pe-props-collapsed')) {
+    try {
+      const pr = props.getBoundingClientRect();
+      if (pr.width > 0 && pr.height > 0
+          && pr.left < right && pr.right > left
+          && pr.top < bottom && pr.bottom > top) {
+        const viewMid = (top + bottom) / 2;
+        const propsMid = (pr.top + pr.bottom) / 2;
+        if (propsMid <= viewMid) top = Math.max(top, pr.bottom + 10);
+        else bottom = Math.min(bottom, pr.top - 10);
+      }
+    } catch (_) {}
+  }
+  if (bottom - top < 80) {
+    // Degenerate clamp — fall back to raw visual viewport center.
+    top = vv ? vv.offsetTop : 0;
+    bottom = vv ? (vv.offsetTop + vv.height) : window.innerHeight;
+  }
+  return { top, bottom, left, right, midY: (top + bottom) / 2 };
+}
+
+/** Scroll wrap so a screen Y lands on the safe-band center. */
+function peScrollScreenYToTextFocusCenter(screenY) {
+  const wrap = document.getElementById('peStageWrap');
+  if (!wrap) return;
+  const safe = peGetTextFocusSafeRect();
+  const delta = screenY - safe.midY;
+  if (Math.abs(delta) > 4) wrap.scrollTop += delta;
+}
+
+/**
+ * Scroll a stage-local point to the safe focus center BEFORE creating a text
+ * block. stageX/stageY are CSS px relative to #peStage.
+ */
+function peScrollStagePointIntoKeyboardSafeZone(stageX, stageY) {
+  const stage = document.getElementById('peStage');
+  if (!stage) return;
+  peEnsureEditorKbScrollRoom({ forTextCreate: true, estimate: true });
+  const sr = stage.getBoundingClientRect();
+  peScrollScreenYToTextFocusCenter(sr.top + stageY);
+}
+
+/** Scroll any element (editor or selected text block) into the safe center. */
+function peScrollElementIntoTextFocusCenter(el, opts) {
+  const wrap = document.getElementById('peStageWrap');
+  if (!el || !wrap) return false;
+  const force = !!(opts && opts.force);
+  const withPad = !!(opts && opts.withPad);
+  if (withPad) peEnsureEditorKbScrollRoom({ estimate: !!(opts && opts.estimate) });
+  const safe = peGetTextFocusSafeRect();
+  const er = el.getBoundingClientRect();
+  const elMid = er.top + Math.min(Math.max(er.height, 8), 36) / 2;
+  const margin = 12;
+  const covered = elMid < safe.top + margin || elMid > safe.bottom - margin
+    || er.bottom > safe.bottom - 8 || er.top < safe.top + 8;
+  // Also treat overlap with the mini-panel as "covered".
+  let propsHit = false;
+  const props = document.getElementById('peProps');
+  if (props && props.classList.contains('visible') && !props.classList.contains('pe-props-collapsed')) {
+    try {
+      const pr = props.getBoundingClientRect();
+      propsHit = !(er.bottom < pr.top || er.top > pr.bottom || er.right < pr.left || er.left > pr.right);
+    } catch (_) {}
+  }
+  if (!force && !covered && !propsHit) return false;
+  // If the block sits under the mini-panel and we still have no scroll room,
+  // add just enough pad to move it to the safe center (selection path).
+  if ((covered || propsHit) && withPad === false) {
+    const maxScroll = Math.max(0, wrap.scrollHeight - wrap.clientHeight);
+    const needDelta = elMid - safe.midY;
+    if (wrap.scrollTop + needDelta > maxScroll + 2 || wrap.scrollTop + needDelta < -2) {
+      peEnsureEditorKbScrollRoom({ estimate: false });
+    }
+  }
+  const safe2 = peGetTextFocusSafeRect();
+  const er2 = el.getBoundingClientRect();
+  const elMid2 = er2.top + Math.min(Math.max(er2.height, 8), 36) / 2;
+  const delta = elMid2 - safe2.midY;
+  if (Math.abs(delta) > 4) wrap.scrollTop += delta;
+  return true;
+}
+
+/** Scroll the active inline editor into the safe focus center. */
 function peScrollInlineEditorIntoWrapSafeZone() {
   if (!peState?.inlineEditId) return;
   const el = peInlineEditorDomEl();
-  const wrap = document.getElementById('peStageWrap');
-  if (!el || !wrap) return;
-  const wr = wrap.getBoundingClientRect();
-  const er = el.getBoundingClientRect();
-  const targetScreenY = wr.top + Math.max(72, wrap.clientHeight * 0.18);
-  wrap.scrollTop += er.top - targetScreenY;
+  if (!el) return;
+  peScrollElementIntoTextFocusCenter(el, { force: true, withPad: true, estimate: true });
 }
 
 /**
- * Keep the caret inside the real visualViewport (after OSK animation).
- * Targets ~30% from the top of the visible viewport — not merely “above”
- * the keyboard bottom edge (which still leaves bottom-page blocks covered).
+ * Keep the caret inside the real visualViewport (after OSK animation),
+ * aiming at the center of the band not covered by keyboard / mini-panel.
  */
 function peScrollInlineEditorAboveKeyboard(force) {
   if (!peState?.inlineEditId) return;
   if (!force && Date.now() < peTextKbScrollQuietUntil) return;
   const el = peInlineEditorDomEl();
-  const wrap = document.getElementById('peStageWrap');
-  if (!el || !wrap) return;
-  const vv = window.visualViewport;
-  const viewTop = vv ? vv.offsetTop : 0;
-  const viewH = vv ? vv.height : window.innerHeight;
-  const viewBottom = viewTop + viewH;
-  const er = el.getBoundingClientRect();
-  const targetY = viewTop + viewH * 0.28;
-  const elMid = er.top + Math.min(er.height, 24) / 2;
-  let delta = elMid - targetY;
-  // Also clamp if still below the visible bottom with a margin.
-  if (er.bottom > viewBottom - 40) {
-    delta = Math.max(delta, er.bottom - (viewBottom - 40));
+  if (!el) return;
+  peScrollElementIntoTextFocusCenter(el, { force: !!force, withPad: true });
+  if (document.activeElement !== el) {
+    peState.inlineEditFocusPending = true;
+    peFocusInlineEditorNow();
   }
-  if (er.top < viewTop + 12) {
-    delta = Math.min(delta, er.top - (viewTop + 12));
+}
+
+/** When a text block is selected (not necessarily editing), keep it unobscured. */
+function peScrollSelectedTextIntoFocusCenter(o) {
+  if (!peState || !o || o.type !== 'text') return;
+  const el = document.querySelector('#peObjLayer [data-pe-id="' + o.id + '"].pe-obj-text');
+  if (!el) return;
+  if (peState.inlineEditId === o.id) {
+    peScrollElementIntoTextFocusCenter(el, { force: true, withPad: true, estimate: true });
+    return;
   }
-  if (Math.abs(delta) > 6) {
-    wrap.scrollTop += delta;
-    if (document.activeElement !== el) {
-      peState.inlineEditFocusPending = true;
-      peFocusInlineEditorNow();
-    }
-  }
+  // Selection only: center if covered by mini-panel / viewport; pad only if needed.
+  peScrollElementIntoTextFocusCenter(el, { force: false, withPad: false });
 }
 
 function peOnVisualViewportForText() {
   if (!peState?.inlineEditId) return;
+  peEnsureEditorKbScrollRoom();
   peScrollInlineEditorAboveKeyboard(true);
   peFocusInlineEditorNow();
 }
@@ -25047,12 +25171,13 @@ function peBindTextKeyboardGuards(on) {
 }
 
 /**
- * After a new text block is focused: keep OSK up and keep the caret visible.
- * Point is pre-scrolled at create; retries catch late OSK / vv layout.
+ * After a new text block is focused: keep OSK up and keep the caret visible
+ * near the center of the unobscured screen. Retries catch late OSK / vv layout.
  */
 function peScheduleTextEditVisibility(o) {
   if (!peState || !o) return;
   peArmTextKeyboardQuiet(40);
+  peEnsureEditorKbScrollRoom({ estimate: true, forTextCreate: true });
   peBindTextKeyboardGuards(true);
   clearTimeout(peTextKbTimer);
   const editId = o.id;
@@ -25063,17 +25188,20 @@ function peScheduleTextEditVisibility(o) {
       peState.inlineEditFocusPending = true;
       peFocusInlineEditorNow();
     }
+    peEnsureEditorKbScrollRoom({ estimate: peKeyboardOcclusionPx() < 48 });
     peScrollInlineEditorIntoWrapSafeZone();
     peScrollInlineEditorAboveKeyboard(true);
   };
   pass();
   peTextKbTimer = setTimeout(() => {
     pass();
-    setTimeout(pass, 120);
+    setTimeout(pass, 80);
+    setTimeout(pass, 160);
     setTimeout(pass, 280);
-    setTimeout(pass, 500);
-    setTimeout(pass, 800);
-  }, 30);
+    setTimeout(pass, 450);
+    setTimeout(pass, 700);
+    setTimeout(pass, 1000);
+  }, 20);
 }
 
 function peInlineTextObj() {
@@ -25242,6 +25370,10 @@ function peEndCalloutEdit(keepSelection) {
   peSyncInlineEditsFromDom();
   peState.inlineEditId = null;
   peState.inlineEditFocusPending = false;
+  clearTimeout(peTextKbTimer);
+  peTextKbTimer = null;
+  peBindTextKeyboardGuards(false);
+  peClearEditorKbScrollRoom();
   if (!keepSelection) peState.sel = null;
   peRedrawObjects();
   peUpdateProps();
@@ -25265,13 +25397,15 @@ function peBeginInlineEdit(o, opts) {
   peState.inlineEditFocusPending = true;
   const skipSelectionHistory = !!(opts && opts.isNewDraft) || peState.draftTextId === o.id;
   peSelect(o, { skipSelectionHistory });
-  // Scroll above the estimated keyboard BEFORE focus so the new block is
-  // already visible; focus then opens the OSK without covering it.
+  // Pad + center into the safe band BEFORE focus so the OSK / mini-panel
+  // do not cover the new caret.
+  peEnsureEditorKbScrollRoom({ estimate: true, forTextCreate: !!(opts && opts.isNewDraft) });
   peScrollInlineEditorIntoWrapSafeZone();
   peArmTextKeyboardQuiet(80);
   peFocusInlineEditorNow();
   if (typeof isTouchDevice !== 'undefined' && isTouchDevice) {
     peBindTextKeyboardGuards(true);
+    peScheduleTextEditVisibility(o);
   }
 }
 
@@ -25286,6 +25420,7 @@ function peEndInlineEditForToolSwitch() {
   clearTimeout(peTextKbTimer);
   peTextKbTimer = null;
   peBindTextKeyboardGuards(false);
+  peClearEditorKbScrollRoom();
   peState.sel = null;
   peState.multiSel = [];
   if (hadInline || removed) peCommitEditorHistory();
@@ -25302,6 +25437,7 @@ function peFinishTextInlineEdit(opts) {
   clearTimeout(peTextKbTimer);
   peTextKbTimer = null;
   peBindTextKeyboardGuards(false);
+  peClearEditorKbScrollRoom();
   if (opts && opts.keepTool && peState.tool === 'text') {
     peState.sel = null;
   } else if (!opts || !opts.keepSelection) {
@@ -25322,6 +25458,7 @@ function peEndInlineEdit(keepSelection) {
   clearTimeout(peTextKbTimer);
   peTextKbTimer = null;
   peBindTextKeyboardGuards(false);
+  peClearEditorKbScrollRoom();
   if (!keepSelection) peState.sel = null;
   peRedrawObjects();
   peUpdateProps();
@@ -26076,12 +26213,20 @@ function peSelect(o, opts) {
     removedEmpty = !!peRemoveEmptyInlineText();
     peState.inlineEditId = null;
     peState.inlineEditFocusPending = false;
+    clearTimeout(peTextKbTimer);
+    peTextKbTimer = null;
+    peBindTextKeyboardGuards(false);
+    peClearEditorKbScrollRoom();
   } else if (!o) {
     peSyncInlineEditsFromDom();
     removedEmpty = !!peRemoveEmptyInlineText();
     peState.inlineEditId = null;
     peState.inlineEditFocusPending = false;
     peTextClickSeq = { id: null, t: 0 };
+    clearTimeout(peTextKbTimer);
+    peTextKbTimer = null;
+    peBindTextKeyboardGuards(false);
+    peClearEditorKbScrollRoom();
   }
   // Selecting a non-text object while Text tool is active exits Text mode.
   // Do NOT exit highlight/redact when selecting an object of the same type —
@@ -26107,6 +26252,11 @@ function peSelect(o, opts) {
     peApplyObjSelection(o);
     peUpdateProps();
     peUpdateRedactActionsUi();
+    if (o && o.type === 'text') {
+      requestAnimationFrame(() => peScrollSelectedTextIntoFocusCenter(o));
+    } else if (!peState.inlineEditId) {
+      peClearEditorKbScrollRoom();
+    }
     if (removedEmpty || inlineBefore !== peState.inlineEditId) peCommitEditorHistory();
     return;
   }
@@ -26115,6 +26265,11 @@ function peSelect(o, opts) {
   peUpdateProps();
   peUpdatePanUi();
   peUpdateRedactActionsUi();
+  if (o && o.type === 'text') {
+    requestAnimationFrame(() => peScrollSelectedTextIntoFocusCenter(o));
+  } else if (!peState.inlineEditId) {
+    peClearEditorKbScrollRoom();
+  }
   if (removedEmpty || inlineBefore !== peState.inlineEditId) peCommitEditorHistory();
   else if (!skipSelectionHistory) peCommitSelectionHistoryIfChanged(selBefore);
 }
@@ -27300,6 +27455,149 @@ function peOnPageToolsCtxAction(action) {
 }
 
 let peTextSelCtx = null; // { range, text, kind: 'page'|'inline', el? }
+/** True while the user is dragging native selection handles (blue anchors). */
+let peTextSelHandleDragging = false;
+/** Snapshot of menu to restore after handle drag ends. */
+let peTextSelMenuResume = null; // { clientX, clientY, info } | null
+let peTextSelHandleListenersBound = false;
+
+/** Client-space rects for the start/end carets of the current selection. */
+function peTextSelEndpointHitRects(pad) {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount || sel.isCollapsed) return [];
+  const p = pad == null ? 36 : pad;
+  const out = [];
+  try {
+    const range = sel.getRangeAt(0);
+    const a = document.createRange();
+    a.setStart(range.startContainer, range.startOffset);
+    a.setEnd(range.startContainer, range.startOffset);
+    let ar = a.getBoundingClientRect();
+    if (!ar || (ar.width === 0 && ar.height === 0)) {
+      try {
+        const nr = range.getClientRects();
+        if (nr && nr.length) ar = nr[0];
+      } catch (_) {}
+    }
+    if (ar) out.push({
+      left: ar.left - p, top: ar.top - p,
+      right: ar.right + p, bottom: ar.bottom + p
+    });
+    const b = document.createRange();
+    b.setStart(range.endContainer, range.endOffset);
+    b.setEnd(range.endContainer, range.endOffset);
+    let br = b.getBoundingClientRect();
+    if (!br || (br.width === 0 && br.height === 0)) {
+      try {
+        const nr = range.getClientRects();
+        if (nr && nr.length) br = nr[nr.length - 1];
+      } catch (_) {}
+    }
+    if (br) out.push({
+      left: br.left - p, top: br.top - p,
+      right: br.right + p, bottom: br.bottom + p
+    });
+  } catch (_) {}
+  return out;
+}
+
+function peClientNearTextSelHandle(clientX, clientY) {
+  const rects = peTextSelEndpointHitRects(44);
+  for (let i = 0; i < rects.length; i++) {
+    const r = rects[i];
+    if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function peIsEditorPageTextSelection() {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount || sel.isCollapsed) return false;
+  try {
+    let node = sel.getRangeAt(0).commonAncestorContainer;
+    if (node && node.nodeType === 3) node = node.parentElement;
+    return !!(node && node.closest && node.closest('#peTextLayer'));
+  } catch (_) { return false; }
+}
+
+function peBeginTextSelHandleDrag(clientX, clientY) {
+  peBindTextSelHandleDragGuards();
+  if (peTextSelHandleDragging) return;
+  peTextSelHandleDragging = true;
+  // Remember menu contents so we can re-show after the handle is released.
+  const menu = document.getElementById('peTextSelCtxMenu');
+  if (menu && menu.classList.contains('visible') && peTextSelCtx) {
+    peTextSelMenuResume = {
+      clientX: clientX != null ? clientX : (parseFloat(menu.style.left) || 0),
+      clientY: clientY != null ? clientY : (parseFloat(menu.style.top) || 0),
+      info: peTextSelCtx
+    };
+  } else if (!peTextSelMenuResume) {
+    peTextSelMenuResume = null;
+  }
+  // Hide without wiping a resume snapshot already captured above.
+  if (menu) {
+    menu.classList.remove('visible');
+    menu.setAttribute('aria-hidden', 'true');
+  }
+  peTextSelCtx = null;
+}
+
+function peEndTextSelHandleDrag() {
+  if (!peTextSelHandleDragging) return;
+  peTextSelHandleDragging = false;
+  const resume = peTextSelMenuResume;
+  peTextSelMenuResume = null;
+  // Only restore when a page-text selection still exists.
+  if (!resume || !resume.info) return;
+  if (!peIsEditorPageTextSelection() && resume.info.kind === 'page') return;
+  const live = peCaptureEditorTextSelection();
+  const info = live || resume.info;
+  if (!info) return;
+  // Prefer a point near the selection end; fall back to prior menu position.
+  let x = resume.clientX, y = resume.clientY;
+  try {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount) {
+      const rects = sel.getRangeAt(0).getClientRects();
+      if (rects && rects.length) {
+        const last = rects[rects.length - 1];
+        x = last.left + last.width / 2;
+        y = last.bottom + 8;
+      }
+    }
+  } catch (_) {}
+  peShowTextSelCtxMenu(x, y, info);
+}
+
+function peBindTextSelHandleDragGuards() {
+  if (peTextSelHandleListenersBound) return;
+  peTextSelHandleListenersBound = true;
+  const onPtrDown = (e) => {
+    if (!peState || !peState.objSelectMode) return;
+    if (e.button != null && e.button !== 0) return;
+    const menu = document.getElementById('peTextSelCtxMenu');
+    if (menu && menu.contains(e.target)) return;
+    // Hide while adjusting handles OR while actively re-dragging a selection.
+    const nearHandle = peClientNearTextSelHandle(e.clientX, e.clientY);
+    const onTextLayer = !!(e.target && e.target.closest && e.target.closest('#peTextLayer'));
+    if (nearHandle || (onTextLayer && peIsEditorPageTextSelection() && (menu?.classList.contains('visible') || peTextSelCtx))) {
+      peBeginTextSelHandleDrag(e.clientX, e.clientY);
+    }
+  };
+  const onPtrUp = () => { peEndTextSelHandleDrag(); };
+  document.addEventListener('pointerdown', onPtrDown, true);
+  document.addEventListener('pointerup', onPtrUp, true);
+  document.addEventListener('pointercancel', onPtrUp, true);
+  document.addEventListener('selectionchange', () => {
+    if (!peTextSelHandleDragging) return;
+    // Keep menu hidden for the whole handle gesture.
+    const menu = document.getElementById('peTextSelCtxMenu');
+    if (menu && menu.classList.contains('visible')) peHideTextSelCtxMenu();
+  });
+}
 
 function peHideTextSelCtxMenu() {
   const menu = document.getElementById('peTextSelCtxMenu');
@@ -27510,6 +27808,12 @@ function peSyncTextSelMenuActive(activeSet) {
 function peShowTextSelCtxMenu(clientX, clientY, info) {
   const menu = document.getElementById('peTextSelCtxMenu');
   if (!menu || !info) return;
+  // Never show the markup/copy menu while a selection handle is being dragged.
+  if (peTextSelHandleDragging) {
+    peTextSelMenuResume = { clientX, clientY, info };
+    return;
+  }
+  peBindTextSelHandleDragGuards();
   peHideObjCtxMenu();
   peHideCropCtxMenu();
   peHidePageToolsCtxMenu();
@@ -28624,13 +28928,21 @@ function peStartObjSelectBlankGesture(e) {
   }
 }
 
-/** Touch on PDF text in Object-select: pan like Hand (text layer would eat the gesture). */
+/** Touch on PDF text in Object-select: pan like Hand (text layer would eat the gesture).
+ *  Exception: when the finger grabs a native blue selection handle, let the
+ *  browser adjust the selection and keep our markup menu hidden until release. */
 function peOnObjSelectTextLayerPointerDown(e) {
   if (!peState || !peState.objSelectMode) return false;
   if (!peIsPrimaryPointer(e)) return false;
   const touchLike = e.pointerType === 'touch' || e.pointerType === 'pen';
   if (!touchLike) return false;
   if (pePinchActive || Date.now() < pePinchBlockObjUntil) return true;
+  // Adjusting an existing selection via its endpoint handles — do not pan.
+  if (peIsEditorPageTextSelection() && peClientNearTextSelHandle(e.clientX, e.clientY)) {
+    peBindTextSelHandleDragGuards();
+    peBeginTextSelHandleDrag(e.clientX, e.clientY);
+    return false;
+  }
   if (e.cancelable) e.preventDefault();
   e.stopPropagation();
   peCapturePointer(e, document.getElementById('peStage') || e.currentTarget);
@@ -29418,6 +29730,7 @@ function peObjMouseDown(e, o) {
       peState.draftTextId = o.id;
       peBeginInlineEdit(o, { isNewDraft: true });
       peFocusInlineEditorNow();
+      // peBeginInlineEdit already schedules OSK/center retries on touch.
       if (typeof isTouchDevice !== 'undefined' && isTouchDevice) {
         peScheduleTextEditVisibility(o);
       }
