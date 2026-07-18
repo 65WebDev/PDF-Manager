@@ -1676,6 +1676,19 @@
     #peStage { position: relative; background: #fff; box-shadow: 0 8px 30px rgba(0,0,0,.5); flex: 0 0 auto; }
     #peStage canvas { display: block; }
     #peStage.pe-layout-zoom canvas { image-rendering: auto; }
+    /*Touch: drawing/pan must own the gesture (mouse path used mousedown only).
+       Also lock the scrollable wrap — otherwise Android/iOS cancel the pointer
+       mid-stroke and shapes/redacts disappear as “too small”.*/
+    #pageEditModal.open .pe-stage-wrap,
+    #pageEditModal.open .pe-stage-pad,
+    #pageEditModal.open #peStage,
+    #pageEditModal.open #peObjLayer,
+    #pageEditModal.open #peCrop {
+      touch-action: none;
+    }
+    #pageEditModal.open .pe-stage-wrap {
+      overscroll-behavior: none;
+    }
     /*z-index:3 is deliberate, not decorative: #peTextLayer has an explicit
        z-index:2 (needed in preview mode, to sit above the raster <img>).
        Per CSS stacking rules a positioned element with an explicit z-index
@@ -23906,7 +23919,7 @@ function peRedrawObjects() {
         el.appendChild(rotH);
       }
     }
-    el.addEventListener('mousedown', (e) => peObjMouseDown(e, o));
+    peBindPointerDown(el, (e) => peObjMouseDown(e, o));
     layer.appendChild(el);
     if (o.type === 'callout') peAppendCalloutBox(layer, o, W, H);
   });
@@ -24041,8 +24054,7 @@ function peAppendCalloutBox(layer, o, W, H) {
       const rimEl = document.createElement('div');
       rimEl.className = 'pe-callout-rim ' + side;
       rimEl.title = 'Переместить';
-      rimEl.addEventListener('mousedown', (e) => {
-        if (e.button !== 0) return;
+      peBindPointerDown(rimEl, (e) => {
         peStartCalloutBoxMove(e, o);
       });
       box.appendChild(rimEl);
@@ -24058,8 +24070,8 @@ function peAppendCalloutBox(layer, o, W, H) {
   if (isEditing) {
     textEl.contentEditable = 'true';
     textEl.spellcheck = false;
-    textEl.addEventListener('mousedown', (e) => {
-      if (e.button === 0 && peCalloutBorderHit(box, e.clientX, e.clientY)) {
+    peBindPointerDown(textEl, (e) => {
+      if (peCalloutBorderHit(box, e.clientX, e.clientY)) {
         peStartCalloutBoxMove(e, o);
         return;
       }
@@ -24090,7 +24102,7 @@ function peAppendCalloutBox(layer, o, W, H) {
     bgBtn.className = 'pe-callout-bg-handle';
     bgBtn.title = 'Цвет фона';
     bgBtn.style.background = peCalloutBg(o);
-    bgBtn.addEventListener('mousedown', (e) => {
+    peBindPointerDown(bgBtn, (e) => {
       e.preventDefault();
       e.stopPropagation();
     });
@@ -24108,8 +24120,7 @@ function peAppendCalloutBox(layer, o, W, H) {
       h.title = 'Изменить размер';
       h.style.cursor = peTextCornerCursor(corner, 0);
       h.contentEditable = 'false';
-      h.addEventListener('mousedown', (e) => {
-        if (e.button !== 0) return;
+      peBindPointerDown(h, (e) => {
         e.preventDefault();
         e.stopPropagation();
         peStartCalloutBoxResize(e, o, corner);
@@ -24125,7 +24136,7 @@ function peAppendCalloutBox(layer, o, W, H) {
     if (peState.drag?.kind === 'move-pending') peState.drag = null;
     peBeginCalloutEdit(o);
   });
-  box.addEventListener('mousedown', (e) => peObjMouseDown(e, o));
+  peBindPointerDown(box, (e) => peObjMouseDown(e, o));
   layer.appendChild(box);
 }
 
@@ -26391,9 +26402,8 @@ function peInitPropsPanelDrag() {
   if (!props || !handle || props.dataset.peDragInit === '1') return;
   props.dataset.peDragInit = '1';
 
-  handle.addEventListener('mousedown', (e) => {
+  peBindPointerDown(handle, (e) => {
     if (!props.classList.contains('visible')) return;
-    if (e.button !== 0) return;
     e.preventDefault();
     e.stopPropagation();
     pePropsDragMode = pePropsPanelMode(props);
@@ -26405,6 +26415,7 @@ function peInitPropsPanelDrag() {
       startTop: rect.top
     };
     props.classList.add('pe-props-dragging');
+    peCapturePointer(e, handle);
   });
 
   handle.addEventListener('dblclick', (e) => {
@@ -26414,7 +26425,7 @@ function peInitPropsPanelDrag() {
     peResetPropsPanelPos();
   });
 
-  window.addEventListener('mousemove', (e) => {
+  peBindPointerMoveUp((e) => {
     if (!pePropsDrag) return;
     const dx = e.clientX - pePropsDrag.startX;
     const dy = e.clientY - pePropsDrag.startY;
@@ -26422,9 +26433,7 @@ function peInitPropsPanelDrag() {
     if (pePropsDragMode) peSetPropsCustomPos(pePropsDragMode, c);
     props.style.left = c.left + 'px';
     props.style.top = c.top + 'px';
-  });
-
-  window.addEventListener('mouseup', () => {
+  }, () => {
     if (!pePropsDrag) return;
     props.classList.remove('pe-props-dragging');
     if (pePropsDragMode) peSavePropsPanelPos(pePropsDragMode);
@@ -28040,8 +28049,62 @@ function peStartPanView(e) {
   }
 }
 
+// Pointer Events for the page editor (touch cannot apply tools via mousedown alone).
+function peIsPrimaryPointer(e) {
+  if (!e) return false;
+  if (e.isPrimary === false) return false;
+  if (typeof e.button === 'number' && e.button !== 0 && e.button !== -1) return false;
+  return true;
+}
+
+function peBindPointerDown(el, handler, opts) {
+  if (!el) return;
+  const o = (opts === true) ? { capture: true, passive: false }
+    : (opts === false || opts == null) ? { passive: false }
+    : Object.assign({ passive: false }, opts);
+  if (window.PointerEvent) {
+    el.addEventListener('pointerdown', (e) => {
+      if (!peIsPrimaryPointer(e)) return;
+      handler(e);
+    }, o);
+  } else {
+    el.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      handler(e);
+    }, o);
+  }
+}
+
+function peBindPointerMoveUp(onMove, onUp) {
+  const move = (e) => {
+    if (e && e.isPrimary === false) return;
+    onMove(e);
+  };
+  const up = (e) => {
+    if (e && e.isPrimary === false) return;
+    onUp(e);
+  };
+  if (window.PointerEvent) {
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
+  } else {
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  }
+}
+
+function peCapturePointer(e, el) {
+  if (!e || e.pointerId == null || !el || !el.setPointerCapture) return;
+  try { el.setPointerCapture(e.pointerId); } catch (_) {}
+}
+
 function peObjMouseDown(e, o) {
-  if (e.button !== 0) return;
+  if (!peIsPrimaryPointer(e)) return;
+  // Touch: claim the gesture so the browser does not scroll instead of drawing.
+  if ((e.pointerType === 'touch' || e.pointerType === 'pen') && e.cancelable) {
+    e.preventDefault();
+  }
   // In crop mode, any manipulation of objects within the page
   // (select/move/resize/rotate/edit) are blocked.
   if (peState && peState.tool === 'crop') {
@@ -28397,17 +28460,20 @@ function peObjMouseDown(e, o) {
     peApplyZoomSlider(v, e.clientX, e.clientY, { debounce: 180 });
   }, { passive: false });
 
-  wrap.addEventListener('mousedown', (e) => {
-    if (!peState || e.button !== 0) return;
+  peBindPointerDown(wrap, (e) => {
+    if (!peState) return;
     if (e.target.closest('#peStage')) return;
     if (peState.tool === 'crop' && !peState.cropPdf) {
       e.preventDefault();
+      peCapturePointer(e, wrap);
       peBeginCropDraw(e.clientX, e.clientY);
       return;
     }
     if (peState.tool === 'select' && !peState.sel && peCanPan() && !peState.objSelectMode) {
+      peCapturePointer(e, wrap);
       peStartPanView(e);
     } else if (peState.tool === 'crop' && peState.cropPdf && peCanPan()) {
+      peCapturePointer(e, wrap);
       peStartPanView(e);
     }
   });
@@ -28421,8 +28487,8 @@ function peObjMouseDown(e, o) {
   // done explicitly here instead, in a listener registered before all the
   // others so it always runs first regardless of what the click goes on to
   // trigger.
-  stage.addEventListener('mousedown', (e) => {
-    if (!peState || e.button !== 0) return;
+  peBindPointerDown(stage, (e) => {
+    if (!peState) return;
     if (e.target.closest && e.target.closest('#peTextLayer')) return;   // the text layer's own shield handles this case
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed) return;
@@ -28433,8 +28499,8 @@ function peObjMouseDown(e, o) {
     }
   }, true);
 
-  stage.addEventListener('mousedown', (e) => {
-    if (!peState || e.button !== 0) return;
+  peBindPointerDown(stage, (e) => {
+    if (!peState) return;
     // Anchors are positioned slightly OUTSIDE the text (a few px) - clicking on them could
     // fall into the “border” zone of the same check and are intercepted here as
     // “start moving”, before the event reaches (by surfacing)
@@ -28457,7 +28523,7 @@ function peObjMouseDown(e, o) {
     }
   }, true);
 
-  stage.addEventListener('mousemove', (e) => {
+  const peOnStagePointerTrack = (e) => {
     peTrackEditorPointer(e);
     if (!peState) return;
     const textEl = peInlineTextEl();
@@ -28479,20 +28545,32 @@ function peObjMouseDown(e, o) {
     } else {
       document.querySelectorAll('#peObjLayer .pe-callout-border-hover').forEach(n => n.classList.remove('pe-callout-border-hover'));
     }
-  });
+  };
+  if (window.PointerEvent) stage.addEventListener('pointermove', peOnStagePointerTrack);
+  else stage.addEventListener('mousemove', peOnStagePointerTrack);
 
-  stage.addEventListener('mousedown', (e) => {
-    if (!peState || e.button !== 0) return;
-    if (e.target.closest('.pe-obj')) return;   // objects are processed by their mousedown
+  // Bubble phase (not capture): capture-phase text/callout border movers call
+  // stopPropagation so this handler must not run in capture on the same node.
+  peBindPointerDown(stage, (e) => {
+    if (!peState || peState.drag) return;
+    if (e.target.closest && e.target.closest('.pe-obj')) return;
     // A click that lands on the PDF text-selection layer (object-select mode
     // only) must start a native text selection, not an object marquee - the
     // shield on #peTextLayer already stops this event from bubbling here in
     // the normal case, but that relies on capture-phase propagation timing;
     // checking the target directly here is unambiguous regardless of that.
     if (e.target.closest && e.target.closest('#peTextLayer')) return;
+
+    const tool = peState.tool;
+    const isDrawTool = tool === 'shape' || tool === 'text' || tool === 'redact' || tool === 'crop';
+    // Touch: claim the gesture before the scrollable wrap cancels it.
+    if ((e.pointerType === 'touch' || e.pointerType === 'pen') && e.cancelable) {
+      e.preventDefault();
+    }
+    peCapturePointer(e, stage);
+
     const pt = peStagePoint(e);
     const { w: W, h: H } = peStageSize();
-    const tool = peState.tool;
 
     if (peState.inlineEditId) {
       const el = peInlineTextEl();
@@ -28514,7 +28592,7 @@ function peObjMouseDown(e, o) {
         peUpdatePanUi();
         return;
       }
-      if (e.target === cropEl) {
+      if (e.target === cropEl || (e.target.closest && e.target.closest('#peCrop'))) {
         e.preventDefault();
         peState.drag = {
           kind: 'crop-move',
@@ -28545,12 +28623,20 @@ function peObjMouseDown(e, o) {
     }
     // Draw tools: first blank click only clears selection / ends text edit.
     // Second blank click (nothing focused) starts a new object.
+    // Touch: skip the extra deselect tap — selecting the tool already cleared focus.
     if ((tool === 'shape' || tool === 'text' || tool === 'redact') && peHasActiveObjectFocus()) {
-      e.preventDefault();
+      const touchDraw = (e.pointerType === 'touch' || e.pointerType === 'pen');
+      if (!touchDraw) {
+        e.preventDefault();
+        peCloseShapeMenu();
+        peCloseShapeColorPopup();
+        peDeselectKeepTool();
+        return;
+      }
       peCloseShapeMenu();
       peCloseShapeColorPopup();
       peDeselectKeepTool();
-      return;
+      // Fall through and start drawing on the same tap.
     }
     if (tool === 'redact') {
       e.preventDefault();
@@ -28637,18 +28723,16 @@ function peObjMouseDown(e, o) {
       return;
     }
     // select: click on an empty space - deselect
-    peSelect(null);
+    if (!isDrawTool) peSelect(null);
   });
 
-  window.addEventListener('mousemove', (e) => {
+  peBindPointerMoveUp((e) => {
     if (!peState || !peState.drag) return;
     peState.drag.shiftKey = e.shiftKey;
     peState.drag.lastClientX = e.clientX;
     peState.drag.lastClientY = e.clientY;
     peProcessDrag(e.clientX, e.clientY);
-  });
-
-  window.addEventListener('mouseup', () => {
+  }, () => {
     if (!peState || !peState.drag) return;
     const d = peState.drag;
     const wasRotate = d.kind === 'rotate-text' || d.kind === 'rotate-shape';
@@ -29103,7 +29187,7 @@ function peObjMouseDown(e, o) {
     e.stopPropagation();
     peSelectShapeKind(btn.dataset.shape || 'rect');
   });
-  document.addEventListener('mousedown', (e) => {
+  const peCloseFloatingMenusOnOutside = (e) => {
     const wrapEl = document.getElementById('peShapeWrap');
     if (peIsShapeMenuOpen() && wrapEl && !wrapEl.contains(e.target)) peCloseShapeMenu();
     const colorPop = document.getElementById('peShapeColorPopup');
@@ -29118,7 +29202,10 @@ function peObjMouseDown(e, o) {
         !(e.target.closest && e.target.closest('.pe-callout-bg-handle'))) {
       peCloseCalloutBgPopup();
     }
-  }, true);
+  };
+  // pointerdown so touch closes menus (mousedown alone is too late / missing).
+  if (window.PointerEvent) document.addEventListener('pointerdown', peCloseFloatingMenusOnOutside, true);
+  else document.addEventListener('mousedown', peCloseFloatingMenusOnOutside, true);
 
   document.getElementById('peDeleteObj').addEventListener('click', peDeleteSelected);
   document.getElementById('peCancelBtn').addEventListener('click', () => { void pageEditClose(false); });
