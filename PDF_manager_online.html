@@ -7978,11 +7978,19 @@
     // (this is done separately by relocatePrintIfNeeded). Placed separately so you can
     // was to call this reset BEFORE the measurements in updateCenteredWrap.
     function resetPrintButtonHome() {
-      const center = document.querySelector('.centered-actions');
+      // Home is .print-wrapper (not .centered-actions). Appending to the center
+      // left an empty wrapper in the flex row and an extra gap — on mobile the
+      // printer sat to the right of the reading-mode column above it.
+      const wrapper = document.querySelector('.print-wrapper');
       const printBtn = document.getElementById('printBtn');
-      if (!center || !printBtn) return;
-      if (printBtn.parentElement !== center) {
-        center.appendChild(printBtn);
+      if (!wrapper || !printBtn) return;
+      if (printBtn.parentElement !== wrapper) {
+        const selected = document.getElementById('printSelectedBtn');
+        if (selected && selected.parentElement === wrapper) {
+          wrapper.insertBefore(printBtn, selected);
+        } else {
+          wrapper.appendChild(printBtn);
+        }
         printBtn.classList.remove('print-relocated');
       }
     }
