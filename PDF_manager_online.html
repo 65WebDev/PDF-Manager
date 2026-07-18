@@ -1226,14 +1226,20 @@
     }
     .pe-scale {
       display: flex; align-items: center; gap: 10px; flex-shrink: 0;
-      padding: 5px 13px; border-radius: 8px;
+      box-sizing: border-box;
+      height: 36px;
+      padding: 0 13px;
+      border-radius: 8px;
       background: rgba(0,0,0,.18); font-size: 16.25px; white-space: nowrap;
     }
     .pe-scale input[type=range] { width: 84px; height: 21px; margin: 0; touch-action: none; }
     .pe-end-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-    /* Equal Cancel / Save width; gaps match tool buttons (6px). */
+    /* Equal Cancel / Save size; height matches .pe-scale; gaps match tools. */
     #peEndActions .pe-btn {
       min-width: 7.25em;
+      height: 36px;
+      padding-top: 0;
+      padding-bottom: 0;
       justify-content: center;
       box-sizing: border-box;
     }
@@ -4332,9 +4338,13 @@
       #pageEditModal .pe-scale {
         font-size: 14px;
         gap: 8px;
-        padding: 4px 10px;
+        height: 36px;
+        padding: 0 10px;
       }
       #pageEditModal .pe-scale input[type=range] { width: 72px; }
+      #pageEditModal #peEndActions .pe-btn {
+        height: 36px;
+      }
       .page.to-delete .quick-actions,
       .dragging-active .page .quick-actions,
       body.rubber-selecting .page .quick-actions {
@@ -25590,6 +25600,17 @@ function peOnMobileEditKeydown(e) {
   }
 }
 
+/** Build host HTML from plain mobile textarea text, preserving whole-block bg. */
+function peMobilePlainTextToHtml(text, o) {
+  let html = (typeof peEscapeHtml === 'function' ? peEscapeHtml(text) : peEscapeHtmlLite(text))
+    .replace(/\n/g, '<br>');
+  if (o && o.type === 'text' && o.bg) {
+    html = '<span style="background-color:' + String(o.bg).replace(/"/g, '') + '">'
+      + html + '</span>';
+  }
+  return html;
+}
+
 function peOnMobileEditInput() {
   if (!peState || !peMobileEditActive) return;
   const o = peState.objects.find(x => x.id === peMobileEditActive.id);
@@ -25597,12 +25618,10 @@ function peOnMobileEditInput() {
   if (!o || !t) return;
   const text = t.value;
   o.text = text;
-  const html = (typeof peEscapeHtml === 'function' ? peEscapeHtml(text) : peEscapeHtmlLite(text))
-    .replace(/\n/g, '<br>');
-  o.html = html;
+  o.html = peMobilePlainTextToHtml(text, o);
   const el = peInlineEditorDomEl();
   if (el) {
-    el.textContent = text;
+    el.innerHTML = o.html || '';
     if (typeof peSyncTextEmptyClass === 'function') peSyncTextEmptyClass(el, o);
   }
   // Keep the invisible proxy in sync when landscape window owns typing.
@@ -25647,9 +25666,13 @@ function pePositionMobileEditOverlay() {
   t.style.textAlign = cs.textAlign || 'left';
   const o = peState && peState.objects.find(x => x.id === peMobileEditActive.id);
   t.style.color = (o && o.color) || cs.color || '#111';
-  t.style.background = (o && o.type === 'callout')
-    ? (o.bg || 'rgba(255, 248, 180, 0.95)')
-    : 'rgba(255,255,255,0.02)';
+  if (o && o.type === 'callout') {
+    t.style.background = o.bg || 'rgba(255, 248, 180, 0.95)';
+  } else if (o && o.type === 'text' && o.bg) {
+    t.style.background = o.bg;
+  } else {
+    t.style.background = 'rgba(255,255,255,0.02)';
+  }
 }
 
 const PE_MKB_LAYOUTS = {
@@ -25818,7 +25841,10 @@ function peStartMobileEditOverlay(o) {
   if (el) {
     el.contentEditable = 'false';
     el.classList.add('pe-mobile-overlay-host', 'pe-inline-edit');
-    el.textContent = o.text || '';
+    // Keep html (incl. background hilite spans) — never wipe with textContent.
+    el.innerHTML = o.html != null
+      ? o.html
+      : peMobilePlainTextToHtml(o.text || '', o);
     if (typeof peSyncTextEmptyClass === 'function') peSyncTextEmptyClass(el, o);
   }
 
@@ -26682,17 +26708,22 @@ function peUpdateObjectsLayout() {
   }
   let missing = false;
   peState.objects.forEach(o => {
-    const el = layer.querySelector('[data-pe-id="' + o.id + '"]');
+    // Prefer the outer .pe-obj (text has a nested [data-pe-id] on the inner node).
+    let el = layer.querySelector('.pe-obj[data-pe-id="' + o.id + '"]');
+    if (!el) el = layer.querySelector('[data-pe-id="' + o.id + '"]');
     if (!el) { missing = true; return; }
     el.style.left = (o.x * W) + 'px';
     el.style.top = (o.y * H) + 'px';
     if (o.type === 'text') {
       const outer = el.classList.contains('pe-obj-text-outer') ? el : el.querySelector('.pe-obj-text-outer') || el;
       if (outer) {
+        outer.style.left = (o.x * W) + 'px';
+        outer.style.top = (o.y * H) + 'px';
         outer.style.transformOrigin = 'center center';
         outer.style.transform = o.rot ? 'rotate(' + o.rot + 'deg)' : '';
       }
-      const inner = el.querySelector('.pe-obj-text') || (el.classList.contains('pe-obj-text') ? el : null);
+      const inner = (outer || el).querySelector('.pe-obj-text')
+        || (el.classList.contains('pe-obj-text') ? el : null);
       if (inner) {
         inner.style.fontSize = (o.fontPt * peState.scale) + 'px';
         inner.style.color = o.color;
@@ -27720,10 +27751,30 @@ function peApplyColorPickerValue() {
 
   peColorPreview.items.forEach((item) => {
     const { el, obj } = item;
+    // Mobile overlay hosts are contentEditable=false — force editable for execCommand.
+    const forcedEdit = el.contentEditable !== 'true';
+    if (forcedEdit) el.contentEditable = 'true';
     el.innerHTML = item.snapshotHtml;
-    peRestoreSelectionOffsets(el, item.offsets);
-    if (kind === 'color') document.execCommand('foreColor', false, hex);
-    else document.execCommand('hiliteColor', false, hex || 'transparent');
+    try { el.focus({ preventScroll: true }); } catch (_) { try { el.focus(); } catch (__) {} }
+    if (item.offsets) {
+      peRestoreSelectionOffsets(el, item.offsets);
+    } else {
+      try {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      } catch (_) {}
+    }
+    if (kind === 'color') {
+      document.execCommand('foreColor', false, hex);
+    } else {
+      try { document.execCommand('hiliteColor', false, hex || 'transparent'); }
+      catch (_) {
+        try { document.execCommand('backColor', false, hex || 'transparent'); } catch (__) {}
+      }
+    }
 
     item.snapshotHtml = peGetCleanTextHtml(el);
     obj.html = item.snapshotHtml;
@@ -27738,11 +27789,24 @@ function peApplyColorPickerValue() {
         obj.bg = hex;
       }
     }
+
+    if (forcedEdit) {
+      el.contentEditable = 'false';
+      if (peUsesMobileEditOverlay() && peState && peState.inlineEditId === obj.id) {
+        el.classList.add('pe-mobile-overlay-host', 'pe-inline-edit');
+      }
+    }
   });
 
   if (propInput && document.activeElement !== propInput) propInput.value = hex;
   peColorPickerDirty = true;
   peUpdateColorPickerUi();
+  // Keep mobile typing surface in sync (bg shows on the overlay).
+  if (peMobileEditActive) pePositionMobileEditOverlay();
+  if (peUsesMobileEditOverlay() && peState?.inlineEditId) {
+    peState.inlineEditFocusPending = true;
+    peFocusInlineEditorNow();
+  }
 }
 
 function peCloseColorPickerSession() {
@@ -27905,32 +27969,47 @@ function peClearBgForObj(o) {
   const el = peGetInlineTextEl(o);
   if (!el) return;
   const wasEditingLive = peState.inlineEditId === o.id;
+  const needsForce = el.contentEditable !== 'true';
   let tempEditable = false;
-  if (!wasEditingLive) {
+  if (needsForce) {
     tempEditable = true;
     el.contentEditable = 'true';
   }
-  el.focus();
+  try { el.focus({ preventScroll: true }); } catch (_) { try { el.focus(); } catch (__) {} }
   const range = document.createRange();
   range.selectNodeContents(el);
   const sel = window.getSelection();
   sel.removeAllRanges();
   sel.addRange(range);
-  document.execCommand('hiliteColor', false, 'transparent');
+  try { document.execCommand('hiliteColor', false, 'transparent'); }
+  catch (_) { try { document.execCommand('backColor', false, 'transparent'); } catch (__) {} }
   o.bg = null;
   o.html = peGetCleanTextHtml(el);
   o.text = el.innerText.replace(/\r\n/g, '\n');
   peSyncTextEmptyClass(el, o);
-  if (wasEditingLive) {
-    const range2 = document.createRange();
-    range2.selectNodeContents(el);
-    range2.collapse(false);
-    const sel2 = window.getSelection();
-    sel2.removeAllRanges();
-    sel2.addRange(range2);
+  if (tempEditable) {
+    el.contentEditable = 'false';
+    if (wasEditingLive && peUsesMobileEditOverlay()) {
+      el.classList.add('pe-mobile-overlay-host', 'pe-inline-edit');
+    } else {
+      try { el.blur(); } catch (_) {}
+    }
+  }
+  if (wasEditingLive && peUsesMobileEditOverlay()) {
+    pePositionMobileEditOverlay();
+    peState.inlineEditFocusPending = true;
+    peFocusInlineEditorNow();
+  } else if (wasEditingLive) {
+    try {
+      const range2 = document.createRange();
+      range2.selectNodeContents(el);
+      range2.collapse(false);
+      const sel2 = window.getSelection();
+      sel2.removeAllRanges();
+      sel2.addRange(range2);
+    } catch (_) {}
   } else {
-    window.getSelection().removeAllRanges();
-    if (tempEditable) { el.contentEditable = 'false'; el.blur(); }
+    try { window.getSelection().removeAllRanges(); } catch (_) {}
   }
 }
 
@@ -29022,6 +29101,14 @@ function peBindTextSelHandleDragGuards() {
   };
   const onPtrUp = () => {
     peTextSelPointerDown = false;
+    // Tap on page text (no pan): always clear object selection — the text
+    // layer is outside the selected object's bounds.
+    if (peTextLayerTouchPending && peState?.objSelectMode
+        && (peState.sel || (peState.multiSel && peState.multiSel.length))) {
+      const onPageTextSel = peIsEditorPageTextSelection();
+      peSelect(null, { keepPageTextSelection: onPageTextSel });
+      if (!onPageTextSel) peClearEditorPageTextSelection();
+    }
     peClearTextLayerTouchPending();
     peEndTextSelHandleDrag();
   };
@@ -29081,7 +29168,13 @@ function peBindTextSelHandleDragGuards() {
     if (!peIsEditorPageTextSelection()) return;
     // Long-press is creating a new selection: cancel a deferred pan, but do
     // NOT enter handle-drag / edge-scroll unless the finger is on a handle.
-    if (peTextLayerTouchPending) peTextLayerTouchPending = null;
+    // Also deselect objects — the gesture landed outside them on the text layer.
+    if (peTextLayerTouchPending) {
+      if (peState.sel || (peState.multiSel && peState.multiSel.length)) {
+        peSelect(null, { keepPageTextSelection: true });
+      }
+      peTextLayerTouchPending = null;
+    }
     // Fix gap→page-start jumps before other handle logic runs.
     if (typeof peRepairTouchTextSelection === 'function') peRepairTouchTextSelection();
     if (!(peTextSelPointerDown || peTextSelHandleDragging)) return;
@@ -30176,8 +30269,10 @@ function peProcessDrag(clientX, clientY) {
           d.obj.frames = d.frames0.map(f => ({ x: f.x + ndx, y: f.y + ndy, w: f.w, h: f.h }));
         }
       }
-      if (peState.inlineEditId === d.obj.id && d.obj.type === 'text') peUpdateObjectsLayout();
-      else peRedrawObjects();
+      if (peState.inlineEditId === d.obj.id && d.obj.type === 'text') {
+        peUpdateObjectsLayout();
+        if (peMobileEditActive) pePositionMobileEditOverlay();
+      } else peRedrawObjects();
       return;
     }
   }
@@ -30209,8 +30304,10 @@ function peProcessDrag(clientX, clientY) {
         d.obj.frames = d.frames0.map(f => ({ x: f.x + ndx, y: f.y + ndy, w: f.w, h: f.h }));
       }
     }
-    if (peState.inlineEditId === d.obj.id && d.obj.type === 'text') peUpdateObjectsLayout();
-    else peRedrawObjects();
+    if (peState.inlineEditId === d.obj.id && d.obj.type === 'text') {
+      peUpdateObjectsLayout();
+      if (peMobileEditActive) pePositionMobileEditOverlay();
+    } else peRedrawObjects();
   } else if (d.kind === 'resize') {
     d.obj.w = Math.max(0.02, d.ow + dx / W);
     d.obj.h = Math.max(0.02, d.oh + dy / H);
@@ -30338,6 +30435,7 @@ function peProcessDrag(clientX, clientY) {
     if (d.inlineTextResize || peState.inlineEditId === d.obj.id) {
       peUpdateObjectsLayout(); // apply fontSize first so size math is correct
       peTextSetPosFromFixedCorner(d.obj, d.oppCorner, d.anchorX, d.anchorY, W, H);
+      if (peMobileEditActive) pePositionMobileEditOverlay();
     } else {
       peRedrawObjects();
       peTextSetPosFromFixedCorner(d.obj, d.oppCorner, d.anchorX, d.anchorY, W, H);
