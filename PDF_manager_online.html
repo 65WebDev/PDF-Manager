@@ -1220,7 +1220,7 @@
     .pe-tools-divider-nav { display: none; }
     /* Zoom + Cancel/Save — stays on row 1 right until stage 2 */
     .pe-toolbar-tail {
-      display: flex; flex-wrap: nowrap; align-items: center; gap: 16px;
+      display: flex; flex-wrap: nowrap; align-items: center; gap: 6px;
       flex: 0 0 auto; white-space: nowrap;
       position: relative; z-index: 2; order: 4;
     }
@@ -1231,6 +1231,12 @@
     }
     .pe-scale input[type=range] { width: 84px; height: 21px; margin: 0; touch-action: none; }
     .pe-end-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+    /* Equal Cancel / Save width; gaps match tool buttons (6px). */
+    #peEndActions .pe-btn {
+      min-width: 7.25em;
+      justify-content: center;
+      box-sizing: border-box;
+    }
 
     /* Stage 2: scale + Cancel/Save on their own row, right-aligned (no overlap) */
     .pe-toolbar.pe-tb-tail-wrap .pe-toolbar-tail,
@@ -1744,10 +1750,125 @@
       caret-color: transparent;
     }
     .pe-toolbar.pe-tb-tools-wrap .pe-toolbar-tail {
-      justify-content: space-between;
+      justify-content: flex-start;
+      gap: 6px;
       max-width: 100%;
       box-sizing: border-box;
     }
+    .pe-toolbar.pe-tb-tools-wrap .pe-scale {
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    .pe-toolbar.pe-tb-tools-wrap .pe-scale input[type=range] {
+      flex: 1 1 auto;
+      width: auto;
+      min-width: 56px;
+    }
+    /* Active target while picking text color vs background. */
+    #pePropColorWrap.pe-color-picking,
+    #pePropBgWrap.pe-color-picking {
+      outline: 2px solid #8fd0ff;
+      outline-offset: 2px;
+      border-radius: 8px;
+      background: rgba(52, 152, 219, 0.32);
+      box-shadow: 0 0 0 1px rgba(143, 208, 255, 0.55);
+    }
+    #pePropColorWrap.pe-color-picking .pe-prop-icon,
+    #pePropBgWrap.pe-color-picking .pe-prop-icon {
+      color: #8fd0ff;
+      opacity: 1;
+    }
+    /* Landscape: in-app keyboard window (avoids system OSK covering the page). */
+    #peMobileKbWin {
+      display: none;
+      position: fixed;
+      z-index: 2147483001;
+      left: 50%;
+      bottom: max(8px, env(safe-area-inset-bottom, 0px));
+      transform: translateX(-50%);
+      width: min(720px, calc(100vw - 16px));
+      max-height: min(52vh, 340px);
+      flex-direction: column;
+      gap: 6px;
+      padding: 8px 8px 10px;
+      box-sizing: border-box;
+      background: #243342;
+      border: 1px solid rgba(255,255,255,.18);
+      border-radius: 12px;
+      box-shadow: 0 10px 28px rgba(0,0,0,.45);
+      color: #fff;
+    }
+    #peMobileKbWin.open {
+      display: flex;
+    }
+    #peMobileKbWin .pe-mkb-head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    #peMobileKbWin .pe-mkb-title {
+      font-size: 12px;
+      font-weight: 600;
+      opacity: .85;
+      flex: 1 1 auto;
+      min-width: 0;
+    }
+    #peMobileKbWin .pe-mkb-done {
+      flex: 0 0 auto;
+      border: 1px solid rgba(255,255,255,.22);
+      background: #3498db;
+      color: #fff;
+      border-radius: 8px;
+      padding: 6px 12px;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    #peMobileKbWin .pe-mkb-text {
+      width: 100%;
+      min-height: 44px;
+      max-height: 72px;
+      resize: none;
+      border-radius: 8px;
+      border: 1px solid rgba(255,255,255,.2);
+      background: #fff;
+      color: #111;
+      font-size: 16px;
+      line-height: 1.35;
+      padding: 8px 10px;
+      box-sizing: border-box;
+      caret-color: #111;
+    }
+    #peMobileKbWin .pe-mkb-keys {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: manipulation;
+    }
+    #peMobileKbWin .pe-mkb-row {
+      display: flex;
+      gap: 4px;
+      justify-content: center;
+    }
+    #peMobileKbWin .pe-mkb-key {
+      flex: 1 1 0;
+      min-width: 0;
+      min-height: 34px;
+      border: 1px solid rgba(255,255,255,.16);
+      border-radius: 6px;
+      background: #3d5468;
+      color: #fff;
+      font-size: 14px;
+      font-weight: 600;
+      padding: 0 2px;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+    #peMobileKbWin .pe-mkb-key:active { background: #3498db; }
+    #peMobileKbWin .pe-mkb-key.wide { flex: 1.4 1 0; font-size: 12px; }
+    #peMobileKbWin .pe-mkb-key.space { flex: 4 1 0; }
+    #peMobileKbWin .pe-mkb-key.util { background: #2c3e50; font-size: 12px; }
     .pe-stage-focus-spacer {
       width: 100%;
       height: 0;
@@ -5082,6 +5203,14 @@
       </div>
     </div>
     <textarea id="peOskProxy" inputmode="text" autocomplete="off" autocapitalize="off" spellcheck="false" tabindex="-1" aria-hidden="true"></textarea>
+    <div id="peMobileKbWin" aria-hidden="true">
+      <div class="pe-mkb-head">
+        <span class="pe-mkb-title">Ввод текста</span>
+        <button type="button" class="pe-mkb-done" id="peMobileKbDone">Готово</button>
+      </div>
+      <textarea class="pe-mkb-text" id="peMobileKbText" inputmode="none" autocomplete="off" autocapitalize="off" spellcheck="false" rows="2"></textarea>
+      <div class="pe-mkb-keys" id="peMobileKbKeys" aria-label="Клавиатура"></div>
+    </div>
     <input type="file" id="peImgInput" accept="image/png,image/jpeg" style="display:none">
   </div>
 
@@ -25357,13 +25486,25 @@ function peEnableHlComment(o) {
 /** Touch devices: edit via real <textarea> (contentEditable rarely opens OSK). */
 let peMobileEditActive = null; // { id, type }
 let peMobileEditListenersBound = false;
+let peMobileKbState = { lang: 'ru', shift: false, symbols: false, built: false };
 
 function peUsesMobileEditOverlay() {
   return typeof isTouchDevice !== 'undefined' && isTouchDevice;
 }
 
+/** Landscape mobile: in-app keyboard window instead of system OSK. */
+function peUsesMobileKbWindow() {
+  return peUsesMobileEditOverlay()
+    && typeof window.matchMedia === 'function'
+    && window.matchMedia('(orientation: landscape)').matches;
+}
+
 function peOskEl() {
   return document.getElementById('peOskProxy');
+}
+
+function peMobileKbTextEl() {
+  return document.getElementById('peMobileKbText');
 }
 
 function peEscapeHtmlLite(s) {
@@ -25372,8 +25513,17 @@ function peEscapeHtmlLite(s) {
     .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-/** Arm the textarea during the user gesture (before the editor DOM exists). */
+function peMobileEditInputEl() {
+  if (peUsesMobileKbWindow()) return peMobileKbTextEl() || peOskEl();
+  return peOskEl();
+}
+
+/** Arm input during the user gesture (before the editor DOM exists). */
 function peArmOskProxy(clientX, clientY) {
+  if (peUsesMobileKbWindow()) {
+    peShowMobileKbWindow('');
+    return true;
+  }
   const t = peOskEl();
   if (!t) return false;
   t.classList.add('pe-osk-active');
@@ -25399,10 +25549,35 @@ function peArmOskProxy(clientX, clientY) {
 function peBindMobileEditListeners() {
   if (peMobileEditListenersBound) return;
   const t = peOskEl();
-  if (!t) return;
+  const kbText = peMobileKbTextEl();
   peMobileEditListenersBound = true;
-  t.addEventListener('input', peOnMobileEditInput);
-  t.addEventListener('keydown', peOnMobileEditKeydown);
+  if (t) {
+    t.addEventListener('input', peOnMobileEditInput);
+    t.addEventListener('keydown', peOnMobileEditKeydown);
+  }
+  if (kbText) {
+    kbText.addEventListener('input', peOnMobileEditInput);
+    kbText.addEventListener('keydown', peOnMobileEditKeydown);
+    // Keep system OSK down while the in-app keyboard window is open.
+    kbText.addEventListener('focus', () => {
+      if (!peUsesMobileKbWindow()) return;
+      try { kbText.setAttribute('readonly', 'readonly'); } catch (_) {}
+      setTimeout(() => { try { kbText.removeAttribute('readonly'); } catch (_) {} }, 0);
+    });
+  }
+  document.getElementById('peMobileKbDone')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    peSyncMobileEditOverlayToObj();
+    if (!peState || !peMobileEditActive) {
+      peHideMobileKbWindow();
+      return;
+    }
+    const o = peState.objects.find(x => x.id === peMobileEditActive.id);
+    if (o && o.type === 'callout') peEndCalloutEdit(true);
+    else peFinishTextInlineEdit({ keepTool: true, keepSelection: true });
+  });
+  peEnsureMobileKbBuilt();
 }
 
 function peOnMobileEditKeydown(e) {
@@ -25418,7 +25593,7 @@ function peOnMobileEditKeydown(e) {
 function peOnMobileEditInput() {
   if (!peState || !peMobileEditActive) return;
   const o = peState.objects.find(x => x.id === peMobileEditActive.id);
-  const t = peOskEl();
+  const t = peMobileEditInputEl();
   if (!o || !t) return;
   const text = t.value;
   o.text = text;
@@ -25430,12 +25605,28 @@ function peOnMobileEditInput() {
     el.textContent = text;
     if (typeof peSyncTextEmptyClass === 'function') peSyncTextEmptyClass(el, o);
   }
+  // Keep the invisible proxy in sync when landscape window owns typing.
+  const proxy = peOskEl();
+  if (proxy && proxy !== t && proxy.value !== text) proxy.value = text;
   pePositionMobileEditOverlay();
 }
 
 function pePositionMobileEditOverlay() {
+  if (!peMobileEditActive) return;
+  if (peUsesMobileKbWindow()) {
+    // Landscape: typing UI is the floating keyboard window; hide the proxy overlay.
+    const t = peOskEl();
+    if (t) {
+      t.classList.remove('pe-osk-active');
+      t.style.left = '-9999px';
+      t.style.top = '0px';
+      t.style.width = '1px';
+      t.style.height = '1px';
+    }
+    return;
+  }
   const t = peOskEl();
-  if (!t || !peMobileEditActive) return;
+  if (!t) return;
   const el = peInlineEditorDomEl();
   if (!el) return;
   const r = el.getBoundingClientRect();
@@ -25454,7 +25645,6 @@ function pePositionMobileEditOverlay() {
   t.style.fontStyle = cs.fontStyle || 'normal';
   t.style.lineHeight = cs.lineHeight || 'normal';
   t.style.textAlign = cs.textAlign || 'left';
-  // Prefer the object's color (host text is forced transparent).
   const o = peState && peState.objects.find(x => x.id === peMobileEditActive.id);
   t.style.color = (o && o.color) || cs.color || '#111';
   t.style.background = (o && o.type === 'callout')
@@ -25462,17 +25652,168 @@ function pePositionMobileEditOverlay() {
     : 'rgba(255,255,255,0.02)';
 }
 
+const PE_MKB_LAYOUTS = {
+  ru: [
+    ['й', 'ц', 'у', 'к', 'е', 'н', 'г', 'ш', 'щ', 'з', 'х'],
+    ['ф', 'ы', 'в', 'а', 'п', 'р', 'о', 'л', 'д', 'ж', 'э'],
+    ['shift', 'я', 'ч', 'с', 'м', 'и', 'т', 'ь', 'б', 'ю', 'back']
+  ],
+  en: [
+    ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
+    ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
+    ['shift', 'z', 'x', 'c', 'v', 'b', 'n', 'm', 'back']
+  ],
+  sym: [
+    ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
+    ['-', '/', ':', ';', '(', ')', '₽', '&', '@', '"'],
+    ['abc', '.', ',', '?', '!', "'", '+', '=', 'back']
+  ]
+};
+
+function peEnsureMobileKbBuilt() {
+  const host = document.getElementById('peMobileKbKeys');
+  if (!host || peMobileKbState.built) {
+    if (host) peRenderMobileKbKeys();
+    return;
+  }
+  peMobileKbState.built = true;
+  host.addEventListener('pointerdown', (e) => {
+    const btn = e.target.closest('button[data-mkb]');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    peHandleMobileKbKey(btn.dataset.mkb);
+  });
+  peRenderMobileKbKeys();
+}
+
+function peRenderMobileKbKeys() {
+  const host = document.getElementById('peMobileKbKeys');
+  if (!host) return;
+  const layout = peMobileKbState.symbols
+    ? PE_MKB_LAYOUTS.sym
+    : PE_MKB_LAYOUTS[peMobileKbState.lang] || PE_MKB_LAYOUTS.ru;
+  const shift = !!peMobileKbState.shift;
+  const rows = layout.map((row) => {
+    const keys = row.map((k) => {
+      if (k === 'shift') {
+        return '<button type="button" class="pe-mkb-key util wide" data-mkb="shift">'
+          + (shift ? '⇧' : '⬆') + '</button>';
+      }
+      if (k === 'back') {
+        return '<button type="button" class="pe-mkb-key util wide" data-mkb="back">⌫</button>';
+      }
+      if (k === 'abc') {
+        return '<button type="button" class="pe-mkb-key util wide" data-mkb="abc">ABC</button>';
+      }
+      const label = (!peMobileKbState.symbols && shift) ? k.toUpperCase() : k;
+      return '<button type="button" class="pe-mkb-key" data-mkb="'
+        + label.replace(/"/g, '&quot;') + '">' + label + '</button>';
+    }).join('');
+    return '<div class="pe-mkb-row">' + keys + '</div>';
+  });
+  const langLabel = peMobileKbState.lang === 'ru' ? 'EN' : 'RU';
+  rows.push(
+    '<div class="pe-mkb-row">'
+    + '<button type="button" class="pe-mkb-key util wide" data-mkb="sym">'
+    + (peMobileKbState.symbols ? 'ABC' : '123') + '</button>'
+    + '<button type="button" class="pe-mkb-key util wide" data-mkb="lang">' + langLabel + '</button>'
+    + '<button type="button" class="pe-mkb-key space" data-mkb="space">пробел</button>'
+    + '<button type="button" class="pe-mkb-key util wide" data-mkb="enter">⏎</button>'
+    + '</div>'
+  );
+  host.innerHTML = rows.join('');
+}
+
+function peHandleMobileKbKey(code) {
+  const t = peMobileKbTextEl();
+  if (!t) return;
+  if (code === 'shift') {
+    peMobileKbState.shift = !peMobileKbState.shift;
+    peRenderMobileKbKeys();
+    return;
+  }
+  if (code === 'sym') {
+    peMobileKbState.symbols = !peMobileKbState.symbols;
+    peMobileKbState.shift = false;
+    peRenderMobileKbKeys();
+    return;
+  }
+  if (code === 'abc') {
+    peMobileKbState.symbols = false;
+    peMobileKbState.shift = false;
+    peRenderMobileKbKeys();
+    return;
+  }
+  if (code === 'lang') {
+    peMobileKbState.lang = peMobileKbState.lang === 'ru' ? 'en' : 'ru';
+    peMobileKbState.symbols = false;
+    peMobileKbState.shift = false;
+    peRenderMobileKbKeys();
+    return;
+  }
+  let start = t.selectionStart != null ? t.selectionStart : t.value.length;
+  let end = t.selectionEnd != null ? t.selectionEnd : t.value.length;
+  if (code === 'back') {
+    if (start === end && start > 0) start -= 1;
+    t.value = t.value.slice(0, start) + t.value.slice(end);
+    try { t.setSelectionRange(start, start); } catch (_) {}
+  } else if (code === 'space') {
+    t.value = t.value.slice(0, start) + ' ' + t.value.slice(end);
+    try { t.setSelectionRange(start + 1, start + 1); } catch (_) {}
+  } else if (code === 'enter') {
+    t.value = t.value.slice(0, start) + '\n' + t.value.slice(end);
+    try { t.setSelectionRange(start + 1, start + 1); } catch (_) {}
+  } else {
+    t.value = t.value.slice(0, start) + code + t.value.slice(end);
+    try { t.setSelectionRange(start + code.length, start + code.length); } catch (_) {}
+    if (peMobileKbState.shift && !peMobileKbState.symbols) {
+      peMobileKbState.shift = false;
+      peRenderMobileKbKeys();
+    }
+  }
+  peOnMobileEditInput();
+}
+
+function peShowMobileKbWindow(text) {
+  peBindMobileEditListeners();
+  peEnsureMobileKbBuilt();
+  const win = document.getElementById('peMobileKbWin');
+  const t = peMobileKbTextEl();
+  if (!win || !t) return false;
+  win.classList.add('open');
+  win.setAttribute('aria-hidden', 'false');
+  if (text != null) t.value = text;
+  t.setAttribute('inputmode', 'none');
+  // Focus without summoning the system keyboard when possible.
+  try {
+    t.setAttribute('readonly', 'readonly');
+    t.focus({ preventScroll: true });
+    setTimeout(() => {
+      try { t.removeAttribute('readonly'); } catch (_) {}
+      try { t.setSelectionRange(t.value.length, t.value.length); } catch (_) {}
+    }, 0);
+  } catch (_) {}
+  return true;
+}
+
+function peHideMobileKbWindow() {
+  const win = document.getElementById('peMobileKbWin');
+  const t = peMobileKbTextEl();
+  if (win) {
+    win.classList.remove('open');
+    win.setAttribute('aria-hidden', 'true');
+  }
+  if (t) {
+    try { if (document.activeElement === t) t.blur(); } catch (_) {}
+  }
+}
+
 /** Keep a real textarea focused for the whole mobile edit session. */
 function peStartMobileEditOverlay(o) {
   if (!peUsesMobileEditOverlay() || !o) return false;
-  const t = peOskEl();
-  if (!t) return false;
   peBindMobileEditListeners();
-  const alreadyFocused = document.activeElement === t;
   peMobileEditActive = { id: o.id, type: o.type };
-  t.classList.add('pe-osk-active');
-  t.setAttribute('aria-hidden', 'false');
-  if (t.value !== (o.text || '')) t.value = o.text || '';
   const el = peInlineEditorDomEl();
   if (el) {
     el.contentEditable = 'false';
@@ -25480,6 +25821,26 @@ function peStartMobileEditOverlay(o) {
     el.textContent = o.text || '';
     if (typeof peSyncTextEmptyClass === 'function') peSyncTextEmptyClass(el, o);
   }
+
+  if (peUsesMobileKbWindow()) {
+    const proxy = peOskEl();
+    if (proxy) {
+      proxy.value = o.text || '';
+      proxy.classList.remove('pe-osk-active');
+    }
+    peShowMobileKbWindow(o.text || '');
+    pePositionMobileEditOverlay();
+    if (peState) peState.inlineEditFocusPending = false;
+    return true;
+  }
+
+  peHideMobileKbWindow();
+  const t = peOskEl();
+  if (!t) return false;
+  const alreadyFocused = document.activeElement === t;
+  t.classList.add('pe-osk-active');
+  t.setAttribute('aria-hidden', 'false');
+  if (t.value !== (o.text || '')) t.value = o.text || '';
   pePositionMobileEditOverlay();
   try {
     if (!alreadyFocused) t.focus();
@@ -25496,6 +25857,7 @@ function peStopMobileEditOverlay() {
   const host = document.querySelector('.pe-mobile-overlay-host');
   if (host) host.classList.remove('pe-mobile-overlay-host');
   peMobileEditActive = null;
+  peHideMobileKbWindow();
   if (!t) return;
   t.classList.remove('pe-osk-active');
   t.setAttribute('aria-hidden', 'true');
@@ -25509,7 +25871,7 @@ function peStopMobileEditOverlay() {
 
 function peSyncMobileEditOverlayToObj() {
   if (!peState || !peMobileEditActive) return;
-  const t = peOskEl();
+  const t = peMobileEditInputEl();
   const o = peState.objects.find(x => x.id === peMobileEditActive.id);
   if (!t || !o) return;
   const text = t.value;
@@ -25525,11 +25887,11 @@ function peFocusInlineEditorNow() {
   const editId = peState.inlineEditId;
   const o = peState.objects.find(x => x.id === editId);
   if (!o) return false;
-  // Mobile: keep the real textarea focused — never hand off to contentEditable.
+  // Mobile: keep the real textarea / in-app keyboard focused.
   if (peUsesMobileEditOverlay() && (o.type === 'text' || o.type === 'callout')) {
     const ok = peStartMobileEditOverlay(o);
     if (ok) peState.inlineEditFocusPending = false;
-    return ok;
+    return !!ok;
   }
   let el = null;
   if (o.type === 'text') {
@@ -25846,8 +26208,12 @@ function peScrollInlineEditorAboveKeyboard(force) {
   if (!el) return;
   peScrollElementIntoTextFocusCenter(el, { force: !!force, withPad: true });
   const osk = peOskEl();
+  const kbText = peMobileKbTextEl();
   const focused = document.activeElement === el
-    || (peMobileEditActive && osk && document.activeElement === osk);
+    || (peMobileEditActive && osk && document.activeElement === osk)
+    || (peMobileEditActive && kbText && document.activeElement === kbText)
+    || (peMobileEditActive && peUsesMobileKbWindow()
+        && document.getElementById('peMobileKbWin')?.classList.contains('open'));
   if (!focused) {
     peState.inlineEditFocusPending = true;
     peFocusInlineEditorNow();
@@ -25905,8 +26271,19 @@ function peScheduleTextEditVisibility(o) {
     peFocusInlineEditorNow();
     if (peMobileEditActive) pePositionMobileEditOverlay();
   };
+  // Landscape in-app keyboard: no system-OSK pad/scroll dance.
+  if (peUsesMobileKbWindow()) {
+    refocus();
+    peClearEditorKbScrollRoom();
+    return;
+  }
   const pass = (allowScroll) => {
     if (!peState || peState.inlineEditId !== editId) return;
+    if (peUsesMobileKbWindow()) {
+      refocus();
+      peClearEditorKbScrollRoom();
+      return;
+    }
     const obj = peState.objects.find(x => x.id === editId) || o;
     refocus();
     // Wait until the OSK is actually up before scrolling — early scroll kills it.
@@ -27283,6 +27660,13 @@ function pePositionColorPickerPopup(popup, anchorEl) {
   popup.style.top = Math.round(y) + 'px';
 }
 
+function peSetColorPickerTargetHighlight(kind) {
+  const colorWrap = document.getElementById('pePropColorWrap');
+  const bgWrap = document.getElementById('pePropBgWrap');
+  colorWrap?.classList.toggle('pe-color-picking', kind === 'color');
+  bgWrap?.classList.toggle('pe-color-picking', kind === 'bg');
+}
+
 function peOpenColorPicker(kind, anchorEl, objs) {
   const targets = objs.map(o => ({ obj: o, el: peGetInlineTextEl(o) })).filter(t => t.el);
   if (!targets.length) return;
@@ -27293,6 +27677,7 @@ function peOpenColorPicker(kind, anchorEl, objs) {
   const [r, g, b] = peHexToRgb(startHex);
   const [h, s, v] = peRgbToHsv(r, g, b);
   peColorPickerState = { h, s, v, kind, anchorEl };
+  peSetColorPickerTargetHighlight(kind);
   peUpdateColorPickerUi();
   const popup = document.getElementById('peColorPickerPopup');
   popup.style.display = 'flex';
@@ -27305,6 +27690,7 @@ function peCloseColorPickerUi() {
   const popup = document.getElementById('peColorPickerPopup');
   if (popup) popup.style.display = 'none';
   peColorPickerState = null;
+  peSetColorPickerTargetHighlight(null);
 }
 
 function peUpdateColorPickerUi() {
@@ -32137,19 +32523,31 @@ function peObjMouseDown(e, o) {
     const barPadR = parseFloat(barStyles.paddingRight) || 0;
     const cropL = cropRect.left - barRect.left;
     const delR = delRect.right - barRect.left;
+    const portrait = typeof window.matchMedia === 'function'
+      && window.matchMedia('(orientation: portrait)').matches;
+    const textBtn = document.getElementById('peToolText');
+    const textRect = textBtn?.getBoundingClientRect();
 
-    // Title left == Crop left (transform so flex flow / lead layout stay put).
+    // Portrait: center «Страница №» over Crop…Text. Landscape: left-align with Crop.
     title.style.transform = '';
-    const titleLeft = title.getBoundingClientRect().left - barRect.left;
-    const dx = Math.round(cropL - titleLeft);
-    title.style.transform = dx ? ('translateX(' + dx + 'px)') : '';
+    const tRect = title.getBoundingClientRect();
+    if (portrait && textRect && textRect.width > 0) {
+      const groupMid = ((cropRect.left + textRect.right) / 2) - barRect.left;
+      const titleMid = (tRect.left - barRect.left) + tRect.width / 2;
+      const dx = Math.round(groupMid - titleMid);
+      title.style.transform = dx ? ('translateX(' + dx + 'px)') : '';
+    } else {
+      const titleLeft = tRect.left - barRect.left;
+      const dx = Math.round(cropL - titleLeft);
+      title.style.transform = dx ? ('translateX(' + dx + 'px)') : '';
+    }
 
-    // Tail: scale starts at Crop; Cancel/Save end at Delete.
-    // padding is relative to the flex content box (inside bar padding).
+    // Tail: scale starts at Crop; Cancel/Save end at Delete; 6px gaps (scale grows).
     const padL = Math.max(0, Math.round(cropL - barPadL));
     const contentRight = barRect.width - barPadR;
     const padR = Math.max(0, Math.round(contentRight - delR));
-    tail.style.justifyContent = 'space-between';
+    tail.style.justifyContent = 'flex-start';
+    tail.style.gap = '6px';
     tail.style.paddingLeft = padL + 'px';
     tail.style.paddingRight = padR + 'px';
   }
@@ -32459,6 +32857,18 @@ function peObjMouseDown(e, o) {
     if (peBar) peTbRo.observe(peBar);
   }
   window.addEventListener('resize', peUpdateToolbarWrap);
+  window.addEventListener('orientationchange', () => {
+    peUpdateToolbarWrap();
+    // Switch portrait OSK overlay ↔ landscape in-app keyboard window.
+    if (peState?.inlineEditId && peMobileEditActive) {
+      const o = peState.objects.find(x => x.id === peState.inlineEditId);
+      if (o) {
+        peSyncMobileEditOverlayToObj();
+        peStartMobileEditOverlay(o);
+        peScheduleTextEditVisibility(o);
+      }
+    }
+  });
   peInitPropsPanelDrag();
   document.getElementById('peMenuToggleBtn')?.addEventListener('click', (e) => {
     e.preventDefault();
