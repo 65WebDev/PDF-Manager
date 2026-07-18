@@ -12733,6 +12733,13 @@
         layer.dataset.eventsShielded = '1';
         layer.addEventListener('mousedown', (e) => {
           if (e.button === 0) {
+            // Touch Object-select pan is handled on pointerdown; ignore the
+            // synthetic mouse follow-up so it does not start a text drag.
+            if (layer.id === 'peTextLayer' && typeof peState !== 'undefined' && peState &&
+                peState.objSelectMode && typeof isTouchDevice !== 'undefined' && isTouchDevice) {
+              e.stopPropagation();
+              return;
+            }
             // This capture-phase stopPropagation prevents the event from ever
             // reaching the inner .textLayer, so the selection gap-guard must be
             // armed right here - it cannot listen for this event itself.
@@ -12767,7 +12774,15 @@
           }
         }, true);
         layer.addEventListener('pointerdown', (e) => {
-          if (e.button === 0) e.stopPropagation();
+          if (e.button !== 0) return;
+          // Object-select + touch on PDF text: start pan/marquee (otherwise the
+          // text layer swallows the gesture and Hand-like pan never runs).
+          if (layer.id === 'peTextLayer' &&
+              typeof peOnObjSelectTextLayerPointerDown === 'function' &&
+              peOnObjSelectTextLayerPointerDown(e)) {
+            return;
+          }
+          e.stopPropagation();
         }, true);
         layer.addEventListener('click', (e) => {
           e.stopPropagation();
@@ -24950,10 +24965,23 @@ function peInlineEditorDomEl() {
 }
 
 /**
- * Scroll so the editor will remain visible above a typical mobile OSK.
- * Uses an estimated keyboard height when visualViewport has not shrunk yet,
- * so a block created near the page bottom is already clear before typing.
+ * Scroll a stage-local point into the upper band of the wrap BEFORE creating
+ * a text block — so when the OSK covers the lower half, the caret is already
+ * on-screen. stageX/stageY are CSS px relative to #peStage.
  */
+function peScrollStagePointIntoKeyboardSafeZone(stageX, stageY) {
+  const wrap = document.getElementById('peStageWrap');
+  const stage = document.getElementById('peStage');
+  if (!wrap || !stage) return;
+  const sr = stage.getBoundingClientRect();
+  const wr = wrap.getBoundingClientRect();
+  const pointScreenY = sr.top + stageY;
+  // Park the tap point ~18% down the wrap (well above a typical OSK).
+  const targetScreenY = wr.top + Math.max(72, wrap.clientHeight * 0.18);
+  wrap.scrollTop += pointScreenY - targetScreenY;
+}
+
+/** Scroll the active editor into the upper wrap band (estimated OSK). */
 function peScrollInlineEditorIntoWrapSafeZone() {
   if (!peState?.inlineEditId) return;
   const el = peInlineEditorDomEl();
@@ -24961,23 +24989,15 @@ function peScrollInlineEditorIntoWrapSafeZone() {
   if (!el || !wrap) return;
   const wr = wrap.getBoundingClientRect();
   const er = el.getBoundingClientRect();
-  const vv = window.visualViewport;
-  const vvH = vv ? vv.height : window.innerHeight;
-  // If the OSK is not open yet, reserve ~48% of the window for it.
-  const kbOpen = vv && vv.height < window.innerHeight * 0.85;
-  const kbReserve = kbOpen
-    ? Math.max(0, wr.bottom - (vv.offsetTop + vv.height))
-    : Math.round(Math.min(window.innerHeight * 0.52, Math.max(260, window.innerHeight * 0.45)));
-  const usableBottom = wr.top + Math.max(140, wrap.clientHeight - kbReserve) * 0.72;
-  if (er.bottom > usableBottom) {
-    wrap.scrollTop += er.bottom - usableBottom;
-  }
-  if (er.top < wr.top + 10) {
-    wrap.scrollTop += er.top - (wr.top + 10);
-  }
+  const targetScreenY = wr.top + Math.max(72, wrap.clientHeight * 0.18);
+  wrap.scrollTop += er.top - targetScreenY;
 }
 
-/** Fine-tune against the real visualViewport once the OSK has settled. */
+/**
+ * Keep the caret inside the real visualViewport (after OSK animation).
+ * Targets ~30% from the top of the visible viewport — not merely “above”
+ * the keyboard bottom edge (which still leaves bottom-page blocks covered).
+ */
 function peScrollInlineEditorAboveKeyboard(force) {
   if (!peState?.inlineEditId) return;
   if (!force && Date.now() < peTextKbScrollQuietUntil) return;
@@ -24986,27 +25006,30 @@ function peScrollInlineEditorAboveKeyboard(force) {
   if (!el || !wrap) return;
   const vv = window.visualViewport;
   const viewTop = vv ? vv.offsetTop : 0;
-  const viewBottom = vv ? (vv.offsetTop + vv.height) : window.innerHeight;
-  const margin = 36;
+  const viewH = vv ? vv.height : window.innerHeight;
+  const viewBottom = viewTop + viewH;
   const er = el.getBoundingClientRect();
-  let scrolled = false;
-  if (er.bottom > viewBottom - margin) {
-    wrap.scrollTop += er.bottom - (viewBottom - margin);
-    scrolled = true;
+  const targetY = viewTop + viewH * 0.28;
+  const elMid = er.top + Math.min(er.height, 24) / 2;
+  let delta = elMid - targetY;
+  // Also clamp if still below the visible bottom with a margin.
+  if (er.bottom > viewBottom - 40) {
+    delta = Math.max(delta, er.bottom - (viewBottom - 40));
   }
   if (er.top < viewTop + 12) {
-    wrap.scrollTop += er.top - (viewTop + 12);
-    scrolled = true;
+    delta = Math.min(delta, er.top - (viewTop + 12));
   }
-  if (scrolled && document.activeElement !== el) {
-    peState.inlineEditFocusPending = true;
-    peFocusInlineEditorNow();
+  if (Math.abs(delta) > 6) {
+    wrap.scrollTop += delta;
+    if (document.activeElement !== el) {
+      peState.inlineEditFocusPending = true;
+      peFocusInlineEditorNow();
+    }
   }
 }
 
 function peOnVisualViewportForText() {
   if (!peState?.inlineEditId) return;
-  // Prefer real keyboard geometry as soon as it changes.
   peScrollInlineEditorAboveKeyboard(true);
   peFocusInlineEditorNow();
 }
@@ -25025,31 +25048,32 @@ function peBindTextKeyboardGuards(on) {
 
 /**
  * After a new text block is focused: keep OSK up and keep the caret visible.
- * Immediate safe-zone scroll runs at create; retries catch late OSK layout.
+ * Point is pre-scrolled at create; retries catch late OSK / vv layout.
  */
 function peScheduleTextEditVisibility(o) {
   if (!peState || !o) return;
-  peArmTextKeyboardQuiet(80);
+  peArmTextKeyboardQuiet(40);
   peBindTextKeyboardGuards(true);
   clearTimeout(peTextKbTimer);
   const editId = o.id;
-  const pass = (force) => {
+  const pass = () => {
     if (!peState || peState.inlineEditId !== editId) return;
     const el = peInlineEditorDomEl();
     if (el && document.activeElement !== el) {
       peState.inlineEditFocusPending = true;
       peFocusInlineEditorNow();
     }
-    if (force) peScrollInlineEditorAboveKeyboard(true);
-    else peScrollInlineEditorIntoWrapSafeZone();
+    peScrollInlineEditorIntoWrapSafeZone();
+    peScrollInlineEditorAboveKeyboard(true);
   };
-  // Immediate + a few passes while the OSK animates in.
-  pass(false);
+  pass();
   peTextKbTimer = setTimeout(() => {
-    pass(true);
-    setTimeout(() => pass(true), 180);
-    setTimeout(() => pass(true), 420);
-  }, 60);
+    pass();
+    setTimeout(pass, 120);
+    setTimeout(pass, 280);
+    setTimeout(pass, 500);
+    setTimeout(pass, 800);
+  }, 30);
 }
 
 function peInlineTextObj() {
@@ -28526,6 +28550,93 @@ function peCapturePointer(e, el) {
 let pePinchBlockObjUntil = 0;
 let peSelSnapBeforePinch = null;
 let peObjMarqueeTap = { t: 0, x: 0, y: 0 };
+/** Deferred touch hit on an object — committed on move/tap, cancelled on pinch. */
+let peTouchObjPending = null;
+let peTouchObjCommit = false;
+
+function peCancelTouchObjPending() {
+  if (!peTouchObjPending) return;
+  const snap = peTouchObjPending.snap;
+  peTouchObjPending = null;
+  if (snap && peState && !peSelectionEqual(peSelectionSnapshot(), snap)) {
+    peRestoreSelectionSnapshot(snap);
+  }
+}
+
+function peFlushTouchObjPending(clientX, clientY, reason) {
+  const p = peTouchObjPending;
+  if (!p) return;
+  peTouchObjPending = null;
+  if (reason === 'cancel' || pePinchActive || Date.now() < pePinchBlockObjUntil) {
+    if (p.snap && peState && !peSelectionEqual(peSelectionSnapshot(), p.snap)) {
+      peRestoreSelectionSnapshot(p.snap);
+    }
+    return;
+  }
+  // Re-enter peObjMouseDown with defer bypass to actually select / start move.
+  peTouchObjCommit = true;
+  try {
+    const fake = {
+      pointerType: 'touch',
+      isPrimary: true,
+      button: 0,
+      clientX: p.startClientX,
+      clientY: p.startClientY,
+      pointerId: p.pointerId,
+      shiftKey: !!p.shiftKey,
+      cancelable: true,
+      target: p.target,
+      currentTarget: p.currentTarget,
+      preventDefault() {},
+      stopPropagation() {}
+    };
+    peObjMouseDown(fake, p.o);
+    if (reason === 'move' && peState?.drag && typeof peProcessDrag === 'function') {
+      peProcessDrag(clientX, clientY);
+    }
+  } finally {
+    peTouchObjCommit = false;
+  }
+}
+
+/** Empty-canvas / text-layer gesture in Object-select: dbl→marquee, else pan. */
+function peStartObjSelectBlankGesture(e) {
+  if (!peState || !peState.objSelectMode) return;
+  const pt = peStagePoint(e);
+  const now = Date.now();
+  const tapDist = Math.hypot(e.clientX - peObjMarqueeTap.x, e.clientY - peObjMarqueeTap.y);
+  const isDbl = (now - peObjMarqueeTap.t) < 550 && tapDist < 48;
+  peObjMarqueeTap = { t: now, x: e.clientX, y: e.clientY };
+  if (isDbl) {
+    peState.drag = {
+      kind: 'obj-marquee',
+      startX: pt.x, startY: pt.y, curX: pt.x, curY: pt.y,
+      additive: e.shiftKey,
+      baseIds: e.shiftKey ? peGetSelectedObjects().map(o => o.id) : null
+    };
+    peUpdatePanUi();
+  } else {
+    peStartPanView(e);
+    if (peState.drag && peState.drag.kind === 'pan-view') {
+      peState.drag.fromObjSelectTap = true;
+      peState.drag.additive = !!e.shiftKey;
+    }
+  }
+}
+
+/** Touch on PDF text in Object-select: pan like Hand (text layer would eat the gesture). */
+function peOnObjSelectTextLayerPointerDown(e) {
+  if (!peState || !peState.objSelectMode) return false;
+  if (!peIsPrimaryPointer(e)) return false;
+  const touchLike = e.pointerType === 'touch' || e.pointerType === 'pen';
+  if (!touchLike) return false;
+  if (pePinchActive || Date.now() < pePinchBlockObjUntil) return true;
+  if (e.cancelable) e.preventDefault();
+  e.stopPropagation();
+  peCapturePointer(e, document.getElementById('peStage') || e.currentTarget);
+  peStartObjSelectBlankGesture(e);
+  return true;
+}
 
 function peObjMouseDown(e, o) {
   if (!peIsPrimaryPointer(e)) return;
@@ -28534,28 +28645,32 @@ function peObjMouseDown(e, o) {
   if (pePinchActive || (touchLike && Date.now() < pePinchBlockObjUntil)) {
     if (touchLike && e.cancelable) e.preventDefault();
     e.stopPropagation();
+    peCancelTouchObjPending();
     return;
   }
-  if (touchLike) peSelSnapBeforePinch = peSelectionSnapshot();
-  // Corner / rotate handles must win even while the text is being edited —
-  // the early “caret / border-move” return used to swallow them.
-  if (o.type === 'text' && e.target.classList && e.target.classList.contains('pe-text-corner-handle')
-      && peState?.sel === o) {
-    if (touchLike && e.cancelable) e.preventDefault();
-    e.stopPropagation();
-    peStartTextCornerResize(e, o, e.target.dataset.corner);
-    return;
-  }
-  if (o.type === 'text' && e.target.classList && e.target.classList.contains('pe-text-rotate-handle')
-      && peState?.sel === o) {
-    if (touchLike && e.cancelable) e.preventDefault();
-    e.stopPropagation();
-    peStartTextRotate(e, o);
-    return;
-  }
+  const onHandle = !!(e.target.classList && (
+    e.target.classList.contains('pe-text-corner-handle') ||
+    e.target.classList.contains('pe-text-rotate-handle') ||
+    e.target.classList.contains('pe-redact-handle') ||
+    e.target.classList.contains('pe-callout-rim')
+  ));
   // While editing text/callout content: allow native caret placement on the
   // inner area (must NOT preventDefault). Border still moves the block.
   if (o.type === 'text' && peState?.inlineEditId === o.id) {
+    if (onHandle && e.target.classList.contains('pe-text-corner-handle') && peState.sel === o) {
+      if (touchLike && e.cancelable) e.preventDefault();
+      e.stopPropagation();
+      peCancelTouchObjPending();
+      peStartTextCornerResize(e, o, e.target.dataset.corner);
+      return;
+    }
+    if (onHandle && e.target.classList.contains('pe-text-rotate-handle') && peState.sel === o) {
+      if (touchLike && e.cancelable) e.preventDefault();
+      e.stopPropagation();
+      peCancelTouchObjPending();
+      peStartTextRotate(e, o);
+      return;
+    }
     if (peIsTextBorderHit(e.currentTarget, e.clientX, e.clientY)) {
       if (touchLike && e.cancelable) e.preventDefault();
       peStartInlineTextMove(e, o);
@@ -28572,6 +28687,29 @@ function peObjMouseDown(e, o) {
     }
     return;
   }
+  // Handles must not be deferred (resize/rotate need the same gesture).
+  if (onHandle && peState?.sel === o) {
+    peCancelTouchObjPending();
+    // fall through to handle branches below
+  } else if (touchLike && !peTouchObjCommit) {
+    // Defer touch select/move until we know this is not the first finger of a pinch.
+    peSelSnapBeforePinch = peSelectionSnapshot();
+    peTouchObjPending = {
+      o,
+      snap: peSelSnapBeforePinch,
+      startClientX: e.clientX,
+      startClientY: e.clientY,
+      pointerId: e.pointerId,
+      shiftKey: !!e.shiftKey,
+      target: e.target,
+      currentTarget: e.currentTarget
+    };
+    if (e.cancelable) e.preventDefault();
+    e.stopPropagation();
+    peCapturePointer(e, e.currentTarget);
+    return;
+  }
+  if (touchLike) peSelSnapBeforePinch = peSelectionSnapshot();
   // Double-tap to edit callout/text: detect before preventDefault so the
   // focus() call stays inside an uncancelled user gesture (mobile OSK).
   const maybeDblEdit = (o.type === 'callout' || o.type === 'text')
@@ -28905,21 +29043,25 @@ function peObjMouseDown(e, o) {
     pePinchLastMidX = null;
     pePinchLastMidY = null;
     peSelSnapBeforePinch = null;
+    peCancelTouchObjPending();
     // Keep blocking object hits briefly while fingers lift.
-    pePinchBlockObjUntil = Date.now() + 280;
+    pePinchBlockObjUntil = Date.now() + 350;
   }
   wrap.addEventListener('touchstart', (e) => {
     if (!peState || typeof isTouchDevice === 'undefined' || !isTouchDevice) return;
     if (e.touches.length !== 2) return;
-    // First finger often selected an object under it — undo that for pinch.
-    pePinchBlockObjUntil = Date.now() + 500;
-    if (peSelSnapBeforePinch) {
+    // First finger often landed on an object — abort deferred select / restore.
+    pePinchBlockObjUntil = Date.now() + 600;
+    pePinchActive = true;
+    if (peTouchObjPending) {
+      peFlushTouchObjPending(0, 0, 'cancel');
+    } else if (peSelSnapBeforePinch) {
       const cur = peSelectionSnapshot();
       if (!peSelectionEqual(cur, peSelSnapBeforePinch)) {
         peRestoreSelectionSnapshot(peSelSnapBeforePinch);
       }
-      peSelSnapBeforePinch = null;
     }
+    peSelSnapBeforePinch = null;
     // Draw tools: first finger may have started a shape/redact/text — cancel.
     if (peState.drag) {
       if (!peCancelActiveDraw()) {
@@ -28940,7 +29082,6 @@ function peObjMouseDown(e, o) {
         peRedrawObjects();
       }
     }
-    pePinchActive = true;
     pePinchStartDist = peTouchDist(e.touches[0], e.touches[1]);
     pePinchStartSlider = peState.zoomSlider || 100;
     pePinchLastMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
@@ -29267,11 +29408,14 @@ function peObjMouseDown(e, o) {
       // One undo step after the input is completed rolls back the creation of the entire block
       // (we take a picture only before creating it; commit it when exiting editing).
       peCommitEditorHistory();
+      // Scroll the tap point into the upper band BEFORE creating/focusing so
+      // the OSK covers empty page below, not the new text block.
+      if (touchLike || (typeof isTouchDevice !== 'undefined' && isTouchDevice)) {
+        peScrollStagePointIntoKeyboardSafeZone(pt.x, pt.y);
+      }
       const o = { id: ++peState.seq, type: 'text', text: '', fontPt: 16, color: '#d90000', x: pt.x / W, y: pt.y / H };
       peState.objects.push(o);
       peState.draftTextId = o.id;
-      // Focus inside the user gesture first (keeps the keyboard up). Scroll
-      // above the keyboard is deferred until the OSK settles.
       peBeginInlineEdit(o, { isNewDraft: true });
       peFocusInlineEditorNow();
       if (typeof isTouchDevice !== 'undefined' && isTouchDevice) {
@@ -29288,27 +29432,7 @@ function peObjMouseDown(e, o) {
     }
     if (tool === 'select' && peState.objSelectMode) {
       e.preventDefault();
-      const now = Date.now();
-      const tapDist = Math.hypot(e.clientX - peObjMarqueeTap.x, e.clientY - peObjMarqueeTap.y);
-      const isDbl = (now - peObjMarqueeTap.t) < 550 && tapDist < 48;
-      peObjMarqueeTap = { t: now, x: e.clientX, y: e.clientY };
-      // Marquee only on double-tap; single finger always pans like Hand
-      // (start pan-view immediately — no hold threshold / peCanPan gate).
-      if (isDbl) {
-        peState.drag = {
-          kind: 'obj-marquee',
-          startX: pt.x, startY: pt.y, curX: pt.x, curY: pt.y,
-          additive: e.shiftKey,
-          baseIds: e.shiftKey ? peGetSelectedObjects().map(o => o.id) : null
-        };
-        peUpdatePanUi();
-      } else {
-        peStartPanView(e);
-        if (peState.drag && peState.drag.kind === 'pan-view') {
-          peState.drag.fromObjSelectTap = true;
-          peState.drag.additive = e.shiftKey;
-        }
-      }
+      peStartObjSelectBlankGesture(e);
       return;
     }
     if (tool === 'select' && !peState.sel && peCanPan()) {
@@ -29320,12 +29444,28 @@ function peObjMouseDown(e, o) {
   });
 
   peBindPointerMoveUp((e) => {
+    // Deferred object hit: commit as move once the finger travels, unless pinch.
+    if (peTouchObjPending && !pePinchActive) {
+      const dist = Math.hypot(e.clientX - peTouchObjPending.startClientX,
+                             e.clientY - peTouchObjPending.startClientY);
+      if (dist >= 10) peFlushTouchObjPending(e.clientX, e.clientY, 'move');
+    }
     if (!peState || !peState.drag) return;
     peState.drag.shiftKey = e.shiftKey;
     peState.drag.lastClientX = e.clientX;
     peState.drag.lastClientY = e.clientY;
     peProcessDrag(e.clientX, e.clientY);
   }, () => {
+    // Tap on object (no pinch, little/no move) → select now.
+    if (peTouchObjPending && !pePinchActive) {
+      peFlushTouchObjPending(
+        peTouchObjPending.startClientX,
+        peTouchObjPending.startClientY,
+        'tap'
+      );
+    } else if (peTouchObjPending) {
+      peFlushTouchObjPending(0, 0, 'cancel');
+    }
     // Single-finger gesture ended without becoming a pinch — drop the snap
     // so a later pinch does not restore a stale selection.
     if (!pePinchActive) peSelSnapBeforePinch = null;
