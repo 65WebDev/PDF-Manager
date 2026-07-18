@@ -2409,9 +2409,14 @@
         pointer-events: none;
       }
       body.zoom-text-select-active:not(.nav-mode-active) .page .textLayer .endOfContent.active,
-      #pageEditModal.pe-obj-select-mode #peStage .textLayer .endOfContent.active,
-      #peTextLayer.pe-text-active .textLayer .endOfContent.active {
+      #pageEditModal.pe-obj-select-mode #peStage .textLayer .endOfContent.active {
         top: 0;
+      }
+      /* Editor text layer: keep the guard below the glyphs. Expanding it to
+         top:0 makes caretRangeFromPoint jump to the page start in word gaps. */
+      #peTextLayer.pe-text-active .textLayer .endOfContent.active {
+        top: 100%;
+        pointer-events: none;
       }
       /*NOTE: ::selection and ::-moz-selection must stay in SEPARATE rules.
          Chrome doesn't recognize ::-moz-selection, and one invalid selector in
@@ -23961,6 +23966,9 @@ function peDestroy() {
   if (pePinchRaf) { cancelAnimationFrame(pePinchRaf); pePinchRaf = 0; }
   pePinchActive = false;
   pePinchPending = null;
+  pePinchLastAppliedMidX = null;
+  pePinchLastAppliedMidY = null;
+  if (peState) peState._liveZoomMul = null;
   document.getElementById('pageEditModal')?.classList.remove('pe-alt-highlight');
   const layer = document.getElementById('peObjLayer');
   if (layer) layer.innerHTML = '';
