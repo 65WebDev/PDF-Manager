@@ -1572,6 +1572,30 @@
       border: 1px solid rgba(255,255,255,.35); box-sizing: border-box;
     }
     .pe-color-swatch-btn:hover { border-color: #fff; transform: scale(1.12); }
+    /* Mobile: presets only — SV / hue / RGB do not fit the viewport. */
+    @media (pointer: coarse) {
+      #peColorPickerPopup {
+        width: auto;
+        max-width: calc(100vw - 16px);
+        gap: 6px;
+        padding: 8px;
+      }
+      #peColorPickerPopup .pe-color-sv,
+      #peColorPickerPopup .pe-color-hue-row,
+      #peColorPickerPopup .pe-color-rgb-row {
+        display: none !important;
+      }
+      #peColorPickerPopup .pe-color-swatches {
+        flex-wrap: wrap;
+        gap: 6px;
+        justify-content: center;
+      }
+      #peColorPickerPopup .pe-color-swatch-btn {
+        width: 28px;
+        height: 28px;
+        border-radius: 5px;
+      }
+    }
     /*When previewing a new color/background by highlighting, hide the native one
        highlighting the selection (otherwise the blue fill of the browser makes it difficult to see what
        there will actually be color). We do not touch the Range/Selection itself - only
@@ -3943,8 +3967,14 @@
       #pageEditModal .pe-toolbar {
         padding-top: max(8px, env(safe-area-inset-top, 0px));
         padding-left: max(8px, env(safe-area-inset-left, 0px));
-        /* Reserve room for #peMenuToggleBtn (42px) on the right. */
-        padding-right: max(52px, calc(8px + env(safe-area-inset-right, 0px) + 42px));
+        /* Keep original toolbar padding so wrap/icon sizing matches pre-toggle layout. */
+        padding-right: max(8px, env(safe-area-inset-right, 0px));
+      }
+      /* Overlay toggle must not steal flex width from tool icons (36×36).
+         Tail gets a local inset so Cancel/Save sit clear of the absolute button. */
+      #pageEditModal:not(.pe-menu-collapsed) .pe-toolbar-tail {
+        padding-right: 40px;
+        box-sizing: border-box;
       }
       /* Hide/show editor top menu — same idea as #menuToggleBtn in the preview. */
       #pageEditModal #peMenuToggleBtn {
@@ -3953,8 +3983,9 @@
         top: max(8px, env(safe-area-inset-top, 0px));
         right: max(8px, env(safe-area-inset-right, 0px));
         z-index: 40;
-        width: 42px;
-        height: 42px;
+        /* Match .pe-btn-square so toolbar chrome / icon scale stays unchanged. */
+        width: 36px;
+        height: 36px;
         padding: 0;
         border: none;
         border-radius: 8px;
@@ -3968,8 +3999,8 @@
         touch-action: manipulation;
       }
       #pageEditModal #peMenuToggleBtn svg {
-        width: 22px;
-        height: 22px;
+        width: 20px;
+        height: 20px;
         display: block;
       }
       #pageEditModal #peMenuToggleBtn:active,
@@ -4018,6 +4049,10 @@
         position: absolute;
         /* 10px visible → 15px hit (1.5×): inset -(10*0.25)= -2.5px */
         inset: -2.5px;
+      }
+      /* Redact anchors: 1.7× hit (10 → 17): inset -(10*0.35)= -3.5px */
+      #pageEditModal .pe-text-corner-handle.pe-redact-handle::after {
+        inset: -3.5px;
       }
       #pageEditModal #peCrop .pe-handle::after {
         inset: -5px;
@@ -22177,7 +22212,9 @@ function peCheckEdgeAutoScroll(clientX, clientY, opts) {
       'obj-marquee', 'obj-select-gesture',
       'move', 'move-pending', 'move-multi', 'move-pending-multi',
       'callout-box-move', 'resize', 'resize-text', 'resize-shape',
-      'resize-callout-box', 'resize-redact', 'resize-hl'
+      'resize-callout-box', 'resize-redact', 'resize-hl', 'resize-vector',
+      /* Create / stretch shapes & marks near the stage edge. */
+      'shape-draw', 'freehand-draw', 'redact-draw', 'highlight-draw'
     ];
     if (!edgeKinds.includes(peState.drag.kind) && !textSelDrag) { peStopAutoScroll(); return; }
   }
@@ -22185,9 +22222,18 @@ function peCheckEdgeAutoScroll(clientX, clientY, opts) {
   const wrap = document.getElementById('peStageWrap');
   if (!wrap) return;
   const r = wrap.getBoundingClientRect();
-  // Wider band + faster scroll while adjusting PDF text selection handles.
-  const TH = textSelDrag ? 96 : 52;
-  const speed = textSelDrag ? 22 : 14;
+  // Text-sel: large band (~1/3 of the stage) so scroll starts well before the rim.
+  // Shape draw/resize: a bit wider than the default object-move band.
+  const shapeEdge = !!(peState.drag && (
+    peState.drag.kind === 'shape-draw' || peState.drag.kind === 'freehand-draw'
+    || peState.drag.kind === 'redact-draw' || peState.drag.kind === 'highlight-draw'
+    || peState.drag.kind === 'resize-shape' || peState.drag.kind === 'resize-vector'
+    || peState.drag.kind === 'resize-redact'
+  ));
+  const TH = textSelDrag
+    ? Math.max(168, Math.round(Math.min(r.width, r.height) * 0.34))
+    : (shapeEdge ? 88 : 52);
+  const speed = textSelDrag ? 26 : (shapeEdge ? 18 : 14);
   let dx = 0, dy = 0;
   if (clientX - r.left < TH) dx = -1;
   else if (r.right - clientX < TH) dx = 1;
@@ -26825,8 +26871,11 @@ function peBeginColorPreviewIfNeeded(kind, targets, wholeMode) {
 /** Keep the custom color popup fully inside the visual viewport. */
 function pePositionColorPickerPopup(popup, anchorEl) {
   if (!popup || !anchorEl) return;
-  const mw = popup.offsetWidth || 190;
-  const mh = popup.offsetHeight || 280;
+  const coarse = typeof window.matchMedia === 'function'
+    && window.matchMedia('(pointer: coarse)').matches;
+  // Mobile shows presets only (no SV/RGB), so the default height is much smaller.
+  const mw = popup.offsetWidth || (coarse ? 180 : 190);
+  const mh = popup.offsetHeight || (coarse ? 48 : 280);
   const vv = window.visualViewport;
   const viewL = (vv ? vv.offsetLeft : 0) + 6;
   const viewT = (vv ? vv.offsetTop : 0) + 6;
@@ -27752,6 +27801,7 @@ function peShowPageToolsCtxMenu(clientX, clientY) {
 
   menu.classList.add('visible');
   menu.setAttribute('aria-hidden', 'false');
+  peArmCtxMenuOutsideGuard(600);
   const w = menu.offsetWidth, h = menu.offsetHeight;
   let x = clientX, y = clientY;
   if (x + w > window.innerWidth - 6) x = window.innerWidth - w - 6;
@@ -28107,11 +28157,14 @@ function peBindTextSelHandleDragGuards() {
         menu.classList.remove('visible');
         menu.setAttribute('aria-hidden', 'true');
       }
-      // Scroll toward the moving caret (more reliable than the last touch point
-      // when the OS owns the blue handle gesture).
-      const focusPt = pePageTextSelFocusClientPoint();
-      if (focusPt) peCheckEdgeAutoScroll(focusPt.x, focusPt.y);
-      else peCheckEdgeAutoScroll(peTextSelLastClientX, peTextSelLastClientY);
+      // Prefer the finger for edge proximity — the caret often lags far behind
+      // the touch, which made scroll start only at the very rim.
+      const fx = peTextSelLastClientX, fy = peTextSelLastClientY;
+      if (fx != null && fy != null) peCheckEdgeAutoScroll(fx, fy);
+      else {
+        const focusPt = pePageTextSelFocusClientPoint();
+        if (focusPt) peCheckEdgeAutoScroll(focusPt.x, focusPt.y);
+      }
     }
   });
 }
@@ -28369,6 +28422,7 @@ function peShowTextSelCtxMenu(clientX, clientY, info) {
   }
   menu.classList.add('visible');
   menu.setAttribute('aria-hidden', 'false');
+  peArmCtxMenuOutsideGuard(600);
   pePositionTextSelCtxMenuAwayFromSelection(menu, clientX, clientY, info);
 }
 
@@ -28781,6 +28835,15 @@ function peOnTextSelCtxAction(action) {
   peRestoreTextSelRange(range);
 }
 
+/** Ignore outside mousedown/click that fire right after a long-press opens a menu. */
+let peCtxMenuIgnoreOutsideUntil = 0;
+function peArmCtxMenuOutsideGuard(ms) {
+  peCtxMenuIgnoreOutsideUntil = performance.now() + (ms == null ? 550 : ms);
+}
+function peShouldIgnoreCtxMenuOutside() {
+  return performance.now() < peCtxMenuIgnoreOutsideUntil;
+}
+
 function peShowObjCtxMenu(clientX, clientY) {
   const menu = document.getElementById('peObjCtxMenu');
   if (!menu) return;
@@ -28806,6 +28869,9 @@ function peShowObjCtxMenu(clientX, clientY) {
   if (hlCommentBtn) hlCommentBtn.style.display = 'none';
   menu.classList.add('visible');
   menu.setAttribute('aria-hidden', 'false');
+  // Long-press → contextmenu often arrives while the finger is still down;
+  // the following touchend/mousedown/click must not dismiss the menu.
+  peArmCtxMenuOutsideGuard(600);
   const w = menu.offsetWidth, h = menu.offsetHeight;
   let x = clientX, y = clientY;
   if (x + w > window.innerWidth - 6) x = window.innerWidth - w - 6;
@@ -28834,6 +28900,14 @@ function peOnObjContextMenu(e) {
   peHideCropCtxMenu();
   peHideTextSelCtxMenu();
   peHidePageToolsCtxMenu();
+  // Long-press opens the menu while the finger is still down. Drop the
+  // deferred touch-commit so pointerup does not re-enter peObjMouseDown
+  // (which would hide the menu immediately on release).
+  peTouchObjPending = null;
+  if (peState.drag) {
+    peState.drag = null;
+    peStopAutoScroll();
+  }
 
   const inSel = peState.sel === o || (peState.multiSel || []).includes(o);
   if (!inSel) peSelect(o);
@@ -29483,6 +29557,14 @@ function peFlushTouchObjPending(clientX, clientY, reason) {
     }
     return;
   }
+  // Object / page-tools context menu already shown from long-press — do not
+  // synthesize a tap that would hide it.
+  if (reason === 'tap' && typeof peShouldIgnoreCtxMenuOutside === 'function'
+      && peShouldIgnoreCtxMenuOutside()) {
+    return;
+  }
+  const objMenu = document.getElementById('peObjCtxMenu');
+  if (reason === 'tap' && objMenu && objMenu.classList.contains('visible')) return;
   // Re-enter peObjMouseDown with defer bypass to actually select / start move.
   peTouchObjCommit = true;
   try {
@@ -30597,6 +30679,7 @@ function peObjMouseDown(e, o) {
   peObjLayer.addEventListener('contextmenu', peOnObjContextMenu);
 
   document.addEventListener('mousedown', (e) => {
+    if (typeof peShouldIgnoreCtxMenuOutside === 'function' && peShouldIgnoreCtxMenuOutside()) return;
     const menu = document.getElementById('peObjCtxMenu');
     if (!menu || !menu.classList.contains('visible')) return;
     if (menu.contains(e.target)) return;
@@ -30604,6 +30687,7 @@ function peObjMouseDown(e, o) {
   }, true);
 
   document.addEventListener('mousedown', (e) => {
+    if (typeof peShouldIgnoreCtxMenuOutside === 'function' && peShouldIgnoreCtxMenuOutside()) return;
     const menu = document.getElementById('peTextSelCtxMenu');
     if (!menu || !menu.classList.contains('visible')) return;
     if (menu.contains(e.target)) return;
@@ -30611,6 +30695,7 @@ function peObjMouseDown(e, o) {
   }, true);
 
   document.addEventListener('mousedown', (e) => {
+    if (typeof peShouldIgnoreCtxMenuOutside === 'function' && peShouldIgnoreCtxMenuOutside()) return;
     const menu = document.getElementById('pePageToolsCtxMenu');
     if (!menu || !menu.classList.contains('visible')) return;
     if (menu.contains(e.target)) return;
@@ -30631,6 +30716,14 @@ function peObjMouseDown(e, o) {
     peOnTextSelCtxAction(btn.dataset.action);
   });
 
+  // Keep the object menu open through the finger-up that follows a long-press.
+  peObjCtxMenu.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  });
+  peObjCtxMenu.addEventListener('pointerdown', (e) => {
+    e.stopPropagation();
+  });
   peObjCtxMenu.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-action]');
     if (!btn || !peState) return;
@@ -30706,6 +30799,7 @@ function peObjMouseDown(e, o) {
     peShowPageToolsCtxMenu(e.clientX, e.clientY);
   });
   document.addEventListener('click', (e) => {
+    if (typeof peShouldIgnoreCtxMenuOutside === 'function' && peShouldIgnoreCtxMenuOutside()) return;
     if (peCropCtxMenu && !peCropCtxMenu.contains(e.target)) peHideCropCtxMenu();
     if (peObjCtxMenu && !peObjCtxMenu.contains(e.target)) peHideObjCtxMenu();
     if (peTextSelCtxMenu && !peTextSelCtxMenu.contains(e.target)) peHideTextSelCtxMenu();
