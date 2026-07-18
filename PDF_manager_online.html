@@ -3899,6 +3899,84 @@
       #pageEditModal #peRotR .rotate-glyph {
         font-size: 28px;
         line-height: 1;
+        /* translate after flip so +2px moves the glyph down on screen */
+        transform: translateY(2px) scaleX(-1) scaleY(-1);
+      }
+      /* Corner resize handles: 1.5× hit area via invisible padding (knob stays 10px). */
+      #pageEditModal .pe-text-corner-handle,
+      #pageEditModal .pe-handle {
+        position: absolute;
+      }
+      #pageEditModal .pe-text-corner-handle::after,
+      #pageEditModal .pe-handle::after {
+        content: '';
+        position: absolute;
+        /* 10px visible → 15px hit (1.5×): inset -(10*0.25)= -2.5px */
+        inset: -2.5px;
+      }
+      /* Object-select: enable PDF text selection on touch (fine-pointer rules
+         above never match on phones, so the layer stayed inert). */
+      #pageEditModal.pe-obj-select-mode #peTextLayer.pe-text-active {
+        pointer-events: none;
+        user-select: text;
+        -webkit-user-select: text;
+        cursor: text;
+      }
+      #pageEditModal.pe-obj-select-mode #peTextLayer.pe-text-active .page-text-layer-inner.textLayer {
+        user-select: text;
+        -webkit-user-select: text;
+        pointer-events: none;
+      }
+      #pageEditModal.pe-obj-select-mode #peTextLayer.pe-text-active .textLayer :is(span, br) {
+        color: rgba(0, 0, 0, 0);
+        -webkit-text-fill-color: transparent;
+        forced-color-adjust: none;
+        position: absolute;
+        white-space: pre;
+        cursor: text;
+        transform-origin: 0% 0%;
+        user-select: text;
+        -webkit-user-select: text;
+        pointer-events: auto;
+        touch-action: manipulation;
+      }
+      #pageEditModal.pe-obj-select-mode #peTextLayer.pe-text-active .textLayer span:not(.markedContent) {
+        padding-bottom: 3px;
+        padding-right: 20px;
+      }
+      #pageEditModal.pe-obj-select-mode #peTextLayer.pe-text-active .textLayer br::selection {
+        background: transparent;
+      }
+      #pageEditModal.pe-obj-select-mode #peTextLayer.pe-text-active .textLayer .endOfContent {
+        display: block;
+        position: absolute;
+        left: 0; right: 0; top: 100%; bottom: 0;
+        z-index: -1;
+        cursor: default;
+        user-select: none;
+        -webkit-user-select: none;
+        pointer-events: none;
+      }
+      #pageEditModal.pe-obj-select-mode #peTextLayer.pe-text-active .textLayer ::selection {
+        color: rgba(0, 0, 0, 0);
+        -webkit-text-fill-color: transparent;
+        forced-color-adjust: none;
+        background: transparent;
+      }
+      #pageEditModal.pe-obj-select-mode #peTextLayer.pe-text-active .tl-sel-highlight {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        overflow: hidden;
+      }
+      #pageEditModal.pe-obj-select-mode #peTextLayer.pe-text-active .tl-sel-highlight > div {
+        position: absolute;
+        background: rgba(0, 120, 215, 0.32);
+        forced-color-adjust: none;
+      }
+      /* Let text-layer hits win over stage touch-action:none while selecting. */
+      #pageEditModal.pe-obj-select-mode #peTextLayer.pe-text-active {
+        touch-action: manipulation;
       }
       #pageEditModal .pe-scale {
         font-size: 14px;
@@ -20800,6 +20878,9 @@ let pePinchStartDist = 0;
 let pePinchStartSlider = 100;
 let pePinchLastMidX = null;
 let pePinchLastMidY = null;
+let pePinchRaf = 0;
+let pePinchPending = null;
+let peTextKbTimer = null;
 let peTextClickSeq = { id: null, t: 0 };
 let peZoomFullRenderTimer = null;
 let peZoomRenderGen = 0;
@@ -21017,11 +21098,15 @@ async function peRenderStagePdf() {
   canvas.getContext('2d').drawImage(off, 0, 0);
   stage.classList.remove('pe-layout-zoom');
   // Full object rebuild steals contentEditable focus (mobile keyboard dies).
-  // While typing, only reflow existing nodes and re-focus the editor.
+  // While typing, only reflow existing nodes; re-focus only if focus was lost.
   if (peState.inlineEditId) {
     peUpdateObjectsLayout();
-    peState.inlineEditFocusPending = true;
-    peFocusInlineEditorIfNeeded();
+    const editingEl = peInlineTextEl() || document.querySelector(
+      '#peObjLayer .pe-obj-callout-box[data-pe-id="' + peState.inlineEditId + '"] .pe-callout-text');
+    if (editingEl && document.activeElement !== editingEl) {
+      peState.inlineEditFocusPending = true;
+      peFocusInlineEditorIfNeeded();
+    }
   } else {
     peRedrawObjects();
   }
@@ -21889,6 +21974,10 @@ function peApplyZoomSlider(val, anchorX, anchorY, options = {}) {
   peSyncScaleSliderUi(options.syncSlider !== false);
   peUpdatePanUi();
 
+  if (options.skipRender) {
+    peCancelZoomRender();
+    return;
+  }
   if (options.immediate) peFlushZoomRender();
   else peScheduleFullRender(options.debounce ?? 140);
 }
@@ -23477,6 +23566,12 @@ function peDestroy() {
   document.removeEventListener('keyup', peOnKeyUp, true);
   window.removeEventListener('blur', peOnWinBlurAlt);
   document.removeEventListener('mousedown', peGuardColorPreviewClick, true);
+  clearTimeout(peTextKbTimer);
+  peTextKbTimer = null;
+  peBindTextKeyboardGuards(false);
+  if (pePinchRaf) { cancelAnimationFrame(pePinchRaf); pePinchRaf = 0; }
+  pePinchActive = false;
+  pePinchPending = null;
   document.getElementById('pageEditModal')?.classList.remove('pe-alt-highlight');
   const layer = document.getElementById('peObjLayer');
   if (layer) layer.innerHTML = '';
@@ -23491,6 +23586,13 @@ function peDestroy() {
 
 function peOnWinResize() {
   if (!peState) return;
+  // Keyboard open/close fires resize on mobile — do not re-render the PDF
+  // (that rebuilds/blurs contentEditable and makes the OSK flash).
+  if (peState.inlineEditId) {
+    peUpdatePropsPosition();
+    peScrollInlineEditorAboveKeyboard();
+    return;
+  }
   const wrap = document.getElementById('peStageWrap');
   if (!wrap) return;
   peUpdatePropsPosition();
@@ -24769,30 +24871,72 @@ function peFocusInlineEditorIfNeeded() {
   });
 }
 
-/** Mobile: zoom/scroll so a new text block sits above the on-screen keyboard. */
-function peEnsureTextEditZoom(o, clientX, clientY) {
-  if (!peState || !o) return;
-  const sl = document.getElementById('peScaleSlider');
-  const min = sl ? parseInt(sl.min, 10) : 100;
-  const max = sl ? parseInt(sl.max, 10) : 200;
-  const target = Math.max(peState.zoomSlider || 100, 158);
-  const ax = clientX != null ? clientX : null;
-  const ay = clientY != null ? clientY : null;
-  peApplyZoomSlider(Math.min(max, Math.max(min, target)), ax, ay, {
-    debounce: 220,
-    syncSlider: true
-  });
+/** Scroll the active inline editor so it stays above the on-screen keyboard. */
+function peScrollInlineEditorAboveKeyboard() {
+  if (!peState?.inlineEditId) return;
+  const el = peInlineTextEl() || document.querySelector(
+    '#peObjLayer .pe-obj-callout-box[data-pe-id="' + peState.inlineEditId + '"] .pe-callout-text');
   const wrap = document.getElementById('peStageWrap');
-  const stage = document.getElementById('peStage');
-  if (!wrap || !stage) return;
-  const wr = wrap.getBoundingClientRect();
-  const sr = stage.getBoundingClientRect();
-  if (sr.width <= 0 || sr.height <= 0) return;
-  const tx = sr.left + (Number(o.x) || 0) * sr.width;
-  const ty = sr.top + (Number(o.y) || 0) * sr.height;
-  // Keep the caret in the upper ~22% of the wrap so the keyboard does not cover it.
-  wrap.scrollLeft += tx - (wr.left + wr.width * 0.5);
-  wrap.scrollTop += ty - (wr.top + Math.min(wr.height * 0.22, 140));
+  if (!el || !wrap) return;
+  const vv = window.visualViewport;
+  const viewTop = vv ? vv.offsetTop : 0;
+  const viewBottom = vv ? (vv.offsetTop + vv.height) : window.innerHeight;
+  const margin = 28;
+  const er = el.getBoundingClientRect();
+  if (er.bottom > viewBottom - margin) {
+    wrap.scrollTop += er.bottom - (viewBottom - margin);
+  }
+  if (er.top < viewTop + 12) {
+    wrap.scrollTop += er.top - (viewTop + 12);
+  }
+}
+
+function peOnVisualViewportForText() {
+  if (!peState?.inlineEditId) return;
+  peScrollInlineEditorAboveKeyboard();
+}
+
+function peBindTextKeyboardGuards(on) {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  if (on) {
+    vv.addEventListener('resize', peOnVisualViewportForText);
+    vv.addEventListener('scroll', peOnVisualViewportForText);
+  } else {
+    vv.removeEventListener('resize', peOnVisualViewportForText);
+    vv.removeEventListener('scroll', peOnVisualViewportForText);
+  }
+}
+
+/**
+ * After a new text block is focused, gently zoom (if needed) and keep the
+ * caret above the keyboard — deferred so it does not fight the OSK open gesture.
+ */
+function peScheduleTextEditVisibility(o) {
+  if (!peState || !o) return;
+  peBindTextKeyboardGuards(true);
+  clearTimeout(peTextKbTimer);
+  const editId = o.id;
+  const run = () => {
+    if (!peState || peState.inlineEditId !== editId) return;
+    const el = peInlineTextEl();
+    if (!el) return;
+    // Mild zoom only when still near fit — avoid a hard zoom that reflows focus.
+    if ((peState.zoomSlider || 100) < 135) {
+      const r = el.getBoundingClientRect();
+      peApplyZoomSlider(148, r.left + r.width / 2, r.top + r.height / 2, {
+        debounce: 500,
+        syncSlider: true
+      });
+    }
+    peScrollInlineEditorAboveKeyboard();
+    // Second pass after keyboard animation / zoom layout settle.
+    setTimeout(() => {
+      if (!peState || peState.inlineEditId !== editId) return;
+      peScrollInlineEditorAboveKeyboard();
+    }, 280);
+  };
+  peTextKbTimer = setTimeout(run, 320);
 }
 
 function peInlineTextObj() {
@@ -24979,6 +25123,7 @@ function peBeginInlineEdit(o, opts) {
   peState.inlineEditFocusPending = true;
   const skipSelectionHistory = !!(opts && opts.isNewDraft) || peState.draftTextId === o.id;
   peSelect(o, { skipSelectionHistory });
+  if (typeof isTouchDevice !== 'undefined' && isTouchDevice) peBindTextKeyboardGuards(true);
 }
 
 function peEndInlineEditForToolSwitch() {
@@ -24989,6 +25134,9 @@ function peEndInlineEditForToolSwitch() {
   peState.inlineEditId = null;
   peState.inlineEditFocusPending = false;
   peState.draftTextId = null;
+  clearTimeout(peTextKbTimer);
+  peTextKbTimer = null;
+  peBindTextKeyboardGuards(false);
   peState.sel = null;
   peState.multiSel = [];
   if (hadInline || removed) peCommitEditorHistory();
@@ -25002,6 +25150,9 @@ function peFinishTextInlineEdit(opts) {
   peState.inlineEditId = null;
   peState.inlineEditFocusPending = false;
   peState.draftTextId = null;
+  clearTimeout(peTextKbTimer);
+  peTextKbTimer = null;
+  peBindTextKeyboardGuards(false);
   if (opts && opts.keepTool && peState.tool === 'text') {
     peState.sel = null;
   } else if (!opts || !opts.keepSelection) {
@@ -25019,6 +25170,9 @@ function peEndInlineEdit(keepSelection) {
   peState.inlineEditId = null;
   peState.inlineEditFocusPending = false;
   peState.draftTextId = null;
+  clearTimeout(peTextKbTimer);
+  peTextKbTimer = null;
+  peBindTextKeyboardGuards(false);
   if (!keepSelection) peState.sel = null;
   peRedrawObjects();
   peUpdateProps();
@@ -28464,18 +28618,51 @@ function peObjMouseDown(e, o) {
   wrap.addEventListener('mousemove', peTrackZoomMouse);
   if (modal) modal.addEventListener('mousemove', peTrackZoomMouse);
 
-  // Mobile page editor: pinch-to-zoom (reuses peApplyZoomSlider anchors).
+  // Mobile page editor: pinch-to-zoom + pan (smoother than per-move PDF render).
   function peTouchDist(t1, t2) {
     const dx = t1.clientX - t2.clientX;
     const dy = t1.clientY - t2.clientY;
     return Math.hypot(dx, dy);
   }
+  function pePinchSliderFromDist(dist) {
+    if (pePinchStartDist <= 0) return pePinchStartSlider;
+    // Multiplicative zoom (not linear on the quadratic slider) + dampening.
+    const startMul = peSliderToZoomMul(pePinchStartSlider);
+    const ratio = Math.max(0.25, dist / pePinchStartDist);
+    const damped = Math.pow(ratio, 0.62);
+    const newMul = startMul * damped;
+    const min = peScaleSlider ? parseInt(peScaleSlider.min, 10) : 100;
+    const max = peScaleSlider ? parseInt(peScaleSlider.max, 10) : 200;
+    return Math.max(min, Math.min(max, peZoomMulToSlider(newMul)));
+  }
+  function peFlushPinchFrame() {
+    pePinchRaf = 0;
+    if (!pePinchActive || !peState || !pePinchPending) return;
+    const { midX, midY, dist } = pePinchPending;
+    pePinchPending = null;
+    const newSlider = pePinchSliderFromDist(dist);
+    // Layout-only during the gesture; sharp PDF redraw on finger-up.
+    peApplyZoomSlider(newSlider, midX, midY, { skipRender: true, syncSlider: true });
+  }
   function peEndEditorPinch(e) {
     if (!pePinchActive) return;
     if (e.touches && e.touches.length >= 2) return;
+    if (pePinchRaf) {
+      cancelAnimationFrame(pePinchRaf);
+      pePinchRaf = 0;
+    }
+    if (pePinchPending && peState) {
+      const { midX, midY, dist } = pePinchPending;
+      pePinchPending = null;
+      peApplyZoomSlider(pePinchSliderFromDist(dist), midX, midY, {
+        immediate: true,
+        syncSlider: true
+      });
+    } else {
+      peFlushZoomRender();
+    }
     pePinchActive = false;
     pePinchStartDist = 0;
-    peFlushZoomRender();
     pePinchLastMidX = null;
     pePinchLastMidY = null;
   }
@@ -28492,6 +28679,8 @@ function peObjMouseDown(e, o) {
     pePinchStartSlider = peState.zoomSlider || 100;
     pePinchLastMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
     pePinchLastMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+    pePinchPending = null;
+    peCancelZoomRender();
     e.preventDefault();
   }, { passive: false });
   wrap.addEventListener('touchmove', (e) => {
@@ -28499,24 +28688,16 @@ function peObjMouseDown(e, o) {
     e.preventDefault();
     const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
     const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-    // Pan: midpoint travel moves the viewport (works together with pinch zoom).
+    // Pan immediately (cheap); zoom layout is rAF-throttled.
     if (pePinchLastMidX != null && pePinchLastMidY != null) {
       wrap.scrollLeft -= (midX - pePinchLastMidX);
       wrap.scrollTop -= (midY - pePinchLastMidY);
     }
     const dist = peTouchDist(e.touches[0], e.touches[1]);
-    if (pePinchStartDist > 0) {
-      const ratio = dist / pePinchStartDist;
-      const SENS = 120;
-      let newSlider = Math.round(pePinchStartSlider + (ratio - 1) * SENS);
-      const min = peScaleSlider ? parseInt(peScaleSlider.min, 10) : 100;
-      const max = peScaleSlider ? parseInt(peScaleSlider.max, 10) : 200;
-      newSlider = Math.max(min, Math.min(max, newSlider));
-      // Zoom around the current midpoint so pinch + pan feel simultaneous.
-      peApplyZoomSlider(newSlider, midX, midY, { debounce: 180, syncSlider: true });
-    }
+    pePinchPending = { midX, midY, dist };
     pePinchLastMidX = midX;
     pePinchLastMidY = midY;
+    if (!pePinchRaf) pePinchRaf = requestAnimationFrame(peFlushPinchFrame);
   }, { passive: false });
   wrap.addEventListener('touchend', peEndEditorPinch);
   wrap.addEventListener('touchcancel', peEndEditorPinch);
@@ -28820,13 +29001,13 @@ function peObjMouseDown(e, o) {
       const o = { id: ++peState.seq, type: 'text', text: '', fontPt: 16, color: '#d90000', x: pt.x / W, y: pt.y / H };
       peState.objects.push(o);
       peState.draftTextId = o.id;
-      // Mobile: zoom to the tap first so the caret is readable above the keyboard,
-      // then focus synchronously inside this gesture (async focus drops the keyboard).
-      if (typeof isTouchDevice !== 'undefined' && isTouchDevice) {
-        peEnsureTextEditZoom(o, e.clientX, e.clientY);
-      }
+      // Focus inside the user gesture first (keeps the keyboard up). Zoom /
+      // keyboard-aware scroll runs after the OSK settles — not before focus.
       peBeginInlineEdit(o, { isNewDraft: true });
       peFocusInlineEditorNow();
+      if (typeof isTouchDevice !== 'undefined' && isTouchDevice) {
+        peScheduleTextEditVisibility(o);
+      }
       return;
     }
     if (tool === 'select' && peState.inlineEditId) {
