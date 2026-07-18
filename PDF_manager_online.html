@@ -9692,7 +9692,9 @@
           p.style.removeProperty('--mobile-qa-top');
         });
 
-      if (typeof peState !== 'undefined' && peState) return;
+      // Do not touch peState here: updateUIState() runs during script init
+      // before `let peState` is initialized (TDZ). Use the modal class instead.
+      if (document.getElementById('pageEditModal')?.classList.contains('open')) return;
       if (isDragActive || rubberActive || rubberArmed) return;
       if (selectedPages.size !== 1) return;
 
