@@ -22255,6 +22255,8 @@ function peStopAutoScroll() {
 }
 
 function peCheckEdgeAutoScroll(clientX, clientY, opts) {
+  // Pinch owns wrap scroll — never compete with it (causes mid-point drift / jitter).
+  if (typeof pePinchActive !== 'undefined' && pePinchActive) { peStopAutoScroll(); return; }
   const textSelDrag = typeof peTextSelHandleDragging !== 'undefined' && peTextSelHandleDragging;
   if (!peState) { peStopAutoScroll(); return; }
   if (!peState.drag && !textSelDrag) { peStopAutoScroll(); return; }
@@ -25838,15 +25840,19 @@ function peBeginInlineEdit(o, opts) {
     if (cur && cur.type === 'callout') peEndCalloutEdit(true);
     else peFinishTextInlineEdit({ keepTool: true });
   }
+  // Always allow focus — a stuck suppress flag blocks the OSK entirely.
+  peInlineEditFocusSuppressed = false;
   peState.inlineEditId = o.id;
   peState.inlineEditFocusPending = true;
   const skipSelectionHistory = !!(opts && opts.isNewDraft) || peState.draftTextId === o.id;
   peSelect(o, { skipSelectionHistory });
-  // Pad + center into the safe band BEFORE focus so the OSK / mini-panel
-  // do not cover the new caret.
+  // Focus FIRST while still inside the user gesture (critical for mobile OSK).
+  // Scroll/pad adjustments come after — they must not precede focus().
+  peArmTextKeyboardQuiet(80);
+  peFocusInlineEditorNow();
   peEnsureEditorKbScrollRoom({ estimate: true, forTextCreate: !!(opts && opts.isNewDraft) });
   peScrollInlineEditorIntoWrapSafeZone();
-  peArmTextKeyboardQuiet(80);
+  // Re-assert focus after layout (DOM still same element).
   peFocusInlineEditorNow();
   if (typeof isTouchDevice !== 'undefined' && isTouchDevice) {
     peBindTextKeyboardGuards(true);
@@ -28100,6 +28106,7 @@ function peSelectionEndpointSuspicious(node) {
 let peTextSelRepairing = false;
 function peRepairTouchTextSelection() {
   if (peTextSelRepairing) return;
+  if (typeof pePinchActive !== 'undefined' && pePinchActive) return;
   if (typeof isTouchDevice === 'undefined' || !isTouchDevice) return;
   if (!peState || !peState.objSelectMode) return;
   if (!peIsEditorPageTextSelection()) return;
@@ -28289,6 +28296,7 @@ function peBindTextSelHandleDragGuards() {
   };
   const onPtrMove = (e) => {
     if (!peState || !peState.objSelectMode) return;
+    if (pePinchActive) return;
     peTextSelLastClientX = e.clientX;
     peTextSelLastClientY = e.clientY;
     // Deferred text-layer touch: movement → pan (not selection).
@@ -28313,6 +28321,13 @@ function peBindTextSelHandleDragGuards() {
   const onTouchMove = (e) => {
     if (!peState || !peState.objSelectMode) return;
     if (!e.touches || !e.touches.length) return;
+    // Two fingers = pinch — never arm handle-drag / edge-scroll from one tip.
+    if (e.touches.length >= 2 || pePinchActive) {
+      peTextSelHandleDragging = false;
+      peClearTextLayerTouchPending();
+      peStopAutoScroll();
+      return;
+    }
     const t = e.touches[0];
     peTextSelLastClientX = t.clientX;
     peTextSelLastClientY = t.clientY;
@@ -28330,6 +28345,12 @@ function peBindTextSelHandleDragGuards() {
   const onTouchStart = (e) => {
     if (!peState || !peState.objSelectMode) return;
     if (!e.touches || !e.touches.length) return;
+    if (e.touches.length >= 2 || pePinchActive) {
+      peTextSelHandleDragging = false;
+      peClearTextLayerTouchPending();
+      peStopAutoScroll();
+      return;
+    }
     peTextSelPointerDown = true;
     const t = e.touches[0];
     peTextSelLastClientX = t.clientX;
@@ -28348,6 +28369,7 @@ function peBindTextSelHandleDragGuards() {
   document.addEventListener('touchcancel', onPtrUp, { capture: true, passive: true });
   document.addEventListener('selectionchange', () => {
     if (!peState || !peState.objSelectMode) return;
+    if (pePinchActive) return;
     if (!peIsEditorPageTextSelection()) return;
     // Long-press is creating a new selection: cancel a deferred pan, but do
     // NOT enter handle-drag / edge-scroll unless the finger is on a handle.
@@ -29154,6 +29176,17 @@ function peStageRectOfEl(el) {
 function peStartTextCornerResize(e, o, corner) {
   const inner = peGetInlineTextEl(o);
   if (!inner) return;
+  // Same OSK suppress pattern as border-move: redraw/focus during resize
+  // makes the keyboard blink on mobile.
+  const editing = peState && peState.inlineEditId === o.id;
+  if (editing) {
+    peInlineEditFocusSuppressed = true;
+    peState.inlineEditFocusPending = false;
+    clearTimeout(peTextKbTimer);
+    peTextKbTimer = null;
+    window.getSelection()?.removeAllRanges();
+    try { inner.blur(); } catch (_) {}
+  }
   const { w: W, h: H } = peStageSize();
   const { w: wPx, h: hPx } = peTextBlockSizePx(o, inner, W);
   const oppCorner = peTextOppositeCorner(corner);
@@ -29166,7 +29199,8 @@ function peStartTextCornerResize(e, o, corner) {
     kind: 'resize-text', obj: o, corner,
     anchorX: anchorPt.x, anchorY: anchorPt.y,
     oppCorner, startDist, startFontPt: o.fontPt,
-    shiftKey: e.shiftKey
+    shiftKey: e.shiftKey,
+    inlineTextResize: !!editing
   };
   peUpdatePanUi();
 }
@@ -29589,9 +29623,16 @@ function peProcessDrag(clientX, clientY) {
     if (d.shiftKey) newPt = Math.round(newPt);
     else newPt = peRoundPt(newPt);
     d.obj.fontPt = newPt;
-    peRedrawObjects();
-    peTextSetPosFromFixedCorner(d.obj, d.oppCorner, d.anchorX, d.anchorY, W, H);
-    peRedrawObjects();
+    // Layout-only while editing — full redraw rebuilds contentEditable and
+    // fights the OSK (blink). Mirror the border-move path.
+    if (d.inlineTextResize || peState.inlineEditId === d.obj.id) {
+      peTextSetPosFromFixedCorner(d.obj, d.oppCorner, d.anchorX, d.anchorY, W, H);
+      peUpdateObjectsLayout();
+    } else {
+      peRedrawObjects();
+      peTextSetPosFromFixedCorner(d.obj, d.oppCorner, d.anchorX, d.anchorY, W, H);
+      peRedrawObjects();
+    }
     if (peState.sel === d.obj) peSyncPropsSizeUi(d.obj.fontPt);
   } else if (d.kind === 'freehand-draw') {
     if (!d.obj || !d.points || !d.points.length) return;
@@ -29954,7 +29995,12 @@ function peObjMouseDown(e, o) {
       target: e.target,
       currentTarget: e.currentTarget
     };
-    if (e.cancelable) e.preventDefault();
+    // Do NOT preventDefault here when a tap may open the OSK (text edit).
+    // Cancelling the gesture on pointerdown makes later focus() from the
+    // deferred pointerup flush unable to show the keyboard on iOS/Android.
+    const mayEditText = (o.type === 'text' || o.type === 'callout')
+      && (peState.tool === 'text' || peState.tool === 'select');
+    if (e.cancelable && !mayEditText) e.preventDefault();
     e.stopPropagation();
     peCapturePointer(e, e.currentTarget);
     return;
@@ -30354,6 +30400,11 @@ function peObjMouseDown(e, o) {
     // First finger often landed on an object — abort deferred select / restore.
     pePinchBlockObjUntil = Date.now() + 600;
     pePinchActive = true;
+    // Freeze page-text selection interactions so they don't fight pinch scroll.
+    peTextSelHandleDragging = false;
+    peTextSelPointerDown = false;
+    if (typeof peClearTextLayerTouchPending === 'function') peClearTextLayerTouchPending();
+    peStopAutoScroll();
     if (peTouchObjPending) {
       peFlushTouchObjPending(0, 0, 'cancel');
     } else if (peSelSnapBeforePinch) {
@@ -30783,7 +30834,7 @@ function peObjMouseDown(e, o) {
       peRedrawObjects();
       peUpdateProps();
     }
-    if (d.inlineTextMove && peState?.inlineEditId) {
+    if ((d.inlineTextMove || d.inlineTextResize) && peState?.inlineEditId) {
       const movedObj = d.obj;
       requestAnimationFrame(() => peResumeInlineTextEditAfterMove(movedObj));
     } else if (peInlineEditFocusSuppressed && !peState?.drag) {
@@ -31777,7 +31828,16 @@ function peObjMouseDown(e, o) {
           nav.style.gap = Math.max(0, Math.round(
             shapeRect.left - imgRect.right
           )) + 'px';
-          nav.style.left = Math.max(0, Math.round(imgRect.left - barRect.left)) + 'px';
+          const navLeft = Math.max(0, Math.round(imgRect.left - barRect.left));
+          nav.style.left = navLeft + 'px';
+          // Keep Object-select / Hand clear of the absolute ←→ pair.
+          if (lead) {
+            const navWNow = nav.offsetWidth
+              || ((prev.offsetWidth || 32) + (next.offsetWidth || 32) + (parseFloat(nav.style.gap) || innerGap));
+            const leadDesiredLeft = navLeft + navWNow + groupGap;
+            const leadNaturalLeft = titleRightRel + barGap;
+            lead.style.marginLeft = Math.max(0, Math.round(leadDesiredLeft - leadNaturalLeft)) + 'px';
+          }
           peLayoutMenuToggleOverDelete();
           return;
         }
