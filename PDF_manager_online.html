@@ -8113,9 +8113,25 @@
 
       const mathCols = mobileColsThatFit(currentScale, avail);
       const domCols = measureMobileDomCols();
-      // Trust DOM when it disagrees (border-box vs formula edge cases); otherwise math.
-      const cols = domCols > 0 ? domCols : mathCols;
-      if (cols < 1 || cols === startCols) return false;
+      // Math is tied to currentScale (authoritative after pinch). Prefer it when
+      // it already signals a column change — a stale DOM read (still showing
+      // the pre-pinch column count for a frame) used to block 3→2 / 2→1
+      // fill-snap and left the row under-filled.
+      // DOM is only a fallback when math still equals startCols but the laid
+      // out grid has already wrapped/unwrapped.
+      let endCols = mathCols;
+      if (endCols === startCols && domCols > 0 && domCols !== startCols) {
+        endCols = domCols;
+      }
+      if (endCols < 1 || endCols === startCols) return false;
+
+      // One column step per gesture: overshooting 3→1 still lands on 2-col
+      // fill (and 2→1 on the next pinch). Same when pinching out.
+      const nPages = pdfDoc.getPageCount();
+      let cols = endCols;
+      if (endCols < startCols) cols = startCols - 1;
+      else if (endCols > startCols) cols = startCols + 1;
+      cols = Math.max(1, Math.min(nPages, cols));
 
       const target = computeMobileScaleForCols(cols);
       if (!(target > 0) || target === currentScale) return false;
@@ -9755,7 +9771,12 @@
         cancelPageTouchDrag();
         pinchActive = true;
         pinchStartScale = currentScale;
-        pinchStartCols = mobileColsThatFit(currentScale, getScrollAvailWidth());
+        // What the user actually sees at gesture start (DOM), with math fallback.
+        try { void pagesContainer.offsetHeight; } catch (_) {}
+        const startDomCols = measureMobileDomCols();
+        pinchStartCols = startDomCols > 0
+          ? startDomCols
+          : mobileColsThatFit(currentScale, getScrollAvailWidth());
         mobileMinScale = computeMobilePinchMinScale();
         document.body.classList.add('pinch-zooming');
         pinchStartDist = touchDist(e.touches[0], e.touches[1]);
