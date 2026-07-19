@@ -7951,17 +7951,33 @@
       return Math.max(0, mainEl.clientWidth - padL - padR);
     }
 
-    const CARD_BORDER = 4;
     const CARD_FACTOR = 1.35;
     //Min. scale on mobile: 35% (half of the previous 70%) - fits 2x more pages in a row.
     const MOBILE_SCALE_FLOOR = 35;
 
+    // Outer width of one .page card at `scale`. MUST match applyScale + CSS:
+    //   --thumb-width: round(154 * scale/100) px
+    //   .page { width: calc(var(--thumb-width) * 1.35); box-sizing: border-box }
+    // Border is inside the width (border-box), so it must NOT be added again —
+    // the old `+ 4` overestimate made math column-counts flip before the DOM,
+    // so pinch fill-snap fired for the wrong column count (or looked like it
+    // "didn't enlarge" when zooming 3→2 / 2→1).
+    function cardOuterWidth(scale) {
+      const thumb = Math.round(154 * (scale / 100));
+      // Match used layout width (subpixel) rather than a raw float that can
+      // sit a hair above what flex will actually wrap.
+      return Math.round(thumb * CARD_FACTOR * 1000) / 1000;
+    }
+
     //The width of a row of cols square cards at a given scale.
     function cardRowWidth(scale, cols) {
       if (cols < 1) return 0;
-      const sf = scale / 100;
-      const cardW = 154 * sf * CARD_FACTOR + CARD_BORDER;
-      return cols * cardW + (cols - 1) * pageGapForScale(scale);
+      return cols * cardOuterWidth(scale) + (cols - 1) * pageGapForScale(scale);
+    }
+
+    /** True when `cols` cards at `scale` fit in `avail` (no optimistic slack). */
+    function cardRowFits(scale, cols, avail) {
+      return cardRowWidth(scale, cols) <= avail + 0.01;
     }
 
     //Target number of pages per row when opening a document (mobile).
@@ -7983,7 +7999,7 @@
       cols = Math.max(1, Math.min(n, cols));
       let best = MOBILE_SCALE_FLOOR;
       for (let s = MOBILE_SCALE_FLOOR; s <= 500; s++) {
-        if (cardRowWidth(s, cols) <= avail + 0.5) best = s;
+        if (cardRowFits(s, cols, avail)) best = s;
         else break;
       }
       return best;
@@ -8009,7 +8025,7 @@
       if (avail <= 0) return 1;
       const nPages = pdfDoc ? pdfDoc.getPageCount() : 1;
       let n = 1;
-      while (n < nPages && cardRowWidth(scale, n + 1) <= avail + 0.5) n++;
+      while (n < nPages && cardRowFits(scale, n + 1, avail)) n++;
       return n;
     }
 
@@ -8050,7 +8066,7 @@
       let target = currentScale;
       const minS = Math.max(MOBILE_SCALE_FLOOR, mobileMinScale || computeMobilePinchMinScale());
       for (let s = currentScale - 1; s >= minS; s--) {
-        if (cardRowWidth(s, 1) <= avail + 0.5) {
+        if (cardRowFits(s, 1, avail)) {
           target = s;
           break;
         }
@@ -8059,22 +8075,50 @@
       return applyMobilePinchScaleSnap(target, page, anchorFx, anchorFy, midX, midY);
     }
 
+    /** Column count from the laid-out DOM (source of truth for what the user sees). */
+    function measureMobileDomCols() {
+      const pages = getVisiblePages();
+      if (!pages.length) return 0;
+      try {
+        const rows = groupVisiblePagesIntoRows(pages);
+        if (rows && rows.length) {
+          let max = 0;
+          for (const r of rows) if (r.length > max) max = r.length;
+          if (max > 0) return max;
+        }
+      } catch (_) {}
+      return 0;
+    }
+
     //After pinch: only when the column count CHANGED during the gesture,
     //settle to the exact fill-width scale for the new column count — so the
     //squares maximally occupy the working area width. If the column count
     //stayed the same, leave the user's scale alone (no fill snap).
     function snapMobileFillWidthAfterPinch(anchorEl, anchorFx, anchorFy, midX, midY) {
       if (!isTouchDevice || !pdfDoc) return false;
-      if (!(pinchStartCols > 0)) return false;
 
       const avail = getScrollAvailWidth();
       if (avail <= 0) return false;
 
-      const cols = mobileColsThatFit(currentScale, avail);
-      if (cols < 1 || cols === pinchStartCols) return false;
+      // Prefer the columns remembered at pinch-start; fall back to recomputing
+      // from pinchStartScale if the flag was lost.
+      const startCols = (pinchStartCols > 0)
+        ? pinchStartCols
+        : mobileColsThatFit(pinchStartScale, avail);
+      if (!(startCols > 0)) return false;
+
+      // Layout was just applied in endPinch — force a reflow so DOM columns
+      // match the new --thumb-width before we measure.
+      try { void pagesContainer.offsetHeight; } catch (_) {}
+
+      const mathCols = mobileColsThatFit(currentScale, avail);
+      const domCols = measureMobileDomCols();
+      // Trust DOM when it disagrees (border-box vs formula edge cases); otherwise math.
+      const cols = domCols > 0 ? domCols : mathCols;
+      if (cols < 1 || cols === startCols) return false;
 
       const target = computeMobileScaleForCols(cols);
-      if (target === currentScale) return false;
+      if (!(target > 0) || target === currentScale) return false;
 
       const pages = getVisiblePages();
       const page = (anchorEl && anchorEl.isConnected) ? anchorEl : pages[0];
