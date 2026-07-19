@@ -1076,6 +1076,16 @@
     }
     #peObjCtxMenu button:hover:not(:disabled) { background: #eef4fa; }
     #peObjCtxMenu button:disabled { opacity: .45; cursor: default; }
+    #peObjCtxMenu button.pe-ctx-checkable {
+      display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    }
+    #peObjCtxMenu button.pe-ctx-checkable .ctx-check {
+      flex: 0 0 auto; visibility: hidden; color: #2980b9; font-weight: 700; font-size: 14px;
+    }
+    #peObjCtxMenu button.pe-ctx-checkable.active {
+      background: #e8f4fc;
+    }
+    #peObjCtxMenu button.pe-ctx-checkable.active .ctx-check { visibility: visible; }
 
     /* Page-editor blank-area RMB: compact tools menu (mirrors top toolbar) */
     #pePageToolsCtxMenu {
@@ -5258,6 +5268,10 @@
     <button type="button" data-action="copy">Скопировать</button>
     <button type="button" data-action="cut">Вырезать</button>
     <button type="button" data-action="paste">Вставить</button>
+    <button type="button" data-action="arrow-comment" class="pe-ctx-checkable" hidden style="display:none">
+      <span class="ctx-label">Комментарий</span>
+      <span class="ctx-check" aria-hidden="true">✓</span>
+    </button>
     <button type="button" data-action="hl-comment" hidden style="display:none">Комментарий</button>
     <button type="button" data-action="delete">Удалить</button>
   </div>
@@ -22230,6 +22244,16 @@ function peGetObjectNormBounds(o) {
     const maxX = Math.max(x + w, cx + cw), maxY = Math.max(y + h, cy + ch);
     return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
   }
+  if (o.arrowComment && o.arrowComment.boxX != null) {
+    const c = o.arrowComment;
+    const cx = Number(c.boxX) || 0;
+    const cy = Number(c.boxY) || 0;
+    const cw = Number(c.boxW) > 0 ? Number(c.boxW) : 0.2;
+    const ch = Number(c.boxH) > 0 ? Number(c.boxH) : 0.12;
+    const minX = Math.min(x, cx), minY = Math.min(y, cy);
+    const maxX = Math.max(x + w, cx + cw), maxY = Math.max(y + h, cy + ch);
+    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+  }
   return { x, y, w, h };
 }
 
@@ -22278,6 +22302,15 @@ function peRemapObjectForCrop(o, crop) {
     }
     if (Number(o.hlComment.boxWFrac) > 0) o.hlComment.boxWFrac = rw(o.hlComment.boxWFrac);
     if (Number(o.hlComment.boxHFrac) > 0) o.hlComment.boxHFrac = rh(o.hlComment.boxHFrac);
+  }
+  if (o.arrowComment) {
+    const c = o.arrowComment;
+    if (c.boxX != null) {
+      c.boxX = rx(c.boxX);
+      c.boxY = ry(c.boxY);
+    }
+    if (c.boxW != null) c.boxW = rw(c.boxW);
+    if (c.boxH != null) c.boxH = rh(c.boxH);
   }
 }
 
@@ -23810,6 +23843,7 @@ function peCaptureEditorSnapshot() {
     const copy = { ...o };
     delete copy.imgEl;
     if (copy.hlComment) copy.hlComment = { ...copy.hlComment };
+    if (copy.arrowComment) copy.arrowComment = { ...copy.arrowComment };
     if (copy.frames) copy.frames = copy.frames.map(f => ({ ...f }));
     return copy;
   });
@@ -24742,6 +24776,9 @@ function peRedrawObjects() {
     peBindPointerDown(el, (e) => peObjMouseDown(e, o));
     layer.appendChild(el);
     if (o.type === 'callout') peAppendCalloutBox(layer, o, W, H);
+    if (o.type === 'shape' && (o.shape || '') === 'arrow' && o.arrowComment) {
+      peAppendArrowCommentBox(layer, o, W, H);
+    }
   });
   document.getElementById('peDeleteObj').disabled = !peGetSelectedObjects().length;
   // Never re-arm the fixed OSK proxy mid border-drag (it desyncs from .sel).
@@ -24764,8 +24801,86 @@ const PE_CALLOUT_BG_COLORS = [
 ];
 
 function peCalloutBg(o) {
-  const c = (o && o.bg) ? String(o.bg) : PE_CALLOUT_BG;
+  const src = (o && o.arrowComment && o.type === 'shape') ? o.arrowComment : o;
+  const c = (src && src.bg) ? String(src.bg) : PE_CALLOUT_BG;
   return c || PE_CALLOUT_BG;
+}
+
+function peIsArrowShape(o) {
+  return !!(o && o.type === 'shape' && (o.shape || '') === 'arrow');
+}
+
+function peArrowHasComment(o) {
+  return peIsArrowShape(o) && !!o.arrowComment;
+}
+
+/** Object that holds callout box fields (boxX/Y/W/H, text, html, bg, fontPt). */
+function peCommentBoxHost(o) {
+  if (!o) return null;
+  if (o.type === 'callout') return o;
+  if (peArrowHasComment(o)) return o.arrowComment;
+  return null;
+}
+
+function peIsCalloutLike(o) {
+  return !!(o && (o.type === 'callout' || peArrowHasComment(o)));
+}
+
+/** Leader from a point (arrow tip) to the nearest edge of the comment box. */
+function pePointBoxLeaderEndpoints(px, py, bx, by, bw, bh) {
+  const p2 = peHlNearestRectPoint(bx, by, bx + bw, by + bh, px, py);
+  return { x1: px, y1: py, x2: p2.x, y2: p2.y };
+}
+
+function peArrowTipFrameFrac(o, W, H) {
+  const ep = peVectorShapeEndpoints(o, W, H);
+  const tipX = ep.x2 / Math.max(1, W);
+  const tipY = ep.y2 / Math.max(1, H);
+  const s = 0.012;
+  return { x: tipX - s / 2, y: tipY - s / 2, w: s, h: s };
+}
+
+function peEnsureArrowCommentBox(o) {
+  if (!peArrowHasComment(o)) return;
+  const c = o.arrowComment;
+  const def = peCalloutDefaultBoxFracs();
+  if (!(c.boxW > 0)) c.boxW = def.boxW;
+  if (!(c.boxH > 0)) c.boxH = def.boxH;
+  if (c.boxX == null || c.boxY == null) {
+    const { w: W, h: H } = peStageSize();
+    const frame = peArrowTipFrameFrac(o, W, H);
+    const pos = pePickCalloutBoxPos(frame, c.boxW, c.boxH);
+    if (c.boxX == null) c.boxX = pos.boxX;
+    if (c.boxY == null) c.boxY = pos.boxY;
+  }
+  if (c.fontPt == null) c.fontPt = 12;
+  if (!c.bg) c.bg = PE_CALLOUT_BG;
+  if (c.text == null) c.text = '';
+  if (c.html == null) c.html = '';
+}
+
+function peToggleArrowComment(o) {
+  if (!peState || !peIsArrowShape(o)) return;
+  if (o.arrowComment) {
+    if (peState.inlineEditId === o.id) {
+      peState.inlineEditId = null;
+      peState.inlineEditFocusPending = false;
+      peStopMobileEditOverlay();
+    }
+    delete o.arrowComment;
+    peRedrawObjects();
+    peUpdateProps();
+    peCommitEditorHistory();
+    return;
+  }
+  o.arrowComment = {
+    text: '', html: '', fontPt: 12, bg: PE_CALLOUT_BG
+  };
+  peEnsureArrowCommentBox(o);
+  peSelect(o, { skipSelectionHistory: true });
+  peRedrawObjects();
+  peBeginCalloutEdit(o);
+  peCommitEditorHistory();
 }
 
 function peCalloutFrames(o) {
@@ -24900,6 +25015,143 @@ function peAppendCalloutBox(layer, o, W, H) {
       textEl.addEventListener('input', () => {
         o.html = textEl.innerHTML;
         o.text = peEditablePlainText(textEl);
+      });
+      textEl.addEventListener('blur', () => {
+        setTimeout(() => {
+          if (!peState || peState.inlineEditId !== o.id) return;
+          if (peState.drag && (peState.drag.kind === 'callout-box-move'
+              || peState.drag.kind === 'resize-callout-box')) return;
+          if (peState._calloutKeepEdit) return;
+          if (document.activeElement && document.activeElement.closest
+              && document.activeElement.closest('.pe-obj-callout-box[data-pe-id="' + o.id + '"]')) return;
+          const bgPop = document.getElementById('peCalloutBgPopup');
+          if (bgPop && bgPop.classList.contains('open')) return;
+          peEndCalloutEdit(true);
+        }, 0);
+      });
+    }
+    peBindPointerDown(textEl, (e) => {
+      if (peCalloutBorderHit(box, e.clientX, e.clientY)) {
+        peStartCalloutBoxMove(e, o);
+        return;
+      }
+      e.stopPropagation();
+      if (peUsesMobileEditOverlay()) peFocusInlineEditorNow();
+    });
+  }
+  box.appendChild(textEl);
+
+  if (isSel) {
+    const bgBtn = document.createElement('div');
+    bgBtn.className = 'pe-callout-bg-handle';
+    bgBtn.title = 'Цвет фона';
+    bgBtn.style.background = peCalloutBg(o);
+    peBindPointerDown(bgBtn, (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    bgBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      peOpenCalloutBgPopup(bgBtn, o);
+    });
+    box.appendChild(bgBtn);
+
+    ['nw', 'ne', 'sw', 'se'].forEach(corner => {
+      const h = document.createElement('div');
+      h.className = 'pe-text-corner-handle pe-callout-corner-handle ' + corner;
+      h.dataset.corner = corner;
+      h.title = 'Изменить размер';
+      h.style.cursor = peTextCornerCursor(corner, 0);
+      h.contentEditable = 'false';
+      peBindPointerDown(h, (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        peStartCalloutBoxResize(e, o, corner);
+      });
+      box.appendChild(h);
+    });
+  }
+
+  box.addEventListener('dblclick', (e) => {
+    if (e.button != null && e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (peState.drag?.kind === 'move-pending') peState.drag = null;
+    peBeginCalloutEdit(o);
+  });
+  peBindPointerDown(box, (e) => peObjMouseDown(e, o));
+  layer.appendChild(box);
+}
+
+/** Yellow comment bubble for an arrow shape, leader glued to the tip (x2,y2). */
+function peAppendArrowCommentBox(layer, o, W, H) {
+  if (!peArrowHasComment(o)) return;
+  peEnsureArrowCommentBox(o);
+  const c = o.arrowComment;
+  const bx = c.boxX * W, by = c.boxY * H;
+  const bw = c.boxW * W, bh = c.boxH * H;
+  const ep = peVectorShapeEndpoints(o, W, H);
+  const pts = pePointBoxLeaderEndpoints(ep.x2, ep.y2, bx, by, bw, bh);
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'pe-callout-leader pe-arrow-comment-leader');
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+  svg.dataset.peId = String(o.id);
+  const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  line.setAttribute('x1', String(pts.x1));
+  line.setAttribute('y1', String(pts.y1));
+  line.setAttribute('x2', String(pts.x2));
+  line.setAttribute('y2', String(pts.y2));
+  svg.appendChild(line);
+  layer.appendChild(svg);
+
+  const box = document.createElement('div');
+  box.className = 'pe-obj pe-obj-callout-box pe-obj-arrow-comment-box';
+  box.dataset.peId = String(o.id);
+  box.style.left = bx + 'px';
+  box.style.top = by + 'px';
+  box.style.width = bw + 'px';
+  box.style.height = bh + 'px';
+  box.style.background = peCalloutBg(o);
+  const isSel = peState.sel === o && !peIsMultiSelection();
+  const isEditing = peState.inlineEditId === o.id;
+  if (isSel || (peState.multiSel && peState.multiSel.includes(o))) box.classList.add('sel');
+  if (isEditing) {
+    box.classList.add('pe-callout-editing');
+    const rim = peCalloutEditRimPx();
+    box.style.setProperty('--pe-callout-rim', rim + 'px');
+    box.style.setProperty('--pe-callout-rim-half', (rim / 2) + 'px');
+    if (peState.drag && peState.drag.obj === o && peState.drag.kind === 'callout-box-move') {
+      box.classList.add('pe-callout-border-drag');
+    }
+    ['t', 'r', 'b', 'l'].forEach(side => {
+      const rimEl = document.createElement('div');
+      rimEl.className = 'pe-callout-rim ' + side;
+      rimEl.title = 'Переместить';
+      peBindPointerDown(rimEl, (e) => {
+        peStartCalloutBoxMove(e, o);
+      });
+      box.appendChild(rimEl);
+    });
+  }
+
+  const textEl = document.createElement('div');
+  textEl.className = 'pe-callout-text';
+  textEl.dataset.peId = String(o.id);
+  const fontPx = (c.fontPt || 12) * (peState.scale || 1);
+  textEl.style.fontSize = fontPx + 'px';
+  textEl.innerHTML = c.html != null ? c.html : peEscapeHtml(c.text || '').replace(/\n/g, '<br>');
+  if (isEditing) {
+    textEl.spellcheck = false;
+    if (peUsesMobileEditOverlay()) {
+      textEl.contentEditable = 'false';
+      textEl.classList.add('pe-mobile-overlay-host');
+    } else {
+      textEl.contentEditable = 'true';
+      textEl.addEventListener('input', () => {
+        c.html = textEl.innerHTML;
+        c.text = peEditablePlainText(textEl);
       });
       textEl.addEventListener('blur', () => {
         setTimeout(() => {
@@ -25322,9 +25574,13 @@ function peSyncInlineEditsFromDom() {
     if (!box) return;
     const id = parseInt(box.dataset.peId, 10);
     const o = peState.objects.find(x => x.id === id);
-    if (o && o.type === 'callout') {
+    if (!o) return;
+    if (o.type === 'callout') {
       o.html = el.innerHTML;
       o.text = peEditablePlainText(el);
+    } else if (peArrowHasComment(o)) {
+      o.arrowComment.html = el.innerHTML;
+      o.arrowComment.text = peEditablePlainText(el);
     }
   });
   peSyncHlCommentsFromDom();
@@ -25642,7 +25898,7 @@ function peBindMobileEditListeners() {
       return;
     }
     const o = peState.objects.find(x => x.id === peMobileEditActive.id);
-    if (o && o.type === 'callout') peEndCalloutEdit(true);
+    if (o && peIsCalloutLike(o)) peEndCalloutEdit(true);
     else peFinishTextInlineEdit({ keepTool: true, keepSelection: true });
   });
   peEnsureMobileKbBuilt();
@@ -25653,7 +25909,7 @@ function peOnMobileEditKeydown(e) {
   if (e.key === 'Escape') {
     e.preventDefault();
     const o = peState.objects.find(x => x.id === peMobileEditActive.id);
-    if (o && o.type === 'callout') peEndCalloutEdit(true);
+    if (o && peIsCalloutLike(o)) peEndCalloutEdit(true);
     else peFinishTextInlineEdit({ keepTool: true, keepSelection: true });
   }
 }
@@ -25675,11 +25931,12 @@ function peOnMobileEditInput() {
   const t = peMobileEditInputEl();
   if (!o || !t) return;
   const text = t.value;
-  o.text = text;
-  o.html = peMobilePlainTextToHtml(text, o);
+  const host = peCommentBoxHost(o) || o;
+  host.text = text;
+  host.html = peMobilePlainTextToHtml(text, o);
   const el = peInlineEditorDomEl();
   if (el) {
-    el.innerHTML = o.html || '';
+    el.innerHTML = host.html || '';
     if (typeof peSyncTextEmptyClass === 'function') peSyncTextEmptyClass(el, o);
   }
   // Keep the invisible proxy in sync when landscape window owns typing.
@@ -25907,24 +26164,25 @@ function peStartMobileEditOverlay(o) {
   if (peGeomDragActive || peInlineEditFocusSuppressed) return false;
   peBindMobileEditListeners();
   peMobileEditActive = { id: o.id, type: o.type };
+  const host = peCommentBoxHost(o) || o;
   const el = peInlineEditorDomEl();
   if (el) {
     el.contentEditable = 'false';
     el.classList.add('pe-mobile-overlay-host', 'pe-inline-edit');
     // Keep html (incl. background hilite spans) — never wipe with textContent.
-    el.innerHTML = o.html != null
-      ? o.html
-      : peMobilePlainTextToHtml(o.text || '', o);
+    el.innerHTML = host.html != null
+      ? host.html
+      : peMobilePlainTextToHtml(host.text || '', o);
     if (typeof peSyncTextEmptyClass === 'function') peSyncTextEmptyClass(el, o);
   }
 
   if (peUsesMobileKbWindow()) {
     const proxy = peOskEl();
     if (proxy) {
-      proxy.value = o.text || '';
+      proxy.value = host.text || '';
       proxy.classList.remove('pe-osk-active');
     }
-    peShowMobileKbWindow(o.text || '');
+    peShowMobileKbWindow(host.text || '');
     pePositionMobileEditOverlay();
     if (peState) peState.inlineEditFocusPending = false;
     return true;
@@ -25938,7 +26196,7 @@ function peStartMobileEditOverlay(o) {
   t.style.display = '';
   t.classList.add('pe-osk-active');
   t.setAttribute('aria-hidden', 'false');
-  if (t.value !== (o.text || '')) t.value = o.text || '';
+  if (t.value !== (host.text || '')) t.value = host.text || '';
   pePositionMobileEditOverlay();
   try {
     if (!alreadyFocused) t.focus();
@@ -26044,8 +26302,9 @@ function peSyncMobileEditOverlayToObj() {
   const o = peState.objects.find(x => x.id === peMobileEditActive.id);
   if (!t || !o) return;
   const text = t.value;
-  o.text = text;
-  o.html = (typeof peEscapeHtml === 'function' ? peEscapeHtml(text) : peEscapeHtmlLite(text))
+  const host = peCommentBoxHost(o) || o;
+  host.text = text;
+  host.html = (typeof peEscapeHtml === 'function' ? peEscapeHtml(text) : peEscapeHtmlLite(text))
     .replace(/\n/g, '<br>');
 }
 
@@ -26057,7 +26316,7 @@ function peFocusInlineEditorNow() {
   const o = peState.objects.find(x => x.id === editId);
   if (!o) return false;
   // Mobile: keep the real textarea / in-app keyboard focused.
-  if (peUsesMobileEditOverlay() && (o.type === 'text' || o.type === 'callout')) {
+  if (peUsesMobileEditOverlay() && (o.type === 'text' || peIsCalloutLike(o))) {
     const ok = peStartMobileEditOverlay(o);
     if (ok) peState.inlineEditFocusPending = false;
     return !!ok;
@@ -26065,7 +26324,7 @@ function peFocusInlineEditorNow() {
   let el = null;
   if (o.type === 'text') {
     el = document.querySelector('#peObjLayer [data-pe-id="' + o.id + '"].pe-obj-text');
-  } else if (o.type === 'callout') {
+  } else if (peIsCalloutLike(o)) {
     el = document.querySelector(
       '#peObjLayer .pe-obj-callout-box[data-pe-id="' + o.id + '"] .pe-callout-text');
   }
@@ -26523,7 +26782,7 @@ function peInlineTextEl() {
 function peCalloutEditObj() {
   if (!peState?.inlineEditId) return null;
   const o = peState.objects.find(x => x.id === peState.inlineEditId);
-  return o && o.type === 'callout' ? o : null;
+  return peIsCalloutLike(o) ? o : null;
 }
 
 function peCalloutEditBoxEl() {
@@ -26892,6 +27151,8 @@ function peResumeInlineTextEditAfterMove(o) {
 
 function peStartCalloutBoxMove(e, o) {
   if (peState.drag) return;
+  const host = peCommentBoxHost(o);
+  if (!host) return;
   const box = peCalloutEditBoxEl();
   if (box) {
     box.classList.add('pe-callout-border-drag');
@@ -26909,21 +27170,21 @@ function peStartCalloutBoxMove(e, o) {
     ox: o.x, oy: o.y, ow: o.w || 0, oh: o.h || 0,
     calloutBoxOnly: true,
     keepCalloutEdit: !!peState._calloutKeepEdit,
-    oboxX: o.boxX, oboxY: o.boxY,
-    boxStartX: (o.boxX || 0) * W,
-    boxStartY: (o.boxY || 0) * H,
-    frames0: peCalloutFrames(o).map(f => ({ x: f.x, y: f.y, w: f.w, h: f.h }))
+    oboxX: host.boxX, oboxY: host.boxY,
+    boxStartX: (host.boxX || 0) * W,
+    boxStartY: (host.boxY || 0) * H,
+    frames0: (o.type === 'callout') ? peCalloutFrames(o).map(f => ({ x: f.x, y: f.y, w: f.w, h: f.h })) : null
   };
   peUpdatePanUi();
 }
 
 function peBeginCalloutEdit(o) {
-  if (!peState || !o || o.type !== 'callout') return;
+  if (!peState || !peIsCalloutLike(o)) return;
   peTextClickSeq = { id: null, t: 0 };
   if (peState.inlineEditId && peState.inlineEditId !== o.id) {
     const cur = peState.objects.find(x => x.id === peState.inlineEditId);
     if (cur && cur.type === 'text') peFinishTextInlineEdit({ keepTool: true, keepSelection: true });
-    else if (cur && cur.type === 'callout') peEndCalloutEdit(true);
+    else if (cur && peIsCalloutLike(cur)) peEndCalloutEdit(true);
   }
   peInlineEditFocusSuppressed = false;
   peState.inlineEditId = o.id;
@@ -26948,7 +27209,7 @@ function peEndCalloutEdit(keepSelection) {
   if (peState.drag && (peState.drag.kind === 'callout-box-move'
       || peState.drag.kind === 'resize-callout-box')) return;
   const o = peState.objects.find(x => x.id === peState.inlineEditId);
-  if (!o || o.type !== 'callout') return;
+  if (!peIsCalloutLike(o)) return;
   peSyncInlineEditsFromDom();
   peStopMobileEditOverlay();
   peState.inlineEditId = null;
@@ -26965,7 +27226,7 @@ function peEndCalloutEdit(keepSelection) {
 
 function peBeginInlineEdit(o, opts) {
   if (!peState || !o) return;
-  if (o.type === 'callout') {
+  if (peIsCalloutLike(o)) {
     peBeginCalloutEdit(o);
     return;
   }
@@ -26973,7 +27234,7 @@ function peBeginInlineEdit(o, opts) {
   peTextClickSeq = { id: null, t: 0 };
   if (peState.inlineEditId && peState.inlineEditId !== o.id) {
     const cur = peState.objects.find(x => x.id === peState.inlineEditId);
-    if (cur && cur.type === 'callout') peEndCalloutEdit(true);
+    if (cur && peIsCalloutLike(cur)) peEndCalloutEdit(true);
     else peFinishTextInlineEdit({ keepTool: true });
   }
   // Drop any leftover move-pending so a later border-drag can suspend the proxy.
@@ -27661,15 +27922,16 @@ function peBeginSingleMoveDrag(e, o, opts) {
   const pt = peStagePoint(e);
   const { w: W, h: H } = peStageSize();
   const boxOnly = !!(opts && opts.calloutBoxOnly);
+  const host = boxOnly ? (peCommentBoxHost(o) || o) : o;
   peState.drag = {
     kind: 'move-pending', obj: o,
     startX: pt.x, startY: pt.y,
     ox: o.x, oy: o.y, ow: o.w || 0, oh: o.h || 0,
     threshold: 4,
     calloutBoxOnly: boxOnly,
-    oboxX: o.boxX, oboxY: o.boxY,
-    boxStartX: (o.boxX || 0) * W,
-    boxStartY: (o.boxY || 0) * H,
+    oboxX: host.boxX, oboxY: host.boxY,
+    boxStartX: (host.boxX || 0) * W,
+    boxStartY: (host.boxY || 0) * H,
     frames0: (o.type === 'callout') ? peCalloutFrames(o).map(f => ({ x: f.x, y: f.y, w: f.w, h: f.h })) : null
   };
   peUpdatePanUi();
@@ -30361,6 +30623,16 @@ function peShowObjCtxMenu(clientX, clientY) {
   menu.querySelector('[data-action="delete"]').disabled = !sel.length;
   const hlCommentBtn = menu.querySelector('[data-action="hl-comment"]');
   if (hlCommentBtn) hlCommentBtn.style.display = 'none';
+  const arrowCommentBtn = menu.querySelector('[data-action="arrow-comment"]');
+  if (arrowCommentBtn) {
+    const sole = sel.length === 1 ? sel[0] : null;
+    const show = !!(sole && peIsArrowShape(sole));
+    arrowCommentBtn.style.display = show ? '' : 'none';
+    arrowCommentBtn.hidden = !show;
+    const on = show && peArrowHasComment(sole);
+    arrowCommentBtn.classList.toggle('active', on);
+    arrowCommentBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
   menu.classList.add('visible');
   menu.setAttribute('aria-hidden', 'false');
   // Long-press → contextmenu often arrives while the finger is still down;
@@ -30707,9 +30979,12 @@ function peStartHlCornerResize(e, o, corner) {
 }
 
 function peStartCalloutBoxResize(e, o, corner) {
+  const host = peCommentBoxHost(o);
+  if (!host) return;
   const { w: W, h: H } = peStageSize();
-  peEnsureCalloutBoxSize(o);
-  const l = o.boxX * W, t = o.boxY * H, r = l + o.boxW * W, b = t + o.boxH * H;
+  if (o.type === 'callout') peEnsureCalloutBoxSize(o);
+  else peEnsureArrowCommentBox(o);
+  const l = host.boxX * W, t = host.boxY * H, r = l + host.boxW * W, b = t + host.boxH * H;
   const anchor = {
     nw: { x: r, y: b }, ne: { x: l, y: b }, se: { x: l, y: t }, sw: { x: r, y: t }
   }[corner];
@@ -30901,13 +31176,15 @@ function peProcessDrag(clientX, clientY) {
     return;
   }
   if (d.kind === 'callout-box-move') {
+    const host = peCommentBoxHost(d.obj);
+    if (!host) return;
     const dx = pt.x - d.startX, dy = pt.y - d.startY;
     let nbx = (d.boxStartX + dx) / W;
     let nby = (d.boxStartY + dy) / H;
-    nbx = Math.max(0.005, Math.min(0.98 - (d.obj.boxW || 0.1), nbx));
-    nby = Math.max(0.005, Math.min(0.98 - (d.obj.boxH || 0.08), nby));
-    d.obj.boxX = nbx;
-    d.obj.boxY = nby;
+    nbx = Math.max(0.005, Math.min(0.98 - (host.boxW || 0.1), nbx));
+    nby = Math.max(0.005, Math.min(0.98 - (host.boxH || 0.08), nby));
+    host.boxX = nbx;
+    host.boxY = nby;
     peRedrawObjects();
   } else if (d.kind === 'move') {
     const c = peClampObjXY(d.obj, d.ox + dx / W, d.oy + dy / H);
@@ -30938,14 +31215,16 @@ function peProcessDrag(clientX, clientY) {
     d.obj.h = Math.max(0.02, (bottom - top) / H);
     peRedrawObjects();
   } else if (d.kind === 'resize-callout-box') {
+    const host = peCommentBoxHost(d.obj);
+    if (!host) return;
     const left = Math.min(d.anchorX, pt.x);
     const top = Math.min(d.anchorY, pt.y);
     const right = Math.max(d.anchorX, pt.x);
     const bottom = Math.max(d.anchorY, pt.y);
-    d.obj.boxX = left / W;
-    d.obj.boxY = top / H;
-    d.obj.boxW = Math.max(0.04, (right - left) / W);
-    d.obj.boxH = Math.max(0.03, (bottom - top) / H);
+    host.boxX = left / W;
+    host.boxY = top / H;
+    host.boxW = Math.max(0.04, (right - left) / W);
+    host.boxH = Math.max(0.03, (bottom - top) / H);
     peRedrawObjects();
   } else if (d.kind === 'resize-redact') {
     let L = d.startL, T = d.startT, R = d.startR, B = d.startB;
@@ -31398,7 +31677,7 @@ function peObjMouseDown(e, o) {
     }
     return;
   }
-  if (o.type === 'callout' && peState?.inlineEditId === o.id) {
+  if (peIsCalloutLike(o) && peState?.inlineEditId === o.id) {
     const box = e.currentTarget.classList.contains('pe-obj-callout-box')
       ? e.currentTarget
       : e.currentTarget.closest && e.currentTarget.closest('.pe-obj-callout-box');
@@ -31429,7 +31708,7 @@ function peObjMouseDown(e, o) {
     // Do NOT preventDefault here when a tap may open the OSK (text edit).
     // Cancelling the gesture on pointerdown makes later focus() from the
     // deferred pointerup flush unable to show the keyboard on iOS/Android.
-    const mayEditText = (o.type === 'text' || o.type === 'callout')
+    const mayEditText = (o.type === 'text' || peIsCalloutLike(o))
       && (peState.tool === 'text' || peState.tool === 'select');
     if (e.cancelable && !mayEditText) e.preventDefault();
     e.stopPropagation();
@@ -31439,7 +31718,7 @@ function peObjMouseDown(e, o) {
   if (touchLike) peSelSnapBeforePinch = peSelectionSnapshot();
   // Double-tap to edit callout/text: detect before preventDefault so the
   // focus() call stays inside an uncancelled user gesture (mobile OSK).
-  const maybeDblEdit = (o.type === 'callout' || o.type === 'text')
+  const maybeDblEdit = (peIsCalloutLike(o) || o.type === 'text')
     && peState?.tool === 'select' && peState.inlineEditId !== o.id;
   if (maybeDblEdit) {
     const now = Date.now();
@@ -31450,7 +31729,7 @@ function peObjMouseDown(e, o) {
       peHideObjCtxMenu();
       peTextClickSeq = { id: null, t: 0 };
       if (peState.drag?.kind === 'move-pending') peState.drag = null;
-      if (o.type === 'callout') peBeginCalloutEdit(o);
+      if (peIsCalloutLike(o)) peBeginCalloutEdit(o);
       else peBeginInlineEdit(o);
       peFocusInlineEditorNow();
       return;
@@ -31575,6 +31854,31 @@ function peObjMouseDown(e, o) {
       if (touchLike && peState.drag) peState.drag.threshold = 14;
     }
     return;
+  }
+  // Arrow with comment: dragging the yellow bubble moves the comment only.
+  if (peArrowHasComment(o) && peState.tool === 'select' && peState.inlineEditId !== o.id) {
+    const onBox = !!(e.target.closest && e.target.closest('.pe-obj-callout-box'));
+    if (onBox) {
+      e.stopPropagation();
+      peHideObjCtxMenu();
+      if (peIsMultiSelectionIncluding(o)) {
+        peSelect(o);
+        return;
+      }
+      if (peState.multiSel && peState.multiSel.length) peState.multiSel = [];
+      peTextClickSeq = { id: o.id, t: Date.now() };
+      if (peState.sel !== o) {
+        const before = peSelectionSnapshot();
+        peState.sel = o;
+        peRedrawObjects();
+        peUpdateProps();
+        peUpdatePanUi();
+        peCommitSelectionHistoryIfChanged(before);
+      }
+      peBeginSingleMoveDrag(e, o, { calloutBoxOnly: true });
+      if (touchLike && peState.drag) peState.drag.threshold = 14;
+      return;
+    }
   }
   if ((o.type === 'highlight' || o.type === 'strikeout' || o.type === 'underline')
       && peState.tool === 'select') {
@@ -32228,7 +32532,7 @@ function peObjMouseDown(e, o) {
     if (tool === 'select' && peState.inlineEditId) {
       e.preventDefault();
       const editing = peState.objects.find(x => x.id === peState.inlineEditId);
-      if (editing && editing.type === 'callout') peEndCalloutEdit(false);
+      if (editing && peIsCalloutLike(editing)) peEndCalloutEdit(false);
       else peEndInlineEdit(false);
       return;
     }
@@ -32564,6 +32868,9 @@ function peObjMouseDown(e, o) {
       peCutSelectedObjects();
     } else if (action === 'paste') {
       void pePasteAtStage(peObjCtxPastePos.x, peObjCtxPastePos.y);
+    } else if (action === 'arrow-comment') {
+      const sole = peGetSelectedObjects();
+      if (sole.length === 1 && peIsArrowShape(sole[0])) peToggleArrowComment(sole[0]);
     }
   });
 
@@ -33885,7 +34192,9 @@ function peCloseCalloutBgPopup() {
 
 function peOpenCalloutBgPopup(anchorEl, o) {
   const pop = document.getElementById('peCalloutBgPopup');
-  if (!pop || !o || o.type !== 'callout') return;
+  if (!pop || !o || !peIsCalloutLike(o)) return;
+  const host = peCommentBoxHost(o);
+  if (!host) return;
   peCloseShapeColorPopup();
   pop.innerHTML = '';
   const cur = peCalloutBg(o).toLowerCase();
@@ -33899,7 +34208,7 @@ function peOpenCalloutBgPopup(anchorEl, o) {
     btn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      o.bg = hex;
+      host.bg = hex;
       peCloseCalloutBgPopup();
       peRedrawObjects();
       peCommitEditorHistory();
@@ -34006,6 +34315,87 @@ function peStartShapeRotate(e, o) {
   peShowRotateLabel();
   peUpdateRotateLabel(o, e.clientX, e.clientY);
   peUpdatePanUi();
+}
+
+function peBakeFillCommentText(ctx, txt, bx, by, bw, bh, fontPt, S) {
+  if (!txt) return;
+  const fontPx = Math.max(8, (fontPt || 12) * S);
+  ctx.fillStyle = '#2c3e50';
+  ctx.font = fontPx + 'px "Segoe UI", Arial, sans-serif';
+  ctx.textBaseline = 'top';
+  const pad = 4 * S;
+  const maxW = Math.max(8, bw - pad * 2);
+  const lineH = fontPx * 1.25;
+  let ty = by + pad;
+  const maxY = by + bh - pad;
+
+  function emitLine(s) {
+    if (ty + lineH > maxY + 0.5) return false;
+    ctx.fillText(s, bx + pad, ty);
+    ty += lineH;
+    return true;
+  }
+  function wrapChunk(chunk) {
+    if (!chunk) return true;
+    if (ctx.measureText(chunk).width <= maxW) return emitLine(chunk);
+    const words = chunk.split(/(\s+)/);
+    let cur = '';
+    for (let i = 0; i < words.length; i++) {
+      const word = words[i];
+      if (!word) continue;
+      const test = cur + word;
+      if (ctx.measureText(test).width <= maxW) {
+        cur = test;
+        continue;
+      }
+      if (cur && !emitLine(cur.replace(/\s+$/, ''))) return false;
+      cur = '';
+      if (ctx.measureText(word).width <= maxW) {
+        cur = word;
+        continue;
+      }
+      let piece = '';
+      for (let j = 0; j < word.length; j++) {
+        const ch = word[j];
+        if (ctx.measureText(piece + ch).width > maxW && piece) {
+          if (!emitLine(piece)) return false;
+          piece = ch;
+        } else piece += ch;
+      }
+      cur = piece;
+    }
+    if (cur && !emitLine(cur.replace(/\s+$/, ''))) return false;
+    return true;
+  }
+  String(txt).split('\n').forEach(line => { wrapChunk(line); });
+}
+
+/** Bake arrow-linked yellow comment bubble + leader into overlay canvas. */
+function peBakeDrawArrowComment(ctx, o, canvasW, canvasH, S) {
+  if (!peArrowHasComment(o)) return;
+  const c = o.arrowComment;
+  if (!(c.boxW > 0) || !(c.boxH > 0) || c.boxX == null || c.boxY == null) return;
+  const bx = c.boxX * canvasW;
+  const by = c.boxY * canvasH;
+  const bw = Math.max(2, c.boxW * canvasW);
+  const bh = Math.max(2, c.boxH * canvasH);
+  const ep = peVectorShapeEndpoints(o, canvasW, canvasH);
+  const pts = pePointBoxLeaderEndpoints(ep.x2, ep.y2, bx, by, bw, bh);
+  const lw = Math.max(1, 1 * S);
+  ctx.save();
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth = lw;
+  ctx.beginPath();
+  ctx.moveTo(pts.x1, pts.y1);
+  ctx.lineTo(pts.x2, pts.y2);
+  ctx.stroke();
+  ctx.fillStyle = peCalloutBg(o);
+  ctx.fillRect(bx, by, bw, bh);
+  ctx.strokeRect(bx, by, bw, bh);
+  const txt = String(c.text || '').replace(/\r\n/g, '\n').trim() ||
+    String(c.html || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/\r\n/g, '\n').trim();
+  peBakeFillCommentText(ctx, txt, bx, by, bw, bh, c.fontPt || 12, S);
+  ctx.restore();
 }
 
 function peBakeDrawShape(ctx, o, canvas, renderScale) {
@@ -34453,6 +34843,13 @@ function peHydrateEditorObjects(list, pageIdx) {
       copy.text = String(copy.text || '');
       copy.html = copy.html != null ? String(copy.html) : null;
       copy.bg = peCalloutBg(copy);
+    } else if (copy.type === 'shape' && copy.arrowComment) {
+      const ac = { ...copy.arrowComment };
+      ac.text = String(ac.text || '');
+      ac.html = ac.html != null ? String(ac.html) : '';
+      ac.bg = ac.bg || PE_CALLOUT_BG;
+      if (ac.fontPt == null) ac.fontPt = 12;
+      copy.arrowComment = ac;
     } else if (copy.type === 'text') {
       if (!(Number(copy.boxW) > 0.5) || !(Number(copy.boxH) > 0.5)) {
         try {
@@ -35082,6 +35479,7 @@ function peDrawEditorObjects(ctx, canvasW, canvasH, objects, stageW, stageH) {
     } else if (o.type === 'shape' && o.w > 0 && o.h > 0) {
       const fakeCanvas = { width: canvasW, height: canvasH };
       peBakeDrawShape(ctx, o, fakeCanvas, S);
+      if (peArrowHasComment(o)) peBakeDrawArrowComment(ctx, o, canvasW, canvasH, S);
       drew = true;
     } else if (o.type === 'text' && (o.text || '').trim()) {
       ctx.save();
