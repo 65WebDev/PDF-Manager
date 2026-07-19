@@ -24979,6 +24979,69 @@ function pePlusNearestLocal(w, h, lx, ly) {
 }
 
 /**
+ * Sample the same smooth freehand path used for SVG/canvas rendering,
+ * in local box pixel coords.
+ */
+function peFreehandSampleLocalPoints(o, W, H) {
+  const path = (o && o.path) ? o.path : [];
+  const w = Math.max(1, (Number(o.w) || 0) * W);
+  const h = Math.max(1, (Number(o.h) || 0) * H);
+  if (!path.length) return [];
+  if (path.length === 1) {
+    return [{ x: path[0][0] * w, y: path[0][1] * h }];
+  }
+  const cmd = peFreehandSmoothPathCommands(path, w, h);
+  if (!cmd) {
+    return path.map(p => ({ x: p[0] * w, y: p[1] * h }));
+  }
+  const samples = [{ x: cmd.move[0], y: cmd.move[1] }];
+  if (cmd.line) {
+    samples.push({ x: cmd.line[0], y: cmd.line[1] });
+    return samples;
+  }
+  let prev = cmd.move;
+  (cmd.curves || []).forEach(seg => {
+    const steps = 10;
+    for (let s = 1; s <= steps; s++) {
+      const t = s / steps;
+      const mt = 1 - t;
+      const x = mt * mt * mt * prev[0]
+        + 3 * mt * mt * t * seg.cp1[0]
+        + 3 * mt * t * t * seg.cp2[0]
+        + t * t * t * seg.to[0];
+      const y = mt * mt * mt * prev[1]
+        + 3 * mt * mt * t * seg.cp1[1]
+        + 3 * mt * t * t * seg.cp2[1]
+        + t * t * t * seg.to[1];
+      samples.push({ x, y });
+    }
+    prev = seg.to;
+  });
+  return samples;
+}
+
+/** Nearest point on the freehand stroke (smooth path) in local box coords. */
+function peFreehandNearestLocal(o, W, H, lx, ly) {
+  const samples = peFreehandSampleLocalPoints(o, W, H);
+  const w = Math.max(1, (Number(o.w) || 0) * W);
+  const h = Math.max(1, (Number(o.h) || 0) * H);
+  if (!samples.length) return peHlNearestRectPoint(0, 0, w, h, lx, ly);
+  if (samples.length === 1) return samples[0];
+  let best = samples[0];
+  let bestD = Math.hypot(best.x - lx, best.y - ly);
+  for (let i = 1; i < samples.length; i++) {
+    const a = samples[i - 1], b = samples[i];
+    const p = peNearestPointOnSeg(a.x, a.y, b.x, b.y, lx, ly);
+    const d = Math.hypot(p.x - lx, p.y - ly);
+    if (d < bestD) {
+      bestD = d;
+      best = p;
+    }
+  }
+  return best;
+}
+
+/**
  * Contour (or shaft) point of a shape in local box coords, toward a local target.
  * Prefer the drawn outline over the selection AABB so leaders meet the figure.
  */
@@ -24994,7 +25057,8 @@ function peShapeContourPointLocal(o, W, H, lx, ly) {
   if (kind === 'line') {
     return peNearestPointOnSeg(0, h / 2, w, h / 2, lx, ly);
   }
-  // rect / freehand / default — edge of the local box (= drawn rect for rect)
+  if (kind === 'freehand') return peFreehandNearestLocal(o, W, H, lx, ly);
+  // rect / default — edge of the local box (= drawn rect for rect)
   return peHlNearestRectPoint(0, 0, w, h, lx, ly);
 }
 
@@ -25015,7 +25079,7 @@ function peShapeLeaderBoundsPx(o, W, H) {
 
 /**
  * Short-path leader: contour of the figure ↔ nearest edge of the comment box.
- * Arrow anchors at the tail; ellipse/star/plus use real outline geometry.
+ * Arrow anchors at the tail; ellipse/star/plus/freehand use real outline geometry.
  */
 function peShapeCommentLeaderEndpoints(o, W, H, bx, by, bw, bh) {
   if (peIsArrowShape(o)) {
