@@ -16756,17 +16756,19 @@
     }
 
     // Lazy-loaded helper used only when a PDF requires a password to open.
-    // Produces an in-memory copy the rest of the app can load with pdf-lib.
-    let pdfDecryptModPromise = null;
-    function loadPdfDecryptModule() {
-      if (!pdfDecryptModPromise) {
-        pdfDecryptModPromise = import('https://esm.sh/@pdfsmaller/pdf-decrypt@1.0.1')
+    // Loads the document with the user-supplied password and saves an
+    // in-memory copy without encryption for the rest of the app (pdf-lib).
+    let pdfPasswordLibPromise = null;
+    function loadPdfPasswordLib() {
+      if (!pdfPasswordLibPromise) {
+        // Fork of pdf-lib with password support for protected documents.
+        pdfPasswordLibPromise = import('https://esm.sh/@cantoo/pdf-lib@2.7.4')
           .catch((err) => {
-            pdfDecryptModPromise = null;
+            pdfPasswordLibPromise = null;
             throw err;
           });
       }
-      return pdfDecryptModPromise;
+      return pdfPasswordLibPromise;
     }
 
     function pdfLoadLooksPasswordProtected(err) {
@@ -16774,13 +16776,19 @@
       return /encrypt|password|security|шифр|парол/i.test(msg);
     }
 
-    /** Apply the password supplied by the user; returns decrypted PDF bytes. */
+    function pdfPasswordRejected(err) {
+      const msg = String((err && err.message) || err || '');
+      return /password incorrect|incorrect password|needs password/i.test(msg);
+    }
+
+    /** Open with the password supplied by the user; return bytes without encryption. */
     async function decryptPdfBytesWithPassword(bytes, password) {
-      const mod = await loadPdfDecryptModule();
-      return await mod.decryptPDF(
-        bytes.slice(),
-        password == null ? '' : String(password)
-      );
+      const mod = await loadPdfPasswordLib();
+      const pwd = password == null ? '' : String(password);
+      const doc = await mod.PDFDocument.load(bytes.slice(), { password: pwd });
+      // Re-save so the main pdf-lib build can load the result normally.
+      const out = await doc.save();
+      return out instanceof Uint8Array ? out : new Uint8Array(out);
     }
 
     /**
@@ -16864,8 +16872,8 @@
         try {
           return await decryptPdfBytesWithPassword(bytes, password);
         } catch (e) {
+          if (pdfPasswordRejected(e)) continue;
           const msg = String((e && e.message) || e || '');
-          if (/incorrect password/i.test(msg)) continue;
           const label = fileName ? `«${fileName}»: ` : '';
           alert(
             label + 'не удалось открыть файл с указанным паролем'
