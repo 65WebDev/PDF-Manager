@@ -26509,6 +26509,8 @@ function peSuspendMobileOverlayForGeomDrag() {
   // Drop active overlay state so no timer/viewport handler can re-position it.
   peMobileEditActive = null;
   peHideOskProxyForGeomDrag();
+  // Landscape in-app keyboard also paints separately — hide for the gesture.
+  peHideMobileKbWindow();
   const host = peInlineEditorDomEl();
   if (host) {
     host.classList.remove('pe-mobile-overlay-host');
@@ -26521,6 +26523,14 @@ function peSuspendMobileOverlayForGeomDrag() {
     const obj = oid != null && peState.objects
       ? peState.objects.find(x => x.id === oid) : null;
     if (obj && obj.color) host.style.color = obj.color;
+    // Ensure host shows current text (proxy may have been the only visible glyphs).
+    if (obj && (obj.html != null || obj.text != null)) {
+      host.innerHTML = obj.html != null
+        ? obj.html
+        : (typeof peMobilePlainTextToHtml === 'function'
+            ? peMobilePlainTextToHtml(obj.text || '', obj)
+            : String(obj.text || ''));
+    }
     window.getSelection()?.removeAllRanges();
     try { host.blur(); } catch (_) {}
   }
@@ -27652,7 +27662,9 @@ function peGetInlineTextEl(o) {
 }
 
 function peGetTextOuterEl(o) {
-  return document.querySelector('#peObjLayer [data-pe-id="' + o.id + '"].pe-obj-text-outer');
+  if (!o) return null;
+  return document.querySelector('#peObjLayer .pe-obj.pe-obj-text-outer[data-pe-id="' + o.id + '"]')
+    || document.querySelector('#peObjLayer [data-pe-id="' + o.id + '"].pe-obj-text-outer');
 }
 
 function peTextOppositeCorner(corner) {
