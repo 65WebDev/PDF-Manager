@@ -26431,6 +26431,53 @@ function peIsTextBorderHit(el, clientX, clientY) {
   return peTextEditHitZone(el, clientX, clientY) === 'border';
 }
 
+/**
+ * During border-drag / resize, the fixed #peOskProxy must not paint the glyphs:
+ * it lives outside the stage and desyncs from .pe-obj.sel. Show host text instead
+ * so frame + text move as one DOM node.
+ */
+function peSuspendMobileOverlayForGeomDrag() {
+  const t = peOskEl();
+  if (t) {
+    try { if (document.activeElement === t) t.blur(); } catch (_) {}
+    t.classList.remove('pe-osk-active');
+    t.setAttribute('aria-hidden', 'true');
+    t.style.left = '-9999px';
+    t.style.top = '0px';
+    t.style.width = '1px';
+    t.style.height = '1px';
+  }
+  const host = peInlineEditorDomEl();
+  if (host) {
+    host.classList.remove('pe-mobile-overlay-host');
+    host.classList.add('pe-text-border-drag');
+    window.getSelection()?.removeAllRanges();
+    try { host.blur(); } catch (_) {}
+  }
+}
+
+/** Move the text outer frame (selection outline) to o.x/o.y in stage pixels. */
+function peSyncTextObjDomPosition(o) {
+  if (!o || o.type !== 'text') return;
+  const layer = document.getElementById('peObjLayer');
+  if (!layer) return;
+  const { w: W, h: H } = peStageSize();
+  const outer = layer.querySelector('.pe-obj.pe-obj-text-outer[data-pe-id="' + o.id + '"]')
+    || layer.querySelector('.pe-obj[data-pe-id="' + o.id + '"]');
+  if (!outer) {
+    peUpdateObjectsLayout();
+    return;
+  }
+  outer.style.left = (o.x * W) + 'px';
+  outer.style.top = (o.y * H) + 'px';
+  // Never leave leftover left/top on the position:relative inner host.
+  const inner = outer.querySelector('.pe-obj-text');
+  if (inner) {
+    inner.style.left = '';
+    inner.style.top = '';
+  }
+}
+
 function peStartInlineTextMove(e, o) {
   if (peState.drag) return;
   // Dismiss OSK for the whole border-drag; restore focus when the drag ends.
@@ -26438,12 +26485,9 @@ function peStartInlineTextMove(e, o) {
   peState.inlineEditFocusPending = false;
   clearTimeout(peTextKbTimer);
   peTextKbTimer = null;
-  const osk = peOskEl();
-  if (osk && document.activeElement === osk) {
-    try { osk.blur(); } catch (_) {}
-  }
+  peSuspendMobileOverlayForGeomDrag();
   const el = peInlineTextEl();
-  if (el) {
+  if (el && !el.classList.contains('pe-text-border-drag')) {
     el.classList.add('pe-text-border-drag');
     window.getSelection()?.removeAllRanges();
     try { el.blur(); } catch (_) {}
@@ -26466,6 +26510,10 @@ function peResumeInlineTextEditAfterMove(o) {
   if (!peState || !o || peState.inlineEditId !== o.id) return;
   peState.inlineEditFocusPending = true;
   peArmTextKeyboardQuiet(40);
+  // Re-attach mobile overlay (was suspended for the drag) at the new position.
+  if (peUsesMobileEditOverlay()) {
+    peStartMobileEditOverlay(o);
+  }
   peFocusInlineEditorNow();
   if (typeof isTouchDevice !== 'undefined' && isTouchDevice) {
     peBindTextKeyboardGuards(true);
@@ -26701,8 +26749,20 @@ function peUpdateObjectsLayout() {
   const layer = document.getElementById('peObjLayer');
   if (!layer) return;
   const { w: W, h: H } = peStageSize();
-  const nodes = layer.querySelectorAll('.pe-obj');
-  if (nodes.length !== peState.objects.length) {
+  // Callouts render 2 .pe-obj nodes per object — compare unique ids, not node count.
+  const domIds = new Set(
+    [...layer.querySelectorAll('.pe-obj[data-pe-id]')].map(n => String(n.dataset.peId))
+  );
+  const expectIds = new Set(
+    peState.objects.filter(o => o.type !== 'comment').map(o => String(o.id))
+  );
+  let idMismatch = domIds.size !== expectIds.size;
+  if (!idMismatch) {
+    for (const id of expectIds) {
+      if (!domIds.has(id)) { idMismatch = true; break; }
+    }
+  }
+  if (idMismatch) {
     peRedrawObjects();
     return;
   }
@@ -26725,6 +26785,9 @@ function peUpdateObjectsLayout() {
       const inner = (outer || el).querySelector('.pe-obj-text')
         || (el.classList.contains('pe-obj-text') ? el : null);
       if (inner) {
+        // Inner is position:relative — never keep absolute offsets on it.
+        inner.style.left = '';
+        inner.style.top = '';
         inner.style.fontSize = (o.fontPt * peState.scale) + 'px';
         inner.style.color = o.color;
         peApplyTextLayoutStyles(inner, o, W);
@@ -27308,7 +27371,9 @@ function peApplyObjSelection(o) {
   peState.sel = o;
   document.querySelectorAll('#peObjLayer .pe-obj.sel').forEach(el => el.classList.remove('sel'));
   if (o) {
-    const el = document.querySelector('#peObjLayer [data-pe-id="' + o.id + '"]');
+    // Prefer the outer .pe-obj — text also stamps data-pe-id on the inner node.
+    const el = document.querySelector('#peObjLayer .pe-obj[data-pe-id="' + o.id + '"]')
+      || document.querySelector('#peObjLayer [data-pe-id="' + o.id + '"]');
     if (el) el.classList.add('sel');
   }
   document.getElementById('peDeleteObj').disabled = !peGetSelectedObjects().length;
@@ -29987,6 +30052,7 @@ function peStartTextCornerResize(e, o, corner) {
     peState.inlineEditFocusPending = false;
     clearTimeout(peTextKbTimer);
     peTextKbTimer = null;
+    peSuspendMobileOverlayForGeomDrag();
     window.getSelection()?.removeAllRanges();
     try { inner.blur(); } catch (_) {}
   }
@@ -30270,8 +30336,7 @@ function peProcessDrag(clientX, clientY) {
         }
       }
       if (peState.inlineEditId === d.obj.id && d.obj.type === 'text') {
-        peUpdateObjectsLayout();
-        if (peMobileEditActive) pePositionMobileEditOverlay();
+        peSyncTextObjDomPosition(d.obj);
       } else peRedrawObjects();
       return;
     }
@@ -30305,8 +30370,7 @@ function peProcessDrag(clientX, clientY) {
       }
     }
     if (peState.inlineEditId === d.obj.id && d.obj.type === 'text') {
-      peUpdateObjectsLayout();
-      if (peMobileEditActive) pePositionMobileEditOverlay();
+      peSyncTextObjDomPosition(d.obj);
     } else peRedrawObjects();
   } else if (d.kind === 'resize') {
     d.obj.w = Math.max(0.02, d.ow + dx / W);
@@ -30435,7 +30499,7 @@ function peProcessDrag(clientX, clientY) {
     if (d.inlineTextResize || peState.inlineEditId === d.obj.id) {
       peUpdateObjectsLayout(); // apply fontSize first so size math is correct
       peTextSetPosFromFixedCorner(d.obj, d.oppCorner, d.anchorX, d.anchorY, W, H);
-      if (peMobileEditActive) pePositionMobileEditOverlay();
+      peSyncTextObjDomPosition(d.obj);
     } else {
       peRedrawObjects();
       peTextSetPosFromFixedCorner(d.obj, d.oppCorner, d.anchorX, d.anchorY, W, H);
