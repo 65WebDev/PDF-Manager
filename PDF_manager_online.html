@@ -1738,6 +1738,7 @@
       box-sizing: border-box;
       white-space: pre-wrap;
       word-break: break-word;
+      transform-origin: center center;
     }
     #peOskProxy.pe-osk-active {
       opacity: 1;
@@ -25702,6 +25703,7 @@ function pePositionMobileEditOverlay() {
       t.style.top = '0px';
       t.style.width = '1px';
       t.style.height = '1px';
+      t.style.transform = '';
     }
     return;
   }
@@ -25713,12 +25715,20 @@ function pePositionMobileEditOverlay() {
   if (!(r.width >= 0) || !(r.height >= 0)) return;
   const cs = getComputedStyle(el);
   const fontPx = parseFloat(cs.fontSize) || 16;
-  const w = Math.max(r.width, Math.ceil(fontPx * 2.2));
-  const h = Math.max(r.height, Math.ceil(fontPx * 1.35));
-  t.style.left = Math.round(r.left) + 'px';
-  t.style.top = Math.round(r.top) + 'px';
+  const obj = peState && peState.objects.find(x => x.id === peMobileEditActive.id);
+  const rot = (obj && obj.rot) || 0;
+  // Use unrotated layout size + CSS rotate so the caret matches the host and
+  // the proxy does not cover the axis-aligned AABB (which hid rotate handles).
+  const w = Math.max(el.offsetWidth || 0, Math.ceil(fontPx * 2.2));
+  const h = Math.max(el.offsetHeight || 0, Math.ceil(fontPx * 1.35));
+  const cx = (r.left + r.right) / 2;
+  const cy = (r.top + r.bottom) / 2;
+  t.style.left = Math.round(cx - w / 2) + 'px';
+  t.style.top = Math.round(cy - h / 2) + 'px';
   t.style.width = Math.round(w) + 'px';
   t.style.height = Math.round(h) + 'px';
+  t.style.transformOrigin = 'center center';
+  t.style.transform = rot ? ('rotate(' + rot + 'deg)') : '';
   t.style.fontSize = cs.fontSize || (fontPx + 'px');
   t.style.fontFamily = cs.fontFamily || 'sans-serif';
   t.style.fontWeight = cs.fontWeight || 'normal';
@@ -25728,7 +25738,7 @@ function pePositionMobileEditOverlay() {
   // Never paint glyphs on the fixed proxy — host inside .sel is the visible text.
   t.style.color = 'transparent';
   t.style.webkitTextFillColor = 'transparent';
-  t.style.caretColor = (peState && peState.objects.find(x => x.id === peMobileEditActive.id)?.color) || cs.color || '#111';
+  t.style.caretColor = (obj && obj.color) || cs.color || '#111';
   t.style.background = 'transparent';
 }
 
@@ -25951,10 +25961,23 @@ function peStopMobileEditOverlay() {
   t.value = '';
   ['left', 'top', 'width', 'height', 'fontSize', 'fontFamily', 'fontWeight',
     'fontStyle', 'lineHeight', 'textAlign', 'color', 'background',
-    'opacity', 'pointerEvents', 'visibility', 'display'].forEach((k) => {
+    'opacity', 'pointerEvents', 'visibility', 'display', 'transform',
+    'transformOrigin', 'webkitTextFillColor', 'caretColor'].forEach((k) => {
     try { t.style[k] = ''; } catch (_) {}
   });
   try { if (document.activeElement === t) t.blur(); } catch (_) {}
+}
+
+/** Peek under #peOskProxy (max z-index) to find handles it may be covering. */
+function peElementUnderOskProxy(clientX, clientY) {
+  const t = peOskEl();
+  if (!t) return document.elementFromPoint(clientX, clientY);
+  const prev = t.style.pointerEvents;
+  t.style.pointerEvents = 'none';
+  let under = null;
+  try { under = document.elementFromPoint(clientX, clientY); } catch (_) {}
+  t.style.pointerEvents = prev;
+  return under;
 }
 
 /**
@@ -25970,14 +25993,34 @@ function peOnOskProxyPointerDown(e) {
     ? peState.objects.find(x => x.id === peMobileEditActive.id && x.type === 'text')
     : null);
   if (!o || peState.inlineEditId !== o.id) return;
+
+  // Rotate / corner handles sit under the proxy's AABB — forward the gesture.
+  const under = peElementUnderOskProxy(e.clientX, e.clientY);
+  if (under && under.closest) {
+    const rotH = under.closest('.pe-text-rotate-handle');
+    if (rotH && peState.sel === o) {
+      if (e.cancelable) e.preventDefault();
+      e.stopPropagation();
+      peStartTextRotate(e, o);
+      return;
+    }
+    const cornerH = under.closest('.pe-text-corner-handle');
+    if (cornerH && peState.sel === o && cornerH.dataset.corner) {
+      if (e.cancelable) e.preventDefault();
+      e.stopPropagation();
+      peStartTextCornerResize(e, o, cornerH.dataset.corner);
+      return;
+    }
+  }
+
   const proxy = peOskEl();
   const host = peInlineTextEl();
   const outer = peGetTextOuterEl(o);
-  // Hit-test what the user sees: proxy rect, then selection outer, then host.
+  // Hit-test what the user sees: host/outer (rotated), not the proxy AABB alone.
   const zones = [
-    peTextEditHitZone(proxy, e.clientX, e.clientY),
+    host ? peTextEditHitZone(host, e.clientX, e.clientY) : 'outside',
     outer ? peTextEditHitZone(outer, e.clientX, e.clientY) : 'outside',
-    host ? peTextEditHitZone(host, e.clientX, e.clientY) : 'outside'
+    peTextEditHitZone(proxy, e.clientX, e.clientY)
   ];
   if (!zones.includes('border')) return;
   peStartInlineTextMove(e, o);
@@ -26565,6 +26608,7 @@ function peHideOskProxyForGeomDrag() {
   t.style.opacity = '0';
   t.style.pointerEvents = 'none';
   t.style.visibility = 'hidden';
+  t.style.transform = '';
   // Keep display as-is (empty / block). display:none → pointercancel mid-drag.
   modal?.classList.add('pe-text-geom-dragging');
 }
@@ -27531,8 +27575,6 @@ function peStartVectorEndpointResize(e, o, which) {
     startRot,
     rotMagnet: peCreateRotMagnet(startRot)
   };
-  peShowRotateLabel();
-  peUpdateRotateLabel(o, e.clientX, e.clientY);
   peUpdatePanUi();
 }
 
@@ -30552,13 +30594,33 @@ function peStartTextRotate(e, o) {
   const cy = (r.top + r.bottom) / 2;
   const pt = peStagePoint(e);
   const startRot = o.rot || 0;
+  const editing = peState && peState.inlineEditId === o.id;
+  if (editing) {
+    // Park OSK proxy so it cannot steal the rotate gesture / desync.
+    peInlineEditFocusSuppressed = true;
+    peGeomDragActive = true;
+    peState.inlineEditFocusPending = false;
+    clearTimeout(peTextKbTimer);
+    peTextKbTimer = null;
+  }
   peState.drag = {
     kind: 'rotate-text', obj: o,
     startRot,
     startAngle: Math.atan2(pt.y - cy, pt.x - cx) * 180 / Math.PI,
     shiftKey: e.shiftKey,
-    rotMagnet: peCreateRotMagnet(startRot)
+    rotMagnet: peCreateRotMagnet(startRot),
+    inlineTextRotate: !!editing
   };
+  if (e && e.cancelable) e.preventDefault();
+  const captureEl = document.getElementById('peStage')
+    || document.getElementById('peStageWrap')
+    || outer;
+  peCapturePointer(e, captureEl);
+  if (editing) {
+    peGeomDragIgnoreCancelUntil = Date.now() + 600;
+    peArmGeomDragTouchFallback();
+    peSuspendMobileOverlayForGeomDrag();
+  }
   peShowRotateLabel();
   peUpdateRotateLabel(o, e.clientX, e.clientY);
   peUpdatePanUi();
@@ -30954,7 +31016,6 @@ function peProcessDrag(clientX, clientY) {
       peLayoutVectorShape(d.obj, d.fixedX, d.fixedY, mx, my, WW, HH, null);
     }
     peRedrawObjects();
-    peUpdateRotateLabel(d.obj, clientX, clientY);
   } else if (d.kind === 'resize-text') {
     const dist = Math.max(1, Math.hypot(pt.x - d.anchorX, pt.y - d.anchorY));
     const scale = dist / d.startDist;
@@ -31001,7 +31062,6 @@ function peProcessDrag(clientX, clientY) {
       }
       peLayoutVectorShape(d.obj, d.startX, d.startY, mx, my, W, H, null);
       peRedrawObjects();
-      peUpdateRotateLabel(d.obj, clientX, clientY);
     } else {
       let x1 = d.startX, y1 = d.startY, x2 = pt.x, y2 = pt.y;
       let wPx = Math.abs(x2 - x1), hPx = Math.abs(y2 - y1);
@@ -32126,8 +32186,6 @@ function peObjMouseDown(e, o) {
       if (peShapeIsVectorStroke(peLastShapeKind)) {
         peState.drag.startRot = 0;
         peState.drag.rotMagnet = peCreateRotMagnet(0);
-        peShowRotateLabel();
-        peUpdateRotateLabel(o, e.clientX, e.clientY);
       }
       peRedrawObjects();
       peUpdatePanUi();
@@ -32185,7 +32243,8 @@ function peObjMouseDown(e, o) {
     // Parking the OSK proxy can emit a spurious pointercancel on mobile.
     // Keep geom-drag alive and continue via the touchmove fallback.
     if (e && e.type === 'pointercancel' && peState && peState.drag
-        && (peState.drag.inlineTextMove || peState.drag.inlineTextResize)
+        && (peState.drag.inlineTextMove || peState.drag.inlineTextResize
+            || peState.drag.inlineTextRotate)
         && Date.now() < peGeomDragIgnoreCancelUntil) {
       peArmGeomDragTouchFallback();
       return;
@@ -32206,9 +32265,7 @@ function peObjMouseDown(e, o) {
     if (!pePinchActive) peSelSnapBeforePinch = null;
     if (!peState || !peState.drag) return;
     const d = peState.drag;
-    const wasRotate = d.kind === 'rotate-text' || d.kind === 'rotate-shape'
-      || d.kind === 'resize-vector'
-      || (d.kind === 'shape-draw' && d.obj && peShapeIsVectorStroke(d.obj.shape));
+    const wasRotate = d.kind === 'rotate-text' || d.kind === 'rotate-shape';
     peState.drag = null;
     peStopAutoScroll();
     document.getElementById('pageEditModal')?.classList.remove('pe-panning', 'pe-crop-panning');
@@ -32219,7 +32276,7 @@ function peObjMouseDown(e, o) {
       peRedrawObjects();
       peUpdateProps();
     }
-    if ((d.inlineTextMove || d.inlineTextResize) && peState?.inlineEditId) {
+    if ((d.inlineTextMove || d.inlineTextResize || d.inlineTextRotate) && peState?.inlineEditId) {
       const movedObj = d.obj;
       requestAnimationFrame(() => peResumeInlineTextEditAfterMove(movedObj));
     } else if (peInlineEditFocusSuppressed || peGeomDragActive) {
