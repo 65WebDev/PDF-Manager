@@ -37265,8 +37265,14 @@ function pePaintBlackRedactRect(doc, pageIdx, region, fillColor) {
   peMarkPageNeedsRedactRaster(page);
 }
 
-// Full-page JPEG for every page that has confirmed redaction. Only for
-// disposable export/save/print copies — never the live editor document.
+// Applies confirmed redaction to every marked page of a disposable
+// export/save/print copy — never the live editor document.
+// First tries the REGIONAL path (peBuildRegionalRedactedPage): only the text
+// under the boxes is removed, with exact width compensation, and the page —
+// including its selectable text layer — stays vector. If the page contains
+// anything the regional path cannot handle safely (images or vector ink
+// under a box, fonts without metrics, shared forms) or the pdf.js
+// verification fails, that page falls back to the old full-page JPEG raster.
 // Mutates `doc` in place (replaces marked pages) and returns the same doc.
 async function peApplyPendingRedactRasterization(doc) {
   if (!doc) return doc;
@@ -37279,7 +37285,14 @@ async function peApplyPendingRedactRasterization(doc) {
   }
   for (let k = 0; k < indices.length; k++) {
     const idx = indices[k];
-    const rebuilt = await peRasterizePageInDoc(doc, idx);
+    let rebuilt = null;
+    try {
+      rebuilt = await peBuildRegionalRedactedPage(doc, idx);
+    } catch (err) {
+      console.warn('peApplyPendingRedactRasterization: regional path failed', err);
+      rebuilt = null;
+    }
+    if (!rebuilt) rebuilt = await peRasterizePageInDoc(doc, idx);
     const [replacement] = await doc.copyPages(rebuilt, [idx]);
     doc.removePage(idx);
     doc.insertPage(idx, replacement);
@@ -37393,111 +37406,162 @@ function peClonePdfBytes(bytes) {
   return new Uint8Array(bytes).slice();
 }
 
-// Secure redaction: conservative text scrub (exact pdf.js match only) + regional
-// render burn (crop page pixels, fill black) — never the whole page.
-async function peFlattenSingleRedactedRegion(doc, pageIdx, rect) {
-  if (!doc || pageIdx == null || pageIdx < 0 || !rect) return;
+// Regional redaction for save/export/print: instead of rasterizing the whole
+// page, remove only the text operators under each confirmed box (with exact
+// TJ width compensation, see peScrubEngineParse) and keep everything else —
+// including the selectable text layer — untouched. The result is VERIFIED
+// with pdf.js before being accepted:
+//   (a) no extractable glyph may touch any box;
+//   (b) pixels outside the boxes must be identical to the pre-scrub render.
+// Any doubt returns null and the caller falls back to the old full-page
+// rasterization for that page, so the worst case is the previous behavior.
+async function peBuildRegionalRedactedPage(doc, pageIdx) {
+  const stored = peRegionsAsObjects(pePageRedactedRegions(doc.getPage(pageIdx)));
+  if (!stored.length) return null;
   const pad = 0.003;
-  const minX = Math.max(0, (rect.minX != null ? rect.minX : rect[0]) - pad);
-  const minY = Math.max(0, (rect.minY != null ? rect.minY : rect[1]) - pad);
-  const maxX = Math.min(1, (rect.maxX != null ? rect.maxX : rect[2]) + pad);
-  const maxY = Math.min(1, (rect.maxY != null ? rect.maxY : rect[3]) + pad);
-  if (!(maxX > minX && maxY > minY)) return;
-  if (rect.flattened) return;
+  const rects = stored.map(r => ({
+    minX: Math.max(0, r.minX - pad),
+    minY: Math.max(0, r.minY - pad),
+    maxX: Math.min(1, r.maxX + pad),
+    maxY: Math.min(1, r.maxY + pad),
+    core: { minX: r.minX, minY: r.minY, maxX: r.maxX, maxY: r.maxY }
+  })).filter(r => r.maxX > r.minX && r.maxY > r.minY);
+  if (!rects.length) return null;
 
-  const scrubRects = [{ minX, minY, maxX, maxY }];
-  let workBytes = peClonePdfBytes(await doc.save());
-  if (!workBytes.length) throw new Error('PDF document is empty');
-  let pj = await pdfjsLib.getDocument({ data: peClonePdfBytes(workBytes) }).promise;
+  const bytesBefore = peClonePdfBytes(await doc.save());
+  if (!bytesBefore.length) return null;
+  const workDoc = await PDFLib.PDFDocument.load(peClonePdfBytes(bytesBefore));
+
+  let scrub;
   try {
-    let workDoc = await PDFLib.PDFDocument.load(peClonePdfBytes(workBytes));
-    for (let pass = 0; pass < 2; pass++) {
-      const pjPage = await pj.getPage(pageIdx + 1);
-      const pjRot = typeof pjPage.rotate === 'number' ? pjPage.rotate : 0;
-      const vp1 = pjPage.getViewport({ scale: 1, rotation: pjRot });
-      const guide = await peBuildTextScrubGuide(pjPage, vp1, scrubRects);
-      guide.conservative = true;
-      guide.rects = scrubRects;
-      if (!guide.runs || !guide.runs.length) break;
-      const changed = await peRemovePageTextInVisualRegion(workDoc, pageIdx, scrubRects, guide);
-      if (!changed) break;
-      workBytes = peClonePdfBytes(await workDoc.save());
-      if (!workBytes.length) throw new Error('PDF save failed after text scrub');
-      try { pj.destroy(); } catch (_) {}
-      pj = await pdfjsLib.getDocument({ data: peClonePdfBytes(workBytes) }).promise;
-      workDoc = await PDFLib.PDFDocument.load(peClonePdfBytes(workBytes));
-    }
+    scrub = await peScrubPageRegionsInDoc(workDoc, pageIdx, rects);
+  } catch (err) {
+    console.warn('peBuildRegionalRedactedPage: scrub failed', err);
+    return null;
+  }
+  if (!scrub || scrub.inkHit || scrub.unresolved) {
+    console.warn('peBuildRegionalRedactedPage: page ' + (pageIdx + 1) +
+      ' needs full raster (' + (scrub && scrub.inkHit ? 'ink under box' : 'unsupported content') + ')');
+    return null;
+  }
 
+  const bytesAfter = peClonePdfBytes(await workDoc.save());
+  if (!bytesAfter.length) return null;
+  const ok = await peVerifyRegionalRedaction(bytesBefore, bytesAfter, pageIdx, rects,
+    scrub.removedBoxes || []);
+  if (!ok) {
+    console.warn('peBuildRegionalRedactedPage: verification failed for page ' + (pageIdx + 1));
+    return null;
+  }
+
+  // Reload so the rewritten streams are committed, then drop the redact
+  // bookkeeping from the page — the text is now really gone.
+  const finalDoc = await PDFLib.PDFDocument.load(peClonePdfBytes(bytesAfter));
+  try {
+    const pg = finalDoc.getPage(pageIdx);
+    pg.node.delete(PDFLib.PDFName.of(PE_NEEDS_REDACT_RASTER_KEY));
+    pg.node.delete(PDFLib.PDFName.of(PE_REDACTED_REGIONS_KEY));
+    pg.node.delete(PDFLib.PDFName.of(PE_NEEDS_SHAPE_RASTER_KEY));
+  } catch (_) {}
+  return finalDoc;
+}
+
+// pdf.js render of one page to a canvas, boxes (+extra pad) blacked out.
+async function peRenderPageWithMaskedBoxes(bytes, pageIdx, boxes, scale, maskPad) {
+  const pj = await pdfjsLib.getDocument({ data: peClonePdfBytes(bytes) }).promise;
+  try {
     const pjPage = await pj.getPage(pageIdx + 1);
     const pjRot = typeof pjPage.rotate === 'number' ? pjPage.rotate : 0;
-    const S = 2;
-    const vp = pjPage.getViewport({ scale: S, rotation: pjRot });
-
+    const vp = pjPage.getViewport({ scale, rotation: pjRot });
     const canvas = document.createElement('canvas');
     canvas.width = Math.ceil(vp.width);
     canvas.height = Math.ceil(vp.height);
     const ctx = canvas.getContext('2d');
     await pjPage.render({ canvasContext: ctx, viewport: vp, annotationMode: 0 }).promise;
-
-    const cropX = Math.round(minX * canvas.width);
-    const cropY = Math.round(minY * canvas.height);
-    const cropW = Math.max(1, Math.round((maxX - minX) * canvas.width));
-    const cropH = Math.max(1, Math.round((maxY - minY) * canvas.height));
-    const cropCanvas = document.createElement('canvas');
-    cropCanvas.width = cropW;
-    cropCanvas.height = cropH;
-    const cropCtx = cropCanvas.getContext('2d');
-    cropCtx.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-    cropCtx.fillStyle = '#000000';
-    cropCtx.fillRect(0, 0, cropW, cropH);
-    const png = pePngBytesFromDataUrl(cropCanvas.toDataURL('image/png'));
-
-    const workPage = workDoc.getPage(pageIdx);
-    const rot = workPage.getRotation().angle || 0;
-    const cb = workPage.getCropBox();
-    const img = await workDoc.embedPng(png);
-    const full = peOverlayPlacement(rot, cb);
-    const localX = full.x + minX * full.w;
-    const localY = full.y + (1 - maxY) * full.h;
-    const anchor = peRotatePointAround(localX, localY, full.x, full.y, rot);
-    workPage.drawImage(img, {
-      x: anchor.x, y: anchor.y,
-      width: (maxX - minX) * full.w,
-      height: (maxY - minY) * full.h,
-      rotate: PDFLib.degrees(rot)
+    ctx.fillStyle = '#000000';
+    boxes.forEach(r => {
+      const x0 = Math.max(0, (r.minX - maskPad)) * canvas.width;
+      const y0 = Math.max(0, (r.minY - maskPad)) * canvas.height;
+      const x1 = Math.min(1, (r.maxX + maskPad)) * canvas.width;
+      const y1 = Math.min(1, (r.maxY + maskPad)) * canvas.height;
+      ctx.fillRect(Math.floor(x0), Math.floor(y0), Math.ceil(x1 - x0), Math.ceil(y1 - y0));
     });
-    peAddPageRedactedRegion(workPage, minX, minY, maxX, maxY, true);
-
-    const [replacement] = await doc.copyPages(workDoc, [pageIdx]);
-    doc.removePage(pageIdx);
-    doc.insertPage(pageIdx, replacement);
+    return canvas;
   } finally {
     try { pj.destroy(); } catch (_) {}
   }
 }
 
-async function peFlattenRedactedRegionsOnPage(doc, pageIdx, rectsOptional) {
-  if (!doc || pageIdx == null || pageIdx < 0) return false;
-  let regions = rectsOptional;
-  if (!regions || !regions.length) {
-    try {
-      regions = peRegionsAsObjects(pePageRedactedRegions(doc.getPage(pageIdx)))
-        .filter(r => !r.flattened);
-    } catch (_) { regions = []; }
-  } else {
-    regions = peRegionsAsObjects(regions).filter(r => !r.flattened);
+async function peVerifyRegionalRedaction(bytesBefore, bytesAfter, pageIdx, rects, removedBoxes) {
+  // (a) no extractable text may remain under any box
+  let pj = null;
+  try {
+    pj = await pdfjsLib.getDocument({ data: peClonePdfBytes(bytesAfter) }).promise;
+    const pjPage = await pj.getPage(pageIdx + 1);
+    const pjRot = typeof pjPage.rotate === 'number' ? pjPage.rotate : 0;
+    const vp1 = pjPage.getViewport({ scale: 1, rotation: pjRot });
+    const tc = await pjPage.getTextContent();
+    for (const item of tc.items) {
+      if (!item || !item.str || !item.transform) continue;
+      const n = item.str.length;
+      if (!n) continue;
+      const [vx, vy] = vp1.convertToViewportPoint(item.transform[4], item.transform[5]);
+      const nx = vx / vp1.width;
+      const ny = vy / vp1.height;
+      const wNorm = (Number(item.width) || 0) / vp1.width;
+      const hRaw = Number(item.height) || Math.hypot(item.transform[2], item.transform[3]) ||
+        Math.abs(item.transform[0]) || Math.abs(item.transform[3]) || 10;
+      const hNorm = Math.max(hRaw, 4) / vp1.height;
+      if (!(wNorm > 0)) continue;
+      for (let k = 0; k < n; k++) {
+        if (item.str[k] === ' ') continue;
+        const gLeft = nx + k / n * wNorm;
+        const gRight = nx + (k + 1) / n * wNorm;
+        const gTop = ny - hNorm;
+        const gBot = ny + hNorm * 0.2;
+        if (peRedactGlyphHit(gLeft, gRight, gTop, gBot, rects)) {
+          console.warn('peVerifyRegionalRedaction: text still under box:', JSON.stringify(item.str));
+          return false;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('peVerifyRegionalRedaction: text check failed', err);
+    return false;
+  } finally {
+    if (pj) try { pj.destroy(); } catch (_) {}
   }
-  if (!regions.length) return false;
-  for (let i = 0; i < regions.length; i++) {
-    await peFlattenSingleRedactedRegion(doc, pageIdx, regions[i]);
+
+  // (b) pixels outside the boxes AND outside the removed glyphs must be
+  // identical — same renderer, same ops, so any real difference means the
+  // scrub disturbed something it should not have.
+  try {
+    const S = 2;
+    const maskBoxes = rects.map(r => ({ minX: r.minX, minY: r.minY, maxX: r.maxX, maxY: r.maxY }))
+      .concat((removedBoxes || []).map(b => ({
+        minX: b.minX, minY: b.minY, maxX: b.maxX, maxY: b.maxY
+      })));
+    const maskPad = 0.004;
+    const beforeCanvas = await peRenderPageWithMaskedBoxes(bytesBefore, pageIdx, maskBoxes, S, maskPad);
+    const afterCanvas = await peRenderPageWithMaskedBoxes(bytesAfter, pageIdx, maskBoxes, S, maskPad);
+    if (beforeCanvas.width !== afterCanvas.width || beforeCanvas.height !== afterCanvas.height) return false;
+    const a = beforeCanvas.getContext('2d').getImageData(0, 0, beforeCanvas.width, beforeCanvas.height).data;
+    const b = afterCanvas.getContext('2d').getImageData(0, 0, afterCanvas.width, afterCanvas.height).data;
+    let bad = 0;
+    const total = beforeCanvas.width * beforeCanvas.height;
+    for (let p = 0; p < a.length; p += 4) {
+      if (Math.abs(a[p] - b[p]) > 12 || Math.abs(a[p + 1] - b[p + 1]) > 12 ||
+          Math.abs(a[p + 2] - b[p + 2]) > 12) bad++;
+    }
+    if (bad > 50) {
+      console.warn('peVerifyRegionalRedaction: ' + bad + ' of ' + total + ' pixels changed outside boxes');
+      return false;
+    }
+  } catch (err) {
+    console.warn('peVerifyRegionalRedaction: pixel check failed', err);
+    return false;
   }
   return true;
-}
-
-async function peFlattenAllRedactedRegionsInDoc(doc) {
-  if (!doc) return;
-  const n = doc.getPageCount();
-  for (let i = 0; i < n; i++) await peFlattenRedactedRegionsOnPage(doc, i);
 }
 
 // Local shape-region rasterization for EXPORT / file-save only (filled shapes).
@@ -37664,27 +37728,6 @@ function peExpandShapesToTouchedGlyphs(shapes, guide) {
   });
 }
 
-function peVisualNormRegionToPdfUser(minX, minY, maxX, maxY, rot, cb) {
-  const visW = (rot % 180) ? cb.height : cb.width;
-  const visH = (rot % 180) ? cb.width : cb.height;
-  const x0 = minX * visW, y0 = minY * visH, x1 = maxX * visW, y1 = maxY * visH;
-  function visToCrop(vx, vy) {
-    const ux = vx, uy = visH - vy;
-    const R = ((rot % 360) + 360) % 360;
-    if (R === 90) return { x: cb.x + uy, y: cb.y + (cb.height - ux) };
-    if (R === 180) return { x: cb.x + (cb.width - ux), y: cb.y + (cb.height - uy) };
-    if (R === 270) return { x: cb.x + (cb.width - uy), y: cb.y + ux };
-    return { x: cb.x + ux, y: cb.y + uy };
-  }
-  const corners = [visToCrop(x0, y0), visToCrop(x1, y0), visToCrop(x1, y1), visToCrop(x0, y1)];
-  return {
-    xMin: Math.min(corners[0].x, corners[1].x, corners[2].x, corners[3].x),
-    yMin: Math.min(corners[0].y, corners[1].y, corners[2].y, corners[3].y),
-    xMax: Math.max(corners[0].x, corners[1].x, corners[2].x, corners[3].x),
-    yMax: Math.max(corners[0].y, corners[1].y, corners[2].y, corners[3].y)
-  };
-}
-
 function peMatMul(m, a, b, c, d, e, f) {
   return [
     m[0] * a + m[2] * b,
@@ -37696,46 +37739,401 @@ function peMatMul(m, a, b, c, d, e, f) {
   ];
 }
 
-// Blank only glyphs under the shape, using pdf.js run widths (scrubGuide).
-// If no nearby pdf.js run exists, leave the show-op untouched — guessing
-// advances was wiping the rest of the line to the right of the shape.
-function peRemoveTextOpsInRegion(srcBytes, regionPdf, scrubGuide, rot, cb, isFormStream) {
-  const src = srcBytes;
+// ============================================================================
+// Width-accurate regional text scrub (инструмент «Затирание» без полной
+// растеризации страницы).
+//
+// The old scrub removed glyph bytes from Tj/TJ strings without compensating
+// their advance widths, so every glyph that followed in the same line
+// segment shifted left ("соседние буквы съезжают"). This engine removes
+// glyphs and inserts an exact TJ kerning adjustment in their place, computed
+// from the font's own /Widths (simple fonts) or /W//DW (CID fonts) tables,
+// so the remaining text keeps its exact position. It also reports content it
+// cannot handle safely (fonts without metrics near the box, images or
+// non-trivial vector ink under the box, shared/multiply-invoked Form
+// XObjects with text under the box) so the caller can fall back to the old
+// full-page rasterization for that page only.
+// ============================================================================
+
+function peLookupPdfObj(doc, v) {
+  if (v == null) return null;
+  try {
+    const r = doc.context.lookup(v);
+    return r == null ? null : r;
+  } catch (_) { return null; }
+}
+
+function pePdfResName(v) {
+  if (v == null) return '';
+  let s = '';
+  try {
+    s = (typeof v.asString === 'function' && v.asString()) ||
+        (typeof v.decodeText === 'function' && v.decodeText()) || String(v);
+  } catch (_) { s = String(v); }
+  if (s.charAt(0) === '/') s = s.slice(1);
+  return s;
+}
+
+function pePdfNumValue(doc, v) {
+  if (v == null) return null;
+  const r = peLookupPdfObj(doc, v) || v;
+  try {
+    if (typeof r.asNumber === 'function') return r.asNumber();
+  } catch (_) {}
+  const n = Number(r);
+  return Number.isFinite(n) ? n : null;
+}
+
+// PDF name tokens may contain #XX escapes in the content stream.
+function peDecodePdfNameToken(raw) {
+  return raw.replace(/#([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+}
+
+// Shared hit rule for regional redaction (engine + verification must agree).
+// Horizontally any overlap counts — a half-covered letter must be removed.
+// Vertically the overlap must be substantial (≥30% of the glyph box or ≥60%
+// of the box height), otherwise the ascender/descender slivers of ADJACENT
+// lines that merely touch the box would be eaten too.
+function peRedactGlyphHit(gLeft, gRight, gTop, gBot, rects) {
+  for (let k = 0; k < rects.length; k++) {
+    const r = rects[k];
+    const ovX = Math.min(gRight, r.maxX) - Math.max(gLeft, r.minX);
+    if (ovX <= 0) continue;
+    const ovY = Math.min(gBot, r.maxY) - Math.max(gTop, r.minY);
+    if (ovY <= 0) continue;
+    const gh = Math.max(1e-6, gBot - gTop);
+    const rh = Math.max(1e-6, r.maxY - r.minY);
+    if (ovY >= 0.3 * gh || ovY >= 0.6 * rh) return true;
+  }
+  return false;
+}
+
+// Standard-14 fonts are usually written WITHOUT a /Widths array (pdf-lib
+// does exactly that for text added by this app), so their advance widths
+// are measured through pdf-lib's own AFM data via widthOfTextAtSize.
+// Array index = byte code (WinAnsi), value = width in 1/1000 em, null =
+// code not measurable. Cached per BaseFont.
+const PE_STD_FONT_MAP = {
+  'Helvetica': 'Helvetica', 'Helvetica-Bold': 'Helvetica-Bold',
+  'Helvetica-Oblique': 'Helvetica-Oblique', 'Helvetica-BoldOblique': 'Helvetica-BoldOblique',
+  'Courier': 'Courier', 'Courier-Bold': 'Courier-Bold',
+  'Courier-Oblique': 'Courier-Oblique', 'Courier-BoldOblique': 'Courier-BoldOblique',
+  'Times-Roman': 'Times-Roman', 'Times-Bold': 'Times-Bold',
+  'Times-Italic': 'Times-Italic', 'Times-BoldItalic': 'Times-BoldItalic'
+};
+const peStdFontWidthsCache = new Map();
+let peStdFontMeasureDocPromise = null;
+async function peGetStandardFontWidths(baseFont, winAnsi) {
+  const cacheKey = baseFont + (winAnsi ? '|win' : '|std');
+  if (peStdFontWidthsCache.has(cacheKey)) return peStdFontWidthsCache.get(cacheKey);
+  let result = null;
+  const stdName = PE_STD_FONT_MAP[baseFont];
+  if (stdName) {
+    try {
+      if (!peStdFontMeasureDocPromise) peStdFontMeasureDocPromise = PDFLib.PDFDocument.create();
+      const mdoc = await peStdFontMeasureDocPromise;
+      const f = await mdoc.embedFont(stdName);
+      const dec = winAnsi ? new TextDecoder('windows-1252') : null;
+      const w = new Array(256).fill(null);
+      const hi = winAnsi ? 256 : 127; // without WinAnsi only ASCII is safe
+      for (let c = 32; c < hi; c++) {
+        try {
+          const ch = dec ? dec.decode(new Uint8Array([c])) : String.fromCharCode(c);
+          if (ch && ch !== '�') w[c] = f.widthOfTextAtSize(ch, 1000);
+        } catch (_) {}
+      }
+      result = w;
+    } catch (_) { result = null; }
+  }
+  peStdFontWidthsCache.set(cacheKey, result);
+  return result;
+}
+
+// Per-code glyph advance widths (glyph space, thousandths of text units) for
+// one font dict. Returns { unitBytes, widthOf(code) } or null when widths
+// cannot be determined (Type3, non-Identity CMaps, missing /Widths).
+// widthOf may return null for an individual code it cannot measure.
+async function peParseFontWidths(doc, fontDict) {
+  if (!fontDict || typeof fontDict.get !== 'function') return null;
+  const subtype = pePdfResName(fontDict.get(PDFLib.PDFName.of('Subtype')));
+  if (subtype === 'Type0') {
+    const encName = pePdfResName(fontDict.get(PDFLib.PDFName.of('Encoding')));
+    if (encName !== 'Identity-H') return null; // vertical/custom CMaps: unsupported
+    const dfArr = peLookupPdfObj(doc, fontDict.get(PDFLib.PDFName.of('DescendantFonts')));
+    const df = (dfArr && typeof dfArr.asArray === 'function')
+      ? peLookupPdfObj(doc, dfArr.asArray()[0]) : null;
+    if (!df || typeof df.get !== 'function') return null;
+    const dwv = pePdfNumValue(doc, df.get(PDFLib.PDFName.of('DW')));
+    const defaultW = dwv != null ? dwv : 1000;
+    const map = new Map();
+    const ranges = []; // [cFirst, cLast, w]
+    const wObj = peLookupPdfObj(doc, df.get(PDFLib.PDFName.of('W')));
+    if (wObj && typeof wObj.asArray === 'function') {
+      const items = wObj.asArray();
+      let i = 0;
+      while (i < items.length) {
+        const first = pePdfNumValue(doc, items[i]);
+        if (first == null) return null;
+        const second = peLookupPdfObj(doc, items[i + 1]) || items[i + 1];
+        if (second && typeof second.asArray === 'function') {
+          const ws = second.asArray();
+          for (let k = 0; k < ws.length; k++) {
+            const w = pePdfNumValue(doc, ws[k]);
+            if (w != null) map.set(first + k, w);
+          }
+          i += 2;
+        } else {
+          const cLast = pePdfNumValue(doc, items[i + 1]);
+          const w = pePdfNumValue(doc, items[i + 2]);
+          if (cLast == null || w == null) return null;
+          ranges.push([first, cLast, w]);
+          i += 3;
+        }
+      }
+    }
+    return {
+      unitBytes: 2,
+      widthOf(code) {
+        const m = map.get(code);
+        if (m != null) return m;
+        for (let k = 0; k < ranges.length; k++) {
+          if (code >= ranges[k][0] && code <= ranges[k][1]) return ranges[k][2];
+        }
+        return defaultW;
+      }
+    };
+  }
+  if (subtype === 'Type1' || subtype === 'TrueType' || subtype === 'MMType1') {
+    const firstChar = pePdfNumValue(doc, fontDict.get(PDFLib.PDFName.of('FirstChar')));
+    const wObj = peLookupPdfObj(doc, fontDict.get(PDFLib.PDFName.of('Widths')));
+    if (firstChar == null || !wObj || typeof wObj.asArray !== 'function') {
+      // No /Widths: usable only when it's a standard-14 font with a plain
+      // name encoding (that's what pdf-lib writes for this app's own text).
+      const baseFont = pePdfResName(fontDict.get(PDFLib.PDFName.of('BaseFont')));
+      const encObj = fontDict.get(PDFLib.PDFName.of('Encoding'));
+      const encName = pePdfResName(encObj);
+      if (encObj && encName !== 'WinAnsiEncoding' && encName !== 'StandardEncoding') return null;
+      const stdW = await peGetStandardFontWidths(baseFont, encName === 'WinAnsiEncoding');
+      if (!stdW) return null;
+      return {
+        unitBytes: 1,
+        widthOf(code) { return (code >= 0 && code < 256) ? stdW[code] : null; }
+      };
+    }
+    const arr = wObj.asArray().map(x => pePdfNumValue(doc, x));
+    let missing = 0;
+    const fd = peLookupPdfObj(doc, fontDict.get(PDFLib.PDFName.of('FontDescriptor')));
+    if (fd && typeof fd.get === 'function') {
+      const mw = pePdfNumValue(doc, fd.get(PDFLib.PDFName.of('MissingWidth')));
+      if (mw != null) missing = mw;
+    }
+    return {
+      unitBytes: 1,
+      widthOf(code) {
+        const idx = code - firstChar;
+        const w = (idx >= 0 && idx < arr.length) ? arr[idx] : null;
+        return w == null ? missing : w;
+      }
+    };
+  }
+  return null; // Type3 and anything exotic
+}
+
+// name -> metrics|null for every font a stream's resources reference.
+// A null value means "font exists but widths are unavailable".
+async function peBuildStreamFontMetrics(doc, resourcesDict) {
+  const out = new Map();
+  if (!resourcesDict || typeof resourcesDict.get !== 'function') return out;
+  const fontDictObj = peLookupPdfObj(doc, resourcesDict.get(PDFLib.PDFName.of('Font')));
+  if (!fontDictObj || typeof fontDictObj.keys !== 'function') return out;
+  for (const key of fontDictObj.keys()) {
+    const fd = peLookupPdfObj(doc, fontDictObj.get(key));
+    let metrics = null;
+    try { metrics = await peParseFontWidths(doc, fd); } catch (_) { metrics = null; }
+    out.set(peDecodePdfNameToken(pePdfResName(key)), metrics);
+  }
+  return out;
+}
+
+// name -> {kind:'image'} | {kind:'form', stream, matrix, resources}
+function peBuildStreamXObjects(doc, resourcesDict) {
+  const out = new Map();
+  if (!resourcesDict || typeof resourcesDict.get !== 'function') return out;
+  const xoDict = peLookupPdfObj(doc, resourcesDict.get(PDFLib.PDFName.of('XObject')));
+  if (!xoDict || typeof xoDict.keys !== 'function') return out;
+  for (const key of xoDict.keys()) {
+    const obj = peLookupPdfObj(doc, xoDict.get(key));
+    if (!obj || !obj.dict) continue;
+    const st = pePdfResName(obj.dict.get(PDFLib.PDFName.of('Subtype')));
+    const name = peDecodePdfNameToken(pePdfResName(key));
+    if (st === 'Image') {
+      out.set(name, { kind: 'image' });
+    } else if (st === 'Form') {
+      let matrix = [1, 0, 0, 1, 0, 0];
+      const mObj = peLookupPdfObj(doc, obj.dict.get(PDFLib.PDFName.of('Matrix')));
+      if (mObj && typeof mObj.asArray === 'function') {
+        const m = mObj.asArray().map(x => pePdfNumValue(doc, x));
+        if (m.length === 6 && m.every(v => v != null)) matrix = m;
+      }
+      const resources = peLookupPdfObj(doc, obj.dict.get(PDFLib.PDFName.of('Resources')));
+      out.set(name, { kind: 'form', stream: obj, matrix, resources });
+    }
+  }
+  return out;
+}
+
+function pePageResourcesDict(doc, page) {
+  try {
+    if (page.node && typeof page.node.Resources === 'function') {
+      const r = page.node.Resources();
+      if (r) return r;
+    }
+  } catch (_) {}
+  try {
+    return peLookupPdfObj(doc, page.node.get(PDFLib.PDFName.of('Resources')));
+  } catch (_) { return null; }
+}
+
+// Decoded page /Contents streams concatenated into one buffer (a PDF may
+// split its content into several streams, potentially mid-line).
+function peGetPageContentBytes(doc, page) {
+  const chunks = [];
+  try {
+    const contentsRef = page.node.get(PDFLib.PDFName.of('Contents'));
+    if (!contentsRef) return null;
+    const resolved = doc.context.lookup(contentsRef);
+    const list = [];
+    if (resolved && typeof resolved.asArray === 'function') {
+      resolved.asArray().forEach(ref => {
+        const s = doc.context.lookup(ref);
+        if (s && s.contents != null) list.push(s);
+      });
+    } else if (resolved && resolved.contents != null) {
+      list.push(resolved);
+    }
+    for (const s of list) {
+      const b = peDecodePdfStreamBytes(s);
+      if (!b) return null; // undecodable stream: give up (caller falls back)
+      chunks.push(b);
+    }
+  } catch (_) { return null; }
+  if (!chunks.length) return null;
+  let total = 0;
+  chunks.forEach(c => { total += c.length + 1; });
+  const outBytes = new Uint8Array(total);
+  let off = 0;
+  chunks.forEach(c => {
+    outBytes.set(c, off);
+    off += c.length;
+    outBytes[off++] = 0x0a;
+  });
+  return outBytes;
+}
+
+function peShallowClonePdfDict(doc, dict) {
+  const d = doc.context.obj({});
+  if (dict && typeof dict.keys === 'function') {
+    for (const k of dict.keys()) {
+      try { d.set(k, dict.get(k)); } catch (_) {}
+    }
+  }
+  return d;
+}
+
+// New compressed stream carrying `bytes`; dict entries (BBox/Matrix/…)
+// copied from dictSource except the encoding-specific keys.
+function peRegisterStreamWithBytes(doc, dictSource, bytes) {
+  const s = doc.context.flateStream(bytes);
+  if (dictSource && typeof dictSource.keys === 'function') {
+    for (const k of dictSource.keys()) {
+      const ks = pePdfResName(k);
+      if (ks === 'Length' || ks === 'Filter' || ks === 'DecodeParms' || ks === 'DP') continue;
+      try { s.dict.set(k, dictSource.get(k)); } catch (_) {}
+    }
+  }
+  return doc.context.register(s);
+}
+
+// --- The content-stream scrub engine ---------------------------------------
+// ctx: {
+//   rects:   [{minX,minY,maxX,maxY, core:{minX,minY,maxX,maxY}}] — padded box
+//            for hit-testing; `core` is the exact confirmed box (used to
+//            recognize the cover rectangle itself as harmless ink).
+//   rot, cb: page rotation / CropBox for user-space → visual-norm mapping.
+//   metrics: Map fontResourceName -> {unitBytes,widthOf}|null
+//   xobjects: Map xobjectResourceName -> info
+//   initialCtm: starting CTM (identity for page content; invocation CTM
+//               composed with /Matrix for a form's content).
+//   collect: true = analyse only, never rewrite.
+// }
+// Returns { bytes, changed, textHit, inkHit, unresolved, formHits }.
+function peScrubEngineParse(src, ctx) {
   const len = src.length;
   const out = [];
   const LPAREN = 0x28, RPAREN = 0x29, BACKSLASH = 0x5c, LANGLE = 0x3c, RANGLE = 0x3e;
   const LBRACK = 0x5b, RBRACK = 0x5d, SPACE = 0x20;
-  const guide = scrubGuide && Array.isArray(scrubGuide.runs) ? scrubGuide : null;
-  const conservative = !!(guide && guide.conservative);
-  const usedRunKeys = new Set();
+  const rects = ctx.rects || [];
+  let uMinX = 1, uMinY = 1, uMaxX = 0, uMaxY = 0;
+  rects.forEach(r => {
+    uMinX = Math.min(uMinX, r.minX); uMinY = Math.min(uMinY, r.minY);
+    uMaxX = Math.max(uMaxX, r.maxX); uMaxY = Math.max(uMaxY, r.maxY);
+  });
 
   let i = 0;
   let inText = false;
-  let ctm = [1, 0, 0, 1, 0, 0];
+  let ctm = (ctx.initialCtm || [1, 0, 0, 1, 0, 0]).slice();
+  const ctmStack = [];
   let tm = [1, 0, 0, 1, 0, 0];
-  let fontSize = 12;
+  let tlm = [1, 0, 0, 1, 0, 0];
+  let leading = 0;
+  let fontSize = 0;
+  let curFontName = '';
   let charSpacing = 0;
   let wordSpacing = 0;
   let hScale = 1;
-  const ctmStack = [];
-  const numBuf = [];
+  // True while the x-advance accumulated since the last explicit positioning
+  // op is exact. A show op whose font has no metrics makes it stale.
+  let xReliable = true;
 
-  function isWs(b) {
-    return b === SPACE || b === 0x09 || b === 0x0a || b === 0x0d;
+  let changed = false;
+  let textHit = false;
+  let inkHit = false;
+  let unresolved = false;
+  const formHits = new Map(); // name -> [ctm, ...]
+  const removedBoxes = [];    // norm AABBs of every glyph actually removed
+
+  // numeric operands pending before an operator, with raw byte ranges and
+  // the out-position before each was emitted (so " can be rewritten).
+  const numBuf = [];
+  const numRaw = [];
+  const numOutPos = [];
+  function resetNums() { numBuf.length = 0; numRaw.length = 0; numOutPos.length = 0; }
+
+  let lastName = '';
+
+  // current path AABB in user space
+  let pathValid = false;
+  let pMinX = 0, pMinY = 0, pMaxX = 0, pMaxY = 0;
+  function pathReset() { pathValid = false; }
+  function pathAddUser(x, y) {
+    if (!pathValid) { pMinX = pMaxX = x; pMinY = pMaxY = y; pathValid = true; return; }
+    if (x < pMinX) pMinX = x; if (x > pMaxX) pMaxX = x;
+    if (y < pMinY) pMinY = y; if (y > pMaxY) pMaxY = y;
   }
+  function pathAddPoint(x, y) {
+    pathAddUser(ctm[0] * x + ctm[2] * y + ctm[4], ctm[1] * x + ctm[3] * y + ctm[5]);
+  }
+
+  function isWs(b) { return b === SPACE || b === 0x09 || b === 0x0a || b === 0x0d || b === 0x00 || b === 0x0c; }
   function isDelim(b) {
     return b === undefined || isWs(b) ||
       b === LPAREN || b === RPAREN || b === LANGLE || b === RANGLE ||
-      b === LBRACK || b === RBRACK || b === 0x2f || b === 0x25;
+      b === LBRACK || b === RBRACK || b === 0x2f || b === 0x25 ||
+      b === 0x7b || b === 0x7d;
   }
-  function skipWs() {
-    while (i < len && isWs(src[i])) i++;
-  }
-  function emitRange(from, to) {
-    for (let k = from; k < to; k++) out.push(src[k]);
-  }
+  function emitRange(from, to) { for (let k = from; k < to; k++) out.push(src[k]); }
+  function emitStr(s) { for (let k = 0; k < s.length; k++) out.push(s.charCodeAt(k)); }
   function parseNumber() {
-    skipWs();
     const start = i;
     if (i < len && (src[i] === 0x2b || src[i] === 0x2d)) i++;
     let seen = false;
@@ -37767,78 +38165,94 @@ function peRemoveTextOpsInRegion(srcBytes, regionPdf, scrubGuide, rot, cb, isFor
     if (i < len) i++;
     return true;
   }
-  function skipArray() {
-    if (src[i] !== LBRACK) return false;
-    let depth = 1; i++;
-    while (i < len && depth > 0) {
-      if (src[i] === LPAREN) { skipLiteralString(); continue; }
-      if (src[i] === LANGLE && !(i + 1 < len && src[i + 1] === LANGLE)) { skipHexString(); continue; }
-      if (src[i] === LBRACK) depth++;
-      else if (src[i] === RBRACK) depth--;
-      i++;
-    }
-    return true;
-  }
-  function textPos() {
-    const m = peMatMul(ctm, tm[0], tm[1], tm[2], tm[3], tm[4], tm[5]);
-    return { x: m[4], y: m[5] };
-  }
-  function advanceTmText(dx) {
-    tm = peMatMul(tm, 1, 0, 0, 1, dx, 0);
-  }
   function matchOp(name) {
     const n = name.length;
     if (i + n > len) return false;
     for (let k = 0; k < n; k++) if (src[i + k] !== name.charCodeAt(k)) return false;
     return isDelim(src[i + n]);
   }
-  function peekShowOp() {
-    const save = i;
-    skipWs();
-    let kind = null, opLen = 0;
-    if (matchOp('Tj')) { kind = 'Tj'; opLen = 2; }
-    else if (matchOp('TJ')) { kind = 'TJ'; opLen = 2; }
-    else if (matchOp("'")) { kind = "'"; opLen = 1; }
-    else if (matchOp('"')) { kind = '"'; opLen = 1; }
-    i = save;
-    return kind ? { kind, opLen } : null;
+
+  function applyPoint(M, x, y) {
+    return { x: M[0] * x + M[2] * y + M[4], y: M[1] * x + M[3] * y + M[5] };
   }
-  function visualPos() {
-    if (rot == null || !cb) return null;
-    const p = textPos();
-    return pePdfUserToVisualNorm(p.x, p.y, rot, cb);
+  function userAabbToNorm(x0, y0, x1, y1) {
+    const c = [
+      pePdfUserToVisualNorm(x0, y0, ctx.rot, ctx.cb),
+      pePdfUserToVisualNorm(x1, y0, ctx.rot, ctx.cb),
+      pePdfUserToVisualNorm(x1, y1, ctx.rot, ctx.cb),
+      pePdfUserToVisualNorm(x0, y1, ctx.rot, ctx.cb)
+    ];
+    return {
+      minX: Math.min(c[0].nx, c[1].nx, c[2].nx, c[3].nx),
+      minY: Math.min(c[0].ny, c[1].ny, c[2].ny, c[3].ny),
+      maxX: Math.max(c[0].nx, c[1].nx, c[2].nx, c[3].nx),
+      maxY: Math.max(c[0].ny, c[1].ny, c[2].ny, c[3].ny)
+    };
   }
-  function nearbyRuns(nx, ny) {
-    if (!guide || !guide.runs.length) return [];
-    return guide.runs.filter(r => Math.abs(r.ny - ny) <= Math.max(r.hNorm, 0.012) * 1.25);
+  function boxHitsAnyRect(b) {
+    if (!rects.length) return false;
+    if (b.maxX < uMinX || b.minX > uMaxX || b.maxY < uMinY || b.minY > uMaxY) return false;
+    for (let k = 0; k < rects.length; k++) {
+      const r = rects[k];
+      if (!(b.maxX < r.minX || b.minX > r.maxX || b.maxY < r.minY || b.minY > r.maxY)) return true;
+    }
+    return false;
   }
-  function lineAvgW(runs) {
-    if (!runs.length) return 0;
-    let s = 0;
-    for (let k = 0; k < runs.length; k++) s += runs[k].avgW;
-    return s / runs.length;
+
+  // Non-text ink (path fills/strokes) intersecting a box. Uniform fills that
+  // fully contain a box leak nothing (page/cell backgrounds and the cover
+  // rectangle itself); thin straight strokes are ruling lines.
+  function evalPathInk(strokeOnly) {
+    if (!pathValid || !rects.length) { pathReset(); return; }
+    const b = userAabbToNorm(pMinX, pMinY, pMaxX, pMaxY);
+    pathReset();
+    const w = Math.max(0, Math.min(1, b.maxX) - Math.max(0, b.minX));
+    const h = Math.max(0, Math.min(1, b.maxY) - Math.max(0, b.minY));
+    if (w * h >= 0.88) return; // page-scale background
+    for (let k = 0; k < rects.length; k++) {
+      const r = rects[k];
+      if (b.maxX < r.minX || b.minX > r.maxX || b.maxY < r.minY || b.minY > r.maxY) continue;
+      const core = r.core || r;
+      const eps = 0.004;
+      const containsCore = b.minX <= core.minX + eps && b.minY <= core.minY + eps &&
+                           b.maxX >= core.maxX - eps && b.maxY >= core.maxY - eps;
+      if (containsCore && !strokeOnly) continue;
+      if (strokeOnly && Math.min(b.maxX - b.minX, b.maxY - b.minY) <= 0.006) continue;
+      inkHit = true;
+      return;
+    }
+  }
+
+  function groupGlyphCodes(bytes, unitBytes) {
+    if (unitBytes !== 2) return bytes.slice();
+    const codes = [];
+    for (let k = 0; k + 1 < bytes.length; k += 2) codes.push((bytes[k] << 8) | bytes[k + 1]);
+    if (bytes.length % 2) codes.push(bytes[bytes.length - 1] << 8);
+    return codes;
   }
   function parseLiteralCodes(from, to) {
     const codes = [];
     let j = from + 1;
     const end = to - 1;
     while (j < end) {
-      if (src[j] === BACKSLASH && j + 1 < end) {
-        const n = src[j + 1];
-        if (n >= 0x30 && n <= 0x37) {
+      if (src[j] === BACKSLASH && j + 1 < end + 1) {
+        const nb = src[j + 1];
+        if (nb >= 0x30 && nb <= 0x37) {
           let oct = '', k = j + 1;
           while (k < end && k < j + 4 && src[k] >= 0x30 && src[k] <= 0x37) {
             oct += String.fromCharCode(src[k]); k++;
           }
           codes.push(parseInt(oct, 8) & 0xff);
           j = k;
-        } else {
-          let code = n;
-          if (n === 0x6e) code = 0x0a;
-          else if (n === 0x72) code = 0x0d;
-          else if (n === 0x74) code = 0x09;
-          else if (n === 0x62) code = 0x08;
-          else if (n === 0x66) code = 0x0c;
+        } else if (nb === 0x0a) { j += 2; }
+        else if (nb === 0x0d) { j += 2; if (j < end && src[j] === 0x0a) j++; }
+        else {
+          let code = nb;
+          if (nb === 0x6e) code = 0x0a;
+          else if (nb === 0x72) code = 0x0d;
+          else if (nb === 0x74) code = 0x09;
+          else if (nb === 0x62) code = 0x08;
+          else if (nb === 0x66) code = 0x0c;
           codes.push(code);
           j += 2;
         }
@@ -37849,22 +38263,6 @@ function peRemoveTextOpsInRegion(srcBytes, regionPdf, scrubGuide, rot, cb, isFor
     }
     return codes;
   }
-  function emitLiteralCodes(codes) {
-    out.push(LPAREN);
-    for (let k = 0; k < codes.length; k++) {
-      const c = codes[k] & 0xff;
-      if (c === LPAREN || c === RPAREN || c === BACKSLASH) {
-        out.push(BACKSLASH); out.push(c);
-      } else if (c === 0x0a) { out.push(BACKSLASH); out.push(0x6e); }
-      else if (c === 0x0d) { out.push(BACKSLASH); out.push(0x72); }
-      else if (c < 0x20 || c > 0x7e) {
-        const oct = c.toString(8);
-        out.push(BACKSLASH);
-        for (let t = 0; t < oct.length; t++) out.push(oct.charCodeAt(t));
-      } else out.push(c);
-    }
-    out.push(RPAREN);
-  }
   function parseHexBytes(from, to) {
     const bytes = [];
     let j = from + 1;
@@ -37872,7 +38270,6 @@ function peRemoveTextOpsInRegion(srcBytes, regionPdf, scrubGuide, rot, cb, isFor
     let nibble = -1;
     while (j < end) {
       const c = src[j++];
-      if (isWs(c)) continue;
       let v = -1;
       if (c >= 0x30 && c <= 0x39) v = c - 0x30;
       else if (c >= 0x41 && c <= 0x46) v = c - 0x41 + 10;
@@ -37884,348 +38281,599 @@ function peRemoveTextOpsInRegion(srcBytes, regionPdf, scrubGuide, rot, cb, isFor
     if (nibble >= 0) bytes.push(nibble << 4);
     return bytes;
   }
-  function emitHexBytes(bytes) {
-    out.push(LANGLE);
-    const hex = '0123456789ABCDEF';
+  function literalBytesFor(codes) {
+    const b = [LPAREN];
+    for (let k = 0; k < codes.length; k++) {
+      const c = codes[k] & 0xff;
+      if (c === LPAREN || c === RPAREN || c === BACKSLASH) { b.push(BACKSLASH, c); }
+      else if (c === 0x0a) { b.push(BACKSLASH, 0x6e); }
+      else if (c === 0x0d) { b.push(BACKSLASH, 0x72); }
+      else if (c < 0x20 || c > 0x7e) {
+        const oct = c.toString(8).padStart(3, '0');
+        b.push(BACKSLASH);
+        for (let t = 0; t < oct.length; t++) b.push(oct.charCodeAt(t));
+      } else b.push(c);
+    }
+    b.push(RPAREN);
+    return b;
+  }
+  function hexBytesFor(bytes) {
+    const hexd = '0123456789ABCDEF';
+    const b = [LANGLE];
     for (let k = 0; k < bytes.length; k++) {
-      out.push(hex.charCodeAt((bytes[k] >> 4) & 15));
-      out.push(hex.charCodeAt(bytes[k] & 15));
+      b.push(hexd.charCodeAt((bytes[k] >> 4) & 15), hexd.charCodeAt(bytes[k] & 15));
     }
-    out.push(RANGLE);
+    b.push(RANGLE);
+    return b;
   }
-  // Blank glyph units under the shape using pdf.js average char width.
-  // Returns { changed, units } and advances Tm by an approximate text-space amount.
-  function pointInScrubRects(cx, cy) {
-    const rects = (guide && guide.rects && guide.rects.length)
-      ? guide.rects
-      : (guide ? [{ minX: guide.minX, minY: guide.minY, maxX: guide.maxX, maxY: guide.maxY }] : []);
-    for (let ri = 0; ri < rects.length; ri++) {
-      const r = rects[ri];
-      if (cx >= r.minX && cx <= r.maxX && cy >= r.minY - 0.005 && cy <= r.maxY + 0.005) return true;
-    }
-    return false;
+  function codesToBytes(codes, unitBytes) {
+    if (unitBytes !== 2) return codes.slice();
+    const b = [];
+    for (let k = 0; k < codes.length; k++) { b.push((codes[k] >> 8) & 0xff, codes[k] & 0xff); }
+    return b;
   }
-  function runKey(r) {
-    return (r.str || '') + '|' + r.nx.toFixed(5) + '|' + r.ny.toFixed(5) + '|' + r.n;
-  }
-  // Exact pdf.js string match ONLY. Position-based matching and per-glyph byte
-  // rewrites were scrubbing the wrong lines (AAAA artifacts) or corrupting encodings.
-  function matchGuideRunExact(decodedStr) {
-    if (!guide || !guide.runs.length || decodedStr == null || decodedStr === '') return null;
-    const candidates = guide.runs.filter(r => r.str === decodedStr && !usedRunKeys.has(runKey(r)));
-    return candidates.length ? candidates[0] : null;
-  }
-  function scrubRectsList() {
-    return (guide && guide.rects && guide.rects.length)
-      ? guide.rects
-      : (guide ? [{ minX: guide.minX, minY: guide.minY, maxX: guide.maxX, maxY: guide.maxY }] : []);
-  }
-  // Redact flatten: exact pdf.js item match only (+ drop ops that start inside the box).
-  // No geometry along long Tj — that deleted the rest of the line.
-  function buildScrubFlags(decodedStr, charCount) {
-    const n = Math.max(1, charCount);
-    if (!scrubRectsList().length) return null;
-    const exact = matchGuideRunExact(decodedStr);
-    if (!exact || !exact.charFlags) return null;
-    usedRunKeys.add(runKey(exact));
-    const flags = new Array(n).fill(false);
-    let any = false;
-    for (let i = 0; i < n && i < exact.charFlags.length; i++) {
-      if (exact.charFlags[i]) { flags[i] = true; any = true; }
-    }
-    return any ? flags : null;
-  }
-  function dropIfOriginInsideRect() {
-    if (!conservative) return false;
-    const vp = visualPos();
-    if (!vp) return false;
-    const rects = scrubRectsList();
-    for (let ri = 0; ri < rects.length; ri++) {
-      const r = rects[ri];
-      if (vp.nx >= r.minX && vp.nx <= r.maxX &&
-          vp.ny >= r.minY - 0.01 && vp.ny <= r.maxY + 0.01) return true;
-    }
-    return false;
-  }
-  function filterCodesByFlags(codes, unitBytes, flags) {
-    const out = [];
-    const n = Math.min(flags.length, Math.floor(codes.length / unitBytes));
-    for (let u = 0; u < n; u++) {
-      if (flags[u]) continue;
-      for (let b = 0; b < unitBytes; b++) out.push(codes[u * unitBytes + b]);
-    }
-    return out;
-  }
-  function applyScrubFlags(charCount, getCodes, unitBytes, emitCodes) {
-    const flags = buildScrubFlags(
-      (function () {
-        const c = getCodes();
-        return c.str || '';
-      })(),
-      charCount
-    );
-    if (!flags) {
-      if (dropIfOriginInsideRect()) {
-        advanceTmText(Math.max(1, charCount) * 0.5 * fontSize * hScale);
-        return 'drop';
-      }
-      return false;
-    }
-    if (flags.every(Boolean)) {
-      advanceTmText(Math.max(1, charCount) * 0.5 * fontSize * hScale);
-      return 'drop';
-    }
-    const c = getCodes();
-    const filtered = filterCodesByFlags(c.codes, unitBytes, flags);
-    if (!filtered.length) {
-      advanceTmText(Math.max(1, charCount) * 0.5 * fontSize * hScale);
-      return 'drop';
-    }
-    emitCodes(filtered);
-    advanceTmText(Math.max(1, charCount) * 0.5 * fontSize * hScale);
-    return true;
+  function fmtNum(v) {
+    if (!Number.isFinite(v)) return '0';
+    let s = v.toFixed(3);
+    if (s.indexOf('.') >= 0) s = s.replace(/0+$/, '').replace(/\.$/, '');
+    return s === '-0' ? '0' : s;
   }
 
-  function literalToUnicode(from, to) {
-    const codes = parseLiteralCodes(from, to);
-    let s = '';
-    for (let k = 0; k < codes.length; k++) s += String.fromCharCode(codes[k]);
-    return { codes, str: s, unitBytes: 1 };
-  }
-  function hexToUnicode(from, to) {
-    const bytes = parseHexBytes(from, to);
-    let zeros = 0;
-    for (let k = 0; k + 1 < bytes.length; k += 2) if (bytes[k] === 0) zeros++;
-    const unitBytes = (bytes.length >= 2 && bytes.length % 2 === 0 && zeros >= bytes.length / 4) ? 2 : 1;
-    let s = '';
-    if (unitBytes === 2) {
-      for (let k = 0; k + 1 < bytes.length; k += 2) s += String.fromCharCode((bytes[k] << 8) | bytes[k + 1]);
-    } else {
-      for (let k = 0; k < bytes.length; k++) s += String.fromCharCode(bytes[k]);
-    }
-    return { codes: bytes, str: s, unitBytes };
-  }
-  function rewriteShowOperand(argStart, argEnd) {
-    if (src[argStart] === LPAREN) {
-      const lit = literalToUnicode(argStart, argEnd);
-      const r = applyScrubFlags(lit.str.length, () => lit, 1, (codes) => emitLiteralCodes(codes));
-      if (r === 'drop') return 'drop';
-      if (r === true) return true;
-      emitRange(argStart, argEnd);
-      return false;
-    }
-    if (src[argStart] === LANGLE) {
-      const hx = hexToUnicode(argStart, argEnd);
-      const r = applyScrubFlags(hx.str.length, () => hx, hx.unitBytes, (codes) => emitHexBytes(codes));
-      if (r === 'drop') return 'drop';
-      if (r === true) return true;
-      emitRange(argStart, argEnd);
-      return false;
-    }
-    if (src[argStart] === LBRACK) {
-      const parts = [];
-      let j = argStart + 1;
-      while (j < argEnd - 1) {
-        while (j < argEnd - 1 && isWs(src[j])) j++;
-        if (j >= argEnd - 1) break;
-        if (src[j] === LPAREN) {
-          const s0 = j; i = j; skipLiteralString(); parts.push({ type: 'str', from: s0, to: i }); j = i;
-        } else if (src[j] === LANGLE && !(j + 1 < len && src[j + 1] === LANGLE)) {
-          const s0 = j; i = j; skipHexString(); parts.push({ type: 'hex', from: s0, to: i }); j = i;
-        } else {
-          i = j;
-          const n = parseNumber();
-          if (n == null) { j++; continue; }
-          parts.push({ type: 'num', value: n, from: j, to: i });
-          j = i;
-        }
-      }
-      i = argEnd;
+  // Show-op processing. parts: [{type:'str', from, to}] and, for TJ,
+  // {type:'num', value, from, to} interleaved. opKind: 'Tj'|'TJ'|"'"|'"'.
+  // Returns null when the op must be left untouched, or the rebuilt
+  // "[...] TJ" operand as a byte array when glyphs were removed.
+  function processShow(parts, opKind) {
+    const fm = ctx.metrics ? ctx.metrics.get(curFontName) : null;
+    const haveFm = !!(fm && typeof fm.widthOf === 'function');
+    const unitBytes = haveFm ? fm.unitBytes : 1;
+    const fs = fontSize;
+    // Decode all glyphs first.
+    const decoded = parts.map(p => {
+      if (p.type !== 'str') return p;
+      const raw = (src[p.from] === LPAREN) ? parseLiteralCodes(p.from, p.to) : parseHexBytes(p.from, p.to);
+      return Object.assign({}, p, {
+        hex: src[p.from] !== LPAREN,
+        codes: groupGlyphCodes(raw, unitBytes)
+      });
+    });
 
-      let concat = '';
-      const strParts = [];
-      for (let p = 0; p < parts.length; p++) {
-        const part = parts[p];
-        if (part.type === 'str') {
-          const lit = literalToUnicode(part.from, part.to);
-          strParts.push({ part, lit, unitBytes: 1 });
-          concat += lit.str;
-        } else if (part.type === 'hex') {
-          const hx = hexToUnicode(part.from, part.to);
-          strParts.push({ part, lit: hx, unitBytes: hx.unitBytes });
-          concat += hx.str;
-        }
+    let pen = 0;              // x offset (text space) accumulated inside this op
+    let removedAny = false;
+    let opBlocked = false;    // hit found but cannot scrub safely
+    let opHadEstimate = false; // some glyph advance was guessed, x is stale after
+    const M = peMatMul(ctm, tm[0], tm[1], tm[2], tm[3], tm[4], tm[5]);
+    const asc = 0.85, desc = 0.25;
+
+    const keptParts = []; // {raw:[from,to]} | {strCodes:[...], hex} | {comp:advance}
+    let pendingComp = 0;
+    let curStr = null;
+    function flushStr() { curStr = null; }
+    function flushComp() {
+      if (pendingComp !== 0) {
+        keptParts.push({ comp: pendingComp });
+        pendingComp = 0;
       }
-      const flags = buildScrubFlags(concat, concat.length);
-      if (!flags) {
-        emitRange(argStart, argEnd);
-        return false;
-      }
-      if (flags.every(Boolean)) {
-        advanceTmText(Math.max(1, concat.length) * 0.5 * fontSize * hScale);
-        return 'drop';
-      }
-      let cursor = 0;
-      let changed = false;
-      out.push(LBRACK);
-      for (let p = 0; p < parts.length; p++) {
-        const part = parts[p];
-        if (part.type === 'num') {
-          emitRange(part.from, part.to);
-          out.push(SPACE);
-          continue;
-        }
-        const sp = strParts.find(s => s.part === part);
-        if (!sp) { emitRange(part.from, part.to); out.push(SPACE); continue; }
-        const n = sp.lit.str.length;
-        const slice = flags.slice(cursor, cursor + n);
-        cursor += n;
-        const filtered = filterCodesByFlags(sp.lit.codes, sp.unitBytes, slice);
-        if (filtered.length !== sp.lit.codes.length) changed = true;
-        if (filtered.length) {
-          if (part.type === 'str') emitLiteralCodes(filtered);
-          else emitHexBytes(filtered);
-        }
-        out.push(SPACE);
-      }
-      out.push(RBRACK);
-      if (changed) {
-        advanceTmText(Math.max(1, concat.length) * 0.5 * fontSize * hScale);
-        return true;
-      }
-      emitRange(argStart, argEnd);
-      return false;
+      flushStr();
     }
-    emitRange(argStart, argEnd);
-    return false;
+
+    for (const p of decoded) {
+      if (p.type === 'num') {
+        pen += (-p.value / 1000) * fs * hScale;
+        flushStr();
+        keptParts.push({ raw: [p.from, p.to] });
+        continue;
+      }
+      for (let g = 0; g < p.codes.length; g++) {
+        const code = p.codes[g];
+        const isSpace = unitBytes === 1 && code === 32;
+        const wv = haveFm ? fm.widthOf(code) : null;
+        const exact = wv != null;
+        if (!exact) opHadEstimate = true;
+        const adv = ((exact ? wv / 1000 : 0.5) * fs + charSpacing + (isSpace ? wordSpacing : 0)) * hScale;
+        let hit = false;
+        let nb = null;
+        if (rects.length) {
+          const x0 = pen, x1 = pen + (adv || 0.001 * fs);
+          const cs = [
+            applyPoint(M, x0, -desc * fs), applyPoint(M, x1, -desc * fs),
+            applyPoint(M, x1, asc * fs), applyPoint(M, x0, asc * fs)
+          ];
+          let bx0 = cs[0].x, by0 = cs[0].y, bx1 = cs[0].x, by1 = cs[0].y;
+          for (let t = 1; t < 4; t++) {
+            bx0 = Math.min(bx0, cs[t].x); by0 = Math.min(by0, cs[t].y);
+            bx1 = Math.max(bx1, cs[t].x); by1 = Math.max(by1, cs[t].y);
+          }
+          nb = userAabbToNorm(bx0, by0, bx1, by1);
+          if (!xReliable || opHadEstimate) { nb.minX = 0; nb.maxX = 1; }
+          hit = peRedactGlyphHit(nb.minX, nb.maxX, nb.minY, nb.maxY, rects);
+        }
+        if (hit) {
+          textHit = true;
+          if (!exact || !xReliable || opHadEstimate || fs * hScale <= 1e-6) {
+            opBlocked = true;
+          } else if (!ctx.collect) {
+            removedAny = true;
+            pendingComp += adv;
+            removedBoxes.push(nb);
+          }
+        } else if (!ctx.collect) {
+          if (pendingComp !== 0) flushComp();
+          if (!curStr || curStr.hex !== p.hex) {
+            curStr = { strCodes: [], hex: p.hex };
+            keptParts.push(curStr);
+          }
+          curStr.strCodes.push(code);
+        }
+        pen += adv;
+      }
+      flushStr();
+    }
+
+    // total advance of the op is unchanged by design
+    tm = peMatMul(tm, 1, 0, 0, 1, pen, 0);
+    if (!haveFm || opHadEstimate) xReliable = false;
+
+    if (opBlocked) { unresolved = true; return null; }
+    if (ctx.collect || !removedAny) return null;
+    if (pendingComp !== 0) flushComp();
+
+    // Assemble "[ ... ] TJ"
+    const b = [LBRACK];
+    for (const kp of keptParts) {
+      if (kp.raw) { for (let k = kp.raw[0]; k < kp.raw[1]; k++) b.push(src[k]); b.push(SPACE); continue; }
+      if (kp.comp != null) {
+        const t = -(1000 * kp.comp) / (fs * hScale);
+        const sTxt = fmtNum(t);
+        for (let k = 0; k < sTxt.length; k++) b.push(sTxt.charCodeAt(k));
+        b.push(SPACE);
+        continue;
+      }
+      const bytes = codesToBytes(kp.strCodes, unitBytes);
+      const enc = kp.hex ? hexBytesFor(bytes) : literalBytesFor(bytes);
+      for (let k = 0; k < enc.length; k++) b.push(enc[k]);
+      b.push(SPACE);
+    }
+    b.push(RBRACK);
+    changed = true;
+    return b;
+  }
+
+  function applyTStar() {
+    tlm = peMatMul(tlm, 1, 0, 0, 1, 0, -leading);
+    tm = tlm.slice();
+    xReliable = true;
+  }
+
+  function skipInlineImage() {
+    // src[i] is at 'BI'. Emit everything through the matching EI verbatim.
+    const start = i;
+    i += 2;
+    // find ID token
+    while (i + 1 < len) {
+      if (src[i] === 0x49 && src[i + 1] === 0x44 &&
+          (i === 0 || isDelim(src[i - 1]) || isWs(src[i - 1])) &&
+          (i + 2 >= len || isWs(src[i + 2]))) { i += 3; break; }
+      if (src[i] === LPAREN) { skipLiteralString(); continue; }
+      i++;
+    }
+    // binary data until whitespace-EI-delimiter
+    while (i < len) {
+      if (src[i] === 0x45 && i + 1 < len && src[i + 1] === 0x49 &&
+          i > 0 && isWs(src[i - 1]) && (i + 2 >= len || isDelim(src[i + 2]))) {
+        i += 2;
+        break;
+      }
+      i++;
+    }
+    emitRange(start, i);
+    if (rects.length) {
+      const c = [
+        applyPoint(ctm, 0, 0), applyPoint(ctm, 1, 0),
+        applyPoint(ctm, 1, 1), applyPoint(ctm, 0, 1)
+      ];
+      const nb = userAabbToNorm(
+        Math.min(c[0].x, c[1].x, c[2].x, c[3].x), Math.min(c[0].y, c[1].y, c[2].y, c[3].y),
+        Math.max(c[0].x, c[1].x, c[2].x, c[3].x), Math.max(c[0].y, c[1].y, c[2].y, c[3].y));
+      if (boxHitsAnyRect(nb)) inkHit = true;
+    }
   }
 
   while (i < len) {
     const tokenStart = i;
-    skipWs();
-    if (i >= len) { emitRange(tokenStart, len); break; }
+    while (i < len && isWs(src[i])) i++;
     if (i > tokenStart) emitRange(tokenStart, i);
+    if (i >= len) break;
 
+    // comment
     if (src[i] === 0x25) {
       const c0 = i;
       while (i < len && src[i] !== 0x0a && src[i] !== 0x0d) i++;
       emitRange(c0, i);
-      numBuf.length = 0;
+      resetNums();
       continue;
     }
 
-    if (matchOp('q')) {
-      ctmStack.push(ctm.slice());
-      i += 1; emitRange(i - 1, i); numBuf.length = 0; continue;
-    }
-    if (matchOp('Q')) {
-      ctm = ctmStack.length ? ctmStack.pop() : [1, 0, 0, 1, 0, 0];
-      i += 1; emitRange(i - 1, i); numBuf.length = 0; continue;
-    }
+    // graphics state
+    if (matchOp('q')) { ctmStack.push(ctm.slice()); i += 1; emitRange(i - 1, i); resetNums(); continue; }
+    if (matchOp('Q')) { ctm = ctmStack.length ? ctmStack.pop() : (ctx.initialCtm || [1, 0, 0, 1, 0, 0]).slice(); i += 1; emitRange(i - 1, i); resetNums(); continue; }
     if (matchOp('cm')) {
       if (numBuf.length >= 6) {
-        const a = numBuf[numBuf.length - 6], b = numBuf[numBuf.length - 5];
-        const c = numBuf[numBuf.length - 4], d = numBuf[numBuf.length - 3];
-        const e = numBuf[numBuf.length - 2], f = numBuf[numBuf.length - 1];
-        ctm = peMatMul(ctm, a, b, c, d, e, f);
+        const a = numBuf[numBuf.length - 6], b2 = numBuf[numBuf.length - 5];
+        const c2 = numBuf[numBuf.length - 4], d2 = numBuf[numBuf.length - 3];
+        const e2 = numBuf[numBuf.length - 2], f2 = numBuf[numBuf.length - 1];
+        ctm = peMatMul(ctm, a, b2, c2, d2, e2, f2);
       }
-      i += 2; emitRange(i - 2, i); numBuf.length = 0; continue;
-    }
-    if (matchOp('BT')) {
-      inText = true; tm = [1, 0, 0, 1, 0, 0];
-      i += 2; emitRange(i - 2, i); numBuf.length = 0; continue;
-    }
-    if (matchOp('ET')) {
-      inText = false;
-      i += 2; emitRange(i - 2, i); numBuf.length = 0; continue;
-    }
-    if (inText && matchOp('Tm')) {
-      if (numBuf.length >= 6) tm = numBuf.slice(numBuf.length - 6);
-      i += 2; emitRange(i - 2, i); numBuf.length = 0; continue;
-    }
-    if (inText && (matchOp('Td') || matchOp('TD'))) {
-      if (numBuf.length >= 2) {
-        tm = peMatMul(tm, 1, 0, 0, 1, numBuf[numBuf.length - 2], numBuf[numBuf.length - 1]);
-      }
-      i += 2; emitRange(i - 2, i); numBuf.length = 0; continue;
-    }
-    if (inText && matchOp('T*')) {
-      i += 2; emitRange(i - 2, i); numBuf.length = 0; continue;
-    }
-    if (inText && matchOp('Tc')) {
-      if (numBuf.length >= 1) charSpacing = numBuf[numBuf.length - 1];
-      i += 2; emitRange(i - 2, i); numBuf.length = 0; continue;
-    }
-    if (inText && matchOp('Tw')) {
-      if (numBuf.length >= 1) wordSpacing = numBuf[numBuf.length - 1];
-      i += 2; emitRange(i - 2, i); numBuf.length = 0; continue;
-    }
-    if (inText && matchOp('Tz')) {
-      if (numBuf.length >= 1) hScale = Math.max(0.01, numBuf[numBuf.length - 1] / 100);
-      i += 2; emitRange(i - 2, i); numBuf.length = 0; continue;
-    }
-    if (inText && matchOp('Tf')) {
-      if (numBuf.length >= 1) fontSize = Math.abs(numBuf[numBuf.length - 1]) || fontSize;
-      i += 2; emitRange(i - 2, i); numBuf.length = 0; continue;
+      i += 2; emitRange(i - 2, i); resetNums(); continue;
     }
 
-    const n0 = i;
-    const num = parseNumber();
-    if (num != null) {
-      numBuf.push(num);
+    // text state / positioning
+    if (matchOp('BT')) { inText = true; tm = [1, 0, 0, 1, 0, 0]; tlm = [1, 0, 0, 1, 0, 0]; xReliable = true; i += 2; emitRange(i - 2, i); resetNums(); continue; }
+    if (matchOp('ET')) { inText = false; i += 2; emitRange(i - 2, i); resetNums(); continue; }
+    if (inText && matchOp('Tm')) {
+      if (numBuf.length >= 6) { tm = numBuf.slice(numBuf.length - 6); tlm = tm.slice(); }
+      xReliable = true;
+      i += 2; emitRange(i - 2, i); resetNums(); continue;
+    }
+    if (inText && matchOp('Td')) {
+      if (numBuf.length >= 2) {
+        tlm = peMatMul(tlm, 1, 0, 0, 1, numBuf[numBuf.length - 2], numBuf[numBuf.length - 1]);
+        tm = tlm.slice();
+      }
+      xReliable = true;
+      i += 2; emitRange(i - 2, i); resetNums(); continue;
+    }
+    if (inText && matchOp('TD')) {
+      if (numBuf.length >= 2) {
+        leading = -numBuf[numBuf.length - 1];
+        tlm = peMatMul(tlm, 1, 0, 0, 1, numBuf[numBuf.length - 2], numBuf[numBuf.length - 1]);
+        tm = tlm.slice();
+      }
+      xReliable = true;
+      i += 2; emitRange(i - 2, i); resetNums(); continue;
+    }
+    if (inText && matchOp('T*')) { applyTStar(); i += 2; emitRange(i - 2, i); resetNums(); continue; }
+    if (inText && matchOp('TL')) { if (numBuf.length >= 1) leading = numBuf[numBuf.length - 1]; i += 2; emitRange(i - 2, i); resetNums(); continue; }
+    if (inText && matchOp('Tc')) { if (numBuf.length >= 1) charSpacing = numBuf[numBuf.length - 1]; i += 2; emitRange(i - 2, i); resetNums(); continue; }
+    if (inText && matchOp('Tw')) { if (numBuf.length >= 1) wordSpacing = numBuf[numBuf.length - 1]; i += 2; emitRange(i - 2, i); resetNums(); continue; }
+    if (inText && matchOp('Tz')) { if (numBuf.length >= 1) hScale = Math.max(0.01, numBuf[numBuf.length - 1] / 100); i += 2; emitRange(i - 2, i); resetNums(); continue; }
+    if (inText && matchOp('Tf')) {
+      if (numBuf.length >= 1) fontSize = Math.abs(numBuf[numBuf.length - 1]) || fontSize;
+      curFontName = lastName;
+      i += 2; emitRange(i - 2, i); resetNums(); continue;
+    }
+
+    // XObjects
+    if (matchOp('Do')) {
+      const info = ctx.xobjects ? ctx.xobjects.get(lastName) : null;
+      if (info && rects.length) {
+        if (info.kind === 'image') {
+          const c = [
+            applyPoint(ctm, 0, 0), applyPoint(ctm, 1, 0),
+            applyPoint(ctm, 1, 1), applyPoint(ctm, 0, 1)
+          ];
+          const nb = userAabbToNorm(
+            Math.min(c[0].x, c[1].x, c[2].x, c[3].x), Math.min(c[0].y, c[1].y, c[2].y, c[3].y),
+            Math.max(c[0].x, c[1].x, c[2].x, c[3].x), Math.max(c[0].y, c[1].y, c[2].y, c[3].y));
+          if (boxHitsAnyRect(nb)) inkHit = true;
+        } else if (info.kind === 'form') {
+          const list = formHits.get(lastName) || [];
+          list.push(ctm.slice());
+          formHits.set(lastName, list);
+        }
+      } else if (info && info.kind === 'form') {
+        const list = formHits.get(lastName) || [];
+        list.push(ctm.slice());
+        formHits.set(lastName, list);
+      }
+      i += 2; emitRange(i - 2, i); resetNums(); continue;
+    }
+
+    // inline images
+    if (matchOp('BI')) { skipInlineImage(); resetNums(); continue; }
+
+    // path construction
+    if (matchOp('m') || matchOp('l')) {
+      if (numBuf.length >= 2) pathAddPoint(numBuf[numBuf.length - 2], numBuf[numBuf.length - 1]);
+      i += 1; emitRange(i - 1, i); resetNums(); continue;
+    }
+    if (matchOp('c')) {
+      if (numBuf.length >= 6) {
+        for (let k = 6; k >= 2; k -= 2) pathAddPoint(numBuf[numBuf.length - k], numBuf[numBuf.length - k + 1]);
+      }
+      i += 1; emitRange(i - 1, i); resetNums(); continue;
+    }
+    if (matchOp('v') || matchOp('y')) {
+      if (numBuf.length >= 4) {
+        pathAddPoint(numBuf[numBuf.length - 4], numBuf[numBuf.length - 3]);
+        pathAddPoint(numBuf[numBuf.length - 2], numBuf[numBuf.length - 1]);
+      }
+      i += 1; emitRange(i - 1, i); resetNums(); continue;
+    }
+    if (matchOp('re')) {
+      if (numBuf.length >= 4) {
+        const x = numBuf[numBuf.length - 4], y = numBuf[numBuf.length - 3];
+        const w = numBuf[numBuf.length - 2], h = numBuf[numBuf.length - 1];
+        pathAddPoint(x, y); pathAddPoint(x + w, y); pathAddPoint(x + w, y + h); pathAddPoint(x, y + h);
+      }
+      i += 2; emitRange(i - 2, i); resetNums(); continue;
+    }
+    if (matchOp('h')) { i += 1; emitRange(i - 1, i); resetNums(); continue; }
+
+    // path painting
+    if (matchOp('f*') || matchOp('B*') || matchOp('b*')) { evalPathInk(false); i += 2; emitRange(i - 2, i); resetNums(); continue; }
+    if (matchOp('f') || matchOp('F') || matchOp('B') || matchOp('b')) { evalPathInk(false); i += 1; emitRange(i - 1, i); resetNums(); continue; }
+    if (matchOp('S') || matchOp('s')) { evalPathInk(true); i += 1; emitRange(i - 1, i); resetNums(); continue; }
+    if (matchOp('n')) { pathReset(); i += 1; emitRange(i - 1, i); resetNums(); continue; }
+    if (matchOp('W*') ) { i += 2; emitRange(i - 2, i); resetNums(); continue; }
+    if (matchOp('W')) { i += 1; emitRange(i - 1, i); resetNums(); continue; }
+    if (matchOp('sh')) {
+      // Shading paints the current clip region, which we do not track.
+      if (rects.length) inkHit = true;
+      i += 2; emitRange(i - 2, i); resetNums(); continue;
+    }
+
+    // numbers
+    if ((src[i] >= 0x30 && src[i] <= 0x39) || src[i] === 0x2b || src[i] === 0x2d || src[i] === 0x2e) {
+      const n0 = i;
+      const num = parseNumber();
+      if (num != null) {
+        numBuf.push(num);
+        numRaw.push([n0, i]);
+        numOutPos.push(out.length);
+        emitRange(n0, i);
+        continue;
+      }
+    }
+
+    // strings / arrays → possible show ops
+    if (src[i] === LPAREN || (src[i] === LANGLE && !(i + 1 < len && src[i + 1] === LANGLE)) || src[i] === LBRACK) {
+      const argStart = i;
+      let parts = null;
+      if (src[i] === LPAREN) { skipLiteralString(); parts = [{ type: 'str', from: argStart, to: i }]; }
+      else if (src[i] === LANGLE) { skipHexString(); parts = [{ type: 'str', from: argStart, to: i }]; }
+      else {
+        // array
+        i++;
+        parts = [];
+        while (i < len && src[i] !== RBRACK) {
+          if (isWs(src[i])) { i++; continue; }
+          if (src[i] === LPAREN) { const s0 = i; skipLiteralString(); parts.push({ type: 'str', from: s0, to: i }); continue; }
+          if (src[i] === LANGLE && !(i + 1 < len && src[i + 1] === LANGLE)) { const s0 = i; skipHexString(); parts.push({ type: 'str', from: s0, to: i }); continue; }
+          const n0 = i;
+          const num = parseNumber();
+          if (num != null) { parts.push({ type: 'num', value: num, from: n0, to: i }); continue; }
+          i++;
+        }
+        if (i < len) i++; // ']'
+      }
+      const argEnd = i;
+
+      // peek at the operator that follows
+      const save = i;
+      while (i < len && isWs(src[i])) i++;
+      let opKind = null, opLen = 0;
+      if (inText) {
+        if (matchOp('Tj')) { opKind = 'Tj'; opLen = 2; }
+        else if (matchOp('TJ')) { opKind = 'TJ'; opLen = 2; }
+        else if (matchOp("'")) { opKind = "'"; opLen = 1; }
+        else if (matchOp('"')) { opKind = '"'; opLen = 1; }
+      }
+      if (!opKind) {
+        i = save;
+        emitRange(argStart, argEnd);
+        resetNums();
+        continue;
+      }
+      const opStart = i;
+
+      // state updates that happen before glyphs are shown
+      let quoteNums = null;
+      if (opKind === '"') {
+        if (numBuf.length >= 2) {
+          wordSpacing = numBuf[numBuf.length - 2];
+          charSpacing = numBuf[numBuf.length - 1];
+          quoteNums = [numRaw[numRaw.length - 2], numRaw[numRaw.length - 1]];
+        }
+        applyTStar();
+      } else if (opKind === "'") {
+        applyTStar();
+      }
+
+      const rebuilt = processShow(parts, opKind);
+      if (rebuilt == null) {
+        // untouched: emit operand + original operator verbatim
+        emitRange(argStart, argEnd);
+        emitRange(save, opStart + opLen);
+        i = opStart + opLen;
+        resetNums();
+        continue;
+      }
+      // rewritten as TJ; reproduce the side effects of ' and " explicitly
+      if (opKind === '"' && quoteNums) {
+        // drop the two numeric operands already emitted
+        const cut = numOutPos[numOutPos.length - 2];
+        out.length = cut;
+        emitRange(quoteNums[0][0], quoteNums[0][1]);
+        emitStr(' Tw ');
+        emitRange(quoteNums[1][0], quoteNums[1][1]);
+        emitStr(' Tc T* ');
+      } else if (opKind === "'") {
+        emitStr('T* ');
+      } else if (opKind === '"') {
+        emitStr('T* ');
+      }
+      for (let k = 0; k < rebuilt.length; k++) out.push(rebuilt[k]);
+      emitStr(' TJ');
+      i = opStart + opLen;
+      resetNums();
+      continue;
+    }
+
+    // names
+    if (src[i] === 0x2f) {
+      const n0 = i; i++;
+      let nameRaw = '';
+      while (i < len && !isDelim(src[i])) { nameRaw += String.fromCharCode(src[i]); i++; }
+      lastName = peDecodePdfNameToken(nameRaw);
       emitRange(n0, i);
       continue;
     }
 
-    if (src[i] === LPAREN || (src[i] === LANGLE && !(i + 1 < len && src[i + 1] === LANGLE)) || src[i] === LBRACK) {
-      const argStart = i;
-      if (src[i] === LPAREN) skipLiteralString();
-      else if (src[i] === LANGLE) skipHexString();
-      else skipArray();
-      const argEnd = i;
-      const show = inText ? peekShowOp() : null;
-      if (show) {
-        if (show.kind === '"' && numBuf.length >= 2) {
-          wordSpacing = numBuf[numBuf.length - 2];
-          charSpacing = numBuf[numBuf.length - 1];
-        }
-        const dropped = rewriteShowOperand(argStart, argEnd);
-        skipWs();
-        if (dropped === 'drop') {
-          // Fully covered by a shape — omit operand+operator so nothing is selectable.
-          i += show.opLen;
-        } else {
-          emitRange(i, i + show.opLen);
-          i += show.opLen;
-        }
-        numBuf.length = 0;
-        continue;
+    // dictionaries << >>
+    if (src[i] === LANGLE && i + 1 < len && src[i + 1] === LANGLE) {
+      const d0 = i; i += 2;
+      let depth = 1;
+      while (i < len && depth > 0) {
+        if (src[i] === LPAREN) { skipLiteralString(); continue; }
+        if (src[i] === LANGLE && i + 1 < len && src[i + 1] === LANGLE) { depth++; i += 2; continue; }
+        if (src[i] === RANGLE && i + 1 < len && src[i + 1] === RANGLE) { depth--; i += 2; continue; }
+        i++;
       }
-      emitRange(argStart, argEnd);
-      numBuf.length = 0;
+      emitRange(d0, i);
       continue;
     }
 
-    if (src[i] === 0x2f) {
-      const n0b = i; i++;
-      while (i < len && !isDelim(src[i])) i++;
-      emitRange(n0b, i); numBuf.length = 0; continue;
-    }
-
+    // any other operator token
     const op0 = i;
     while (i < len && !isDelim(src[i]) &&
            src[i] !== LPAREN && src[i] !== LANGLE && src[i] !== LBRACK) i++;
     if (i > op0) {
       emitRange(op0, i);
-      numBuf.length = 0;
+      resetNums();
       continue;
     }
 
     out.push(src[i]); i++;
-    numBuf.length = 0;
+    resetNums();
   }
 
-  return new Uint8Array(out);
+  return {
+    bytes: changed ? new Uint8Array(out) : src,
+    changed, textHit, inkHit, unresolved, formHits, removedBoxes
+  };
+}
+
+// Analyse nested forms (depth ≥ 2) without rewriting: any text under a box
+// there cannot be scrubbed in place, any ink is a leak — both mean fallback.
+async function peCollectNestedFormInk(doc, xobjects, formHits, base, depth, visited) {
+  let inkHit = false, unresolved = false;
+  if (!formHits || !formHits.size) return { inkHit, unresolved };
+  if (depth <= 0) return { inkHit, unresolved: true };
+  for (const [name, ctms] of formHits) {
+    const info = xobjects.get(name);
+    if (!info || info.kind !== 'form') continue;
+    if (visited.has(info.stream)) { unresolved = true; continue; }
+    visited.add(info.stream);
+    const bytes = peDecodePdfStreamBytes(info.stream);
+    if (!bytes) { unresolved = true; visited.delete(info.stream); continue; }
+    const res = info.resources || base.parentResources;
+    const metrics = await peBuildStreamFontMetrics(doc, res);
+    const xo = peBuildStreamXObjects(doc, res);
+    for (const ctmAt of ctms) {
+      const ctmEff = peMatMul(ctmAt, info.matrix[0], info.matrix[1], info.matrix[2],
+        info.matrix[3], info.matrix[4], info.matrix[5]);
+      let r;
+      try {
+        r = peScrubEngineParse(bytes, {
+          rects: base.rects, rot: base.rot, cb: base.cb,
+          metrics, xobjects: xo, initialCtm: ctmEff, collect: true
+        });
+      } catch (_) { unresolved = true; continue; }
+      if (r.textHit) unresolved = true;
+      if (r.inkHit) inkHit = true;
+      if (r.unresolved) unresolved = true;
+      const nested = await peCollectNestedFormInk(doc, xo, r.formHits,
+        Object.assign({}, base, { parentResources: res }), depth - 1, visited);
+      if (nested.inkHit) inkHit = true;
+      if (nested.unresolved) unresolved = true;
+    }
+    visited.delete(info.stream);
+  }
+  return { inkHit, unresolved };
+}
+
+// Scrub every glyph that touches one of `rects` (visual-norm, padded, with
+// .core) out of a page's content — page streams and singly-invoked top-level
+// Form XObjects — leaving everything else byte-identical. Returns
+// { changed, inkHit, unresolved }; inkHit/unresolved mean the caller must
+// fall back to full-page rasterization for this page.
+async function peScrubPageRegionsInDoc(doc, pageIdx, rects) {
+  const page = doc.getPage(pageIdx);
+  const rot = page.getRotation().angle || 0;
+  const cb = page.getCropBox();
+  const pageRes = pePageResourcesDict(doc, page);
+  const metrics = await peBuildStreamFontMetrics(doc, pageRes);
+  const xobjects = peBuildStreamXObjects(doc, pageRes);
+  const content = peGetPageContentBytes(doc, page);
+  if (!content) return { changed: false, inkHit: false, unresolved: true };
+
+  const base = { rects, rot, cb };
+  const res = peScrubEngineParse(content, {
+    rects, rot, cb, metrics, xobjects, initialCtm: [1, 0, 0, 1, 0, 0], collect: false
+  });
+  let changed = false;
+  let inkHit = res.inkHit;
+  let unresolved = res.unresolved;
+  const removedBoxes = (res.removedBoxes || []).slice();
+
+  // Top-level forms: rewrite only forms invoked exactly once from this page
+  // (a rewritten form is cloned, so shared use from other pages is safe, but
+  // two invocations on this page can need different edits).
+  let clonedXoDict = null;
+  for (const [name, ctms] of res.formHits) {
+    const info = xobjects.get(name);
+    if (!info || info.kind !== 'form') continue;
+    const formBytes = peDecodePdfStreamBytes(info.stream);
+    if (!formBytes) { unresolved = true; continue; }
+    const formRes = info.resources || pageRes;
+    const fMetrics = await peBuildStreamFontMetrics(doc, formRes);
+    const fXobjects = peBuildStreamXObjects(doc, formRes);
+    const collectOnly = ctms.length > 1;
+    for (const ctmAt of ctms) {
+      const ctmEff = peMatMul(ctmAt, info.matrix[0], info.matrix[1], info.matrix[2],
+        info.matrix[3], info.matrix[4], info.matrix[5]);
+      let fRes;
+      try {
+        fRes = peScrubEngineParse(formBytes, {
+          rects, rot, cb, metrics: fMetrics, xobjects: fXobjects,
+          initialCtm: ctmEff, collect: collectOnly
+        });
+      } catch (err) {
+        console.warn('peScrubPageRegionsInDoc: form parse failed', err);
+        unresolved = true;
+        continue;
+      }
+      if (fRes.inkHit) inkHit = true;
+      if (fRes.unresolved) unresolved = true;
+      if (collectOnly && fRes.textHit) unresolved = true;
+      const nested = await peCollectNestedFormInk(doc, fXobjects, fRes.formHits,
+        Object.assign({}, base, { parentResources: formRes }), 4, new Set([info.stream]));
+      if (nested.inkHit) inkHit = true;
+      if (nested.unresolved) unresolved = true;
+      if (!collectOnly && fRes.changed && !fRes.unresolved) {
+        // clone-on-write: fresh form stream + this page's own resources copy
+        if (!clonedXoDict) {
+          const resClone = peShallowClonePdfDict(doc, pageRes);
+          const xoOrig = pageRes ? peLookupPdfObj(doc, pageRes.get(PDFLib.PDFName.of('XObject'))) : null;
+          clonedXoDict = peShallowClonePdfDict(doc, xoOrig);
+          resClone.set(PDFLib.PDFName.of('XObject'), clonedXoDict);
+          page.node.set(PDFLib.PDFName.of('Resources'), resClone);
+        }
+        const newRef = peRegisterStreamWithBytes(doc, info.stream.dict, fRes.bytes);
+        clonedXoDict.set(PDFLib.PDFName.of(name), newRef);
+        (fRes.removedBoxes || []).forEach(b => removedBoxes.push(b));
+        changed = true;
+      }
+    }
+  }
+
+  if (res.changed) {
+    const newRef = peRegisterStreamWithBytes(doc, null, res.bytes);
+    page.node.set(PDFLib.PDFName.of('Contents'), newRef);
+    changed = true;
+  }
+  return { changed, inkHit, unresolved, removedBoxes };
 }
 
 
@@ -38313,15 +38961,21 @@ async function peRewriteStreamBytes(doc, stream, newBytes) {
   } catch (_) {}
 }
 
+// PDF user-space point → normalized top-based visual coordinates of the
+// DISPLAYED (rotated) page. Derived from the same convention as
+// peOverlayPlacement / the editor overlays: /Rotate R turns the page R°
+// clockwise on screen. (The pre-2025 version of this mapping was mirrored
+// on one axis for rotated pages, which is one reason the old regional scrub
+// missed or over-matched glyphs there.)
 function pePdfUserToVisualNorm(x, y, rot, cb) {
   const R = ((rot % 360) + 360) % 360;
   const visW = (R % 180) ? cb.height : cb.width;
   const visH = (R % 180) ? cb.width : cb.height;
   const lx = x - cb.x, ly = y - cb.y;
   let vx, vy;
-  if (R === 90) { vx = ly; vy = visH - lx; }
-  else if (R === 180) { vx = visW - lx; vy = visH - ly; }
-  else if (R === 270) { vx = visW - ly; vy = lx; }
+  if (R === 90) { vx = ly; vy = lx; }
+  else if (R === 180) { vx = visW - lx; vy = ly; }
+  else if (R === 270) { vx = visW - ly; vy = visH - lx; }
   else { vx = lx; vy = visH - ly; }
   return { nx: vx / Math.max(1e-6, visW), ny: vy / Math.max(1e-6, visH) };
 }
@@ -38378,15 +39032,16 @@ async function peBuildTextScrubGuide(pjPage, vp1, rectsOrMinX, minY, maxX, maxY)
   return { minX: uMinX, minY: uMinY, maxX: uMaxX, maxY: uMaxY, rects, runs };
 }
 
+// Removes text-showing operators under the given visual-norm rect(s).
+// Thin wrapper over peScrubPageRegionsInDoc (width-compensating engine);
+// the guide argument is accepted for legacy call sites but only its rects
+// are used. Returns true when any stream was rewritten.
 async function peRemovePageTextInVisualRegion(doc, pageIdx, rectsOrMinX, minY, maxX, maxY, scrubGuide) {
   if (typeof doc.context.flateStream !== 'function') {
     console.warn('peRemovePageTextInVisualRegion: flateStream unavailable — cannot scrub text');
     return false;
   }
   try {
-    const page = doc.getPage(pageIdx);
-    const rot = page.getRotation().angle || 0;
-    const cb = page.getCropBox();
     // Legacy (minX,minY,maxX,maxY,guide) or new (rects, guide).
     let rects, guide = scrubGuide;
     if (Array.isArray(rectsOrMinX)) {
@@ -38398,58 +39053,28 @@ async function peRemovePageTextInVisualRegion(doc, pageIdx, rectsOrMinX, minY, m
     }
     if (guide && Array.isArray(guide.rects) && guide.rects.length) rects = guide.rects;
     if (!rects || !rects.length) return false;
-    const uMinX = Math.min.apply(null, rects.map(r => r.minX));
-    const uMinY = Math.min.apply(null, rects.map(r => r.minY));
-    const uMaxX = Math.max.apply(null, rects.map(r => r.maxX));
-    const uMaxY = Math.max.apply(null, rects.map(r => r.maxY));
-    const pageRegion = peVisualNormRegionToPdfUser(uMinX, uMinY, uMaxX, uMaxY, rot, cb);
-    // Include Form XObjects: many PDFs put all page text inside a Form.
-    // Scrub uses pdf.js charFlags / string match first (works in form space);
-    // geometric CTM hit-test is only a fallback for page Contents.
-    const streams = peCollectPageContentStreams(doc, page);
-    let changed = false;
-    for (const stream of streams) {
-      try {
-        let isForm = false;
-        try {
-          const subtype = stream.dict && stream.dict.get(PDFLib.PDFName.of('Subtype'));
-          const st = subtype && (subtype.asString ? subtype.asString() : String(subtype));
-          isForm = (st === '/Form' || st === 'Form');
-        } catch (_) {}
-        const decoded = peDecodePdfStreamBytes(stream);
-        if (!decoded || !decoded.length) {
-          console.warn('peRemovePageTextInVisualRegion: could not decode a content stream');
-          continue;
-        }
-
-        let modified = peRemoveTextOpsInRegion(decoded, pageRegion, guide, rot, cb, isForm);
-        let same = modified.length === decoded.length;
-        if (same) {
-          for (let bi = 0; bi < decoded.length; bi++) {
-            if (modified[bi] !== decoded[bi]) { same = false; break; }
-          }
-        }
-        if (!same) {
-          await peRewriteStreamBytes(doc, stream, modified);
-          changed = true;
-        }
-      } catch (e) {
-        console.warn('stream text removal failed', e);
-      }
-    }
-    return changed;
+    const res = await peScrubPageRegionsInDoc(doc, pageIdx, rects);
+    return !!(res && res.changed);
   } catch (err) {
     console.warn('peRemovePageTextInVisualRegion failed', err);
     return false;
   }
 }
 
-// Legacy aliases — redact security uses regional flatten, not scrub-only passes.
+// Legacy aliases — kept for compatibility, now routed through the regional
+// redact path used at save/export.
 async function peScrubPageRedactedRegions(doc, pageIdx) {
-  return peFlattenRedactedRegionsOnPage(doc, pageIdx);
+  const rebuilt = await peBuildRegionalRedactedPage(doc, pageIdx);
+  if (!rebuilt) return false;
+  const [replacement] = await doc.copyPages(rebuilt, [pageIdx]);
+  doc.removePage(pageIdx);
+  doc.insertPage(pageIdx, replacement);
+  return true;
 }
 async function peScrubAllRedactedRegionsInDoc(doc) {
-  return peFlattenAllRedactedRegionsInDoc(doc);
+  if (!doc) return;
+  const n = doc.getPageCount();
+  for (let i = 0; i < n; i++) await peScrubPageRedactedRegions(doc, i);
 }
 
 async function peReplaceDocPageWithRasterizedShapes(doc, pageIdx, shapes) {
