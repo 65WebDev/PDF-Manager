@@ -9537,7 +9537,6 @@
     // Pinch-to-zoom (zoom with two fingers) - instead of the slider on mobile
     // ═══════════════════════════════════════════════════════════════════
     let pinchStartDist = 0;     // distance between fingers at the beginning of the gesture
-    let pinchStartSlider = 100; // the value of the "slider" at the beginning of the gesture
     // Zoom anchor: a specific page under your fingers and a fraction of a point inside it
     let pinchAnchorIndex = null;
     let pinchAnchorFx = 0.5, pinchAnchorFy = 0.5;
@@ -9669,14 +9668,15 @@
       restorePinchViewportPoint(contentPt, midX, midY);
     }
 
-    function applyPinchScaleChange(newSlider) {
-      const newScale = clampScale(sliderToScale(newSlider));
+    function applyPinchScaleChange(newScale) {
+      newScale = clampScale(newScale);
       if (newScale === currentScale) return;
 
       currentScale = newScale;
       scaleUserLocked = true;
       autoScaleEnabled = false;
       if (scaleSlider) {
+        // Keep the (hidden-on-mobile) slider in sync for any UI that reads it.
         scaleSlider.value = Math.max(0, Math.min(200, scaleToSlider(currentScale)));
       }
       applyPinchVisualScale();
@@ -9715,8 +9715,6 @@
         mobileMinScale = computeMobilePinchMinScale();
         document.body.classList.add('pinch-zooming');
         pinchStartDist = touchDist(e.touches[0], e.touches[1]);
-        const pinchMinSlider = scaleToSlider(mobileMinScale || computeMobilePinchMinScale());
-        pinchStartSlider = Math.max(pinchMinSlider, Math.min(200, scaleToSlider(currentScale)));
 
         const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
         const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
@@ -9735,18 +9733,20 @@
       e.preventDefault();
       const dist = touchDist(e.touches[0], e.touches[1]);
       if (pinchStartDist <= 0) return;
+      // Map finger distance directly to scale. The desktop slider curve
+      // bottoms out near 70%, which on phones sits ABOVE the 3-/4-column
+      // fill scales — so a pinch-out almost never changed the column count
+      // and the post-pinch fill-snap never had a chance to run.
       const ratio = dist / pinchStartDist;
-      const SENS = 120;
-      let newSlider = pinchStartSlider + (ratio - 1) * SENS;
-      const minSlider = scaleToSlider(mobileMinScale || computeMobilePinchMinScale());
-      newSlider = Math.max(minSlider, Math.min(200, newSlider));
+      const minS = mobileMinScale || computeMobilePinchMinScale();
+      const newScale = Math.max(minS, Math.min(500, Math.round(pinchStartScale * ratio)));
 
       const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
       const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
       pinchLastMidX = midX;
       pinchLastMidY = midY;
 
-      applyPinchScaleChange(Math.round(newSlider));
+      applyPinchScaleChange(newScale);
     }, { passive: false });
 
     function endPinch(e) {
