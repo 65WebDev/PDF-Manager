@@ -28081,11 +28081,19 @@ function peDeselectKeepTool() {
   if (!peState) return;
   // Shape tool: keep the color/stroke/opacity mini-panel visible (tool presets)
   // after deselect — it only hides when leaving the shape tool entirely.
-  if (peState.inlineEditId && peState.tool === 'text') {
-    peFinishTextInlineEdit({ keepTool: true });
-  } else {
-    peSelect(null, { keepTool: true });
+  // Callout-like (incl. shape comments): end edit so the mobile KB / OSK closes.
+  if (peState.inlineEditId) {
+    const editing = peState.objects.find(x => x.id === peState.inlineEditId);
+    if (editing && peIsCalloutLike(editing)) {
+      peEndCalloutEdit(false);
+      return;
+    }
+    if (peState.tool === 'text' || (editing && editing.type === 'text')) {
+      peFinishTextInlineEdit({ keepTool: true });
+      return;
+    }
   }
+  peSelect(null, { keepTool: true });
 }
 
 function peIsMultiSelection() {
@@ -28566,6 +28574,9 @@ function peSelect(o, opts) {
   if (leavingEdit) {
     peSyncInlineEditsFromDom();
     removedEmpty = !!peRemoveEmptyInlineText();
+    // Deselect / switch-away must drop the mobile KB window and #peOskProxy,
+    // not only clear inlineEditId (shape-comment edit used to leave KB up).
+    peStopMobileEditOverlay();
     peState.inlineEditId = null;
     peState.inlineEditFocusPending = false;
     clearTimeout(peTextKbTimer);
@@ -28575,6 +28586,7 @@ function peSelect(o, opts) {
   } else if (!o) {
     peSyncInlineEditsFromDom();
     removedEmpty = !!peRemoveEmptyInlineText();
+    peStopMobileEditOverlay();
     peState.inlineEditId = null;
     peState.inlineEditFocusPending = false;
     peTextClickSeq = { id: null, t: 0 };
