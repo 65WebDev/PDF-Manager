@@ -5268,7 +5268,7 @@
     <button type="button" data-action="copy">Скопировать</button>
     <button type="button" data-action="cut">Вырезать</button>
     <button type="button" data-action="paste">Вставить</button>
-    <button type="button" data-action="arrow-comment" class="pe-ctx-checkable" hidden style="display:none">
+    <button type="button" data-action="shape-comment" class="pe-ctx-checkable" hidden style="display:none">
       <span class="ctx-label">Комментарий</span>
       <span class="ctx-check" aria-hidden="true">✓</span>
     </button>
@@ -22254,6 +22254,16 @@ function peGetObjectNormBounds(o) {
     const maxX = Math.max(x + w, cx + cw), maxY = Math.max(y + h, cy + ch);
     return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
   }
+  if (o.shapeComment && o.shapeComment.boxX != null) {
+    const c = o.shapeComment;
+    const cx = Number(c.boxX) || 0;
+    const cy = Number(c.boxY) || 0;
+    const cw = Number(c.boxW) > 0 ? Number(c.boxW) : 0.2;
+    const ch = Number(c.boxH) > 0 ? Number(c.boxH) : 0.12;
+    const minX = Math.min(x, cx), minY = Math.min(y, cy);
+    const maxX = Math.max(x + w, cx + cw), maxY = Math.max(y + h, cy + ch);
+    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+  }
   return { x, y, w, h };
 }
 
@@ -22305,6 +22315,15 @@ function peRemapObjectForCrop(o, crop) {
   }
   if (o.arrowComment) {
     const c = o.arrowComment;
+    if (c.boxX != null) {
+      c.boxX = rx(c.boxX);
+      c.boxY = ry(c.boxY);
+    }
+    if (c.boxW != null) c.boxW = rw(c.boxW);
+    if (c.boxH != null) c.boxH = rh(c.boxH);
+  }
+  if (o.shapeComment) {
+    const c = o.shapeComment;
     if (c.boxX != null) {
       c.boxX = rx(c.boxX);
       c.boxY = ry(c.boxY);
@@ -23843,6 +23862,7 @@ function peCaptureEditorSnapshot() {
     const copy = { ...o };
     delete copy.imgEl;
     if (copy.hlComment) copy.hlComment = { ...copy.hlComment };
+    if (copy.shapeComment) copy.shapeComment = { ...copy.shapeComment };
     if (copy.arrowComment) copy.arrowComment = { ...copy.arrowComment };
     if (copy.frames) copy.frames = copy.frames.map(f => ({ ...f }));
     return copy;
@@ -24776,8 +24796,8 @@ function peRedrawObjects() {
     peBindPointerDown(el, (e) => peObjMouseDown(e, o));
     layer.appendChild(el);
     if (o.type === 'callout') peAppendCalloutBox(layer, o, W, H);
-    if (o.type === 'shape' && (o.shape || '') === 'arrow' && o.arrowComment) {
-      peAppendArrowCommentBox(layer, o, W, H);
+    if (o.type === 'shape' && peShapeHasComment(o)) {
+      peAppendShapeCommentBox(layer, o, W, H);
     }
   });
   document.getElementById('peDeleteObj').disabled = !peGetSelectedObjects().length;
@@ -24801,7 +24821,7 @@ const PE_CALLOUT_BG_COLORS = [
 ];
 
 function peCalloutBg(o) {
-  const src = (o && o.arrowComment && o.type === 'shape') ? o.arrowComment : o;
+  const src = peShapeCommentData(o) || o;
   const c = (src && src.bg) ? String(src.bg) : PE_CALLOUT_BG;
   return c || PE_CALLOUT_BG;
 }
@@ -24810,45 +24830,99 @@ function peIsArrowShape(o) {
   return !!(o && o.type === 'shape' && (o.shape || '') === 'arrow');
 }
 
-function peArrowHasComment(o) {
-  return peIsArrowShape(o) && !!o.arrowComment;
+/** Migrate legacy arrowComment → shapeComment; return comment payload or null. */
+function peShapeCommentData(o) {
+  if (!o || o.type !== 'shape') return null;
+  if (o.shapeComment) return o.shapeComment;
+  if (o.arrowComment) {
+    o.shapeComment = o.arrowComment;
+    delete o.arrowComment;
+    return o.shapeComment;
+  }
+  return null;
+}
+
+function peShapeHasComment(o) {
+  return !!peShapeCommentData(o);
 }
 
 /** Object that holds callout box fields (boxX/Y/W/H, text, html, bg, fontPt). */
 function peCommentBoxHost(o) {
   if (!o) return null;
   if (o.type === 'callout') return o;
-  if (peArrowHasComment(o)) return o.arrowComment;
-  return null;
+  return peShapeCommentData(o);
 }
 
 function peIsCalloutLike(o) {
-  return !!(o && (o.type === 'callout' || peArrowHasComment(o)));
+  return !!(o && (o.type === 'callout' || peShapeHasComment(o)));
 }
 
-/** Leader from a point (arrow tip) to the nearest edge of the comment box. */
+/** Leader from a point to the nearest edge of the comment box. */
 function pePointBoxLeaderEndpoints(px, py, bx, by, bw, bh) {
   const p2 = peHlNearestRectPoint(bx, by, bx + bw, by + bh, px, py);
   return { x1: px, y1: py, x2: p2.x, y2: p2.y };
 }
 
-function peArrowTipFrameFrac(o, W, H) {
+/**
+ * Arrow comment anchors at the START/tail (x1,y1) — opposite the arrowhead tip.
+ * (Earlier builds used the tip; users asked to flip to the other end.)
+ */
+function peArrowCommentAnchorPx(o, W, H) {
   const ep = peVectorShapeEndpoints(o, W, H);
-  const tipX = ep.x2 / Math.max(1, W);
-  const tipY = ep.y2 / Math.max(1, H);
-  const s = 0.012;
-  return { x: tipX - s / 2, y: tipY - s / 2, w: s, h: s };
+  return { x: ep.x1, y: ep.y1 };
 }
 
-function peEnsureArrowCommentBox(o) {
-  if (!peArrowHasComment(o)) return;
-  const c = o.arrowComment;
+/** Axis-aligned bounds of a shape in stage pixels (accounts for rotation). */
+function peShapeLeaderBoundsPx(o, W, H) {
+  const x = (Number(o.x) || 0) * W;
+  const y = (Number(o.y) || 0) * H;
+  const w = Math.max(1, (Number(o.w) || 0) * W);
+  const h = Math.max(1, (Number(o.h) || 0) * H);
+  const rot = ((Number(o.rot) || 0) * Math.PI) / 180;
+  if (!rot) return { L: x, T: y, R: x + w, B: y + h };
+  const cx = x + w / 2, cy = y + h / 2;
+  const cos = Math.abs(Math.cos(rot)), sin = Math.abs(Math.sin(rot));
+  const bw = w * cos + h * sin;
+  const bh = w * sin + h * cos;
+  return { L: cx - bw / 2, T: cy - bh / 2, R: cx + bw / 2, B: cy + bh / 2 };
+}
+
+/** Short-path leader: nearest edge of shape AABB ↔ nearest edge of comment box. */
+function peShapeCommentLeaderEndpoints(o, W, H, bx, by, bw, bh) {
+  if (peIsArrowShape(o)) {
+    const a = peArrowCommentAnchorPx(o, W, H);
+    return pePointBoxLeaderEndpoints(a.x, a.y, bx, by, bw, bh);
+  }
+  const b = peShapeLeaderBoundsPx(o, W, H);
+  return peHlLeaderEndpoints(b.L, b.T, b.R, b.B, bx, by, bw, bh);
+}
+
+function peShapeCommentAnchorFrameFrac(o, W, H) {
+  if (peIsArrowShape(o)) {
+    const a = peArrowCommentAnchorPx(o, W, H);
+    const tipX = a.x / Math.max(1, W);
+    const tipY = a.y / Math.max(1, H);
+    const s = 0.012;
+    return { x: tipX - s / 2, y: tipY - s / 2, w: s, h: s };
+  }
+  const b = peShapeLeaderBoundsPx(o, W, H);
+  return {
+    x: b.L / Math.max(1, W),
+    y: b.T / Math.max(1, H),
+    w: Math.max(0.01, (b.R - b.L) / Math.max(1, W)),
+    h: Math.max(0.01, (b.B - b.T) / Math.max(1, H))
+  };
+}
+
+function peEnsureShapeCommentBox(o) {
+  const c = peShapeCommentData(o);
+  if (!c) return;
   const def = peCalloutDefaultBoxFracs();
   if (!(c.boxW > 0)) c.boxW = def.boxW;
   if (!(c.boxH > 0)) c.boxH = def.boxH;
   if (c.boxX == null || c.boxY == null) {
     const { w: W, h: H } = peStageSize();
-    const frame = peArrowTipFrameFrac(o, W, H);
+    const frame = peShapeCommentAnchorFrameFrac(o, W, H);
     const pos = pePickCalloutBoxPos(frame, c.boxW, c.boxH);
     if (c.boxX == null) c.boxX = pos.boxX;
     if (c.boxY == null) c.boxY = pos.boxY;
@@ -24859,28 +24933,40 @@ function peEnsureArrowCommentBox(o) {
   if (c.html == null) c.html = '';
 }
 
-function peToggleArrowComment(o) {
-  if (!peState || !peIsArrowShape(o)) return;
-  if (o.arrowComment) {
+function peToggleShapeComment(o) {
+  if (!peState || !o || o.type !== 'shape') return;
+  peNormalizeShapeComment(o);
+  if (o.shapeComment) {
     if (peState.inlineEditId === o.id) {
       peState.inlineEditId = null;
       peState.inlineEditFocusPending = false;
       peStopMobileEditOverlay();
     }
+    delete o.shapeComment;
     delete o.arrowComment;
     peRedrawObjects();
     peUpdateProps();
     peCommitEditorHistory();
     return;
   }
-  o.arrowComment = {
+  o.shapeComment = {
     text: '', html: '', fontPt: 12, bg: PE_CALLOUT_BG
   };
-  peEnsureArrowCommentBox(o);
+  delete o.arrowComment;
+  peEnsureShapeCommentBox(o);
   peSelect(o, { skipSelectionHistory: true });
   peRedrawObjects();
   peBeginCalloutEdit(o);
   peCommitEditorHistory();
+}
+
+/** @deprecated use peToggleShapeComment */
+function peToggleArrowComment(o) {
+  peToggleShapeComment(o);
+}
+
+function peNormalizeShapeComment(o) {
+  peShapeCommentData(o);
 }
 
 function peCalloutFrames(o) {
@@ -25084,18 +25170,17 @@ function peAppendCalloutBox(layer, o, W, H) {
   layer.appendChild(box);
 }
 
-/** Yellow comment bubble for an arrow shape, leader glued to the tip (x2,y2). */
-function peAppendArrowCommentBox(layer, o, W, H) {
-  if (!peArrowHasComment(o)) return;
-  peEnsureArrowCommentBox(o);
-  const c = o.arrowComment;
+/** Yellow comment bubble for a shape; leader to arrow tail or short path to other shapes. */
+function peAppendShapeCommentBox(layer, o, W, H) {
+  if (!peShapeHasComment(o)) return;
+  peEnsureShapeCommentBox(o);
+  const c = peShapeCommentData(o);
   const bx = c.boxX * W, by = c.boxY * H;
   const bw = c.boxW * W, bh = c.boxH * H;
-  const ep = peVectorShapeEndpoints(o, W, H);
-  const pts = pePointBoxLeaderEndpoints(ep.x2, ep.y2, bx, by, bw, bh);
+  const pts = peShapeCommentLeaderEndpoints(o, W, H, bx, by, bw, bh);
 
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-  svg.setAttribute('class', 'pe-callout-leader pe-arrow-comment-leader');
+  svg.setAttribute('class', 'pe-callout-leader pe-shape-comment-leader');
   svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
   svg.dataset.peId = String(o.id);
   const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
@@ -25107,7 +25192,7 @@ function peAppendArrowCommentBox(layer, o, W, H) {
   layer.appendChild(svg);
 
   const box = document.createElement('div');
-  box.className = 'pe-obj pe-obj-callout-box pe-obj-arrow-comment-box';
+  box.className = 'pe-obj pe-obj-callout-box pe-obj-shape-comment-box';
   box.dataset.peId = String(o.id);
   box.style.left = bx + 'px';
   box.style.top = by + 'px';
@@ -25578,9 +25663,10 @@ function peSyncInlineEditsFromDom() {
     if (o.type === 'callout') {
       o.html = el.innerHTML;
       o.text = peEditablePlainText(el);
-    } else if (peArrowHasComment(o)) {
-      o.arrowComment.html = el.innerHTML;
-      o.arrowComment.text = peEditablePlainText(el);
+    } else if (peShapeHasComment(o)) {
+      const host = peShapeCommentData(o);
+      host.html = el.innerHTML;
+      host.text = peEditablePlainText(el);
     }
   });
   peSyncHlCommentsFromDom();
@@ -30623,15 +30709,15 @@ function peShowObjCtxMenu(clientX, clientY) {
   menu.querySelector('[data-action="delete"]').disabled = !sel.length;
   const hlCommentBtn = menu.querySelector('[data-action="hl-comment"]');
   if (hlCommentBtn) hlCommentBtn.style.display = 'none';
-  const arrowCommentBtn = menu.querySelector('[data-action="arrow-comment"]');
-  if (arrowCommentBtn) {
+  const shapeCommentBtn = menu.querySelector('[data-action="shape-comment"]');
+  if (shapeCommentBtn) {
     const sole = sel.length === 1 ? sel[0] : null;
-    const show = !!(sole && peIsArrowShape(sole));
-    arrowCommentBtn.style.display = show ? '' : 'none';
-    arrowCommentBtn.hidden = !show;
-    const on = show && peArrowHasComment(sole);
-    arrowCommentBtn.classList.toggle('active', on);
-    arrowCommentBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    const show = !!(sole && sole.type === 'shape');
+    shapeCommentBtn.style.display = show ? '' : 'none';
+    shapeCommentBtn.hidden = !show;
+    const on = show && peShapeHasComment(sole);
+    shapeCommentBtn.classList.toggle('active', on);
+    shapeCommentBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
   }
   menu.classList.add('visible');
   menu.setAttribute('aria-hidden', 'false');
@@ -30983,7 +31069,7 @@ function peStartCalloutBoxResize(e, o, corner) {
   if (!host) return;
   const { w: W, h: H } = peStageSize();
   if (o.type === 'callout') peEnsureCalloutBoxSize(o);
-  else peEnsureArrowCommentBox(o);
+  else peEnsureShapeCommentBox(o);
   const l = host.boxX * W, t = host.boxY * H, r = l + host.boxW * W, b = t + host.boxH * H;
   const anchor = {
     nw: { x: r, y: b }, ne: { x: l, y: b }, se: { x: l, y: t }, sw: { x: r, y: t }
@@ -31855,8 +31941,8 @@ function peObjMouseDown(e, o) {
     }
     return;
   }
-  // Arrow with comment: dragging the yellow bubble moves the comment only.
-  if (peArrowHasComment(o) && peState.tool === 'select' && peState.inlineEditId !== o.id) {
+  // Shape with comment: dragging the yellow bubble moves the comment only.
+  if (peShapeHasComment(o) && peState.tool === 'select' && peState.inlineEditId !== o.id) {
     const onBox = !!(e.target.closest && e.target.closest('.pe-obj-callout-box'));
     if (onBox) {
       e.stopPropagation();
@@ -32868,9 +32954,9 @@ function peObjMouseDown(e, o) {
       peCutSelectedObjects();
     } else if (action === 'paste') {
       void pePasteAtStage(peObjCtxPastePos.x, peObjCtxPastePos.y);
-    } else if (action === 'arrow-comment') {
+    } else if (action === 'shape-comment') {
       const sole = peGetSelectedObjects();
-      if (sole.length === 1 && peIsArrowShape(sole[0])) peToggleArrowComment(sole[0]);
+      if (sole.length === 1 && sole[0].type === 'shape') peToggleShapeComment(sole[0]);
     }
   });
 
@@ -34370,17 +34456,16 @@ function peBakeFillCommentText(ctx, txt, bx, by, bw, bh, fontPt, S) {
   String(txt).split('\n').forEach(line => { wrapChunk(line); });
 }
 
-/** Bake arrow-linked yellow comment bubble + leader into overlay canvas. */
-function peBakeDrawArrowComment(ctx, o, canvasW, canvasH, S) {
-  if (!peArrowHasComment(o)) return;
-  const c = o.arrowComment;
+/** Bake shape-linked yellow comment bubble + leader into overlay canvas. */
+function peBakeDrawShapeComment(ctx, o, canvasW, canvasH, S) {
+  if (!peShapeHasComment(o)) return;
+  const c = peShapeCommentData(o);
   if (!(c.boxW > 0) || !(c.boxH > 0) || c.boxX == null || c.boxY == null) return;
   const bx = c.boxX * canvasW;
   const by = c.boxY * canvasH;
   const bw = Math.max(2, c.boxW * canvasW);
   const bh = Math.max(2, c.boxH * canvasH);
-  const ep = peVectorShapeEndpoints(o, canvasW, canvasH);
-  const pts = pePointBoxLeaderEndpoints(ep.x2, ep.y2, bx, by, bw, bh);
+  const pts = peShapeCommentLeaderEndpoints(o, canvasW, canvasH, bx, by, bw, bh);
   const lw = Math.max(1, 1 * S);
   ctx.save();
   ctx.strokeStyle = '#000';
@@ -34843,13 +34928,15 @@ function peHydrateEditorObjects(list, pageIdx) {
       copy.text = String(copy.text || '');
       copy.html = copy.html != null ? String(copy.html) : null;
       copy.bg = peCalloutBg(copy);
-    } else if (copy.type === 'shape' && copy.arrowComment) {
-      const ac = { ...copy.arrowComment };
+    } else if (copy.type === 'shape' && (copy.shapeComment || copy.arrowComment)) {
+      const src = copy.shapeComment || copy.arrowComment;
+      const ac = { ...src };
       ac.text = String(ac.text || '');
       ac.html = ac.html != null ? String(ac.html) : '';
       ac.bg = ac.bg || PE_CALLOUT_BG;
       if (ac.fontPt == null) ac.fontPt = 12;
-      copy.arrowComment = ac;
+      copy.shapeComment = ac;
+      delete copy.arrowComment;
     } else if (copy.type === 'text') {
       if (!(Number(copy.boxW) > 0.5) || !(Number(copy.boxH) > 0.5)) {
         try {
@@ -35479,7 +35566,7 @@ function peDrawEditorObjects(ctx, canvasW, canvasH, objects, stageW, stageH) {
     } else if (o.type === 'shape' && o.w > 0 && o.h > 0) {
       const fakeCanvas = { width: canvasW, height: canvasH };
       peBakeDrawShape(ctx, o, fakeCanvas, S);
-      if (peArrowHasComment(o)) peBakeDrawArrowComment(ctx, o, canvasW, canvasH, S);
+      if (peShapeHasComment(o)) peBakeDrawShapeComment(ctx, o, canvasW, canvasH, S);
       drew = true;
     } else if (o.type === 'text' && (o.text || '').trim()) {
       ctx.save();
