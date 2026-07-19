@@ -31538,15 +31538,19 @@ function peObjMouseDown(e, o) {
     const prevMul = peState._liveZoomMul != null
       ? peState._liveZoomMul
       : peSliderToZoomMul(peState.zoomSlider || 100);
-    // One scroll write path only: keep the midpoint under the fingers.
-    // (Previously touchmove panned AND zoom-restore rewrote scroll → jitter.)
-    if (Math.abs(newMul - prevMul) < 0.0008
-        && pePinchLastAppliedMidX != null && pePinchLastAppliedMidY != null) {
-      wrap.scrollLeft -= (midX - pePinchLastAppliedMidX);
-      wrap.scrollTop -= (midY - pePinchLastAppliedMidY);
-    } else {
-      peApplyLiveZoomMul(newMul, midX, midY);
+    // Content under the *previous* finger mid must track the *new* mid.
+    // Sampling at the new mid (old peApplyLiveZoomMul path) dropped pan while
+    // zoom was changing — two-finger translation felt almost frozen.
+    const ax = pePinchLastAppliedMidX != null ? pePinchLastAppliedMidX : midX;
+    const ay = pePinchLastAppliedMidY != null ? pePinchLastAppliedMidY : midY;
+    const { fx, fy } = peStageFracUnderPoint(ax, ay);
+    if (Math.abs(newMul - prevMul) >= 0.0008) {
+      peState._liveZoomMul = newMul;
+      peState.zoomSlider = peZoomMulToSlider(newMul);
+      peApplyStageLayout({ skipCrop: true });
+      peSyncScaleSliderUi(true);
     }
+    peRestoreScrollToAnchor(midX, midY, fx, fy);
     pePinchLastAppliedMidX = midX;
     pePinchLastAppliedMidY = midY;
   }
