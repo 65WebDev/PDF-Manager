@@ -23929,6 +23929,13 @@ function editSelectedPage() {
         if (rot === 180) return [vpW - x, y];
         if (rot === 270) return [vpH - y, x];
         return [x, vpH - y];
+      },
+      convertToViewportPoint(x, y) {
+        // Inverse of convertToPdfPoint (needed when covering a selection).
+        if (rot === 90) return [vpW - y, x];
+        if (rot === 180) return [vpW - x, y];
+        if (rot === 270) return [y, vpH - x];
+        return [x, vpH - y];
       }
     };
   }
@@ -24124,10 +24131,10 @@ function editSelectedPage() {
   }
 
   // Cover selected page text with the current redact fill (no confirmation).
-  // Same paint + page-raster markers as confirming a redact frame in the editor.
+  // Paint in PDF-space like bakeTextMarkupOnPage (highlight/underline), then
+  // mark the page for redact rasterization on export/save.
   async function bakeTextRedactOnPage(pageIdx, pdfRects) {
     if (!pdfDoc || !pdfRects || !pdfRects.length) return;
-    if (typeof pePaintBlackRedactRect !== 'function') return;
 
     const canSuspend = (typeof historyPushSuspended !== 'undefined');
     const wasSuspended = canSuspend ? historyPushSuspended : false;
@@ -24136,39 +24143,55 @@ function editSelectedPage() {
     try {
       if (typeof whenPdfDocIdle === 'function') await whenPdfDocIdle();
       const docRef = pdfDoc;
-      const color = (typeof peLastRedactColor !== 'undefined' && peLastRedactColor)
+      const page = docRef.getPage(pageIdx);
+      const colorHex = (typeof peLastRedactColor !== 'undefined' && peLastRedactColor)
         ? peLastRedactColor : '#000000';
+      const fill = (typeof peHexToPdfLibRgb === 'function')
+        ? peHexToPdfLibRgb(colorHex)
+        : PDFLib.rgb(0, 0, 0);
 
-      const vp = typeof gridMarkupViewportForPage === 'function'
-        ? gridMarkupViewportForPage(pageIdx) : null;
-      if (!vp || !(vp.width > 0) || !(vp.height > 0)) return;
-
-      const regions = [];
+      let painted = 0;
       pdfRects.forEach(r => {
-        const p1 = vp.convertToViewportPoint(r.x0, r.y0);
-        const p2 = vp.convertToViewportPoint(r.x1, r.y1);
-        const left = Math.min(p1[0], p2[0]);
-        const top = Math.min(p1[1], p2[1]);
-        const right = Math.max(p1[0], p2[0]);
-        const bottom = Math.max(p1[1], p2[1]);
-        const w = right - left, h = bottom - top;
-        if (!(w > 0.5) || !(h > 0.5)) return;
-        regions.push({
-          minX: left / vp.width,
-          minY: top / vp.height,
-          maxX: right / vp.width,
-          maxY: bottom / vp.height
+        const w = r.x1 - r.x0, h = r.y1 - r.y0;
+        if (!(w > 0) || !(h > 0)) return;
+        page.drawRectangle({
+          x: r.x0, y: r.y0, width: w, height: h,
+          color: fill, opacity: 1, borderWidth: 0
         });
+        painted++;
       });
-      if (!regions.length) return;
+      if (!painted) return;
 
-      regions.forEach(region => {
-        pePaintBlackRedactRect(docRef, pageIdx, region, color);
-        if (typeof peRememberSessionRedactedRegion === 'function') {
-          peRememberSessionRedactedRegion(
-            pageIdx, region.minX, region.minY, region.maxX, region.maxY);
+      // Same export/save markers as confirming a redact frame in the editor.
+      if (typeof peMarkPageNeedsRedactRaster === 'function') {
+        peMarkPageNeedsRedactRaster(page);
+      }
+      // Record overlay-normalized regions so the selectable text layer can
+      // hide glyphs under the cover (when viewport conversion is available).
+      try {
+        const vp = gridMarkupViewportForPage(pageIdx);
+        if (vp && typeof vp.convertToViewportPoint === 'function' && vp.width > 0 && vp.height > 0) {
+          pdfRects.forEach(r => {
+            const p1 = vp.convertToViewportPoint(r.x0, r.y0);
+            const p2 = vp.convertToViewportPoint(r.x1, r.y1);
+            const left = Math.min(p1[0], p2[0]);
+            const top = Math.min(p1[1], p2[1]);
+            const right = Math.max(p1[0], p2[0]);
+            const bottom = Math.max(p1[1], p2[1]);
+            if (!(right > left) || !(bottom > top)) return;
+            const minX = left / vp.width;
+            const minY = top / vp.height;
+            const maxX = right / vp.width;
+            const maxY = bottom / vp.height;
+            if (typeof peAddPageRedactedRegion === 'function') {
+              peAddPageRedactedRegion(page, minX, minY, maxX, maxY, false);
+            }
+            if (typeof peRememberSessionRedactedRegion === 'function') {
+              peRememberSessionRedactedRegion(pageIdx, minX, minY, maxX, maxY);
+            }
+          });
         }
-      });
+      } catch (_) { /* cover is already painted; region metadata is best-effort */ }
 
       if (pdfDoc !== docRef) {
         console.warn('text redact bake aborted: pdfDoc was swapped mid-draw');
@@ -24205,6 +24228,9 @@ function editSelectedPage() {
         historyChangeHint = [pageIdx];
         if (typeof setDocumentDirty === 'function') setDocumentDirty(true);
       }
+    } catch (err) {
+      console.error('text redact bake failed', err);
+      alert('Не удалось затереть текст: ' + (err && err.message ? err.message : err));
     } finally {
       if (canSuspend) historyPushSuspended = wasSuspended;
     }
