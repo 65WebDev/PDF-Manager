@@ -21542,8 +21542,9 @@ function peApplyStageLayout(options = {}) {
   canvas.style.width = w + 'px';
   canvas.style.height = h + 'px';
   stage.classList.add('pe-layout-zoom');
-  // During pinch, skip crop redraw (no crop) — object layout still needed.
   peUpdateObjectsLayout();
+  // Keep crop overlay in sync with live stage size (pinch used to skip this
+  // and the box drifted until the gesture ended).
   if (!options.skipCrop) peRedrawCrop();
 }
 
@@ -21558,7 +21559,7 @@ function peApplyLiveZoomMul(zoomMul, anchorX, anchorY) {
   const { fx, fy } = peStageFracUnderPoint(anchorX, anchorY);
   peState._liveZoomMul = zoomMul;
   peState.zoomSlider = peZoomMulToSlider(zoomMul);
-  peApplyStageLayout({ skipCrop: true });
+  peApplyStageLayout({ skipCrop: false });
   peRestoreScrollToAnchor(anchorX, anchorY, fx, fy);
   peSyncScaleSliderUi(true);
 }
@@ -31779,7 +31780,8 @@ function peObjMouseDown(e, o) {
     if (Math.abs(newMul - prevMul) >= 0.0008) {
       peState._liveZoomMul = newMul;
       peState.zoomSlider = peZoomMulToSlider(newMul);
-      peApplyStageLayout({ skipCrop: true });
+      // Redraw crop with the new viewport so it does not slide vs the page.
+      peApplyStageLayout({ skipCrop: false });
       peSyncScaleSliderUi(true);
     }
     peRestoreScrollToAnchor(midX, midY, fx, fy);
