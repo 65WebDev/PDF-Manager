@@ -26748,7 +26748,8 @@ function peClearGeomDragTouchFallback() {
 }
 
 function peOnGeomDragTouchMove(e) {
-  if (!peState?.drag || !(peState.drag.inlineTextMove || peState.drag.inlineTextResize)) {
+  if (!peState?.drag || !(peState.drag.inlineTextMove || peState.drag.inlineTextResize
+      || peState.drag.inlineTextRotate)) {
     peClearGeomDragTouchFallback();
     return;
   }
@@ -26763,7 +26764,8 @@ function peOnGeomDragTouchMove(e) {
 function peOnGeomDragTouchEnd(e) {
   peClearGeomDragTouchFallback();
   // Re-enter the shared pointer-up cleanup with a synthetic event.
-  if (!peState?.drag || !(peState.drag.inlineTextMove || peState.drag.inlineTextResize)) return;
+  if (!peState?.drag || !(peState.drag.inlineTextMove || peState.drag.inlineTextResize
+      || peState.drag.inlineTextRotate)) return;
   try {
     window.dispatchEvent(new PointerEvent('pointerup', {
       bubbles: true,
@@ -26781,7 +26783,7 @@ function peOnGeomDragTouchEnd(e) {
     document.getElementById('pageEditModal')?.classList.remove('pe-panning', 'pe-crop-panning');
     document.querySelectorAll('#peObjLayer .pe-text-border-drag, #peObjLayer .pe-text-border-hover')
       .forEach(el => el.classList.remove('pe-text-border-drag', 'pe-text-border-hover'));
-    if ((d.inlineTextMove || d.inlineTextResize) && peState?.inlineEditId) {
+    if ((d.inlineTextMove || d.inlineTextResize || d.inlineTextRotate) && peState?.inlineEditId) {
       requestAnimationFrame(() => peResumeInlineTextEditAfterMove(d.obj));
     } else {
       peGeomDragActive = false;
