@@ -5686,6 +5686,7 @@
     let scaleUserLocked = false;  //the user manually touched the slider → auto off
     let pinchActive = false;
     let pinchStartScale = 100;
+    let pinchStartCols = 0;   // column count at pinch start (for fill-snap)
     let pinchLastMidX = null;
     let pinchLastMidY = null;
     let isLoading = false;
@@ -7999,13 +8000,9 @@
     }
 
     //After pinch: if the page is cropped by no more than 5%, reduce the scale slightly,
-    //so that the sheet fits completely in width.
+    //so that the sheet fits completely in width. Only when the column count did
+    //NOT change during the pinch (column-change uses fill-snap instead).
     const MOBILE_SNAP_MAX_CROP = 0.05;
-    //After pinch: if the current column count leaves unused width, grow the
-    //scale so that row fills the working area — but only when the needed
-    //growth is modest (≤25%). Larger free space means the user intentionally
-    //stopped between two column-count "stops", so leave it alone.
-    const MOBILE_SNAP_MAX_FILL_GROW = 0.25;
 
     /** Largest N such that N square cards at `scale` still fit in `avail`. */
     function mobileColsThatFit(scale, avail) {
@@ -8062,27 +8059,22 @@
       return applyMobilePinchScaleSnap(target, page, anchorFx, anchorFy, midX, midY);
     }
 
-    //After pinch: if the current columns leave unused side space and filling
-    //it needs at most +25% scale, settle to the exact fill-width scale for
-    //that column count (so the squares sit flush against the working area).
+    //After pinch: only when the column count CHANGED during the gesture,
+    //settle to the exact fill-width scale for the new column count — so the
+    //squares maximally occupy the working area width. If the column count
+    //stayed the same, leave the user's scale alone (no fill snap).
     function snapMobileFillWidthAfterPinch(anchorEl, anchorFx, anchorFy, midX, midY) {
       if (!isTouchDevice || !pdfDoc) return false;
+      if (!(pinchStartCols > 0)) return false;
 
       const avail = getScrollAvailWidth();
       if (avail <= 0) return false;
 
       const cols = mobileColsThatFit(currentScale, avail);
-      if (cols < 1) return false;
-
-      const rowW = cardRowWidth(currentScale, cols);
-      // Already flush (or overshooting — shouldn't happen, but bail).
-      if (rowW >= avail - 1) return false;
+      if (cols < 1 || cols === pinchStartCols) return false;
 
       const target = computeMobileScaleForCols(cols);
-      if (target <= currentScale) return false;
-
-      const growth = target / currentScale - 1;
-      if (growth > MOBILE_SNAP_MAX_FILL_GROW + 1e-6) return false;
+      if (target === currentScale) return false;
 
       const pages = getVisiblePages();
       const page = (anchorEl && anchorEl.isConnected) ? anchorEl : pages[0];
@@ -9719,6 +9711,7 @@
         cancelPageTouchDrag();
         pinchActive = true;
         pinchStartScale = currentScale;
+        pinchStartCols = mobileColsThatFit(currentScale, getScrollAvailWidth());
         mobileMinScale = computeMobilePinchMinScale();
         document.body.classList.add('pinch-zooming');
         pinchStartDist = touchDist(e.touches[0], e.touches[1]);
@@ -9771,12 +9764,11 @@
         document.body.classList.remove('pinch-zooming');
 
         applyScale({ afterPinch: true, overflowAnchor: anchorEl });
-        // Crop-snap (shrink ≤5%) and fill-snap (grow ≤25%) are mutually
-        // exclusive: a cropped card has no unused side space, and an
-        // under-filled row is not cropped. Prefer crop-snap when both
-        // somehow apply.
-        if (!snapMobilePageScaleAfterPinch(anchorEl, anchorFx, anchorFy, midX, midY)) {
-          snapMobileFillWidthAfterPinch(anchorEl, anchorFx, anchorFy, midX, midY);
+        // Column count changed during the pinch → fill-snap to the new
+        // column count's exact fill-width scale (regardless of delta).
+        // Column count unchanged → only the small crop-snap may apply.
+        if (!snapMobileFillWidthAfterPinch(anchorEl, anchorFx, anchorFy, midX, midY)) {
+          snapMobilePageScaleAfterPinch(anchorEl, anchorFx, anchorFy, midX, midY);
         }
 
         const settle = () => {
@@ -9796,6 +9788,7 @@
 
         pinchAnchorIndex = null;
         pinchStartScale = 100;
+        pinchStartCols = 0;
         pinchLastMidX = null;
         pinchLastMidY = null;
       }
