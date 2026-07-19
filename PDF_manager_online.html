@@ -24872,6 +24872,132 @@ function peArrowCommentAnchorPx(o, W, H) {
   return { x: ep.x1, y: ep.y1 };
 }
 
+/** Local (unrotated box) → stage pixels. */
+function peShapeLocalToStagePx(o, W, H, lx, ly) {
+  const x = (Number(o.x) || 0) * W;
+  const y = (Number(o.y) || 0) * H;
+  const w = Math.max(1, (Number(o.w) || 0) * W);
+  const h = Math.max(1, (Number(o.h) || 0) * H);
+  const cx = x + w / 2, cy = y + h / 2;
+  const dx = lx - w / 2, dy = ly - h / 2;
+  const rot = ((Number(o.rot) || 0) * Math.PI) / 180;
+  const cos = Math.cos(rot), sin = Math.sin(rot);
+  return { x: cx + dx * cos - dy * sin, y: cy + dx * sin + dy * cos };
+}
+
+/** Stage pixels → local (unrotated box) coords. */
+function peShapeStageToLocalPx(o, W, H, sx, sy) {
+  const x = (Number(o.x) || 0) * W;
+  const y = (Number(o.y) || 0) * H;
+  const w = Math.max(1, (Number(o.w) || 0) * W);
+  const h = Math.max(1, (Number(o.h) || 0) * H);
+  const cx = x + w / 2, cy = y + h / 2;
+  const dx = sx - cx, dy = sy - cy;
+  const rot = ((Number(o.rot) || 0) * Math.PI) / 180;
+  const cos = Math.cos(rot), sin = Math.sin(rot);
+  return { x: w / 2 + dx * cos + dy * sin, y: h / 2 - dx * sin + dy * cos };
+}
+
+function peNearestPointOnSeg(ax, ay, bx, by, px, py) {
+  const abx = bx - ax, aby = by - ay;
+  const len2 = abx * abx + aby * aby;
+  if (len2 < 1e-8) return { x: ax, y: ay };
+  let t = ((px - ax) * abx + (py - ay) * aby) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return { x: ax + abx * t, y: ay + aby * t };
+}
+
+/** Ray from (ox,oy) along unit (vx,vy) vs segment a→b; returns {t,x,y} or null. */
+function peRaySegmentHit(ox, oy, vx, vy, ax, ay, bx, by) {
+  const sx = bx - ax, sy = by - ay;
+  const det = vx * sy - vy * sx;
+  if (Math.abs(det) < 1e-8) return null;
+  const dx = ax - ox, dy = ay - oy;
+  const t = (dx * sy - dy * sx) / det;
+  const u = (dx * vy - dy * vx) / det;
+  if (t < 1e-6 || u < 0 || u > 1) return null;
+  return { t, x: ox + vx * t, y: oy + vy * t };
+}
+
+function peEllipseContourToward(w, h, lx, ly, strokePx) {
+  const sw = Math.max(0, Number(strokePx) || 0);
+  // Match peShapeMarkupInBox: ellipse radius inset by stroke so the visible
+  // outer contour sits near the stroke mid/outer edge.
+  const rx = Math.max(1, w / 2 - sw * 0.5);
+  const ry = Math.max(1, h / 2 - sw * 0.5);
+  const dx = lx - w / 2, dy = ly - h / 2;
+  if (Math.abs(dx) < 1e-6 && Math.abs(dy) < 1e-6) {
+    return { x: w / 2 + rx, y: h / 2 };
+  }
+  const ang = Math.atan2(dy / ry, dx / rx);
+  return { x: w / 2 + rx * Math.cos(ang), y: h / 2 + ry * Math.sin(ang) };
+}
+
+function peStarVerticesLocal(w, h) {
+  const cx = w / 2, cy = h / 2;
+  const ro = Math.min(w, h) * 0.45, ri = ro * 0.42;
+  const pts = [];
+  for (let i = 0; i < 10; i++) {
+    const ang = -Math.PI / 2 + i * Math.PI / 5;
+    const r = (i % 2 === 0) ? ro : ri;
+    pts.push({ x: cx + Math.cos(ang) * r, y: cy + Math.sin(ang) * r });
+  }
+  return pts;
+}
+
+function peStarContourToward(w, h, lx, ly) {
+  const cx = w / 2, cy = h / 2;
+  const dx = lx - cx, dy = ly - cy;
+  const len = Math.hypot(dx, dy) || 1;
+  const vx = dx / len, vy = dy / len;
+  const pts = peStarVerticesLocal(w, h);
+  let bestT = Infinity, best = null;
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length];
+    const hit = peRaySegmentHit(cx, cy, vx, vy, a.x, a.y, b.x, b.y);
+    if (hit && hit.t < bestT) {
+      bestT = hit.t;
+      best = { x: hit.x, y: hit.y };
+    }
+  }
+  if (best) return best;
+  // Fallback: nearest vertex
+  let nearest = pts[0], nd = Infinity;
+  pts.forEach(p => {
+    const d = Math.hypot(p.x - lx, p.y - ly);
+    if (d < nd) { nd = d; nearest = p; }
+  });
+  return nearest;
+}
+
+function pePlusNearestLocal(w, h, lx, ly) {
+  const v = peNearestPointOnSeg(w / 2, h * 0.1, w / 2, h * 0.9, lx, ly);
+  const hz = peNearestPointOnSeg(w * 0.1, h / 2, w * 0.9, h / 2, lx, ly);
+  const dv = Math.hypot(v.x - lx, v.y - ly);
+  const dh = Math.hypot(hz.x - lx, hz.y - ly);
+  return dv <= dh ? v : hz;
+}
+
+/**
+ * Contour (or shaft) point of a shape in local box coords, toward a local target.
+ * Prefer the drawn outline over the selection AABB so leaders meet the figure.
+ */
+function peShapeContourPointLocal(o, W, H, lx, ly) {
+  const w = Math.max(1, (Number(o.w) || 0) * W);
+  const h = Math.max(1, (Number(o.h) || 0) * H);
+  const kind = o.shape || 'rect';
+  if (kind === 'ellipse') {
+    return peEllipseContourToward(w, h, lx, ly, peShapeStrokeRenderPx(o));
+  }
+  if (kind === 'star') return peStarContourToward(w, h, lx, ly);
+  if (kind === 'plus') return pePlusNearestLocal(w, h, lx, ly);
+  if (kind === 'line') {
+    return peNearestPointOnSeg(0, h / 2, w, h / 2, lx, ly);
+  }
+  // rect / freehand / default — edge of the local box (= drawn rect for rect)
+  return peHlNearestRectPoint(0, 0, w, h, lx, ly);
+}
+
 /** Axis-aligned bounds of a shape in stage pixels (accounts for rotation). */
 function peShapeLeaderBoundsPx(o, W, H) {
   const x = (Number(o.x) || 0) * W;
@@ -24887,14 +25013,20 @@ function peShapeLeaderBoundsPx(o, W, H) {
   return { L: cx - bw / 2, T: cy - bh / 2, R: cx + bw / 2, B: cy + bh / 2 };
 }
 
-/** Short-path leader: nearest edge of shape AABB ↔ nearest edge of comment box. */
+/**
+ * Short-path leader: contour of the figure ↔ nearest edge of the comment box.
+ * Arrow anchors at the tail; ellipse/star/plus use real outline geometry.
+ */
 function peShapeCommentLeaderEndpoints(o, W, H, bx, by, bw, bh) {
   if (peIsArrowShape(o)) {
     const a = peArrowCommentAnchorPx(o, W, H);
     return pePointBoxLeaderEndpoints(a.x, a.y, bx, by, bw, bh);
   }
-  const b = peShapeLeaderBoundsPx(o, W, H);
-  return peHlLeaderEndpoints(b.L, b.T, b.R, b.B, bx, by, bw, bh);
+  const boxCx = bx + bw / 2, boxCy = by + bh / 2;
+  const localTarget = peShapeStageToLocalPx(o, W, H, boxCx, boxCy);
+  const localPt = peShapeContourPointLocal(o, W, H, localTarget.x, localTarget.y);
+  const stagePt = peShapeLocalToStagePx(o, W, H, localPt.x, localPt.y);
+  return pePointBoxLeaderEndpoints(stagePt.x, stagePt.y, bx, by, bw, bh);
 }
 
 function peShapeCommentAnchorFrameFrac(o, W, H) {
@@ -31941,8 +32073,9 @@ function peObjMouseDown(e, o) {
     }
     return;
   }
-  // Shape with comment: dragging the yellow bubble moves the comment only.
-  if (peShapeHasComment(o) && peState.tool === 'select' && peState.inlineEditId !== o.id) {
+  // Shape with comment: dragging the yellow bubble moves the comment only
+  // (works in select AND while the shape/draw tool is still active).
+  if (peShapeHasComment(o) && peState.inlineEditId !== o.id) {
     const onBox = !!(e.target.closest && e.target.closest('.pe-obj-callout-box'));
     if (onBox) {
       e.stopPropagation();
@@ -32533,16 +32666,13 @@ function peObjMouseDown(e, o) {
       return;
     }
     // Draw tools: blank click clears selection / ends text edit.
-    // Text keeps two-tap UX (first deselects only).
-    // Redact: tap outside only deselects — never starts a new box on the same tap.
-    // Shape continues into draw on the same gesture (mobile UX).
+    // First tap only deselects; the next blank tap starts a new draw.
     if ((tool === 'shape' || tool === 'text' || tool === 'redact') && peHasActiveObjectFocus()) {
       e.preventDefault();
       peCloseShapeMenu();
       peCloseShapeColorPopup();
       peDeselectKeepTool();
-      if (tool === 'text' || tool === 'redact') return;
-      // shape: fall through and start drawing
+      return;
     }
     if (tool === 'redact') {
       e.preventDefault();
