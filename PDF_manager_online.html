@@ -12782,6 +12782,13 @@
       const inners = document.querySelectorAll('.page-text-layer-inner.textLayer');
       if (!inners.length) return;
       const selection = document.getSelection();
+      // Paint-time clamp: rAF runs between the browser's own (possibly bad)
+      // gap-hit selection update and the actual paint. Correcting here
+      // guarantees a bad state is never PAINTED, even though selectionchange
+      // (a queued task) may not have processed it yet. Without this, a drag
+      // held inside a paragraph gap alternated native-bad/corrected states
+      // across frames and the highlight visibly blinked.
+      if (selection && selection.rangeCount) clampTextLayerDragSelection(selection);
       const hasSel = selection && selection.rangeCount > 0 && !selection.isCollapsed;
       inners.forEach(inner => {
         const outer = inner.closest('.page-text-layer');
@@ -12897,95 +12904,113 @@
             }
           } catch (_) {}
         }
-        // ── Deterministic clamp ──────────────────────────────────────────
-        // The guard above depends on browser hit-testing heuristics that have
-        // proven unreliable; this does not. During a drag that started on a
-        // text layer, if the browser put the selection focus somewhere
-        // geometrically inconsistent with the pointer (the "jump to the end"
-        // signature: focus caret far below/above the cursor, or focus on the
-        // layer container itself), recompute the caret the pointer should
-        // have produced and snap the focus back with Selection.extend().
-        const drag = textLayerDrag;
-        if (!drag || !drag.inner || !drag.inner.isConnected) return;
-        const inner = drag.inner;
-        try {
-          const ib = inner.getBoundingClientRect();
-          // Pointer left this layer (e.g. selecting across pages) - hands off.
-          if (drag.x < ib.left - 6 || drag.x > ib.right + 6 ||
-              drag.y < ib.top - 6 || drag.y > ib.bottom + 6) return;
-
-          // The fixed end of the selection must live in this layer. If the
-          // mousedown itself landed in a gap, the browser may have seeded the
-          // anchor at the end of the layer too - repair it once, from the
-          // remembered mousedown point.
-          let aEl = selection.anchorNode &&
-            (selection.anchorNode.nodeType === 3
-              ? selection.anchorNode.parentElement : selection.anchorNode);
-          let anchorOk = drag.wordMode
-            ? true
-            : (aEl && inner.contains(aEl) && aEl !== inner);
-          if (anchorOk && !drag.wordMode && !drag.anchorFixed) {
-            const ar = textLayerEndpointRect(selection.anchorNode, selection.anchorOffset);
-            if (ar) {
-              const lh = Math.max(8, ar.height || 0);
-              anchorOk = Math.abs((ar.top + ar.bottom) / 2 - drag.downY) <= lh * 2.5;
-            }
-          }
-          let anchorTarget = null;
-          if (!anchorOk) {
-            // After the first repair, ignore small in-layer drift (constant
-            // re-pinning was killing selection). Re-repair only if the anchor
-            // escaped the layer entirely (classic paragraph-gap jump).
-            if (drag.anchorFixed) {
-              const escaped = !aEl || !inner.contains(aEl) || aEl === inner ||
-                (aEl.classList && aEl.classList.contains('endOfContent')) ||
-                (aEl.closest && aEl.closest('.endOfContent'));
-              if (!escaped) return;
-            }
-            anchorTarget = textLayerCaretForPoint(inner, drag.downX, drag.downY);
-            if (!anchorTarget) return;
-          }
-          drag.anchorFixed = true;
-
-          // Is the focus where the pointer is?
-          const fEl = selection.focusNode &&
-            (selection.focusNode.nodeType === 3
-              ? selection.focusNode.parentElement : selection.focusNode);
-          let suspicious = !fEl || fEl === inner ||
-            !inner.contains(fEl) ||
-            (fEl.classList && fEl.classList.contains('endOfContent')) ||
-            (fEl.closest && fEl.closest('.endOfContent'));
-          if (!suspicious) {
-            const fr = textLayerEndpointRect(selection.focusNode, selection.focusOffset);
-            if (fr) {
-              const lh = Math.max(8, fr.height || 0);
-              // Generous threshold: with the no-dead-zone hit areas the native
-              // focus is normally correct (e.g. end of the line above while
-              // the pointer is deep in a paragraph gap is legitimate), so only
-              // a true jump - several lines away from the cursor - counts.
-              suspicious = Math.abs((fr.top + fr.bottom) / 2 - drag.y) > lh * 2.5;
-            }
-          }
-          if (!suspicious && !anchorTarget) return;
-
-          const focusTarget = suspicious
-            ? textLayerCaretForPoint(inner, drag.x, drag.y)
-            : { node: selection.focusNode, offset: selection.focusOffset };
-          if (!focusTarget) return;
-          if (!anchorTarget &&
-              focusTarget.node === selection.focusNode &&
-              focusTarget.offset === selection.focusOffset) return;
-
-          textLayerCorrecting = true;
-          if (anchorTarget) {
-            selection.setBaseAndExtent(
-              anchorTarget.node, anchorTarget.offset,
-              focusTarget.node, focusTarget.offset);
-          } else {
-            selection.extend(focusTarget.node, focusTarget.offset);
-          }
-        } catch (_) { textLayerCorrecting = false; }
+        // Deterministic clamp — also runs at paint time from
+        // renderTextLayerHighlights (see clampTextLayerDragSelection).
+        clampTextLayerDragSelection(selection);
       });
+    }
+
+    // ── Deterministic clamp ──────────────────────────────────────────
+    // The endOfContent guard depends on browser hit-testing heuristics that
+    // have proven unreliable; this does not. During a drag that started on a
+    // text layer, if the browser put the selection focus somewhere
+    // geometrically inconsistent with the pointer (the "jump to the end"
+    // signature: focus caret far below/above the cursor, or focus on the
+    // layer container itself), recompute the caret the pointer should
+    // have produced and snap the focus back with Selection.extend().
+    // Called from selectionchange AND from the rAF highlight renderer:
+    // selectionchange is a queued task, so on its own it can miss the frame
+    // in which the browser's bad gap-hit state gets painted - correcting
+    // again right before measuring guarantees a bad state is never painted
+    // (that alternation was visible as blinking over paragraph gaps).
+    function clampTextLayerDragSelection(selection) {
+      const drag = textLayerDrag;
+      if (!drag || !drag.inner || !drag.inner.isConnected) return;
+      if (!selection || selection.rangeCount === 0) return;
+      const inner = drag.inner;
+      try {
+        const ib = inner.getBoundingClientRect();
+        // Pointer left this layer (e.g. selecting across pages) - hands off.
+        if (drag.x < ib.left - 6 || drag.x > ib.right + 6 ||
+            drag.y < ib.top - 6 || drag.y > ib.bottom + 6) return;
+
+        // The fixed end of the selection must live in this layer. If the
+        // mousedown itself landed in a gap, the browser may have seeded the
+        // anchor at the end of the layer too - repair it once, from the
+        // remembered mousedown point.
+        let aEl = selection.anchorNode &&
+          (selection.anchorNode.nodeType === 3
+            ? selection.anchorNode.parentElement : selection.anchorNode);
+        let anchorOk = drag.wordMode
+          ? true
+          : (aEl && inner.contains(aEl) && aEl !== inner);
+        if (anchorOk && !drag.wordMode && !drag.anchorFixed) {
+          const ar = textLayerEndpointRect(selection.anchorNode, selection.anchorOffset);
+          if (ar) {
+            const lh = Math.max(8, ar.height || 0);
+            anchorOk = Math.abs((ar.top + ar.bottom) / 2 - drag.downY) <= lh * 2.5;
+          }
+        }
+        let anchorTarget = null;
+        if (!anchorOk) {
+          // After the first repair, ignore small in-layer drift (constant
+          // re-pinning was killing selection). Re-repair only if the anchor
+          // escaped the layer entirely (classic paragraph-gap jump).
+          if (drag.anchorFixed) {
+            const escaped = !aEl || !inner.contains(aEl) || aEl === inner ||
+              (aEl.classList && aEl.classList.contains('endOfContent')) ||
+              (aEl.closest && aEl.closest('.endOfContent'));
+            if (!escaped) return;
+          }
+          anchorTarget = textLayerCaretForPoint(inner, drag.downX, drag.downY);
+          if (!anchorTarget) return;
+        }
+        drag.anchorFixed = true;
+
+        // Is the focus where the pointer is?
+        const fEl = selection.focusNode &&
+          (selection.focusNode.nodeType === 3
+            ? selection.focusNode.parentElement : selection.focusNode);
+        let suspicious = !fEl || fEl === inner ||
+          !inner.contains(fEl) ||
+          (fEl.classList && fEl.classList.contains('endOfContent')) ||
+          (fEl.closest && fEl.closest('.endOfContent'));
+        if (!suspicious) {
+          const fr = textLayerEndpointRect(selection.focusNode, selection.focusOffset);
+          if (fr) {
+            const lh = Math.max(8, fr.height || 0);
+            // Generous threshold: with the no-dead-zone hit areas the native
+            // focus is normally correct (e.g. end of the line above while
+            // the pointer is deep in a paragraph gap is legitimate), so only
+            // a true jump - several lines away from the cursor - counts.
+            suspicious = Math.abs((fr.top + fr.bottom) / 2 - drag.y) > lh * 2.5;
+          }
+        }
+        if (!suspicious && !anchorTarget) return;
+
+        const focusTarget = suspicious
+          ? textLayerCaretForPoint(inner, drag.x, drag.y)
+          : { node: selection.focusNode, offset: selection.focusOffset };
+        if (!focusTarget) return;
+        const focusSame = focusTarget.node === selection.focusNode &&
+          focusTarget.offset === selection.focusOffset;
+        if (!anchorTarget && focusSame) return;
+        // Never re-apply an identical selection: Selection APIs that change
+        // nothing fire no selectionchange, which would leave the
+        // textLayerCorrecting flag stuck and swallow the next real event.
+        if (anchorTarget && focusSame &&
+            anchorTarget.node === selection.anchorNode &&
+            anchorTarget.offset === selection.anchorOffset) return;
+
+        textLayerCorrecting = true;
+        if (anchorTarget) {
+          selection.setBaseAndExtent(
+            anchorTarget.node, anchorTarget.offset,
+            focusTarget.node, focusTarget.offset);
+        } else {
+          selection.extend(focusTarget.node, focusTarget.offset);
+        }
+      } catch (_) { textLayerCorrecting = false; }
     }
 
     // Marks the first (leftmost) glyph span of every visual line so CSS can
@@ -13002,32 +13027,58 @@
     // space below the last line of text is left alone. maxBridgePx caps the
     // very last line (which has no "next line" to reach for) and any
     // pathological gap from being unbounded.
-    function tightenTextLayerLineGaps(inner, maxBridgePx) {
-      const cap = maxBridgePx || 90;
+    // Collects the glyph spans of `inner` grouped into visual-line bands,
+    // measured with getBoundingClientRect and converted into the inner's own
+    // (pre-transform) px coordinates. Inline styles CANNOT be used for this:
+    // pdf.js 3.x writes top/left as PERCENTAGES and font-size as a calc()
+    // expression, so parseFloat() on them silently produced percent values
+    // treated as px - all lines of a paragraph collapsed into one band and
+    // the computed "gaps" had no relation to the real geometry (the
+    // bridging mostly worked by accident and paragraph gaps stayed open).
+    function measureTextLayerLines(inner) {
+      const ib = inner.getBoundingClientRect();
+      if (!ib || !(ib.height > 0)) return [];
+      // Client px → the inner's local px (transform: scale on preview grid).
+      const scaleY = ib.height / Math.max(1, inner.offsetHeight || ib.height);
       const spans = inner.getElementsByTagName('span');
+      const probe = document.createRange();
       const items = [];
       for (let i = 0; i < spans.length; i++) {
         const s = spans[i];
         const t = s.firstChild;
         if (!t || t.nodeType !== 3 || !t.nodeValue) continue;
-        const top = parseFloat(s.style.top);
-        const left = parseFloat(s.style.left);
-        if (!isFinite(top) || !isFinite(left)) continue;
-        const fs = parseFloat(s.style.fontSize) || 10;
-        items.push({ s, top, left, fs });
+        let r;
+        try {
+          probe.selectNodeContents(t);          // glyph box, not the padded span box
+          r = probe.getBoundingClientRect();
+        } catch (_) { continue; }
+        if (!r || !(r.width > 0) || !(r.height > 0)) continue;
+        items.push({
+          s,
+          top: (r.top - ib.top) / scaleY,
+          left: r.left - ib.left,
+          h: r.height / scaleY
+        });
       }
-      if (!items.length) return;
+      if (!items.length) return [];
       items.sort((a, b) => (a.top - b.top) || (a.left - b.left));
       const lines = [];
       let band = null;
       for (const it of items) {
-        if (!band || (it.top - band.top) > Math.max(band.fs, it.fs) * 0.6) {
-          band = { top: it.top, fs: it.fs, items: [it] };
+        if (!band || (it.top - band.top) > Math.max(band.h, it.h) * 0.6) {
+          band = { top: it.top, h: it.h, items: [it] };
           lines.push(band);
         } else {
           band.items.push(it);
+          if (it.h > band.h) band.h = it.h;
         }
       }
+      return lines;
+    }
+
+    function tightenTextLayerLineGaps(inner, maxBridgePx) {
+      const cap = maxBridgePx || 90;
+      const lines = measureTextLayerLines(inner);
       for (let i = 0; i < lines.length; i++) {
         const hasNext = i + 1 < lines.length;
         const gap = hasNext ? (lines[i + 1].top - lines[i].top) : 0;
@@ -13048,30 +13099,11 @@
     }
 
     function markTextLayerLineStarts(inner) {
-      const spans = inner.getElementsByTagName('span');
-      const items = [];
-      for (let i = 0; i < spans.length; i++) {
-        const s = spans[i];
-        const t = s.firstChild;
-        if (!t || t.nodeType !== 3 || !t.nodeValue) continue;
-        const top = parseFloat(s.style.top);
-        const left = parseFloat(s.style.left);
-        if (!isFinite(top) || !isFinite(left)) continue;
-        const fs = parseFloat(s.style.fontSize) || 10;
-        items.push({ s, top, left, fs });
-      }
-      items.sort((a, b) => (a.top - b.top) || (a.left - b.left));
-      let band = null;
-      const firsts = [];
-      for (const it of items) {
-        if (!band || (it.top - band.top) > Math.max(band.fs, it.fs) * 0.6) {
-          band = { top: it.top, fs: it.fs, first: it };
-          firsts.push(band);
-        } else if (it.left < band.first.left) {
-          band.first = it;
-        }
-      }
-      firsts.forEach(b => b.first.s.classList.add('tl-line-start'));
+      measureTextLayerLines(inner).forEach(b => {
+        let first = b.items[0];
+        for (const it of b.items) if (it.left < first.left) first = it;
+        first.s.classList.add('tl-line-start');
+      });
     }
 
     // The standard PDF.js text layer is the same mechanism as in the pdf.js viewer.
@@ -21332,6 +21364,9 @@ let peTextKbTimer = null;
 /** Nested timeouts from peScheduleTextEditVisibility (must clear on geom-drag). */
 let peTextKbFollowupTimers = [];
 let peTextClickSeq = { id: null, t: 0 };
+/** When inline text/callout editing last began (guards the second click of
+ *  the double-click that opened it from instantly closing it again). */
+let peInlineEditStartedAt = 0;
 let peZoomFullRenderTimer = null;
 let peZoomRenderGen = 0;
 let peSliderDragging = false;
@@ -21762,7 +21797,19 @@ async function peBuildTextLayer(st, gen) {
   container.appendChild(inner);
   try {
     await renderPdfjsTextLayer(inner, textContent, st.viewport);
-    if (typeof tightenTextLayerLineGaps === 'function') tightenTextLayerLineGaps(inner);
+    if (typeof tightenTextLayerLineGaps === 'function') {
+      // Touch: bridge line gaps COMPLETELY (no cap). The OS text-selection
+      // handles resolve their own hit-testing and cannot be corrected as
+      // reliably as desktop mouse drags, so a handle dragged into an
+      // unbridged paragraph gap kept jumping to the page start/end.
+      // With the gap fully owned by the line above it, the native gesture
+      // never sees dead space at all. Blank-space taps still pan: the
+      // text layer's touch gesture is pan-by-default (deferred long-press
+      // selection), unlike desktop where blank space must stay free for
+      // marquee (which is why desktop keeps the default cap).
+      const touchTL = typeof isTouchDevice !== 'undefined' && isTouchDevice;
+      tightenTextLayerLineGaps(inner, touchTL ? Infinity : undefined);
+    }
   } catch (e) {
     console.error('Page-editor text layer error', e);
   }
@@ -22562,7 +22609,9 @@ function peCheckEdgeAutoScroll(clientX, clientY, opts) {
   const wrap = document.getElementById('peStageWrap');
   if (!wrap) return;
   const r = wrap.getBoundingClientRect();
-  // Text-sel: large band so scroll starts before the rim.
+  // Text-sel: slightly wider than object drags (the pointer rides the very
+  // text being selected), but still a narrow rim — the previous 34%-of-
+  // viewport band started scrolling from halfway across the page.
   // Object/shape drags: tighter band (~½ of prior) and half speed.
   const shapeEdge = !!(peState.drag && (
     peState.drag.kind === 'shape-draw' || peState.drag.kind === 'freehand-draw'
@@ -22570,10 +22619,8 @@ function peCheckEdgeAutoScroll(clientX, clientY, opts) {
     || peState.drag.kind === 'resize-shape' || peState.drag.kind === 'resize-vector'
     || peState.drag.kind === 'resize-redact'
   ));
-  const TH = textSelDrag
-    ? Math.max(168, Math.round(Math.min(r.width, r.height) * 0.34))
-    : (shapeEdge ? 44 : 26);
-  const speed = textSelDrag ? 26 : (shapeEdge ? 9 : 7);
+  const TH = textSelDrag ? 44 : (shapeEdge ? 44 : 26);
+  const speed = textSelDrag ? 16 : (shapeEdge ? 9 : 7);
   let dx = 0, dy = 0;
   if (clientX - r.left < TH) dx = -1;
   else if (r.right - clientX < TH) dx = 1;
@@ -26937,6 +26984,7 @@ function peStartCalloutBoxMove(e, o) {
 
 function peBeginCalloutEdit(o) {
   if (!peState || !o || o.type !== 'callout') return;
+  peInlineEditStartedAt = Date.now();
   peTextClickSeq = { id: null, t: 0 };
   if (peState.inlineEditId && peState.inlineEditId !== o.id) {
     const cur = peState.objects.find(x => x.id === peState.inlineEditId);
@@ -26988,6 +27036,7 @@ function peBeginInlineEdit(o, opts) {
     return;
   }
   if (o.type !== 'text') return;
+  peInlineEditStartedAt = Date.now();
   peTextClickSeq = { id: null, t: 0 };
   if (peState.inlineEditId && peState.inlineEditId !== o.id) {
     const cur = peState.objects.find(x => x.id === peState.inlineEditId);
@@ -29241,12 +29290,19 @@ let peTextSelHandleListenersBound = false;
 let peTextLayerTouchPending = null;
 
 /** Client-space rects for the start/end carets of the current selection.
- *  Mobile OS handles sit below/above the line — expand vertically more. */
+ *  The OS drag handles hang BELOW the caret line (Android both, iOS the end
+ *  one), so the hit zone extends mostly downward. The upper extension is
+ *  kept small on purpose: these rects also decide "is this touch a handle
+ *  grab or a pan?", and tall symmetric rects were eating a big slice of the
+ *  page around any selection — panning felt completely different once
+ *  anything was selected. */
 function peTextSelEndpointHitRects(pad) {
   const sel = window.getSelection();
   if (!sel || !sel.rangeCount || sel.isCollapsed) return [];
   const p = pad == null ? 40 : pad;
-  const vExtra = (typeof isTouchDevice !== 'undefined' && isTouchDevice) ? 52 : 20;
+  const touch = (typeof isTouchDevice !== 'undefined' && isTouchDevice);
+  const upExtra = touch ? 16 : 20;
+  const downExtra = touch ? 52 : 20;
   const out = [];
   try {
     const range = sel.getRangeAt(0);
@@ -29261,8 +29317,8 @@ function peTextSelEndpointHitRects(pad) {
       } catch (_) {}
     }
     if (ar) out.push({
-      left: ar.left - p, top: ar.top - p - vExtra,
-      right: ar.right + p, bottom: ar.bottom + p + vExtra
+      left: ar.left - p, top: ar.top - upExtra,
+      right: ar.right + p, bottom: ar.bottom + p + downExtra
     });
     const b = document.createRange();
     b.setStart(range.endContainer, range.endOffset);
@@ -29275,8 +29331,8 @@ function peTextSelEndpointHitRects(pad) {
       } catch (_) {}
     }
     if (br) out.push({
-      left: br.left - p, top: br.top - p - vExtra,
-      right: br.right + p, bottom: br.bottom + p + vExtra
+      left: br.left - p, top: br.top - upExtra,
+      right: br.right + p, bottom: br.bottom + p + downExtra
     });
   } catch (_) {}
   return out;
@@ -29619,9 +29675,42 @@ function peBeginTextSelHandleDrag(clientX, clientY) {
   peTextSelCtx = null;
 }
 
+/** True when the live selection is exactly the one the menu was shown for. */
+function peTextSelSelectionMatchesCtx() {
+  try {
+    const ctx = peTextSelCtx;
+    if (!ctx || !ctx.range) return false;
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount) return false;
+    const r = sel.getRangeAt(0);
+    return r.compareBoundaryPoints(Range.START_TO_START, ctx.range) === 0
+      && r.compareBoundaryPoints(Range.END_TO_END, ctx.range) === 0;
+  } catch (_) { return false; }
+}
+
+/** Re-show the markup menu once an UNTRACKED selection adjustment settles.
+ *  Native blue-handle drags can deliver no pointer/touch events at all, so
+ *  the usual pointerup → peEndTextSelHandleDrag resume never fires. */
+let peTextSelMenuResumeTimer = null;
+function peScheduleTextSelMenuResume() {
+  if (!peTextSelMenuResume) return;
+  clearTimeout(peTextSelMenuResumeTimer);
+  peTextSelMenuResumeTimer = setTimeout(() => {
+    peTextSelMenuResumeTimer = null;
+    if (!peState || !peState.objSelectMode) return;
+    if (peTextSelPointerDown || peTextSelHandleDragging) return;
+    if (!peTextSelMenuResume) return;
+    // Reuse the end-of-drag resume path (repositions near the selection end).
+    peTextSelHandleDragging = true;
+    peEndTextSelHandleDrag();
+  }, 650);
+}
+
 function peEndTextSelHandleDrag() {
   if (!peTextSelHandleDragging) return;
   peTextSelHandleDragging = false;
+  clearTimeout(peTextSelMenuResumeTimer);
+  peTextSelMenuResumeTimer = null;
   peStopAutoScroll();
   const resume = peTextSelMenuResume;
   peTextSelMenuResume = null;
@@ -29664,7 +29753,13 @@ function peBindTextSelHandleDragGuards() {
     // selection's endpoints as repair anchors.
     if (!nearHandle) peTextSelLastGoodSel = null;
     const onTextLayer = !!(e.target && e.target.closest && e.target.closest('#peTextLayer'));
-    if (nearHandle || (onTextLayer && peIsEditorPageTextSelection() && (menu?.classList.contains('visible') || peTextSelCtx))) {
+    // Desktop only for the "re-dragging over text" case: on touch a finger
+    // on the text layer away from the handles is a PAN (or a long-press
+    // creating a new selection), and entering handle-drag state here both
+    // blocked the pan and armed edge auto-scroll — moving around the page
+    // felt completely different once anything was selected.
+    const touchPtr = e.pointerType === 'touch' || e.pointerType === 'pen';
+    if (nearHandle || (!touchPtr && onTextLayer && peIsEditorPageTextSelection() && (menu?.classList.contains('visible') || peTextSelCtx))) {
       peBeginTextSelHandleDrag(e.clientX, e.clientY);
     }
   };
@@ -29763,20 +29858,55 @@ function peBindTextSelHandleDragGuards() {
     // Long-press is creating a new selection: cancel a deferred pan, but do
     // NOT enter handle-drag / edge-scroll unless the finger is on a handle.
     // Also deselect objects — the gesture landed outside them on the text layer.
+    // A selection identical to the one present when the finger landed did
+    // NOT come from this gesture — keep the deferred pan alive for it.
     if (peTextLayerTouchPending) {
-      if (peState.sel || (peState.multiSel && peState.multiSel.length)) {
-        peSelect(null, { keepPageTextSelection: true });
+      let changedDuringGesture = true;
+      try {
+        if (peTextLayerTouchPending.selSnap) {
+          const r = window.getSelection().getRangeAt(0);
+          changedDuringGesture =
+            r.compareBoundaryPoints(Range.START_TO_START, peTextLayerTouchPending.selSnap) !== 0
+            || r.compareBoundaryPoints(Range.END_TO_END, peTextLayerTouchPending.selSnap) !== 0;
+        }
+      } catch (_) {}
+      if (changedDuringGesture) {
+        if (peState.sel || (peState.multiSel && peState.multiSel.length)) {
+          peSelect(null, { keepPageTextSelection: true });
+        }
+        peTextLayerTouchPending = null;
       }
-      peTextLayerTouchPending = null;
     }
-    if (!(peTextSelPointerDown || peTextSelHandleDragging)) return;
+    // The markup menu must not sit over a selection that is being adjusted.
+    // Native blue-handle drags can deliver NO pointer/touch events at all,
+    // so this cannot rely on the gesture flags — any live change away from
+    // the menu's own range hides it (and re-shows it once it settles).
+    const menu = document.getElementById('peTextSelCtxMenu');
+    if (menu && menu.classList.contains('visible')
+        && peTextSelCtx && peTextSelCtx.kind === 'page'
+        && !peTextSelSelectionMatchesCtx()) {
+      if (!peTextSelMenuResume) {
+        peTextSelMenuResume = {
+          clientX: parseFloat(menu.style.left) || 0,
+          clientY: parseFloat(menu.style.top) || 0,
+          info: peTextSelCtx
+        };
+      }
+      menu.classList.remove('visible');
+      menu.setAttribute('aria-hidden', 'true');
+      peTextSelCtx = null;
+    }
+    if (!(peTextSelPointerDown || peTextSelHandleDragging)) {
+      // Untracked (native-handle) adjustment: re-show the menu on settle.
+      peScheduleTextSelMenuResume();
+      return;
+    }
     if (!peTextSelHandleDragging) {
       // Creating selection via long-press — leave it entirely to the OS
       // (after the repair above).
       if (!peClientNearTextSelHandle(peTextSelLastClientX, peTextSelLastClientY)) return;
       peBeginTextSelHandleDrag(peTextSelLastClientX, peTextSelLastClientY);
     }
-    const menu = document.getElementById('peTextSelCtxMenu');
     if (menu && menu.classList.contains('visible')) {
       menu.classList.remove('visible');
       menu.setAttribute('aria-hidden', 'true');
@@ -31439,8 +31569,22 @@ function peFlushTextLayerTouchPan(clientX, clientY) {
     return;
   }
   peTextLayerTouchPending = null;
-  // If a selection already appeared (long-press), never steal the gesture.
-  if (peIsEditorPageTextSelection()) return;
+  // Only a selection that appeared/changed DURING this gesture (long-press)
+  // owns the gesture. A selection that merely existed before the finger
+  // landed must not block panning — otherwise moving around the page works
+  // completely differently as soon as anything is selected.
+  if (peIsEditorPageTextSelection()) {
+    let changedDuringGesture = true;
+    try {
+      if (p.selSnap) {
+        const r = window.getSelection().getRangeAt(0);
+        changedDuringGesture =
+          r.compareBoundaryPoints(Range.START_TO_START, p.selSnap) !== 0
+          || r.compareBoundaryPoints(Range.END_TO_END, p.selSnap) !== 0;
+      }
+    } catch (_) {}
+    if (changedDuringGesture) return;
+  }
   const fake = {
     pointerType: 'touch',
     isPrimary: true,
@@ -31477,11 +31621,21 @@ function peOnObjSelectTextLayerPointerDown(e) {
   }
   // Defer pan so a long-press can create a selection. preventDefault here
   // would block that native gesture and force imprecise / jumpy selection.
+  let selSnap = null;
+  try {
+    if (peIsEditorPageTextSelection()) {
+      selSnap = window.getSelection().getRangeAt(0).cloneRange();
+    }
+  } catch (_) {}
   peTextLayerTouchPending = {
     pointerId: e.pointerId,
     startX: e.clientX,
     startY: e.clientY,
-    startTime: Date.now()
+    startTime: Date.now(),
+    // Selection present when the finger LANDED — panning over it must keep
+    // working exactly like without a selection (only a selection that forms
+    // or changes during this gesture may claim the gesture).
+    selSnap
   };
   e.stopPropagation();
   return true;
@@ -31575,6 +31729,14 @@ function peObjMouseDown(e, o) {
     const isDbl = peTextClickSeq.id === o.id && (now - peTextClickSeq.t) < dblMs;
     if (isDbl) {
       e.stopPropagation();
+      // Desktop: cancel the pointerdown so its derived mousedown is never
+      // dispatched. peBeginCalloutEdit/peBeginInlineEdit redraw the object
+      // layer, so the derived mousedown retargets to the detached node's
+      // ancestor and its focus-move default action steals focus from the
+      // just-focused editor — the callout blur handler then closed editing
+      // within the same tick (double-click appeared dead; only F2 worked).
+      // Touch keeps the gesture uncancelled for the OSK.
+      if (!touchLike && e.cancelable) e.preventDefault();
       peHideObjCtxMenu();
       peTextClickSeq = { id: null, t: 0 };
       if (peState.drag?.kind === 'move-pending') peState.drag = null;
@@ -32275,6 +32437,17 @@ function peObjMouseDown(e, o) {
     // Redact: tap outside only deselects — never starts a new box on the same tap.
     // Shape continues into draw on the same gesture (mobile UX).
     if ((tool === 'shape' || tool === 'text' || tool === 'redact') && peHasActiveObjectFocus()) {
+      // Second click of a double-click that JUST opened text/callout editing:
+      // entering edit redraws the object layer AND may auto-scroll the stage
+      // (safe-zone scroll), so this mousedown lands on "blank" stage even
+      // though the pointer never left the object. Ending the edit here made
+      // a plain double-click open-and-instantly-close the editor (it looked
+      // like double-click "does not work", only F2 did). No geometric check:
+      // the safe-zone scroll has already moved the object from under the
+      // pointer by the time the second click arrives.
+      if (peState.inlineEditId && Date.now() - (peInlineEditStartedAt || 0) < 450) {
+        return;
+      }
       e.preventDefault();
       peCloseShapeMenu();
       peCloseShapeColorPopup();
