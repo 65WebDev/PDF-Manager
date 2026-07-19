@@ -1749,8 +1749,11 @@
       -webkit-user-select: text;
       user-select: text;
     }
-    /* Geom-drag: keep the fixed proxy from painting independently of .pe-obj.sel */
-    #peOskProxy.pe-osk-geom-parked {
+    /* Geom-drag: never paint the fixed proxy (it desyncs from .pe-obj.sel).
+       display:none beats any pe-osk-active / inline left/top/color re-arm. */
+    #peOskProxy.pe-osk-geom-parked,
+    #pageEditModal.pe-text-geom-dragging #peOskProxy {
+      display: none !important;
       opacity: 0 !important;
       visibility: hidden !important;
       pointer-events: none !important;
@@ -1759,16 +1762,23 @@
       width: 1px !important;
       height: 1px !important;
     }
-    .pe-obj-text.pe-mobile-overlay-host,
-    .pe-callout-text.pe-mobile-overlay-host {
+    /* Host glyphs stay invisible only while the proxy is the typing surface.
+       During border-drag the host must paint inside the moving .sel frame. */
+    .pe-obj-text.pe-mobile-overlay-host:not(.pe-text-border-drag),
+    .pe-callout-text.pe-mobile-overlay-host:not(.pe-text-border-drag) {
       color: transparent !important;
-      -webkit-text-fill-color: transparent;
+      -webkit-text-fill-color: transparent !important;
       caret-color: transparent;
     }
-    /* Border-drag: glyphs must live on the host inside the moving outer frame. */
-    .pe-obj-text.pe-inline-edit.pe-text-border-drag {
+    /* Border-drag: force glyphs on the host (wins over leftover overlay-host). */
+    .pe-obj-text.pe-inline-edit.pe-text-border-drag,
+    .pe-obj-text.pe-inline-edit.pe-text-border-drag.pe-mobile-overlay-host {
+      -webkit-text-fill-color: currentColor !important;
+      caret-color: transparent;
       color: inherit;
-      -webkit-text-fill-color: unset !important;
+    }
+    #pageEditModal.pe-text-geom-dragging .pe-obj-text.pe-inline-edit {
+      -webkit-text-fill-color: currentColor !important;
       caret-color: transparent;
     }
     .pe-toolbar.pe-tb-tools-wrap .pe-toolbar-tail {
@@ -21300,6 +21310,8 @@ let pePinchLastAppliedMidY = null;
 let pePinchRaf = 0;
 let pePinchPending = null;
 let peTextKbTimer = null;
+/** Nested timeouts from peScheduleTextEditVisibility (must clear on geom-drag). */
+let peTextKbFollowupTimers = [];
 let peTextClickSeq = { id: null, t: 0 };
 let peZoomFullRenderTimer = null;
 let peZoomRenderGen = 0;
@@ -25562,12 +25574,16 @@ function peMobileEditInputEl() {
 
 /** Arm input during the user gesture (before the editor DOM exists). */
 function peArmOskProxy(clientX, clientY) {
+  // Never re-arm the fixed proxy mid border-drag/resize (frame/text desync).
+  if (peGeomDragActive || peInlineEditFocusSuppressed) return false;
   if (peUsesMobileKbWindow()) {
     peShowMobileKbWindow('');
     return true;
   }
   const t = peOskEl();
   if (!t) return false;
+  t.classList.remove('pe-osk-geom-parked');
+  t.style.display = '';
   t.classList.add('pe-osk-active');
   t.setAttribute('aria-hidden', 'false');
   const x = (clientX != null && isFinite(clientX)) ? clientX : (window.innerWidth / 2);
@@ -25596,6 +25612,9 @@ function peBindMobileEditListeners() {
   if (t) {
     t.addEventListener('input', peOnMobileEditInput);
     t.addEventListener('keydown', peOnMobileEditKeydown);
+    // Visible glyphs live on the fixed proxy — border grabs must start geom-drag
+    // here, or pointer events never reach .pe-obj / stage handlers underneath.
+    peBindPointerDown(t, peOnOskProxyPointerDown, true);
   }
   if (kbText) {
     kbText.addEventListener('input', peOnMobileEditInput);
@@ -25903,6 +25922,8 @@ function peStartMobileEditOverlay(o) {
   const t = peOskEl();
   if (!t) return false;
   const alreadyFocused = document.activeElement === t;
+  t.classList.remove('pe-osk-geom-parked');
+  t.style.display = '';
   t.classList.add('pe-osk-active');
   t.setAttribute('aria-hidden', 'false');
   if (t.value !== (o.text || '')) t.value = o.text || '';
@@ -25924,15 +25945,33 @@ function peStopMobileEditOverlay() {
   peMobileEditActive = null;
   peHideMobileKbWindow();
   if (!t) return;
-  t.classList.remove('pe-osk-active');
+  t.classList.remove('pe-osk-active', 'pe-osk-geom-parked');
   t.setAttribute('aria-hidden', 'true');
   t.value = '';
   ['left', 'top', 'width', 'height', 'fontSize', 'fontFamily', 'fontWeight',
     'fontStyle', 'lineHeight', 'textAlign', 'color', 'background',
-    'opacity', 'pointerEvents', 'visibility'].forEach((k) => {
+    'opacity', 'pointerEvents', 'visibility', 'display'].forEach((k) => {
     try { t.style[k] = ''; } catch (_) {}
   });
   try { if (document.activeElement === t) t.blur(); } catch (_) {}
+}
+
+/**
+ * #peOskProxy sits above the text block (position:fixed, max z-index).
+ * Border-band pointerdowns must start peStartInlineTextMove here — stage/.pe-obj
+ * never see those hits while the proxy is pe-osk-active.
+ */
+function peOnOskProxyPointerDown(e) {
+  if (!peIsPrimaryPointer(e)) return;
+  if (!peState || peGeomDragActive) return;
+  if (!peUsesMobileEditOverlay()) return;
+  const o = peInlineTextObj() || (peMobileEditActive && peState.objects
+    ? peState.objects.find(x => x.id === peMobileEditActive.id && x.type === 'text')
+    : null);
+  if (!o || peState.inlineEditId !== o.id) return;
+  const host = peInlineTextEl() || peOskEl();
+  if (peTextEditHitZone(host, e.clientX, e.clientY) !== 'border') return;
+  peStartInlineTextMove(e, o);
 }
 
 function peSyncMobileEditOverlayToObj() {
@@ -26255,6 +26294,7 @@ function peScrollElementIntoTextFocusCenter(el, opts) {
 /** Scroll the active inline editor into the safe focus center. */
 function peScrollInlineEditorIntoWrapSafeZone() {
   if (!peState?.inlineEditId) return;
+  if (peGeomDragActive || peInlineEditFocusSuppressed) return;
   const el = peInlineEditorDomEl();
   if (!el) return;
   peScrollElementIntoTextFocusCenter(el, { force: true, withPad: true, estimate: true });
@@ -26325,12 +26365,18 @@ function peBindTextKeyboardGuards(on) {
  */
 function peScheduleTextEditVisibility(o) {
   if (!peState || !o) return;
+  if (peGeomDragActive || peInlineEditFocusSuppressed) return;
   peArmTextKeyboardQuiet(280);
   peBindTextKeyboardGuards(true);
   clearTimeout(peTextKbTimer);
+  peTextKbTimer = null;
+  if (!Array.isArray(peTextKbFollowupTimers)) peTextKbFollowupTimers = [];
+  peTextKbFollowupTimers.forEach(id => clearTimeout(id));
+  peTextKbFollowupTimers.length = 0;
   const editId = o.id;
   const refocus = () => {
     if (!peState || peState.inlineEditId !== editId) return;
+    if (peGeomDragActive || peInlineEditFocusSuppressed) return;
     peState.inlineEditFocusPending = true;
     peFocusInlineEditorNow();
     if (peMobileEditActive) pePositionMobileEditOverlay();
@@ -26343,6 +26389,7 @@ function peScheduleTextEditVisibility(o) {
   }
   const pass = (allowScroll) => {
     if (!peState || peState.inlineEditId !== editId) return;
+    if (peGeomDragActive || peInlineEditFocusSuppressed) return;
     if (peUsesMobileKbWindow()) {
       refocus();
       peClearEditorKbScrollRoom();
@@ -26371,12 +26418,15 @@ function peScheduleTextEditVisibility(o) {
   // Focus-only first: let the OSK latch before any pad/scroll layout changes.
   refocus();
   peTextKbTimer = setTimeout(() => {
+    if (peGeomDragActive || peInlineEditFocusSuppressed) return;
     pass(false);
-    setTimeout(() => pass(false), 120);
-    setTimeout(() => pass(true), 280);
-    setTimeout(() => pass(true), 450);
-    setTimeout(() => pass(true), 700);
-    setTimeout(() => pass(true), 1000);
+    peTextKbFollowupTimers.push(
+      setTimeout(() => pass(false), 120),
+      setTimeout(() => pass(true), 280),
+      setTimeout(() => pass(true), 450),
+      setTimeout(() => pass(true), 700),
+      setTimeout(() => pass(true), 1000)
+    );
   }, 40);
 }
 
@@ -26469,7 +26519,7 @@ function peIsTextBorderHit(el, clientX, clientY) {
   return peTextEditHitZone(el, clientX, clientY) === 'border';
 }
 
-/** Park #peOskProxy off-screen and make it invisible (geom-drag safe). */
+/** Park #peOskProxy so it cannot paint independently of .pe-obj.sel. */
 function peHideOskProxyForGeomDrag() {
   const t = peOskEl();
   if (!t) return;
@@ -26477,6 +26527,7 @@ function peHideOskProxyForGeomDrag() {
   t.classList.remove('pe-osk-active');
   t.classList.add('pe-osk-geom-parked');
   t.setAttribute('aria-hidden', 'true');
+  t.style.display = 'none';
   t.style.left = '-9999px';
   t.style.top = '0px';
   t.style.width = '1px';
@@ -26484,15 +26535,19 @@ function peHideOskProxyForGeomDrag() {
   t.style.opacity = '0';
   t.style.pointerEvents = 'none';
   t.style.visibility = 'hidden';
+  document.getElementById('pageEditModal')?.classList.add('pe-text-geom-dragging');
 }
 
 function peUnparkOskProxyAfterGeomDrag() {
   const t = peOskEl();
-  if (!t) return;
-  t.classList.remove('pe-osk-geom-parked');
-  t.style.opacity = '';
-  t.style.pointerEvents = '';
-  t.style.visibility = '';
+  if (t) {
+    t.classList.remove('pe-osk-geom-parked');
+    t.style.display = '';
+    t.style.opacity = '';
+    t.style.pointerEvents = '';
+    t.style.visibility = '';
+  }
+  document.getElementById('pageEditModal')?.classList.remove('pe-text-geom-dragging');
 }
 
 /**
@@ -26502,20 +26557,28 @@ function peUnparkOskProxyAfterGeomDrag() {
  */
 function peSuspendMobileOverlayForGeomDrag() {
   peGeomDragActive = true;
+  peInlineEditFocusSuppressed = true;
   // Remember the session so resume can restore the OSK proxy after the gesture.
   if (peMobileEditActive && !peGeomDragResumeMobile) {
     peGeomDragResumeMobile = { id: peMobileEditActive.id, type: peMobileEditActive.type };
   }
   // Drop active overlay state so no timer/viewport handler can re-position it.
   peMobileEditActive = null;
+  // Kill OSK visibility retries that were armed before the drag started.
+  clearTimeout(peTextKbTimer);
+  peTextKbTimer = null;
+  if (Array.isArray(peTextKbFollowupTimers)) {
+    peTextKbFollowupTimers.forEach(id => clearTimeout(id));
+    peTextKbFollowupTimers.length = 0;
+  }
   peHideOskProxyForGeomDrag();
   // Landscape in-app keyboard also paints separately — hide for the gesture.
   peHideMobileKbWindow();
   const host = peInlineEditorDomEl();
   if (host) {
     host.classList.remove('pe-mobile-overlay-host');
-    host.classList.add('pe-text-border-drag');
-    // Force glyphs visible on the host (overlay CSS uses !important transparent).
+    host.classList.add('pe-text-border-drag', 'pe-inline-edit');
+    // Force glyphs visible on the host (overlay CSS used !important transparent).
     try { host.style.removeProperty('-webkit-text-fill-color'); } catch (_) {}
     host.style.webkitTextFillColor = '';
     host.style.color = '';
@@ -26531,6 +26594,8 @@ function peSuspendMobileOverlayForGeomDrag() {
             ? peMobilePlainTextToHtml(obj.text || '', obj)
             : String(obj.text || ''));
     }
+    // Block native contentEditable / selection drag ghosts (desktop path).
+    try { host.setAttribute('draggable', 'false'); } catch (_) {}
     window.getSelection()?.removeAllRanges();
     try { host.blur(); } catch (_) {}
   }
@@ -26570,6 +26635,9 @@ function peSyncTextObjDomPosition(o) {
     inner.style.top = '';
     inner.style.transform = '';
     inner.classList.remove('pe-mobile-overlay-host');
+    if (peGeomDragActive || peInlineEditFocusSuppressed) {
+      inner.classList.add('pe-text-border-drag');
+    }
     try { inner.style.removeProperty('-webkit-text-fill-color'); } catch (_) {}
     if (o.color) inner.style.color = o.color;
   }
@@ -26594,7 +26662,12 @@ function peForceTextObjGeomSync(o) {
 }
 
 function peStartInlineTextMove(e, o) {
-  if (peState.drag) return;
+  // Border-drag must win over a stale move-pending / leftover drag — otherwise
+  // we return early, never park #peOskProxy, and frame/text desync.
+  if (peState.drag) {
+    if (peState.drag.inlineTextMove && peState.drag.obj === o) return;
+    peState.drag = null;
+  }
   // Dismiss OSK for the whole border-drag; restore focus when the drag ends.
   peInlineEditFocusSuppressed = true;
   peState.inlineEditFocusPending = false;
@@ -26607,8 +26680,8 @@ function peStartInlineTextMove(e, o) {
     window.getSelection()?.removeAllRanges();
     try { el.blur(); } catch (_) {}
   }
-  e.preventDefault();
-  e.stopPropagation();
+  if (e && e.cancelable) e.preventDefault();
+  if (e) e.stopPropagation();
   const pt = peStagePointFromClient(e.clientX, e.clientY);
   peState.drag = {
     kind: 'move', obj: o,
@@ -26616,6 +26689,10 @@ function peStartInlineTextMove(e, o) {
     ox: o.x, oy: o.y, ow: o.w || 0, oh: o.h || 0,
     inlineTextMove: true
   };
+  // Capture on the outer/stage — never on #peOskProxy (it becomes display:none).
+  const captureEl = peGetTextOuterEl(o) || document.getElementById('peStage')
+    || (e.currentTarget && e.currentTarget.id !== 'peOskProxy' ? e.currentTarget : null) || el;
+  peCapturePointer(e, captureEl);
   // Snap DOM to model immediately so the first move frame cannot desync.
   peForceTextObjGeomSync(o);
   peUpdatePanUi();
@@ -26730,8 +26807,16 @@ function peBeginInlineEdit(o, opts) {
     if (cur && cur.type === 'callout') peEndCalloutEdit(true);
     else peFinishTextInlineEdit({ keepTool: true });
   }
+  // Drop any leftover move-pending so a later border-drag can suspend the proxy.
+  if (peState.drag && (peState.drag.kind === 'move-pending'
+      || peState.drag.kind === 'move-pending-multi')) {
+    peState.drag = null;
+  }
   // Always allow focus — a stuck suppress flag blocks the OSK entirely.
+  peGeomDragActive = false;
+  peGeomDragResumeMobile = null;
   peInlineEditFocusSuppressed = false;
+  document.getElementById('pageEditModal')?.classList.remove('pe-text-geom-dragging');
   peState.inlineEditId = o.id;
   peState.inlineEditFocusPending = true;
   const skipSelectionHistory = !!(opts && opts.isNewDraft) || peState.draftTextId === o.id;
