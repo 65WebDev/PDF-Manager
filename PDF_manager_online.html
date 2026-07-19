@@ -2264,7 +2264,8 @@
     .pe-text-rotate-handle:active { cursor: grabbing; }
     .pe-rotate-angle-label {
       position: fixed; z-index: 99991; display: none;
-      font-size: 11px; line-height: 1.2; padding: 2px 6px; border-radius: 4px;
+      font-size: 22px; line-height: 1.2; padding: 4px 12px; border-radius: 8px;
+      font-weight: 600;
       background: rgba(34, 48, 61, .96); color: #fff; pointer-events: none;
       box-shadow: 0 2px 8px rgba(0, 0, 0, .35); white-space: nowrap;
     }
@@ -27519,14 +27520,19 @@ function peStartVectorEndpointResize(e, o, which) {
   const { w: W, h: H } = peStageSize();
   const ep = peVectorShapeEndpoints(o, W, H);
   const fixedIsEnd = which === 'start';
+  const startRot = o.rot || 0;
   peState.drag = {
     kind: 'resize-vector',
     obj: o,
     which: which === 'start' ? 'start' : 'end',
     fixedX: fixedIsEnd ? ep.x2 : ep.x1,
     fixedY: fixedIsEnd ? ep.y2 : ep.y1,
-    shiftKey: !!e.shiftKey
+    shiftKey: !!e.shiftKey,
+    startRot,
+    rotMagnet: peCreateRotMagnet(startRot)
   };
+  peShowRotateLabel();
+  peUpdateRotateLabel(o, e.clientX, e.clientY);
   peUpdatePanUi();
 }
 
@@ -27920,10 +27926,11 @@ function peHideRotateLabel() {
 function peUpdateRotateLabel(o, clientX, clientY) {
   const lbl = document.getElementById('peRotateAngleLabel');
   if (!lbl) return;
-  lbl.textContent = Math.round(o.rot || 0) + '°';
+  const deg = (o && typeof o === 'object') ? (o.rot || 0) : (Number(o) || 0);
+  lbl.textContent = Math.round(deg) + '°';
   lbl.style.display = 'block';
-  lbl.style.left = Math.round(clientX + 14) + 'px';
-  lbl.style.top = Math.round(clientY - 28) + 'px';
+  lbl.style.left = Math.round(clientX + 18) + 'px';
+  lbl.style.top = Math.round(clientY - 56) + 'px';
 }
 
 // innerHTML of a text block WITHOUT corner anchors - they are physically children of the same
@@ -30446,6 +30453,34 @@ function peDistToDeg(a, b) {
   return d;
 }
 
+/** Signed shortest delta from→to in (-180, 180]. */
+function peSignedAngleDelta(from, to) {
+  let d = peNormDeg(to) - peNormDeg(from);
+  if (d > 180) d -= 360;
+  if (d <= -180) d += 360;
+  return d;
+}
+
+/** Keep atan2 angles continuous across ±180 for magnet travel tracking. */
+function peContinuousAngle(d, angleDeg) {
+  if (!d) return angleDeg;
+  if (d._lastAtan == null) {
+    d._lastAtan = angleDeg;
+    if (d.startRot != null && isFinite(d.startRot)) {
+      d._unwrappedAngle = d.startRot + peSignedAngleDelta(d.startRot, angleDeg);
+    } else {
+      d._unwrappedAngle = angleDeg;
+    }
+    return d._unwrappedAngle;
+  }
+  let step = angleDeg - d._lastAtan;
+  if (step > 180) step -= 360;
+  if (step <= -180) step += 360;
+  d._lastAtan = angleDeg;
+  d._unwrappedAngle += step;
+  return d._unwrappedAngle;
+}
+
 /**
  * Smart rotation magnet:
  * - Arms after >20° travel from the gesture start.
@@ -30497,6 +30532,16 @@ function peApplyRotateMagnet(d, rawRot) {
     return target;
   }
   return Math.round(rawRot);
+}
+
+/** Apply soft/hard angle snap for line/arrow direction; returns radians angle in degrees. */
+function peSnapVectorAngle(d, rawAngleDeg) {
+  if (d && d.shiftKey) return Math.round(rawAngleDeg / 45) * 45;
+  if (d && d.rotMagnet) {
+    const cont = peContinuousAngle(d, rawAngleDeg);
+    return peApplyRotateMagnet(d, cont);
+  }
+  return rawAngleDeg;
 }
 
 function peStartTextRotate(e, o) {
@@ -30893,27 +30938,23 @@ function peProcessDrag(clientX, clientY) {
   } else if (d.kind === 'resize-vector') {
     const { w: WW, h: HH } = peStageSize();
     let mx = pt.x, my = pt.y;
-    if (d.shiftKey) {
-      const dx = d.which === 'start' ? (d.fixedX - mx) : (mx - d.fixedX);
-      const dy = d.which === 'start' ? (d.fixedY - my) : (my - d.fixedY);
-      let angle = Math.atan2(dy, dx) * 180 / Math.PI;
-      angle = Math.round(angle / 45) * 45;
-      const rad = angle * Math.PI / 180;
-      const len = Math.max(1, Math.hypot(dx, dy));
-      if (d.which === 'start') {
-        mx = d.fixedX - Math.cos(rad) * len;
-        my = d.fixedY - Math.sin(rad) * len;
-      } else {
-        mx = d.fixedX + Math.cos(rad) * len;
-        my = d.fixedY + Math.sin(rad) * len;
-      }
-    }
+    const dx = d.which === 'start' ? (d.fixedX - mx) : (mx - d.fixedX);
+    const dy = d.which === 'start' ? (d.fixedY - my) : (my - d.fixedY);
+    const len = Math.max(1, Math.hypot(dx, dy));
+    let angle = Math.atan2(dy, dx) * 180 / Math.PI;
+    angle = peSnapVectorAngle(d, angle);
+    const rad = angle * Math.PI / 180;
     if (d.which === 'start') {
+      mx = d.fixedX - Math.cos(rad) * len;
+      my = d.fixedY - Math.sin(rad) * len;
       peLayoutVectorShape(d.obj, mx, my, d.fixedX, d.fixedY, WW, HH, null);
     } else {
+      mx = d.fixedX + Math.cos(rad) * len;
+      my = d.fixedY + Math.sin(rad) * len;
       peLayoutVectorShape(d.obj, d.fixedX, d.fixedY, mx, my, WW, HH, null);
     }
     peRedrawObjects();
+    peUpdateRotateLabel(d.obj, clientX, clientY);
   } else if (d.kind === 'resize-text') {
     const dist = Math.max(1, Math.hypot(pt.x - d.anchorX, pt.y - d.anchorY));
     const scale = dist / d.startDist;
@@ -30945,9 +30986,22 @@ function peProcessDrag(clientX, clientY) {
     }
   } else if (d.kind === 'highlight-draw' || d.kind === 'shape-draw' || d.kind === 'redact-draw') {
     if (d.kind === 'shape-draw' && d.obj && peShapeIsVectorStroke(d.obj.shape)) {
-      // Press = tail/start, drag = tip/end direction.
-      peLayoutVectorShape(d.obj, d.startX, d.startY, pt.x, pt.y, W, H, { shiftKey: !!d.shiftKey });
+      // Press = tail/start, drag = tip/end direction (+ soft 45° magnet).
+      let mx = pt.x, my = pt.y;
+      const dx = mx - d.startX, dy = my - d.startY;
+      const len = Math.max(1, Math.hypot(dx, dy));
+      let angle = Math.atan2(dy, dx) * 180 / Math.PI;
+      if (d.rotMagnet || d.shiftKey) {
+        if (d.startRot == null) d.startRot = 0;
+        if (!d.rotMagnet) d.rotMagnet = peCreateRotMagnet(0);
+        angle = peSnapVectorAngle(d, angle);
+        const rad = angle * Math.PI / 180;
+        mx = d.startX + Math.cos(rad) * len;
+        my = d.startY + Math.sin(rad) * len;
+      }
+      peLayoutVectorShape(d.obj, d.startX, d.startY, mx, my, W, H, null);
       peRedrawObjects();
+      peUpdateRotateLabel(d.obj, clientX, clientY);
     } else {
       let x1 = d.startX, y1 = d.startY, x2 = pt.x, y2 = pt.y;
       let wPx = Math.abs(x2 - x1), hPx = Math.abs(y2 - y1);
@@ -32069,6 +32123,12 @@ function peObjMouseDown(e, o) {
       peState.objects.push(o);
       peState.draftShapeId = o.id;
       peState.drag.obj = o;
+      if (peShapeIsVectorStroke(peLastShapeKind)) {
+        peState.drag.startRot = 0;
+        peState.drag.rotMagnet = peCreateRotMagnet(0);
+        peShowRotateLabel();
+        peUpdateRotateLabel(o, e.clientX, e.clientY);
+      }
       peRedrawObjects();
       peUpdatePanUi();
       return;
@@ -32146,7 +32206,9 @@ function peObjMouseDown(e, o) {
     if (!pePinchActive) peSelSnapBeforePinch = null;
     if (!peState || !peState.drag) return;
     const d = peState.drag;
-    const wasRotate = d.kind === 'rotate-text' || d.kind === 'rotate-shape';
+    const wasRotate = d.kind === 'rotate-text' || d.kind === 'rotate-shape'
+      || d.kind === 'resize-vector'
+      || (d.kind === 'shape-draw' && d.obj && peShapeIsVectorStroke(d.obj.shape));
     peState.drag = null;
     peStopAutoScroll();
     document.getElementById('pageEditModal')?.classList.remove('pe-panning', 'pe-crop-panning');
