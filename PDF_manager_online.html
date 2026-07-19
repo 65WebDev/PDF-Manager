@@ -11326,7 +11326,7 @@
 
         if (isLoadingCancelled) { historyPushSuspended = false; return; }
 
-        // Password-protected PDFs are not supported - we reject them before loading them into the editor.
+        // Password-protected PDFs: preparePdfBytes prompts for the password when needed.
         if (!isOffice && !isImage) {
           const prepared = await preparePdfBytes(pdfBytes, file.name);
           if (prepared === null) {
@@ -16755,25 +16755,169 @@
       });
     }
 
-    // Checks that the PDF is not encrypted. Returns the original bytes or null
-    // (with a message to the user) if the file is password protected / cannot be read.
-    // If successful, caches preparedPdfLibDoc so as not to parse the file again.
+    // Lazy-loaded helper used only when a PDF requires a password to open.
+    // Produces an in-memory copy the rest of the app can load with pdf-lib.
+    let pdfDecryptModPromise = null;
+    function loadPdfDecryptModule() {
+      if (!pdfDecryptModPromise) {
+        pdfDecryptModPromise = import('https://esm.sh/@pdfsmaller/pdf-decrypt@1.0.1')
+          .catch((err) => {
+            pdfDecryptModPromise = null;
+            throw err;
+          });
+      }
+      return pdfDecryptModPromise;
+    }
+
+    function pdfLoadLooksPasswordProtected(err) {
+      const msg = String((err && err.message) || err || '');
+      return /encrypt|password|security|шифр|парол/i.test(msg);
+    }
+
+    /** Apply the password supplied by the user; returns decrypted PDF bytes. */
+    async function decryptPdfBytesWithPassword(bytes, password) {
+      const mod = await loadPdfDecryptModule();
+      return await mod.decryptPDF(
+        bytes.slice(),
+        password == null ? '' : String(password)
+      );
+    }
+
+    /**
+     * Modal: ask for the password of a protected PDF.
+     * Resolves to the entered string, or null if the user cancels.
+     */
+    function showPdfPasswordDialog(fileName, opts) {
+      opts = opts || {};
+      const wrongPassword = !!opts.wrongPassword;
+      const label = fileName ? escapeHtml('«' + fileName + '»') : 'Файл';
+      return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay-active';
+        overlay.style.cssText = `
+          position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+          display: flex; align-items: center; justify-content: center; z-index: 100001;`;
+        const box = document.createElement('div');
+        box.style.cssText = `
+          background: #fff; border-radius: 12px; padding: 24px 28px; max-width: 92vw;
+          box-shadow: 0 10px 30px rgba(0,0,0,0.3); text-align: left; min-width: min(340px, 92vw);`;
+        box.innerHTML = `
+          <div style="font-size:17px; color:#2c3e50; margin-bottom:8px; font-weight:600; line-height:1.35;">
+            Файл защищён паролем
+          </div>
+          <div style="font-size:14px; color:#555; margin-bottom:14px; line-height:1.45;">
+            ${label}: введите пароль, чтобы открыть документ.
+          </div>
+          <div id="pdfPwdErr" style="display:${wrongPassword ? 'block' : 'none'}; font-size:13px; color:#c0392b; margin-bottom:10px;">
+            Неверный пароль. Попробуйте ещё раз.
+          </div>
+          <input id="pdfPwdInput" type="password" autocomplete="current-password"
+            placeholder="Пароль"
+            style="width:100%; box-sizing:border-box; padding:10px 12px; font-size:16px;
+              border:1px solid #ccc; border-radius:6px; margin-bottom:18px;" />
+          <div style="display:flex; gap:12px; justify-content:flex-end; flex-wrap:wrap;">
+            <button type="button" id="pdfPwdCancel" style="padding:10px 20px; border:1px solid #ccc; border-radius:6px;
+              background:#fff; color:#333; cursor:pointer; font-size:15px;">Отмена</button>
+            <button type="button" id="pdfPwdOk" style="padding:10px 24px; border:none; border-radius:6px;
+              background:#2980b9; color:#fff; font-weight:bold; cursor:pointer; font-size:15px;">Открыть</button>
+          </div>`;
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+
+        const input = box.querySelector('#pdfPwdInput');
+        const close = (result) => {
+          document.removeEventListener('keydown', onKey, true);
+          if (overlay.parentNode) document.body.removeChild(overlay);
+          resolve(result);
+        };
+        const submit = () => close(input.value);
+        box.querySelector('#pdfPwdOk').onclick = submit;
+        box.querySelector('#pdfPwdCancel').onclick = () => close(null);
+        overlay.addEventListener('click', (e) => { if (e.target === overlay) close(null); });
+        const onKey = (e) => {
+          if (e.key === 'Escape') { e.preventDefault(); close(null); }
+          else if (e.key === 'Enter') { e.preventDefault(); submit(); }
+        };
+        document.addEventListener('keydown', onKey, true);
+        setTimeout(() => { try { input.focus(); input.select(); } catch (_) {} }, 0);
+      });
+    }
+
+    /**
+     * If the PDF needs a password, prompt until the correct one is entered or the user cancels.
+     * Returns decrypted bytes, or null on cancel / failure.
+     * Files that open with an empty password (common edit-restriction case) are handled
+     * without showing the dialog.
+     */
+    async function unlockPdfBytesInteractive(bytes, fileName) {
+      try {
+        return await decryptPdfBytesWithPassword(bytes, '');
+      } catch (_) { /* needs a non-empty password from the user */ }
+
+      let attempt = 0;
+      while (true) {
+        const password = await showPdfPasswordDialog(fileName, {
+          wrongPassword: attempt > 0
+        });
+        if (password == null) return null;
+        attempt++;
+        try {
+          return await decryptPdfBytesWithPassword(bytes, password);
+        } catch (e) {
+          const msg = String((e && e.message) || e || '');
+          if (/incorrect password/i.test(msg)) continue;
+          const label = fileName ? `«${fileName}»: ` : '';
+          alert(
+            label + 'не удалось открыть файл с указанным паролем'
+              + (msg ? ': ' + msg : '.')
+          );
+          return null;
+        }
+      }
+    }
+
+    // Ensure PDF bytes are readable by pdf-lib. If the file is password-protected,
+    // ask the user for the password and return a decrypted in-memory copy.
+    // On cancel / failure returns null (caller skips or aborts). Caches preparedPdfLibDoc.
     async function preparePdfBytes(bytes, fileName) {
       preparedPdfLibDoc = null;
+      const label = fileName ? `«${fileName}»: ` : '';
+      let working = bytes;
       try {
-        const d = await PDFLib.PDFDocument.load(bytes.slice());
+        const d = await PDFLib.PDFDocument.load(working.slice());
         d.getPageCount();
         preparedPdfLibDoc = d;
-        return bytes;
+        return working;
+      } catch (e) {
+        if (!pdfLoadLooksPasswordProtected(e)) {
+          const msg = String((e && e.message) || e || '');
+          alert(label + 'не удалось открыть файл' + (msg ? ': ' + msg : '.'));
+          return null;
+        }
+      }
+
+      try {
+        working = await unlockPdfBytesInteractive(bytes, fileName);
       } catch (e) {
         const msg = String((e && e.message) || e || '');
-        const looksProtected = /encrypt|password|security|шифр|парол/i.test(msg);
-        const label = fileName ? `«${fileName}»: ` : '';
         alert(
-          looksProtected
-            ? label + 'файл защищён паролем. Открытие защищённых PDF не поддерживается.'
-            : label + 'не удалось открыть файл' + (msg ? ': ' + msg : '.')
+          label + 'не удалось подготовить защищённый файл'
+            + (msg ? ': ' + msg : '.')
+            + '\nПроверьте подключение к сети и повторите попытку.'
         );
+        return null;
+      }
+      if (!working) return null;
+
+      try {
+        const d = await PDFLib.PDFDocument.load(working.slice());
+        d.getPageCount();
+        preparedPdfLibDoc = d;
+        return working;
+      } catch (e) {
+        const msg = String((e && e.message) || e || '');
+        alert(label + 'не удалось открыть файл после ввода пароля'
+          + (msg ? ': ' + msg : '.'));
         return null;
       }
     }
@@ -17407,8 +17551,16 @@
             return { file, pageCount: 1 };
           }
           const arrayBuffer = await file.arrayBuffer();
-          const pdf = await PDFLib.PDFDocument.load(arrayBuffer);
-          return { file, pageCount: pdf.getPageCount() };
+          try {
+            const pdf = await PDFLib.PDFDocument.load(arrayBuffer);
+            return { file, pageCount: pdf.getPageCount() };
+          } catch (e) {
+            // Page count unknown until the user enters the password during merge.
+            if (pdfLoadLooksPasswordProtected(e)) {
+              return { file, pageCount: 'пароль' };
+            }
+            throw e;
+          }
         } catch (e) {
           console.error('Ошибка при чтении файла для подсчёта страниц:', file.name, e);
           return { file, pageCount: '—' };
@@ -18653,8 +18805,9 @@
     }
 
     // Universally gets PDF bytes from any supported file:
-    // PDF - as is; Office - via convertOfficeToPdfBytes; image - via
-    // convertImageToPdfBytes. Password-protected PDFs are rejected (null).
+    // PDF - as is (preparePdfBytes asks for a password when the file requires one);
+    // Office - via convertOfficeToPdfBytes; image - via convertImageToPdfBytes.
+    // Returns null if the user cancels the password prompt or the file cannot be read.
     async function fileToPdfBytes(file, showLoad) {
       const ext = (file.name.split('.').pop() || '').toLowerCase();
       if (['doc', 'docx', 'xls', 'xlsx'].includes(ext)) {
