@@ -5025,6 +5025,14 @@
           <line x1="4" y1="20" x2="20" y2="20" stroke="#e74c3c" stroke-width="2.4"/>
         </svg>
       </button>
+      <span class="pe-text-sel-icons-divider pe-text-sel-redact-sep" aria-hidden="true"></span>
+      <button type="button" data-action="redact-text" title="Затереть текст" aria-label="Затереть текст">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21z" fill="#1584E5" stroke="#161212" stroke-width="1" stroke-linejoin="round"/>
+          <path d="m5 11 9 9" fill="none" stroke="#161212" stroke-width="1" stroke-linecap="round"/>
+          <path d="M18 21H3" fill="none" stroke="#161212" stroke-width="1" stroke-linecap="round"/>
+        </svg>
+      </button>
       <span class="pe-text-sel-icons-divider" aria-hidden="true"></span>
       <button type="button" data-action="comment" title="Комментарий" aria-label="Комментарий">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -5327,6 +5335,14 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="M6 4v7a6 6 0 0 0 12 0V4"/>
           <line x1="4" y1="20" x2="20" y2="20" stroke="#e74c3c" stroke-width="2.4"/>
+        </svg>
+      </button>
+      <span class="pe-text-sel-icons-divider pe-text-sel-redact-sep" aria-hidden="true"></span>
+      <button type="button" data-action="redact-text" title="Затереть текст" aria-label="Затереть текст">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21z" fill="#1584E5" stroke="#161212" stroke-width="1" stroke-linejoin="round"/>
+          <path d="m5 11 9 9" fill="none" stroke="#161212" stroke-width="1" stroke-linecap="round"/>
+          <path d="M18 21H3" fill="none" stroke="#161212" stroke-width="1" stroke-linecap="round"/>
         </svg>
       </button>
       <span class="pe-text-sel-icons-divider" aria-hidden="true"></span>
@@ -22837,6 +22853,89 @@ async function peRedactConfirm(o) {
   }
 }
 
+/**
+ * Immediately cover one or more page-fraction regions with the current
+ * redact fill (same paint/raster path as confirming a redact frame).
+ * No confirmation UI — used by “Затереть текст” on a text selection.
+ */
+async function peRedactNormalizedRegionsImmediate(regions, opts) {
+  opts = opts || {};
+  if (!peState || !pdfDoc || !regions || !regions.length) return false;
+  if (peState.__redactConfirmBusy) return false;
+  const color = opts.color || peLastRedactColor || '#000000';
+  const ready = regions.filter(r =>
+    r && (r.maxX - r.minX) > 0.001 && (r.maxY - r.minY) > 0.001);
+  if (!ready.length) return false;
+
+  peState.__redactConfirmBusy = true;
+  try {
+    showLoading(opts.loadingMsg || 'Затирание текста...');
+
+    const bytesBefore = peClonePdfBytes(await pdfDoc.save());
+    pdfDoc = await PDFLib.PDFDocument.load(peClonePdfBytes(bytesBefore));
+    peCommitEditorHistory(true);
+    const undo = peState.undoStack || [];
+    if (undo.length) {
+      undo[undo.length - 1].pdfBytes = bytesBefore;
+      undo[undo.length - 1].sessionRedacted = JSON.parse(JSON.stringify(peSessionRedactedRegions));
+    }
+
+    ready.forEach(region => {
+      pePaintBlackRedactRect(pdfDoc, peState.idx, region, color);
+      peRememberSessionRedactedRegion(
+        peState.idx, region.minX, region.minY, region.maxX, region.maxY);
+    });
+
+    setDocumentDirty(true);
+    peState.pdfContentMutated = true;
+
+    await peReloadEditorPageFromPdfDoc();
+    if (typeof invalidatePageTextLayers === 'function') invalidatePageTextLayers();
+
+    const bytesAfter = peClonePdfBytes(await pdfDoc.save());
+    pdfDoc = await PDFLib.PDFDocument.load(peClonePdfBytes(bytesAfter));
+    peCommitEditorHistory(true);
+    const undo2 = peState.undoStack || [];
+    if (undo2.length) {
+      undo2[undo2.length - 1].pdfBytes = bytesAfter;
+      undo2[undo2.length - 1].sessionRedacted = JSON.parse(JSON.stringify(peSessionRedactedRegions));
+    }
+
+    try { window.getSelection && window.getSelection().removeAllRanges(); } catch (_) {}
+    peTextSelCtx = null;
+    peRedrawObjects();
+    peUpdateProps();
+    peUpdatePanUi();
+    return true;
+  } catch (err) {
+    console.error(err);
+    alert('Не удалось затереть текст: ' + (err.message || err));
+    return false;
+  } finally {
+    peState.__redactConfirmBusy = false;
+    hideLoading();
+  }
+}
+
+async function peApplyPageTextSelRedact() {
+  if (!peState || !peTextSelCtx || peTextSelCtx.kind !== 'page') return;
+  const range = peTextSelCtx.range;
+  let fracs = peTextSelCtx.fracs;
+  if (!fracs || !fracs.length) {
+    try { fracs = peTextSelRangeToPageFracs(range); } catch (_) { fracs = []; }
+  }
+  if (!fracs || !fracs.length) return;
+  peHideTextSelCtxMenu();
+  const regions = fracs.map(r => ({
+    minX: r.x, minY: r.y,
+    maxX: r.x + r.w, maxY: r.y + r.h
+  }));
+  await peRedactNormalizedRegionsImmediate(regions, {
+    color: peLastRedactColor || '#000000',
+    loadingMsg: 'Затирание текста...'
+  });
+}
+
 function peCropViewportRect(c) {
   const p1 = peState.viewport.convertToViewportPoint(c.x, c.y);
   const p2 = peState.viewport.convertToViewportPoint(c.x + c.w, c.y + c.h);
@@ -24024,6 +24123,93 @@ function editSelectedPage() {
     }
   }
 
+  // Cover selected page text with the current redact fill (no confirmation).
+  // Same paint + page-raster markers as confirming a redact frame in the editor.
+  async function bakeTextRedactOnPage(pageIdx, pdfRects) {
+    if (!pdfDoc || !pdfRects || !pdfRects.length) return;
+    if (typeof pePaintBlackRedactRect !== 'function') return;
+
+    const canSuspend = (typeof historyPushSuspended !== 'undefined');
+    const wasSuspended = canSuspend ? historyPushSuspended : false;
+    if (canSuspend) historyPushSuspended = true;
+
+    try {
+      if (typeof whenPdfDocIdle === 'function') await whenPdfDocIdle();
+      const docRef = pdfDoc;
+      const color = (typeof peLastRedactColor !== 'undefined' && peLastRedactColor)
+        ? peLastRedactColor : '#000000';
+
+      const vp = typeof gridMarkupViewportForPage === 'function'
+        ? gridMarkupViewportForPage(pageIdx) : null;
+      if (!vp || !(vp.width > 0) || !(vp.height > 0)) return;
+
+      const regions = [];
+      pdfRects.forEach(r => {
+        const p1 = vp.convertToViewportPoint(r.x0, r.y0);
+        const p2 = vp.convertToViewportPoint(r.x1, r.y1);
+        const left = Math.min(p1[0], p2[0]);
+        const top = Math.min(p1[1], p2[1]);
+        const right = Math.max(p1[0], p2[0]);
+        const bottom = Math.max(p1[1], p2[1]);
+        const w = right - left, h = bottom - top;
+        if (!(w > 0.5) || !(h > 0.5)) return;
+        regions.push({
+          minX: left / vp.width,
+          minY: top / vp.height,
+          maxX: right / vp.width,
+          maxY: bottom / vp.height
+        });
+      });
+      if (!regions.length) return;
+
+      regions.forEach(region => {
+        pePaintBlackRedactRect(docRef, pageIdx, region, color);
+        if (typeof peRememberSessionRedactedRegion === 'function') {
+          peRememberSessionRedactedRegion(
+            pageIdx, region.minX, region.minY, region.maxX, region.maxY);
+        }
+      });
+
+      if (pdfDoc !== docRef) {
+        console.warn('text redact bake aborted: pdfDoc was swapped mid-draw');
+        return;
+      }
+
+      if (typeof whenPdfDocIdle === 'function') await whenPdfDocIdle();
+      const bytesBeforeReload = new Uint8Array(await docRef.save());
+
+      try {
+        const loadBytes = (typeof peClonePdfBytes === 'function')
+          ? peClonePdfBytes(bytesBeforeReload)
+          : bytesBeforeReload.slice();
+        pdfDoc = await PDFLib.PDFDocument.load(loadBytes);
+      } catch (_) { /* keep previous pdfDoc instance */ }
+
+      if (typeof hqPdfjsToken === 'number') hqPdfjsToken++;
+      if (typeof hqUpgraded !== 'undefined' && hqUpgraded && hqUpgraded.clear) hqUpgraded.clear();
+
+      await applyMarkupBytesToPreview(pageIdx, bytesBeforeReload);
+
+      try { window.getSelection && window.getSelection().removeAllRanges(); } catch (_) {}
+
+      if (typeof commitHistoryStep === 'function' && typeof historyCommitChain !== 'undefined') {
+        const marked = (typeof markedForDeletion !== 'undefined')
+          ? [...markedForDeletion].sort((x, y) => x - y) : [];
+        historyCommitChain = historyCommitChain
+          .then(() => commitHistoryStep(Promise.resolve(bytesBeforeReload), marked, [pageIdx]))
+          .catch(e => console.warn('history commit error', e));
+        if (typeof documentDirty !== 'undefined') documentDirty = true;
+        if (typeof updateInfo === 'function') updateInfo();
+        if (typeof updateStickyFileBar === 'function') updateStickyFileBar();
+      } else {
+        historyChangeHint = [pageIdx];
+        if (typeof setDocumentDirty === 'function') setDocumentDirty(true);
+      }
+    } finally {
+      if (canSuspend) historyPushSuspended = wasSuspended;
+    }
+  }
+
   let gridMarkupBakeChain = Promise.resolve();
 
   if (textCopyMenu) {
@@ -24052,7 +24238,7 @@ function editSelectedPage() {
         void copyTextToClipboard(text);
         return;
       }
-      if (action === 'highlight' || action === 'strikeout' || action === 'underline' || action === 'comment') {
+      if (action === 'highlight' || action === 'strikeout' || action === 'underline' || action === 'comment' || action === 'redact-text') {
         let range = textCopyCtxRange;
         const pageIdx = textCopyCtxPageIdx;
         hideTextCopyMenu();
@@ -24078,6 +24264,12 @@ function editSelectedPage() {
           gridMarkupBakeChain = gridMarkupBakeChain
             .then(() => applyPreviewCalloutInEditor(pageIdx, rects))
             .catch(err => console.error('text callout failed', err));
+          return;
+        }
+        if (action === 'redact-text') {
+          gridMarkupBakeChain = gridMarkupBakeChain
+            .then(() => bakeTextRedactOnPage(pageIdx, rects))
+            .catch(err => console.error('text redact bake failed', err));
           return;
         }
         gridMarkupBakeChain = gridMarkupBakeChain
@@ -30945,7 +31137,7 @@ function peSyncTextSelMenuActive(activeSet) {
   const set = activeSet instanceof Set ? activeSet : new Set(activeSet || []);
   menu.querySelectorAll('.pe-text-sel-icons button[data-action]').forEach(btn => {
     const act = btn.dataset.action;
-    if (act === 'clear-markup') return;
+    if (act === 'clear-markup' || act === 'redact-text') return;
     const on = set.has(act);
     btn.classList.toggle('active', on);
     btn.setAttribute('aria-pressed', on ? 'true' : 'false');
@@ -30984,6 +31176,13 @@ function peShowTextSelCtxMenu(clientX, clientY, info) {
   peTextSelCtx = info;
 
   peSyncTextSelMenuActive(activeSet);
+
+  // “Затереть текст” applies to page PDF text selection only (not inline/markup).
+  const showRedact = info.kind === 'page';
+  menu.querySelectorAll('.pe-text-sel-redact-sep, [data-action="redact-text"]').forEach(el => {
+    el.hidden = !showRedact;
+    el.style.display = showRedact ? '' : 'none';
+  });
 
   const showClear = info.kind === 'markup-obj' || activeSet.size > 0;
   menu.querySelectorAll('.pe-text-sel-clear-sep, [data-action="clear-markup"]').forEach(el => {
@@ -31380,6 +31579,14 @@ function peOnTextSelCtxAction(action) {
       peHideTextSelCtxMenu();
       peRestoreTextSelRange(range);
     });
+    return;
+  }
+  if (action === 'redact-text') {
+    if (ctx.kind !== 'page') {
+      peHideTextSelCtxMenu();
+      return;
+    }
+    void peApplyPageTextSelRedact();
     return;
   }
   if (action === 'clear-markup') {
