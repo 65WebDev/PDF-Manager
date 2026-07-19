@@ -28422,15 +28422,16 @@ function peClearBackground() {
 function peApplyWholeFormatToObj(o, kind, value) {
   const el = peGetInlineTextEl(o);
   if (!el) return;
-  const wasEditingLive = peState.inlineEditId === o.id;
+  const wasEditingLive = peState && peState.inlineEditId === o.id;
+  // Mobile overlay keeps contentEditable=false while editing — execCommand
+  // still needs a temporary editable context (same pattern as peClearBgForObj).
+  const needsForce = el.contentEditable !== 'true';
   let tempEditable = false;
-  if (!wasEditingLive) {
-    // The block is selected but not edited - execCommand requires active
-    // editable-context; We turn it on temporarily, then return it to how it was.
+  if (needsForce) {
     tempEditable = true;
     el.contentEditable = 'true';
   }
-  el.focus();
+  try { el.focus({ preventScroll: true }); } catch (_) { try { el.focus(); } catch (__) {} }
   const range = document.createRange();
   range.selectNodeContents(el);
   const sel = window.getSelection();
@@ -28449,20 +28450,30 @@ function peApplyWholeFormatToObj(o, kind, value) {
   el.style.fontWeight = o.bold ? 'bold' : 'normal';
   el.style.fontStyle = o.italic ? 'italic' : 'normal';
 
-  if (wasEditingLive) {
-    // We return the cursor to the end of the text, rather than leaving everything selected.
-    const range2 = document.createRange();
-    range2.selectNodeContents(el);
-    range2.collapse(false);
-    const sel2 = window.getSelection();
-    sel2.removeAllRanges();
-    sel2.addRange(range2);
-  } else {
-    window.getSelection().removeAllRanges();
-    if (tempEditable) {
-      el.contentEditable = 'false';
-      el.blur();
+  if (tempEditable) {
+    el.contentEditable = 'false';
+    if (wasEditingLive && peUsesMobileEditOverlay()) {
+      el.classList.add('pe-mobile-overlay-host', 'pe-inline-edit');
+    } else {
+      try { el.blur(); } catch (_) {}
     }
+  }
+  if (wasEditingLive && peUsesMobileEditOverlay()) {
+    pePositionMobileEditOverlay();
+    peState.inlineEditFocusPending = true;
+    peFocusInlineEditorNow();
+  } else if (wasEditingLive) {
+    // Return the caret to the end instead of leaving everything selected.
+    try {
+      const range2 = document.createRange();
+      range2.selectNodeContents(el);
+      range2.collapse(false);
+      const sel2 = window.getSelection();
+      sel2.removeAllRanges();
+      sel2.addRange(range2);
+    } catch (_) {}
+  } else {
+    try { window.getSelection().removeAllRanges(); } catch (_) {}
   }
 }
 
@@ -28513,6 +28524,13 @@ function peApplyTextFormat(kind, value) {
   // info.mode === 'range' - dotted, only for the selected range.
   const el = peGetInlineTextEl(o);
   if (!el) return;
+  // Mobile host is not contentEditable — fall back to whole-block format.
+  if (el.contentEditable !== 'true') {
+    peApplyWholeFormatToObj(o, kind, value);
+    peUpdateProps();
+    peCommitEditorHistory(true);
+    return;
+  }
   if (kind === 'underline') el.style.textDecoration = 'none';
   switch (kind) {
     case 'bold': document.execCommand('bold'); break;
@@ -30399,6 +30417,88 @@ function peStartTextCornerResize(e, o, corner) {
   peUpdatePanUi();
 }
 
+/** Soft snap to 45° multiples while rotating (text / shapes). */
+function peCreateRotMagnet(startRot) {
+  return {
+    lastRaw: startRot,
+    armed: false,
+    snapped: false,
+    snapTarget: null,
+    rawWhenSnapped: null,
+    inCooldown: false,
+    cooldownTravel: 0
+  };
+}
+
+function peNormDeg(a) {
+  return ((a % 360) + 360) % 360;
+}
+
+function peNearest45Deg(rot) {
+  const n = peNormDeg(rot);
+  const nearest = Math.round(n / 45) * 45;
+  return peNormDeg(nearest);
+}
+
+function peDistToDeg(a, b) {
+  let d = Math.abs(peNormDeg(a) - peNormDeg(b));
+  if (d > 180) d = 360 - d;
+  return d;
+}
+
+/**
+ * Smart rotation magnet:
+ * - Arms after >20° travel from the gesture start.
+ * - Snaps when within ±10° of a 45° multiple.
+ * - Unsnaps after +10° further raw travel from the snap moment.
+ * - After unsnap, needs another 20° of travel before it can snap again.
+ * Shift still forces hard 45° snap (caller handles that separately).
+ */
+function peApplyRotateMagnet(d, rawRot) {
+  const m = d && d.rotMagnet;
+  if (!m) return Math.round(rawRot);
+  const step = Math.abs(rawRot - m.lastRaw);
+  m.lastRaw = rawRot;
+  const travelFromStart = Math.abs(rawRot - d.startRot);
+
+  if (m.snapped) {
+    if (Math.abs(rawRot - m.rawWhenSnapped) >= 10) {
+      m.snapped = false;
+      m.snapTarget = null;
+      m.rawWhenSnapped = null;
+      m.inCooldown = true;
+      m.cooldownTravel = 0;
+      m.armed = false;
+    } else {
+      return m.snapTarget;
+    }
+  }
+
+  if (m.inCooldown) {
+    m.cooldownTravel += step;
+    if (m.cooldownTravel >= 20) {
+      m.inCooldown = false;
+      m.armed = true;
+    } else {
+      return Math.round(rawRot);
+    }
+  }
+
+  if (!m.armed) {
+    if (travelFromStart > 20) m.armed = true;
+    else return Math.round(rawRot);
+  }
+
+  const target = peNearest45Deg(rawRot);
+  if (peDistToDeg(rawRot, target) <= 10) {
+    m.snapped = true;
+    m.snapTarget = target;
+    m.rawWhenSnapped = rawRot;
+    return target;
+  }
+  return Math.round(rawRot);
+}
+
 function peStartTextRotate(e, o) {
   const outer = peGetTextOuterEl(o);
   if (!outer) return;
@@ -30406,11 +30506,13 @@ function peStartTextRotate(e, o) {
   const cx = (r.left + r.right) / 2;
   const cy = (r.top + r.bottom) / 2;
   const pt = peStagePoint(e);
+  const startRot = o.rot || 0;
   peState.drag = {
     kind: 'rotate-text', obj: o,
-    startRot: o.rot || 0,
+    startRot,
     startAngle: Math.atan2(pt.y - cy, pt.x - cx) * 180 / Math.PI,
-    shiftKey: e.shiftKey
+    shiftKey: e.shiftKey,
+    rotMagnet: peCreateRotMagnet(startRot)
   };
   peShowRotateLabel();
   peUpdateRotateLabel(o, e.clientX, e.clientY);
@@ -30745,8 +30847,8 @@ function peProcessDrag(clientX, clientY) {
     const angle = Math.atan2(pt.y - cy, pt.x - cx) * 180 / Math.PI;
     let newRot = d.startRot + (angle - d.startAngle);
     if (d.shiftKey) newRot = Math.round(newRot / 45) * 45;
-    else newRot = Math.round(newRot);
-    d.obj.rot = ((newRot % 360) + 360) % 360;
+    else newRot = peApplyRotateMagnet(d, newRot);
+    d.obj.rot = peNormDeg(newRot);
     outer.style.transform = d.obj.rot ? 'rotate(' + d.obj.rot + 'deg)' : '';
     peUpdateRotateLabel(d.obj, clientX, clientY);
   } else if (d.kind === 'rotate-shape') {
@@ -30761,8 +30863,8 @@ function peProcessDrag(clientX, clientY) {
     const angle = Math.atan2(pt.y - cy, pt.x - cx) * 180 / Math.PI;
     let newRot = d.startRot + (angle - d.startAngle);
     if (d.shiftKey) newRot = Math.round(newRot / 45) * 45;
-    else newRot = Math.round(newRot);
-    d.obj.rot = ((newRot % 360) + 360) % 360;
+    else newRot = peApplyRotateMagnet(d, newRot);
+    d.obj.rot = peNormDeg(newRot);
     outer.style.transform = d.obj.rot ? 'rotate(' + d.obj.rot + 'deg)' : '';
     // The corner anchor cursors should follow the current rotation angle.
     outer.querySelectorAll('.pe-text-corner-handle').forEach(h => {
@@ -32833,15 +32935,22 @@ function peObjMouseDown(e, o) {
   })();
   document.getElementById('peFmtBold').addEventListener('click', () => {
     peApplyTextFormat('bold', null);
-    peState.inlineEditFocusPending = false;
+    // Mobile overlay re-arms focus inside peApplyWholeFormatToObj — don't clear it.
+    if (!(peState && peState.inlineEditId && peUsesMobileEditOverlay())) {
+      peState.inlineEditFocusPending = false;
+    }
   });
   document.getElementById('peFmtItalic').addEventListener('click', () => {
     peApplyTextFormat('italic', null);
-    peState.inlineEditFocusPending = false;
+    if (!(peState && peState.inlineEditId && peUsesMobileEditOverlay())) {
+      peState.inlineEditFocusPending = false;
+    }
   });
   document.getElementById('peFmtUnderline').addEventListener('click', () => {
     peApplyTextFormat('underline', null);
-    peState.inlineEditFocusPending = false;
+    if (!(peState && peState.inlineEditId && peUsesMobileEditOverlay())) {
+      peState.inlineEditFocusPending = false;
+    }
   });
   ['left', 'center', 'right'].forEach(al => {
     const id = 'peFmtAlign' + al.charAt(0).toUpperCase() + al.slice(1);
@@ -33749,11 +33858,13 @@ function peStartShapeRotate(e, o) {
   const cx = (r.left + r.right) / 2;
   const cy = (r.top + r.bottom) / 2;
   const pt = peStagePoint(e);
+  const startRot = o.rot || 0;
   peState.drag = {
     kind: 'rotate-shape', obj: o,
-    startRot: o.rot || 0,
+    startRot,
     startAngle: Math.atan2(pt.y - cy, pt.x - cx) * 180 / Math.PI,
-    shiftKey: e.shiftKey
+    shiftKey: e.shiftKey,
+    rotMagnet: peCreateRotMagnet(startRot)
   };
   peShowRotateLabel();
   peUpdateRotateLabel(o, e.clientX, e.clientY);
