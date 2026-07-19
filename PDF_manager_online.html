@@ -12578,14 +12578,24 @@
       return null;
     }
 
-    // Computes the caret the pointer SHOULD produce: the glyph span line
-    // nearest to the point, with x clamped into that line. Measures the text
+    // Computes the caret the pointer SHOULD produce: the glyph span line the
+    // point belongs to, with x clamped into that line. Measures the text
     // node's own range rect (the glyph box), NOT the span's bounding rect -
     // the latter is inflated by the no-dead-zone hit-area padding.
+    // The empty space between lines/paragraphs belongs to the line ABOVE it
+    // - the same convention as the padded hit areas and as ordinary text
+    // editors (clicking the blank gap under a paragraph puts the caret at
+    // that paragraph's end). Euclidean "nearest line" was used before, and
+    // in a paragraph gap it could resolve to the FIRST line of the next
+    // paragraph - the correction then disagreed with the native padded
+    // hit-testing around it, so the selection edge jittered/jumped across
+    // the separator. Only a point above the first line of text falls
+    // through to the line below it.
     function textLayerCaretForPoint(inner, x, y) {
       const spans = inner.getElementsByTagName('span');
       const probe = document.createRange();
-      let best = null, bestDy = Infinity, bestDx = Infinity;
+      let above = null, aboveDy = Infinity, aboveDx = Infinity;
+      let below = null, belowDy = Infinity, belowDx = Infinity;
       for (let i = 0; i < spans.length; i++) {
         const s = spans[i];
         const t = s.firstChild;
@@ -12596,12 +12606,20 @@
           r = probe.getBoundingClientRect();
         } catch (_) { continue; }
         if (!r || !r.width || !r.height) continue;
-        const dy = y < r.top ? r.top - y : (y > r.bottom ? y - r.bottom : 0);
         const dx = x < r.left ? r.left - x : (x > r.right ? x - r.right : 0);
-        if (dy < bestDy - 0.5 || (Math.abs(dy - bestDy) <= 0.5 && dx < bestDx)) {
-          bestDy = dy; bestDx = dx; best = { span: s, rect: r };
+        if (r.top <= y) {
+          const dy = y > r.bottom ? y - r.bottom : 0;
+          if (dy < aboveDy - 0.5 || (Math.abs(dy - aboveDy) <= 0.5 && dx < aboveDx)) {
+            aboveDy = dy; aboveDx = dx; above = { span: s, rect: r };
+          }
+        } else {
+          const dy = r.top - y;
+          if (dy < belowDy - 0.5 || (Math.abs(dy - belowDy) <= 0.5 && dx < belowDx)) {
+            belowDy = dy; belowDx = dx; below = { span: s, rect: r };
+          }
         }
       }
+      const best = above || below;
       if (!best) return null;
       const r = best.rect;
       const cx = Math.min(Math.max(x, r.left + 0.5), r.right - 0.5);
@@ -29299,14 +29317,22 @@ function pePageTextSelFocusClientPoint() {
  * Safer caret for #peTextLayer: pick the nearest glyph span and clamp x into
  * it. Raw caretRangeFromPoint often lands on endOfContent / the layer root
  * in inter-line gaps → “jump” or whole-page selection.
+ * maxDyPx caps how far (vertically) the nearest glyph may be from the point;
+ * callers that KNOW the current selection is bogus pass a generous cap so a
+ * finger deep inside a paragraph gap still clamps to the closest line.
  */
-function peEditorTextLayerCaretForPoint(clientX, clientY) {
+function peEditorTextLayerCaretForPoint(clientX, clientY, maxDyPx) {
   const layer = document.getElementById('peTextLayer');
   const inner = layer && layer.querySelector('.page-text-layer-inner.textLayer');
   if (!inner) return null;
   const spans = inner.getElementsByTagName('span');
   const probe = document.createRange();
-  let best = null, bestDy = Infinity, bestDx = Infinity;
+  // Same convention as textLayerCaretForPoint: a point inside an empty
+  // line/paragraph gap belongs to the line ABOVE it (a text editor puts the
+  // caret at the paragraph's end there), falling back to the line below
+  // only above the first line of text.
+  let above = null, aboveDy = Infinity, aboveDx = Infinity;
+  let below = null, belowDy = Infinity, belowDx = Infinity;
   for (let i = 0; i < spans.length; i++) {
     const s = spans[i];
     if (s.classList && s.classList.contains('endOfContent')) continue;
@@ -29318,15 +29344,24 @@ function peEditorTextLayerCaretForPoint(clientX, clientY) {
       r = probe.getBoundingClientRect();
     } catch (_) { continue; }
     if (!r || !(r.width > 0) || !(r.height > 0)) continue;
-    const dy = clientY < r.top ? r.top - clientY : (clientY > r.bottom ? clientY - r.bottom : 0);
     const dx = clientX < r.left ? r.left - clientX : (clientX > r.right ? clientX - r.right : 0);
-    if (dy < bestDy - 0.5 || (Math.abs(dy - bestDy) <= 0.5 && dx < bestDx)) {
-      bestDy = dy; bestDx = dx; best = { span: s, rect: r, text: t };
+    if (r.top <= clientY) {
+      const dy = clientY > r.bottom ? clientY - r.bottom : 0;
+      if (dy < aboveDy - 0.5 || (Math.abs(dy - aboveDy) <= 0.5 && dx < aboveDx)) {
+        aboveDy = dy; aboveDx = dx; above = { span: s, rect: r, text: t };
+      }
+    } else {
+      const dy = r.top - clientY;
+      if (dy < belowDy - 0.5 || (Math.abs(dy - belowDy) <= 0.5 && dx < belowDx)) {
+        belowDy = dy; belowDx = dx; below = { span: s, rect: r, text: t };
+      }
     }
   }
+  const best = above || below;
+  const bestDy = above ? aboveDy : belowDy;
   if (!best) return null;
   // Reject points that are far from any glyph (avoids leaping across the page).
-  if (bestDy > 36) return null;
+  if (bestDy > (maxDyPx == null ? 36 : maxDyPx)) return null;
   const r = best.rect;
   const text = best.text;
   const len = text.nodeValue.length;
@@ -29355,59 +29390,143 @@ function peSelectionEndpointSuspicious(node) {
  * nearest glyph under the finger. Safe to call from selectionchange on touch.
  */
 let peTextSelRepairing = false;
+/** Last page-text selection that looked sound (both endpoints on glyphs near
+ *  where the gesture had been). Used to recover the FIXED endpoint when a
+ *  gap hit clobbers the whole selection mid-drag. */
+let peTextSelLastGoodSel = null;
+
+function peTextSelNodeInEditorLayer(node) {
+  if (!node) return false;
+  const el = node.nodeType === 3 ? node.parentElement : node;
+  return !!(el && el.closest && el.closest('#peTextLayer'));
+}
+
 function peRepairTouchTextSelection() {
   if (peTextSelRepairing) return;
   if (typeof pePinchActive !== 'undefined' && pePinchActive) return;
   if (typeof isTouchDevice === 'undefined' || !isTouchDevice) return;
   if (!peState || !peState.objSelectMode) return;
-  if (!peIsEditorPageTextSelection()) return;
-  const ax = peTextSelLastClientX, ay = peTextSelLastClientY;
-  if (ax == null || ay == null) return;
+  const layer = document.getElementById('peTextLayer');
+  if (!layer) return;
   const sel = window.getSelection();
-  if (!sel || !sel.rangeCount) return;
-  const anchorBad = peSelectionEndpointSuspicious(sel.anchorNode);
-  const focusBad = peSelectionEndpointSuspicious(sel.focusNode);
-  let jumpedToStart = false;
-  try {
-    const tip = document.createRange();
-    tip.setStart(sel.focusNode, sel.focusOffset);
-    tip.collapse(true);
-    const fr = tip.getBoundingClientRect();
-    const layer = document.getElementById('peTextLayer');
-    const lr = layer && layer.getBoundingClientRect();
-    if (fr && lr && (fr.width || fr.height) && lr.height > 0) {
-      const cy = fr.top + fr.height / 2;
-      const focusNearTop = (cy - lr.top) < lr.height * 0.08;
-      const fingerLower = ay > lr.top + lr.height * 0.15;
-      // Classic gap hit: focus teleports to the top of the page.
-      if (focusNearTop && fingerLower && Math.abs(cy - ay) > 48) jumpedToStart = true;
-    }
-  } catch (_) {}
-  if (!anchorBad && !focusBad && !jumpedToStart) return;
-  const caret = peEditorTextLayerCaretForPoint(ax, ay);
-  if (!caret) {
-    // Finger in empty space with a bogus whole-layer selection → clear it.
-    if (anchorBad || focusBad || jumpedToStart) {
-      try {
-        const text = (sel.toString() || '');
-        if (text.length > 80 || jumpedToStart) sel.removeAllRanges();
-      } catch (_) {}
-    }
+  if (!sel || !sel.rangeCount || sel.isCollapsed) {
+    // Forget the remembered selection once the gesture is over; mid-gesture
+    // a transient empty state must not wipe the fixed-endpoint memory.
+    if (!(peTextSelPointerDown || peTextSelHandleDragging)) peTextSelLastGoodSel = null;
     return;
   }
+  const anchorIn = peTextSelNodeInEditorLayer(sel.anchorNode);
+  const focusIn = peTextSelNodeInEditorLayer(sel.focusNode);
+  // Not a page-text selection at all (e.g. inline text-object editing) —
+  // hands off. A selection with only ONE endpoint still in the layer is
+  // exactly the breakage being repaired (the other end escaped via a gap).
+  if (!anchorIn && !focusIn) return;
+  const ax = peTextSelLastClientX, ay = peTextSelLastClientY;
+  if (ax == null || ay == null) return;
+  const lr = layer.getBoundingClientRect();
+  const fingerInLayer = lr && lr.width > 0 && lr.height > 0 &&
+    ax >= lr.left - 24 && ax <= lr.right + 24 &&
+    ay >= lr.top - 24 && ay <= lr.bottom + 24;
+
+  const anchorBad = !anchorIn || peSelectionEndpointSuspicious(sel.anchorNode);
+  const focusBad = !focusIn || peSelectionEndpointSuspicious(sel.focusNode);
+
+  // The caret the finger SHOULD produce (line-above convention). While the
+  // finger is on the page a gap of ANY size clamps to the closest line
+  // (exactly what a regular text editor does); off the page keep a tight cap.
+  const expected = peEditorTextLayerCaretForPoint(
+    ax, ay, fingerInLayer ? Math.max(lr.height, 400) : 36);
+
+  // Deterministic jump check, BOTH directions (a gap hit can resolve to the
+  // page start OR the page end — either way "the whole page gets selected").
+  // During an active touch gesture the endpoint being dragged sits on the
+  // line the finger points at; if NEITHER endpoint does, the browser
+  // resolved a gap hit against the start/end of the page text. Gated on a
+  // finger actually being down: a programmatic selection (e.g. the native
+  // Select all) must survive.
+  let jumped = false;
+  const gestureActive = peTextSelPointerDown || peTextSelHandleDragging;
+  if (!anchorBad && !focusBad && gestureActive && fingerInLayer && expected) {
+    try {
+      const er = textLayerEndpointRect(expected.node, expected.offset);
+      const ar = textLayerEndpointRect(sel.anchorNode, sel.anchorOffset);
+      const fr = textLayerEndpointRect(sel.focusNode, sel.focusOffset);
+      if (er) {
+        const ecy = (er.top + er.bottom) / 2;
+        const lh = Math.max(10, er.height || 0, ar ? ar.height : 0, fr ? fr.height : 0);
+        const off = (r) => r ? Math.abs((r.top + r.bottom) / 2 - ecy) : Infinity;
+        jumped = off(ar) > lh * 1.5 && off(fr) > lh * 1.5;
+      }
+    } catch (_) {}
+  }
+  if (!anchorBad && !focusBad && !jumped) {
+    // Selection looks sane — remember it so the fixed endpoint survives a
+    // later gap jump.
+    peTextSelLastGoodSel = {
+      anchorNode: sel.anchorNode, anchorOffset: sel.anchorOffset,
+      focusNode: sel.focusNode, focusOffset: sel.focusOffset
+    };
+    return;
+  }
+
+  const caret = expected;
+  if (!caret) {
+    // Finger in empty space with a bogus whole-layer selection → clear it
+    // rather than leave the whole page selected.
+    try {
+      const text = (sel.toString() || '');
+      if (text.length > 80 || jumped) {
+        sel.removeAllRanges();
+        peTextSelLastGoodSel = null;
+        if (typeof scheduleTextLayerHighlightRender === 'function') scheduleTextLayerHighlightRender();
+      }
+    } catch (_) {}
+    return;
+  }
+
+  // The fixed (non-dragged) endpoint: the current anchor when it is sound,
+  // else recovered from the last good selection — its endpoint FARTHER from
+  // the finger (the near one is the one being dragged).
+  let base = null;
+  if (!anchorBad && !jumped) {
+    base = { node: sel.anchorNode, offset: sel.anchorOffset };
+  } else {
+    const g = peTextSelLastGoodSel;
+    const usable = (n) => n && n.isConnected && peTextSelNodeInEditorLayer(n) &&
+      !peSelectionEndpointSuspicious(n);
+    if (g && usable(g.anchorNode) && usable(g.focusNode)) {
+      try {
+        const ar = textLayerEndpointRect(g.anchorNode, g.anchorOffset);
+        const fr = textLayerEndpointRect(g.focusNode, g.focusOffset);
+        const da = ar ? Math.abs((ar.top + ar.bottom) / 2 - ay) : -1;
+        const df = fr ? Math.abs((fr.top + fr.bottom) / 2 - ay) : -1;
+        base = da >= df
+          ? { node: g.anchorNode, offset: g.anchorOffset }
+          : { node: g.focusNode, offset: g.focusOffset };
+      } catch (_) {}
+    }
+  }
+
   peTextSelRepairing = true;
   try {
-    if (peTextSelHandleDragging && !anchorBad && typeof sel.extend === 'function') {
-      sel.extend(caret.node, caret.offset);
+    if (base && typeof sel.setBaseAndExtent === 'function') {
+      sel.setBaseAndExtent(base.node, base.offset, caret.node, caret.offset);
+      peTextSelLastGoodSel = {
+        anchorNode: base.node, anchorOffset: base.offset,
+        focusNode: caret.node, focusOffset: caret.offset
+      };
     } else if (typeof sel.setBaseAndExtent === 'function') {
-      // Re-seed at the glyph under the finger (undoes the page-start jump).
+      // No trustworthy fixed end (a fresh long-press landed in a gap):
+      // re-seed a collapsed caret at the nearest glyph.
       sel.setBaseAndExtent(caret.node, caret.offset, caret.node, caret.offset);
+      peTextSelLastGoodSel = null;
     } else {
       const r = document.createRange();
       r.setStart(caret.node, caret.offset);
       r.collapse(true);
       sel.removeAllRanges();
       sel.addRange(r);
+      peTextSelLastGoodSel = null;
     }
     if (typeof scheduleTextLayerHighlightRender === 'function') scheduleTextLayerHighlightRender();
   } catch (_) {
@@ -29465,6 +29584,7 @@ function peClientInsidePageTextSelection(clientX, clientY) {
 function peClearEditorPageTextSelection() {
   peTextSelMenuResume = null;
   peTextSelHandleDragging = false;
+  peTextSelLastGoodSel = null;
   peHideTextSelCtxMenu();
   try {
     if (peIsEditorPageTextSelection()) {
@@ -29540,6 +29660,9 @@ function peBindTextSelHandleDragGuards() {
     peTextSelLastClientY = e.clientY;
     // Hide while adjusting handles OR while actively re-dragging a selection.
     const nearHandle = peClientNearTextSelHandle(e.clientX, e.clientY);
+    // A fresh gesture away from the handles must not inherit the previous
+    // selection's endpoints as repair anchors.
+    if (!nearHandle) peTextSelLastGoodSel = null;
     const onTextLayer = !!(e.target && e.target.closest && e.target.closest('#peTextLayer'));
     if (nearHandle || (onTextLayer && peIsEditorPageTextSelection() && (menu?.classList.contains('visible') || peTextSelCtx))) {
       peBeginTextSelHandleDrag(e.clientX, e.clientY);
@@ -29614,7 +29737,9 @@ function peBindTextSelHandleDragGuards() {
     const t = e.touches[0];
     peTextSelLastClientX = t.clientX;
     peTextSelLastClientY = t.clientY;
-    if (peIsEditorPageTextSelection() && peClientNearTextSelHandle(t.clientX, t.clientY)) {
+    const nearHandle = peClientNearTextSelHandle(t.clientX, t.clientY);
+    if (!nearHandle) peTextSelLastGoodSel = null;
+    if (peIsEditorPageTextSelection() && nearHandle) {
       peBeginTextSelHandleDrag(t.clientX, t.clientY);
     }
   };
@@ -29629,6 +29754,11 @@ function peBindTextSelHandleDragGuards() {
   document.addEventListener('selectionchange', () => {
     if (!peState || !peState.objSelectMode) return;
     if (pePinchActive) return;
+    // Fix gap→page-start/page-end jumps BEFORE any gating below: a jump can
+    // push a selection endpoint outside the layer, which moves the range's
+    // common ancestor out of #peTextLayer and would dodge the
+    // peIsEditorPageTextSelection() check entirely.
+    if (typeof peRepairTouchTextSelection === 'function') peRepairTouchTextSelection();
     if (!peIsEditorPageTextSelection()) return;
     // Long-press is creating a new selection: cancel a deferred pan, but do
     // NOT enter handle-drag / edge-scroll unless the finger is on a handle.
@@ -29639,8 +29769,6 @@ function peBindTextSelHandleDragGuards() {
       }
       peTextLayerTouchPending = null;
     }
-    // Fix gap→page-start jumps before other handle logic runs.
-    if (typeof peRepairTouchTextSelection === 'function') peRepairTouchTextSelection();
     if (!(peTextSelPointerDown || peTextSelHandleDragging)) return;
     if (!peTextSelHandleDragging) {
       // Creating selection via long-press — leave it entirely to the OS
