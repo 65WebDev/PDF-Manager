@@ -26105,6 +26105,8 @@ let peTextKbScrollQuietUntil = 0;
 /** Extra bottom / top padding on #peStagePad for OSK and top mini-panel. */
 let peEditorKbPadPx = 0;
 let peEditorTopPadPx = 0;
+/** Space above a text block reserved for the rotate handle (top:-22px + touch). */
+const PE_TEXT_ROT_HANDLE_CLEAR_PX = 48;
 
 function peArmTextKeyboardQuiet(ms) {
   peTextKbScrollQuietUntil = Date.now() + (ms || 400);
@@ -26168,7 +26170,8 @@ function peEnsureEditorKbScrollRoom(opts) {
       try { ph = props.getBoundingClientRect().height || props.offsetHeight || 0; } catch (_) { ph = 0; }
     }
     if (!(ph > 0)) ph = 96; // portrait text panel (size/color/format rows)
-    needTop = Math.max(needTop, Math.round(ph + 28));
+    // + rotate-handle clearance so the knob above the block stays below the panel.
+    needTop = Math.max(needTop, Math.round(ph + 28 + PE_TEXT_ROT_HANDLE_CLEAR_PX));
   }
   needTop = Math.max(0, Math.min(Math.round(window.innerHeight * 0.5), needTop));
 
@@ -26196,7 +26199,8 @@ function peClearEditorKbScrollRoom() {
 
 /**
  * Usable screen band for focusing text: visualViewport minus the mini-panel
- * when it overlaps that band. MidY is where we aim the caret / text block.
+ * when it overlaps that band. MidY is where we aim the caret / text block
+ * (biased slightly down so the rotate handle above the block stays clear).
  */
 function peGetTextFocusSafeRect() {
   const vv = window.visualViewport;
@@ -26210,6 +26214,7 @@ function peGetTextFocusSafeRect() {
       && typeof isTouchDevice !== 'undefined' && isTouchDevice) {
     bottom = Math.min(bottom, top + Math.max(160, window.innerHeight * 0.55));
   }
+  const editingText = !!(peState && peState.inlineEditId && !peInlineEditFocusSuppressed);
   const props = document.getElementById('peProps');
   if (props && props.classList.contains('visible') && !props.classList.contains('pe-props-collapsed')) {
     try {
@@ -26219,7 +26224,9 @@ function peGetTextFocusSafeRect() {
           && pr.top < bottom && pr.bottom > top) {
         const viewMid = (top + bottom) / 2;
         const propsMid = (pr.top + pr.bottom) / 2;
-        if (propsMid <= viewMid) top = Math.max(top, pr.bottom + 12);
+        const belowProps = pr.bottom + 12
+          + (editingText ? PE_TEXT_ROT_HANDLE_CLEAR_PX : 0);
+        if (propsMid <= viewMid) top = Math.max(top, belowProps);
         else bottom = Math.min(bottom, pr.top - 12);
       }
     } catch (_) {}
@@ -26238,7 +26245,10 @@ function peGetTextFocusSafeRect() {
     bottom = vv ? (vv.offsetTop + vv.height) : window.innerHeight;
     if (wr && peEditorTopPadPx > 0) top = Math.max(top, wr.top + Math.min(peEditorTopPadPx, (bottom - top) * 0.35));
   }
-  return { top, bottom, left, right, midY: (top + bottom) / 2 };
+  // Bias aim point slightly below geometric center (~lower 58%) so the
+  // rotate knob above the block clears the formatting mini-panel.
+  const midY = top + (bottom - top) * (editingText ? 0.58 : 0.5);
+  return { top, bottom, left, right, midY };
 }
 
 /** Scroll wrap so a screen Y lands on the safe-band center. */
@@ -26262,7 +26272,7 @@ function peScrollStagePointIntoKeyboardSafeZone(stageX, stageY) {
   peScrollScreenYToTextFocusCenter(sr.top + stageY);
 }
 
-/** True if el's top overlaps (or sits under) the visible mini-panel. */
+/** True if el's top (or its rotate handle) overlaps the visible mini-panel. */
 function peElCoveredByPropsPanel(el) {
   const props = document.getElementById('peProps');
   if (!el || !props || !props.classList.contains('visible')
@@ -26271,9 +26281,9 @@ function peElCoveredByPropsPanel(el) {
     const er = el.getBoundingClientRect();
     const pr = props.getBoundingClientRect();
     if (!(pr.height > 0) || !(pr.width > 0)) return false;
-    // Covered when the caret/block top is above the panel's bottom edge
-    // (panel is fixed on top in portrait).
-    return er.top < pr.bottom + 10
+    // Include room for the rotate handle sitting above the text block.
+    const clear = (peState && peState.inlineEditId) ? PE_TEXT_ROT_HANDLE_CLEAR_PX : 0;
+    return er.top - clear < pr.bottom + 10
       && er.left < pr.right && er.right > pr.left;
   } catch (_) { return false; }
 }
@@ -26292,10 +26302,11 @@ function peNudgeTextObjBelowPropsPanel(o) {
   if (props.classList.contains('pe-props-collapsed')) return false;
   const er = el.getBoundingClientRect();
   const pr = props.getBoundingClientRect();
-  if (!(pr.height > 0) || er.top >= pr.bottom + 12) return false;
+  const minTop = pr.bottom + 12 + PE_TEXT_ROT_HANDLE_CLEAR_PX;
+  if (!(pr.height > 0) || er.top >= minTop) return false;
   const { h: H } = peStageSize();
   if (!(H > 0)) return false;
-  const needPx = (pr.bottom + 18) - er.top;
+  const needPx = minTop - er.top;
   if (!(needPx > 2)) return false;
   const nextY = Math.min(0.93, (o.y || 0) + needPx / H);
   if (nextY <= (o.y || 0) + 1e-6) return false;
@@ -26331,23 +26342,26 @@ function peScrollElementIntoTextFocusCenter(el, opts) {
   const safe2 = peGetTextFocusSafeRect();
   const er2 = el.getBoundingClientRect();
   const elMid2 = er2.top + Math.min(Math.max(er2.height, 8), 36) / 2;
-  // Prefer the safe-band center, but never leave the caret under the panel.
+  // Prefer the safe-band center (already biased down), but never leave the
+  // rotate handle under the formatting mini-panel.
   let targetY = safe2.midY;
   const props = document.getElementById('peProps');
   if (props && props.classList.contains('visible') && !props.classList.contains('pe-props-collapsed')) {
     try {
       const pr = props.getBoundingClientRect();
-      if (pr.height > 0) targetY = Math.max(targetY, pr.bottom + 36);
+      if (pr.height > 0) {
+        targetY = Math.max(targetY, pr.bottom + 36 + PE_TEXT_ROT_HANDLE_CLEAR_PX);
+      }
     } catch (_) {}
   }
   const delta = elMid2 - targetY;
   if (Math.abs(delta) > 4) wrap.scrollTop += delta;
-  // Hard clamp: if still under the panel, push down one more step.
+  // Hard clamp: if still under the panel / handle zone, push down one more step.
   if (peElCoveredByPropsPanel(el)) {
     try {
       const pr = props.getBoundingClientRect();
       const er3 = el.getBoundingClientRect();
-      const push = (pr.bottom + 16) - er3.top;
+      const push = (pr.bottom + 12 + PE_TEXT_ROT_HANDLE_CLEAR_PX) - er3.top;
       if (push > 2) wrap.scrollTop += push;
     } catch (_) {}
   }
