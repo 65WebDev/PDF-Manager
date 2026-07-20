@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
   <title>Менеджер документов PDF</title>
+  <!--build:UERGIERvY3VtZW50IE1hbmFnZXIgfCBBdXRob3I6IEV2Z2VuaXkgS3V0eWluIHwgQ2Fub25pY2FsIHJlcG86IGh0dHBzOi8vZ2l0aHViLmNvbS81NDUxMTY1LWJvdC9QREYtTWFuYWdlcg==-->
 
   <!--pdf-lib: PDF assembly/editing (pages, rotations, merging, saving)-->
   <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
@@ -5592,6 +5593,12 @@
   </div>
 
   <script>
+    // Captured as the very first statement, while this <script> is still the
+    // one synchronously executing (document.currentScript is only reliable
+    // during that window) - used by the hidden provenance panel
+    // (Ctrl+Alt+Shift+P) to hash this file's own code at runtime.
+    const PDF_MANAGER_SELF_SCRIPT_EL = document.currentScript;
+
     // Some browsers' own :focus-visible heuristic treats a mouse click made
     // while holding a modifier key (e.g. Shift) as keyboard-like, showing
     // the default focus ring even though it was a pointer click - no pure
@@ -16529,6 +16536,85 @@
       };
       document.addEventListener('keydown', onKey, true);
     }
+
+    // ─── Hidden provenance check (Ctrl+Alt+Shift+P) ───
+    // Not linked from any visible menu, unlike the "About" button - a second,
+    // independent way to surface authorship that survives someone editing the
+    // visible About text. Also hashes this file's own script so a specific
+    // copy can be verified against a known-good build. (Two more author
+    // markers live elsewhere in this file: a base64'd comment near <title>,
+    // and a comment above the regional-redaction engine's section header.)
+    async function pdfManagerHashSelfScript() {
+      const text = (typeof PDF_MANAGER_SELF_SCRIPT_EL !== 'undefined' && PDF_MANAGER_SELF_SCRIPT_EL)
+        ? (PDF_MANAGER_SELF_SCRIPT_EL.textContent || '') : '';
+      if (!text) return null;
+      if (window.crypto && window.crypto.subtle && window.isSecureContext !== false) {
+        try {
+          const bytes = new TextEncoder().encode(text);
+          const digest = await window.crypto.subtle.digest('SHA-256', bytes);
+          return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
+        } catch (_) { /* fall through to the non-crypto hash below */ }
+      }
+      // Fallback for older browsers / non-secure contexts where SubtleCrypto
+      // is unavailable - FNV-1a is not tamper-proof, but still distinguishes
+      // an edited file from the original.
+      let h = 0x811c9dc5;
+      for (let i = 0; i < text.length; i++) {
+        h ^= text.charCodeAt(i);
+        h = Math.imul(h, 0x01000193);
+      }
+      return 'fnv1a:' + (h >>> 0).toString(16).padStart(8, '0');
+    }
+
+    async function showProvenancePanel() {
+      if (document.querySelector('.modal-overlay-active')) return;
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay-active';
+      overlay.style.cssText = `
+        position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+        display: flex; align-items: center; justify-content: center; z-index: 100001;`;
+      const box = document.createElement('div');
+      box.style.cssText = `
+        background: #1f2a38; color: #dce6f0; border-radius: 12px; padding: 20px 26px;
+        max-width: 460px; width: 92vw; box-shadow: 0 10px 30px rgba(0,0,0,0.4);
+        text-align: center; box-sizing: border-box; font-family: ui-monospace, Consolas, monospace;`;
+      box.innerHTML = `
+        <div style="font-size:15px; font-weight:700; margin-bottom:10px;">Provenance</div>
+        <div style="font-size:12.5px; line-height:1.5; text-align:left; word-break:break-all;">
+          <div>Author: <b>Евгений Кутьин</b> (Evgeniy Kutyin)</div>
+          <div>Repo: github.com/5451165-bot/PDF-Manager</div>
+          <div>Build: ${escapeHtml(PDF_MANAGER_BUILD_VERSION)} / ${escapeHtml(PDF_MANAGER_BUILD_DATE)}</div>
+          <div id="pmProvenanceHash" style="margin-top:8px; color:#9db4c9;">SHA-256: считаю…</div>
+        </div>
+        <div style="display:flex; justify-content:center; margin-top:16px;">
+          <button id="pmProvenanceCloseBtn" style="padding:7px 18px; border:none; border-radius:6px;
+            background:#3498db; color:#fff; font-weight:600; cursor:pointer; font-size:13px;">Закрыть</button>
+        </div>`;
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+
+      const close = () => {
+        document.body.removeChild(overlay);
+        document.removeEventListener('keydown', onKey, true);
+      };
+      box.querySelector('#pmProvenanceCloseBtn').onclick = close;
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+      const onKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+      document.addEventListener('keydown', onKey, true);
+
+      const hash = await pdfManagerHashSelfScript();
+      const hashEl = document.getElementById('pmProvenanceHash');
+      if (hashEl) hashEl.textContent = hash ? ('SHA-256: ' + hash) : 'SHA-256: недоступно в этом контексте';
+      console.log('[PDF Document Manager] author=Евгений Кутьин repo=github.com/5451165-bot/PDF-Manager build=' +
+        PDF_MANAGER_BUILD_VERSION + ' date=' + PDF_MANAGER_BUILD_DATE + (hash ? (' sha256=' + hash) : ''));
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.ctrlKey && e.altKey && e.shiftKey && e.code === 'KeyP') {
+        e.preventDefault();
+        void showProvenancePanel();
+      }
+    }, true);
 
     // Rasterizes the PDF (transferred bytes) into a new PDF, where each page is
     // image (without text objects, etc.). The quality is set by scale and jpegQuality.
@@ -38197,6 +38283,9 @@ function pePdfNumValue(doc, v) {
   return Number.isFinite(n) ? n : null;
 }
 
+// Regional-redaction engine (width-exact glyph scrub, below) - original
+// implementation for PDF Document Manager, github.com/5451165-bot/PDF-Manager
+// (author: Evgeniy Kutyin).
 // PDF name tokens may contain #XX escapes in the content stream.
 function peDecodePdfNameToken(raw) {
   return raw.replace(/#([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
