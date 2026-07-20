@@ -3254,29 +3254,6 @@
       .drop-zone .dz-mobile { display: inline; }
     }
 
-    .pm-recent-panel { margin-bottom: 20px; }
-    .pm-recent-title { font-size: 14px; color: #888; margin-bottom: 8px; font-weight: 600; }
-    .pm-recent-list { display: flex; flex-wrap: wrap; gap: 10px; }
-    .pm-recent-card {
-      display: flex; align-items: center; gap: 10px;
-      border: 1px solid #ddd; border-radius: 10px; padding: 8px 10px;
-      background: #fff; cursor: pointer; width: 260px; max-width: 100%;
-      position: relative; transition: border-color .15s, box-shadow .15s;
-    }
-    .pm-recent-card:hover { border-color: #007bff; box-shadow: 0 2px 8px rgba(0,123,255,0.15); }
-    .pm-recent-thumb {
-      width: 36px; height: 48px; flex: 0 0 auto; display: flex; align-items: center; justify-content: center;
-      background: #f2f2f2; border-radius: 4px; overflow: hidden; font-size: 20px;
-    }
-    .pm-recent-thumb img { width: 100%; height: 100%; object-fit: cover; }
-    .pm-recent-meta { min-width: 0; flex: 1 1 auto; }
-    .pm-recent-name { font-size: 13px; color: #2c3e50; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .pm-recent-sub { font-size: 11px; color: #888; margin-top: 2px; }
-    .pm-recent-remove {
-      border: none; background: transparent; color: #aaa; font-size: 16px; cursor: pointer;
-      line-height: 1; padding: 2px 4px; border-radius: 4px;
-    }
-    .pm-recent-remove:hover { color: #cc3d40; background: #fdeaea; }
 
     .pages { 
       display: flex;
@@ -5566,7 +5543,6 @@
       <h1>Менеджер документов PDF</h1>
     </div>
     <div id="dropZone" class="drop-zone"><span class="dz-desktop">Нажмите здесь или перетащите в эту область один или несколько файлов для открытия</span><span class="dz-mobile">Нажмите здесь для выбора одного или нескольких файлов</span><br><span style="font-size:14px;color:#888;margin-top:8px;display:block;">Поддерживаются: PDF, Word (.docx), Excel (.xls, .xlsx), изображения (PNG, JPEG, BMP, GIF, WEBP, TIFF)</span></div>
-    <div id="pmRecentFilesPanel" class="pm-recent-panel" style="display:none;"></div>
     <div id="pagesContainer" class="pages"></div>
     <div id="insertIndicator"></div>
     <div id="insertMenu">
@@ -6690,7 +6666,7 @@
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // CRASH RECOVERY + RECENT FILES (IndexedDB, best-effort/local-only)
+    // CRASH RECOVERY (IndexedDB, best-effort/local-only)
     //
     // Everything here lives in the browser's own local storage for this
     // origin - never on the disk location the file was opened from - so a
@@ -6702,9 +6678,7 @@
     const PM_IDB_NAME = 'PDFManagerLocal';
     const PM_IDB_VERSION = 1;
     const PM_RECOVERY_STORE = 'recovery';
-    const PM_RECENT_STORE = 'recentFiles';
     const PM_RECOVERY_SLOT = 'main'; // single-document scope; tabs get their own slot (see pmRecoverySlotId)
-    const PM_RECENT_MAX = 8;
     const PM_RECOVERY_DEBOUNCE_MS = 8000;   // write this long after edits go quiet
     const PM_RECOVERY_MAX_WAIT_MS = 45000;  // ...but never wait longer than this during continuous editing
     let pmIdbPromise = null;
@@ -6721,7 +6695,6 @@
           req.onupgradeneeded = () => {
             const db = req.result;
             if (!db.objectStoreNames.contains(PM_RECOVERY_STORE)) db.createObjectStore(PM_RECOVERY_STORE, { keyPath: 'slot' });
-            if (!db.objectStoreNames.contains(PM_RECENT_STORE)) db.createObjectStore(PM_RECENT_STORE, { keyPath: 'id', autoIncrement: true });
           };
           req.onsuccess = () => resolve(req.result);
           req.onerror = () => resolve(null);
@@ -6862,137 +6835,13 @@
       } catch (e) { /* best effort only */ }
     }
 
-    // --- Recent files -------------------------------------------------------
-
-    async function pmRecordRecentFile(meta) {
-      if (!window.indexedDB || !meta || !meta.fileName) return;
-      try {
-        const all = await pmIdbGetAll(PM_RECENT_STORE);
-        const dup = all.find(e => e.fileName === meta.fileName && e.size === meta.size);
-        if (dup) await pmIdbDelete(PM_RECENT_STORE, dup.id);
-        await pmIdbPut(PM_RECENT_STORE, {
-          fileName: meta.fileName,
-          size: meta.size || 0,
-          pageCount: meta.pageCount || null,
-          lastOpenedAt: Date.now(),
-          thumbDataUrl: meta.thumbDataUrl || null,
-          handle: meta.handle || null
-        });
-        const fresh = await pmIdbGetAll(PM_RECENT_STORE);
-        if (fresh.length > PM_RECENT_MAX) {
-          fresh.sort((a, b) => (a.lastOpenedAt || 0) - (b.lastOpenedAt || 0));
-          const excess = fresh.slice(0, fresh.length - PM_RECENT_MAX);
-          for (const e of excess) await pmIdbDelete(PM_RECENT_STORE, e.id);
-        }
-      } catch (e) { /* best effort only */ }
-      pmRenderRecentFilesPanel();
-    }
-
-    function pmRecordRecentFileFromCurrent(sizeHint, handleOverride) {
-      if (!pdfDoc) return;
-      const snap = (docHistoryIndex >= 0) ? docHistory[docHistoryIndex] : null;
-      pmRecordRecentFile({
-        fileName: currentFileName,
-        size: sizeHint || (snap && snap.pdfBytes ? snap.pdfBytes.length : 0),
-        pageCount: snap && snap.pages ? snap.pages.length : pdfDoc.getPageCount(),
-        thumbDataUrl: (snap && snap.pages && snap.pages[0]) ? snap.pages[0].src : null,
-        handle: (handleOverride !== undefined ? handleOverride : (typeof sourceFileHandle !== 'undefined' ? sourceFileHandle : null)) || null
-      });
-    }
-
-    // Reopens a "recent files" entry. Browsers never let a web page silently
-    // re-read an arbitrary local path without a fresh user gesture - a stored
-    // FileSystemFileHandle (Chromium only) lets us re-request read permission
-    // and reopen in one click; everywhere else (Firefox, revoked permission,
-    // moved/deleted file) we can only ask the user to pick the file again.
-    async function pmReopenRecentEntry(entry) {
-      if (!pmTabsEnabled() && pdfDoc && documentDirty) {
-        const ok = await showConfirmDialog(
-          'Документ не сохранён.<br>При открытии новый документ будет заменён на текущий.',
-          { html: true, yesText: 'Подтвердить', noText: 'Отменить' });
-        if (!ok) return;
-      }
-      if (entry.handle) {
-        try {
-          let perm = await entry.handle.queryPermission({ mode: 'read' });
-          if (perm !== 'granted') perm = await entry.handle.requestPermission({ mode: 'read' });
-          if (perm === 'granted') {
-            const file = await entry.handle.getFile();
-            if (pmTabsEnabled()) {
-              await pmOpenFilesAsTabs([file], [entry.handle]);
-            } else {
-              sourceFileHandle = entry.handle;
-              await loadPDF(file);
-            }
-            return;
-          }
-        } catch (e) { /* fall through to manual re-pick below */ }
-      }
-      const ok = await showConfirmDialog(
-        `Браузер не может автоматически переоткрыть «${escapeHtml(entry.fileName || '')}» — выберите файл вручную.`,
-        { html: true, yesText: 'Выбрать файл', noText: 'Отмена' });
-      if (ok) loadNewPDF();
-    }
-
-    function pmRecentFilesPanelEl() { return document.getElementById('pmRecentFilesPanel'); }
-
-    function pmSyncRecentFilesVisibility() {
-      const el = pmRecentFilesPanelEl();
-      if (!el) return;
-      const dz = document.getElementById('dropZone');
-      const show = dz && dz.style.display !== 'none' && el.dataset.hasEntries === '1';
-      el.style.display = show ? '' : 'none';
-    }
-
-    async function pmRenderRecentFilesPanel() {
-      const el = pmRecentFilesPanelEl();
-      if (!el) return;
-      if (!window.indexedDB) { el.style.display = 'none'; return; }
-      const rows = await pmIdbGetAll(PM_RECENT_STORE);
-      el.dataset.hasEntries = rows.length ? '1' : '0';
-      if (!rows.length) { el.innerHTML = ''; pmSyncRecentFilesVisibility(); return; }
-      rows.sort((a, b) => (b.lastOpenedAt || 0) - (a.lastOpenedAt || 0));
-      const fmtDate = (t) => {
-        try { return new Date(t).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); }
-        catch (e) { return ''; }
-      };
-      el.innerHTML = '<div class="pm-recent-title">Недавние файлы</div><div class="pm-recent-list"></div>';
-      const list = el.querySelector('.pm-recent-list');
-      rows.forEach(entry => {
-        const card = document.createElement('div');
-        card.className = 'pm-recent-card';
-        card.title = entry.fileName || '';
-        card.innerHTML = `
-          <div class="pm-recent-thumb">${entry.thumbDataUrl ? `<img src="${entry.thumbDataUrl}" alt="">` : '📄'}</div>
-          <div class="pm-recent-meta">
-            <div class="pm-recent-name">${escapeHtml(entry.fileName || '')}</div>
-            <div class="pm-recent-sub">${fmtDate(entry.lastOpenedAt)}${entry.pageCount ? ' · ' + entry.pageCount + ' стр.' : ''}${entry.size ? ' · ' + formatBytes(entry.size) : ''}</div>
-          </div>
-          <button class="pm-recent-remove" title="Убрать из списка">&times;</button>`;
-        card.querySelector('.pm-recent-remove').addEventListener('click', async (e) => {
-          e.stopPropagation();
-          await pmIdbDelete(PM_RECENT_STORE, entry.id);
-          pmRenderRecentFilesPanel();
-        });
-        card.addEventListener('click', () => pmReopenRecentEntry(entry));
-        list.appendChild(card);
-      });
-      pmSyncRecentFilesVisibility();
-    }
-
     // --- Boot ----------------------------------------------------------------
 
-    async function pmInitRecoveryAndRecentFiles() {
-      const dz = document.getElementById('dropZone');
-      if (dz && window.MutationObserver) {
-        new MutationObserver(pmSyncRecentFilesVisibility).observe(dz, { attributes: true, attributeFilter: ['style'] });
-      }
+    async function pmInitCrashRecovery() {
       document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'hidden') pmSweepRecoveryOnHide();
       });
       window.addEventListener('pagehide', pmSweepRecoveryOnHide);
-
-      pmRenderRecentFilesPanel();
 
       if (pmRecoveryBootHandled) return;
       pmRecoveryBootHandled = true;
@@ -7013,7 +6862,14 @@
         try {
           const file = new File([top.pdfBytes], top.fileName || 'document.pdf', { type: 'application/pdf' });
           await pmIdbDelete(PM_RECOVERY_STORE, top.slot);
-          await loadPDF(file);
+          // Route through the tab system when it's active (desktop default) -
+          // calling loadPDF() directly would load the document without ever
+          // creating/showing a tab for it, leaving the tab bar empty.
+          if (typeof pmTabsEnabled === 'function' && pmTabsEnabled()) {
+            await pmOpenFilesAsTabs([file]);
+          } else {
+            await loadPDF(file);
+          }
         } catch (e) {
           console.error(e);
           alert('Не удалось восстановить документ: ' + (e.message || e));
@@ -11775,7 +11631,6 @@
         await renderInitialThumbnailsFromOriginalBytes();
         checkHintVisibility();
         await resetDocHistoryToCurrent(initialHistoryBytes);
-        if (typeof pmRecordRecentFileFromCurrent === 'function') pmRecordRecentFileFromCurrent(file.size);
 
       } catch (e) {
         console.error(e);
@@ -17859,9 +17714,6 @@
         }
         // The document is saved - we consider it “clean” (without unsaved changes)
         await resetDocHistoryToCurrent();
-        if (typeof pmRecordRecentFileFromCurrent === 'function') {
-          pmRecordRecentFileFromCurrent(bytes.length, (saveTarget && saveTarget.handle) ? saveTarget.handle : undefined);
-        }
       } catch (e) {
         if (saveTarget && saveTarget.writable) {
           try { await saveTarget.writable.abort(); } catch (_) {}
@@ -21314,7 +21166,7 @@ window.addEventListener('resize', () => { pmRenderBar(); });
 // Starting state: The tab bar is hidden while no document is open.
 pmSyncLayout();
 initBeforeUnloadGuard();
-if (typeof pmInitRecoveryAndRecentFiles === 'function') pmInitRecoveryAndRecentFiles();
+if (typeof pmInitCrashRecovery === 'function') pmInitCrashRecovery();
 
 // ═══════════════════════════════════════════════════════════════════════
 // SEARCH BY DOCUMENT TEXT (Ctrl+F) - replaces the standard browser search.
@@ -24704,6 +24556,7 @@ function editSelectedPage() {
         if (typeof documentDirty !== 'undefined') documentDirty = true;
         if (typeof updateInfo === 'function') updateInfo();
         if (typeof updateStickyFileBar === 'function') updateStickyFileBar();
+        if (typeof pmOnDocumentDirtyChanged === 'function') pmOnDocumentDirtyChanged();
       } else {
         historyChangeHint = [pageIdx];
         if (typeof setDocumentDirty === 'function') setDocumentDirty(true);
@@ -24791,6 +24644,7 @@ function editSelectedPage() {
         if (typeof documentDirty !== 'undefined') documentDirty = true;
         if (typeof updateInfo === 'function') updateInfo();
         if (typeof updateStickyFileBar === 'function') updateStickyFileBar();
+        if (typeof pmOnDocumentDirtyChanged === 'function') pmOnDocumentDirtyChanged();
       } else {
         historyChangeHint = [pageIdx];
         if (typeof setDocumentDirty === 'function') setDocumentDirty(true);
