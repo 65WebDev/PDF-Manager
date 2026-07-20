@@ -3253,7 +3253,8 @@
       .drop-zone .dz-desktop { display: none; }
       .drop-zone .dz-mobile { display: inline; }
     }
-    
+
+
     .pages { 
       display: flex;
       flex-wrap: wrap;
@@ -6664,6 +6665,223 @@
       });
     }
 
+    // ═══════════════════════════════════════════════════════════════════════
+    // CRASH RECOVERY (IndexedDB, best-effort/local-only)
+    //
+    // Everything here lives in the browser's own local storage for this
+    // origin - never on the disk location the file was opened from - so a
+    // read-only network share is not an obstacle. All calls are wrapped so a
+    // blocked/unavailable IndexedDB (private browsing, locked-down profile,
+    // enterprise policy) just silently disables the feature instead of
+    // breaking the editor.
+    // ═══════════════════════════════════════════════════════════════════════
+    const PM_IDB_NAME = 'PDFManagerLocal';
+    const PM_IDB_VERSION = 1;
+    const PM_RECOVERY_STORE = 'recovery';
+    const PM_RECOVERY_SLOT = 'main'; // single-document scope; tabs get their own slot (see pmRecoverySlotId)
+    const PM_RECOVERY_DEBOUNCE_MS = 8000;   // write this long after edits go quiet
+    const PM_RECOVERY_MAX_WAIT_MS = 45000;  // ...but never wait longer than this during continuous editing
+    let pmIdbPromise = null;
+    let pmRecoveryDebounceTimer = null;
+    let pmRecoveryMaxWaitTimer = null;
+    let pmRecoveryBootHandled = false;
+
+    function pmOpenIdb() {
+      if (pmIdbPromise) return pmIdbPromise;
+      pmIdbPromise = new Promise((resolve) => {
+        if (!window.indexedDB) { resolve(null); return; }
+        try {
+          const req = indexedDB.open(PM_IDB_NAME, PM_IDB_VERSION);
+          req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains(PM_RECOVERY_STORE)) db.createObjectStore(PM_RECOVERY_STORE, { keyPath: 'slot' });
+          };
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => resolve(null);
+          req.onblocked = () => resolve(null);
+        } catch (e) { resolve(null); }
+      });
+      return pmIdbPromise;
+    }
+
+    async function pmIdbPut(storeName, value) {
+      try {
+        const db = await pmOpenIdb();
+        if (!db) return false;
+        return await new Promise((resolve) => {
+          const tx = db.transaction(storeName, 'readwrite');
+          tx.objectStore(storeName).put(value);
+          tx.oncomplete = () => resolve(true);
+          tx.onerror = () => resolve(false);
+          tx.onabort = () => resolve(false);
+        });
+      } catch (e) { return false; }
+    }
+
+    async function pmIdbDelete(storeName, key) {
+      try {
+        const db = await pmOpenIdb();
+        if (!db) return false;
+        return await new Promise((resolve) => {
+          const tx = db.transaction(storeName, 'readwrite');
+          tx.objectStore(storeName).delete(key);
+          tx.oncomplete = () => resolve(true);
+          tx.onerror = () => resolve(false);
+        });
+      } catch (e) { return false; }
+    }
+
+    async function pmIdbGetAll(storeName) {
+      try {
+        const db = await pmOpenIdb();
+        if (!db) return [];
+        return await new Promise((resolve) => {
+          const out = [];
+          const tx = db.transaction(storeName, 'readonly');
+          const req = tx.objectStore(storeName).openCursor();
+          req.onsuccess = () => {
+            const cur = req.result;
+            if (cur) { out.push(cur.value); cur.continue(); } else resolve(out);
+          };
+          req.onerror = () => resolve(out);
+        });
+      } catch (e) { return []; }
+    }
+
+    // --- Crash recovery ---------------------------------------------------
+
+    function pmRecoverySlotId() {
+      if (typeof pmTabsEnabled === 'function' && pmTabsEnabled() && pmActiveId != null) {
+        return 'tab:' + pmActiveId;
+      }
+      return PM_RECOVERY_SLOT;
+    }
+
+    async function pmWriteRecoverySnapshot(slot) {
+      if (!pdfDoc || docHistoryIndex < 0 || !docHistory[docHistoryIndex]) return;
+      const snap = docHistory[docHistoryIndex];
+      if (!snap.pdfBytes || !snap.pdfBytes.length) return;
+      const thumb = (snap.pages && snap.pages[0] && snap.pages[0].src) || null;
+      await pmIdbPut(PM_RECOVERY_STORE, {
+        slot,
+        fileName: currentFileName || 'document.pdf',
+        savedAt: Date.now(),
+        pageCount: snap.pages ? snap.pages.length : pdfDoc.getPageCount(),
+        pdfBytes: snap.pdfBytes,
+        thumbDataUrl: thumb
+      });
+    }
+
+    async function pmClearRecoverySnapshot(slot) {
+      await pmIdbDelete(PM_RECOVERY_STORE, slot || pmRecoverySlotId());
+    }
+
+    function pmCancelRecoveryTimers() {
+      clearTimeout(pmRecoveryDebounceTimer); pmRecoveryDebounceTimer = null;
+      clearTimeout(pmRecoveryMaxWaitTimer); pmRecoveryMaxWaitTimer = null;
+    }
+
+    function pmScheduleRecoverySnapshot() {
+      if (!window.indexedDB) return;
+      const slot = pmRecoverySlotId();
+      clearTimeout(pmRecoveryDebounceTimer);
+      pmRecoveryDebounceTimer = setTimeout(() => {
+        pmCancelRecoveryTimers();
+        pmWriteRecoverySnapshot(slot);
+      }, PM_RECOVERY_DEBOUNCE_MS);
+      if (!pmRecoveryMaxWaitTimer) {
+        pmRecoveryMaxWaitTimer = setTimeout(() => {
+          pmCancelRecoveryTimers();
+          pmWriteRecoverySnapshot(slot);
+        }, PM_RECOVERY_MAX_WAIT_MS);
+      }
+    }
+
+    // Called whenever `documentDirty` is (re)assigned - schedules/cancels the
+    // debounced snapshot. Safe to call even when nothing actually changed.
+    function pmOnDocumentDirtyChanged() {
+      if (documentDirty) {
+        pmScheduleRecoverySnapshot();
+      } else {
+        pmCancelRecoveryTimers();
+        pmClearRecoverySnapshot().catch(() => {});
+      }
+    }
+
+    // Last-chance sweep before the tab is backgrounded/closed/crashes - covers
+    // all dirty tabs at once (a debounced per-edit snapshot only tracks the
+    // currently active tab). visibilitychange fires while the page is still
+    // alive, giving the async IndexedDB write time to actually finish.
+    function pmSweepRecoveryOnHide() {
+      try {
+        if (typeof pmTabsEnabled === 'function' && pmTabsEnabled() && pmTabs.length) {
+          if (typeof pmCaptureActive === 'function' && pmActiveId != null) pmCaptureActive();
+          pmTabs.forEach(t => {
+            if (!t.dirty || t.docHistoryIndex == null || t.docHistoryIndex < 0 || !t.docHistory || !t.docHistory[t.docHistoryIndex]) return;
+            const snap = t.docHistory[t.docHistoryIndex];
+            if (!snap.pdfBytes || !snap.pdfBytes.length) return;
+            pmIdbPut(PM_RECOVERY_STORE, {
+              slot: 'tab:' + t.id,
+              fileName: t.fileName || 'document.pdf',
+              savedAt: Date.now(),
+              pageCount: snap.pages ? snap.pages.length : null,
+              pdfBytes: snap.pdfBytes,
+              thumbDataUrl: (snap.pages && snap.pages[0] && snap.pages[0].src) || null
+            });
+          });
+        } else if (documentDirty) {
+          pmWriteRecoverySnapshot(PM_RECOVERY_SLOT);
+        }
+      } catch (e) { /* best effort only */ }
+    }
+
+    // --- Boot ----------------------------------------------------------------
+
+    async function pmInitCrashRecovery() {
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') pmSweepRecoveryOnHide();
+      });
+      window.addEventListener('pagehide', pmSweepRecoveryOnHide);
+
+      if (pmRecoveryBootHandled) return;
+      pmRecoveryBootHandled = true;
+      const rows = await pmIdbGetAll(PM_RECOVERY_STORE);
+      if (!rows.length) return;
+      rows.sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0));
+      const top = rows[0];
+      const extra = rows.length - 1;
+      let dtStr = '';
+      try { dtStr = new Date(top.savedAt || Date.now()).toLocaleString('ru-RU'); } catch (e) {}
+      const msg = `Найдена несохранённая работа: <b>${escapeHtml(top.fileName || 'документ.pdf')}</b>` +
+        (top.pageCount ? ` (${top.pageCount} стр.)` : '') +
+        (dtStr ? `<br>от ${escapeHtml(dtStr)}` : '') +
+        (extra > 0 ? `<br><span style="font-size:13px;color:#888;">и ещё ${extra} несохранён${extra === 1 ? 'ный сеанс' : 'ных сеанса(ов)'}</span>` : '') +
+        `<br><br>Восстановить эту работу?`;
+      const ok = await showConfirmDialog(msg, { html: true, yesText: 'Восстановить', noText: 'Удалить' });
+      if (ok) {
+        try {
+          const file = new File([top.pdfBytes], top.fileName || 'document.pdf', { type: 'application/pdf' });
+          await pmIdbDelete(PM_RECOVERY_STORE, top.slot);
+          // Route through the tab system when it's active (desktop default) -
+          // calling loadPDF() directly would load the document without ever
+          // creating/showing a tab for it, leaving the tab bar empty.
+          if (typeof pmTabsEnabled === 'function' && pmTabsEnabled()) {
+            await pmOpenFilesAsTabs([file]);
+          } else {
+            await loadPDF(file);
+          }
+        } catch (e) {
+          console.error(e);
+          alert('Не удалось восстановить документ: ' + (e.message || e));
+        }
+      } else {
+        await pmIdbDelete(PM_RECOVERY_STORE, top.slot);
+      }
+      // Stale snapshots from other tabs/sessions beyond the one just offered
+      // aren't individually reviewable in this version - drop them too.
+      for (let i = 1; i < rows.length; i++) await pmIdbDelete(PM_RECOVERY_STORE, rows[i].slot);
+    }
+
     function formatBytes(n) {
       if (!Number.isFinite(n) || n < 0) return '—';
       if (n < 1024) return n + ' Б';
@@ -6985,6 +7203,7 @@
       if (v && !historyPushSuspended && !undoRedoBusy) scheduleHistoryPush();
       if (typeof updateInfo === 'function') updateInfo();
       if (typeof updateStickyFileBar === 'function') updateStickyFileBar();
+      if (typeof pmOnDocumentDirtyChanged === 'function') pmOnDocumentDirtyChanged();
     }
 
     function markedArraysEqual(a, b) {
@@ -7393,6 +7612,7 @@
       documentDirty = dirty;
       if (typeof updateInfo === 'function') updateInfo();
       if (typeof updateStickyFileBar === 'function') updateStickyFileBar();
+      if (typeof pmOnDocumentDirtyChanged === 'function') pmOnDocumentDirtyChanged();
     }
 
     function clearDocHistory() {
@@ -7420,6 +7640,7 @@
       documentDirty = false;
       if (typeof updateInfo === 'function') updateInfo();
       if (typeof updateStickyFileBar === 'function') updateStickyFileBar();
+      if (typeof pmOnDocumentDirtyChanged === 'function') pmOnDocumentDirtyChanged();
       updateUndoRedoUI();
     }
 
@@ -19994,6 +20215,7 @@ async function pmCloseTab(id) {
       { html: true, yesText: 'Закрыть', noText: 'Отмена' });
     if (!ok) return;
   }
+  if (typeof pmClearRecoverySnapshot === 'function') pmClearRecoverySnapshot('tab:' + id).catch(() => {});
   pmTabs.splice(idx, 1);
   pmSelectedTabIds.delete(id);
   if (isActive) {
@@ -20944,6 +21166,7 @@ window.addEventListener('resize', () => { pmRenderBar(); });
 // Starting state: The tab bar is hidden while no document is open.
 pmSyncLayout();
 initBeforeUnloadGuard();
+if (typeof pmInitCrashRecovery === 'function') pmInitCrashRecovery();
 
 // ═══════════════════════════════════════════════════════════════════════
 // SEARCH BY DOCUMENT TEXT (Ctrl+F) - replaces the standard browser search.
@@ -24333,6 +24556,7 @@ function editSelectedPage() {
         if (typeof documentDirty !== 'undefined') documentDirty = true;
         if (typeof updateInfo === 'function') updateInfo();
         if (typeof updateStickyFileBar === 'function') updateStickyFileBar();
+        if (typeof pmOnDocumentDirtyChanged === 'function') pmOnDocumentDirtyChanged();
       } else {
         historyChangeHint = [pageIdx];
         if (typeof setDocumentDirty === 'function') setDocumentDirty(true);
@@ -24420,6 +24644,7 @@ function editSelectedPage() {
         if (typeof documentDirty !== 'undefined') documentDirty = true;
         if (typeof updateInfo === 'function') updateInfo();
         if (typeof updateStickyFileBar === 'function') updateStickyFileBar();
+        if (typeof pmOnDocumentDirtyChanged === 'function') pmOnDocumentDirtyChanged();
       } else {
         historyChangeHint = [pageIdx];
         if (typeof setDocumentDirty === 'function') setDocumentDirty(true);
