@@ -37440,8 +37440,10 @@ async function peBuildRegionalRedactedPage(doc, pageIdx) {
     return null;
   }
   if (!scrub || scrub.inkHit || scrub.unresolved) {
-    console.warn('peBuildRegionalRedactedPage: page ' + (pageIdx + 1) +
-      ' needs full raster (' + (scrub && scrub.inkHit ? 'ink under box' : 'unsupported content') + ')');
+    const why = (scrub && scrub.reasons && scrub.reasons.length)
+      ? scrub.reasons.join('; ')
+      : (scrub && scrub.inkHit ? 'ink under box' : 'unsupported content');
+    console.warn('peBuildRegionalRedactedPage: page ' + (pageIdx + 1) + ' needs full raster: ' + why);
     return null;
   }
 
@@ -38101,6 +38103,7 @@ function peScrubEngineParse(src, ctx) {
   let unresolved = false;
   const formHits = new Map(); // name -> [ctm, ...]
   const removedBoxes = [];    // norm AABBs of every glyph actually removed
+  const reasons = new Set();  // human-readable fallback reasons (diagnostics)
 
   // numeric operands pending before an operator, with raw byte ranges and
   // the out-position before each was emitted (so " can be rewritten).
@@ -38209,6 +38212,15 @@ function peScrubEngineParse(src, ctx) {
     const w = Math.max(0, Math.min(1, b.maxX) - Math.max(0, b.minX));
     const h = Math.max(0, Math.min(1, b.maxY) - Math.max(0, b.minY));
     if (w * h >= 0.88) return; // page-scale background
+    // The confirmed cover rectangles themselves: a fill whose AABB matches
+    // the CORE of any box is one of ours — ignore it entirely, otherwise
+    // box #1 registers as "ink" inside the padded area of a nearby box #2.
+    const tol = 0.006;
+    for (let k = 0; k < rects.length; k++) {
+      const core = rects[k].core || rects[k];
+      if (Math.abs(b.minX - core.minX) <= tol && Math.abs(b.maxX - core.maxX) <= tol &&
+          Math.abs(b.minY - core.minY) <= tol && Math.abs(b.maxY - core.maxY) <= tol) return;
+    }
     for (let k = 0; k < rects.length; k++) {
       const r = rects[k];
       if (b.maxX < r.minX || b.minX > r.maxX || b.maxY < r.minY || b.minY > r.maxY) continue;
@@ -38219,6 +38231,7 @@ function peScrubEngineParse(src, ctx) {
       if (containsCore && !strokeOnly) continue;
       if (strokeOnly && Math.min(b.maxX - b.minX, b.maxY - b.minY) <= 0.006) continue;
       inkHit = true;
+      reasons.add((strokeOnly ? 'stroked path' : 'filled path') + ' under box');
       return;
     }
   }
@@ -38392,6 +38405,9 @@ function peScrubEngineParse(src, ctx) {
           textHit = true;
           if (!exact || !xReliable || opHadEstimate || fs * hScale <= 1e-6) {
             opBlocked = true;
+            reasons.add(!exact
+              ? 'no glyph widths for font /' + (curFontName || '?') + ' near box'
+              : 'unreliable text position near box (font /' + (curFontName || '?') + ')');
           } else if (!ctx.collect) {
             removedAny = true;
             pendingComp += adv;
@@ -38475,7 +38491,7 @@ function peScrubEngineParse(src, ctx) {
       const nb = userAabbToNorm(
         Math.min(c[0].x, c[1].x, c[2].x, c[3].x), Math.min(c[0].y, c[1].y, c[2].y, c[3].y),
         Math.max(c[0].x, c[1].x, c[2].x, c[3].x), Math.max(c[0].y, c[1].y, c[2].y, c[3].y));
-      if (boxHitsAnyRect(nb)) inkHit = true;
+      if (boxHitsAnyRect(nb)) { inkHit = true; reasons.add('inline image under box'); }
     }
   }
 
@@ -38555,7 +38571,7 @@ function peScrubEngineParse(src, ctx) {
           const nb = userAabbToNorm(
             Math.min(c[0].x, c[1].x, c[2].x, c[3].x), Math.min(c[0].y, c[1].y, c[2].y, c[3].y),
             Math.max(c[0].x, c[1].x, c[2].x, c[3].x), Math.max(c[0].y, c[1].y, c[2].y, c[3].y));
-          if (boxHitsAnyRect(nb)) inkHit = true;
+          if (boxHitsAnyRect(nb)) { inkHit = true; reasons.add('image /' + lastName + ' under box'); }
         } else if (info.kind === 'form') {
           const list = formHits.get(lastName) || [];
           list.push(ctm.slice());
@@ -38609,7 +38625,7 @@ function peScrubEngineParse(src, ctx) {
     if (matchOp('W')) { i += 1; emitRange(i - 1, i); resetNums(); continue; }
     if (matchOp('sh')) {
       // Shading paints the current clip region, which we do not track.
-      if (rects.length) inkHit = true;
+      if (rects.length) { inkHit = true; reasons.add('sh shading present'); }
       i += 2; emitRange(i - 2, i); resetNums(); continue;
     }
 
@@ -38750,7 +38766,8 @@ function peScrubEngineParse(src, ctx) {
 
   return {
     bytes: changed ? new Uint8Array(out) : src,
-    changed, textHit, inkHit, unresolved, formHits, removedBoxes
+    changed, textHit, inkHit, unresolved, formHits, removedBoxes,
+    reasons: Array.from(reasons)
   };
 }
 
@@ -38758,15 +38775,16 @@ function peScrubEngineParse(src, ctx) {
 // there cannot be scrubbed in place, any ink is a leak — both mean fallback.
 async function peCollectNestedFormInk(doc, xobjects, formHits, base, depth, visited) {
   let inkHit = false, unresolved = false;
-  if (!formHits || !formHits.size) return { inkHit, unresolved };
-  if (depth <= 0) return { inkHit, unresolved: true };
+  const reasons = new Set();
+  if (!formHits || !formHits.size) return { inkHit, unresolved, reasons: [] };
+  if (depth <= 0) return { inkHit, unresolved: true, reasons: ['form nesting too deep'] };
   for (const [name, ctms] of formHits) {
     const info = xobjects.get(name);
     if (!info || info.kind !== 'form') continue;
-    if (visited.has(info.stream)) { unresolved = true; continue; }
+    if (visited.has(info.stream)) { unresolved = true; reasons.add('recursive form /' + name); continue; }
     visited.add(info.stream);
     const bytes = peDecodePdfStreamBytes(info.stream);
-    if (!bytes) { unresolved = true; visited.delete(info.stream); continue; }
+    if (!bytes) { unresolved = true; reasons.add('undecodable form /' + name); visited.delete(info.stream); continue; }
     const res = info.resources || base.parentResources;
     const metrics = await peBuildStreamFontMetrics(doc, res);
     const xo = peBuildStreamXObjects(doc, res);
@@ -38779,18 +38797,20 @@ async function peCollectNestedFormInk(doc, xobjects, formHits, base, depth, visi
           rects: base.rects, rot: base.rot, cb: base.cb,
           metrics, xobjects: xo, initialCtm: ctmEff, collect: true
         });
-      } catch (_) { unresolved = true; continue; }
-      if (r.textHit) unresolved = true;
+      } catch (_) { unresolved = true; reasons.add('nested form /' + name + ' parse failed'); continue; }
+      if (r.textHit) { unresolved = true; reasons.add('text under box inside nested form /' + name); }
       if (r.inkHit) inkHit = true;
       if (r.unresolved) unresolved = true;
+      (r.reasons || []).forEach(x => reasons.add(x));
       const nested = await peCollectNestedFormInk(doc, xo, r.formHits,
         Object.assign({}, base, { parentResources: res }), depth - 1, visited);
       if (nested.inkHit) inkHit = true;
       if (nested.unresolved) unresolved = true;
+      (nested.reasons || []).forEach(x => reasons.add(x));
     }
     visited.delete(info.stream);
   }
-  return { inkHit, unresolved };
+  return { inkHit, unresolved, reasons: Array.from(reasons) };
 }
 
 // Scrub every glyph that touches one of `rects` (visual-norm, padded, with
@@ -38806,7 +38826,7 @@ async function peScrubPageRegionsInDoc(doc, pageIdx, rects) {
   const metrics = await peBuildStreamFontMetrics(doc, pageRes);
   const xobjects = peBuildStreamXObjects(doc, pageRes);
   const content = peGetPageContentBytes(doc, page);
-  if (!content) return { changed: false, inkHit: false, unresolved: true };
+  if (!content) return { changed: false, inkHit: false, unresolved: true, reasons: ['page content undecodable'] };
 
   const base = { rects, rot, cb };
   const res = peScrubEngineParse(content, {
@@ -38816,6 +38836,7 @@ async function peScrubPageRegionsInDoc(doc, pageIdx, rects) {
   let inkHit = res.inkHit;
   let unresolved = res.unresolved;
   const removedBoxes = (res.removedBoxes || []).slice();
+  const reasons = new Set(res.reasons || []);
 
   // Top-level forms: rewrite only forms invoked exactly once from this page
   // (a rewritten form is cloned, so shared use from other pages is safe, but
@@ -38825,7 +38846,7 @@ async function peScrubPageRegionsInDoc(doc, pageIdx, rects) {
     const info = xobjects.get(name);
     if (!info || info.kind !== 'form') continue;
     const formBytes = peDecodePdfStreamBytes(info.stream);
-    if (!formBytes) { unresolved = true; continue; }
+    if (!formBytes) { unresolved = true; reasons.add('undecodable form /' + name); continue; }
     const formRes = info.resources || pageRes;
     const fMetrics = await peBuildStreamFontMetrics(doc, formRes);
     const fXobjects = peBuildStreamXObjects(doc, formRes);
@@ -38842,15 +38863,18 @@ async function peScrubPageRegionsInDoc(doc, pageIdx, rects) {
       } catch (err) {
         console.warn('peScrubPageRegionsInDoc: form parse failed', err);
         unresolved = true;
+        reasons.add('form /' + name + ' parse failed');
         continue;
       }
       if (fRes.inkHit) inkHit = true;
       if (fRes.unresolved) unresolved = true;
-      if (collectOnly && fRes.textHit) unresolved = true;
+      (fRes.reasons || []).forEach(x => reasons.add(x));
+      if (collectOnly && fRes.textHit) { unresolved = true; reasons.add('form /' + name + ' used ' + ctms.length + 'x with text under box'); }
       const nested = await peCollectNestedFormInk(doc, fXobjects, fRes.formHits,
         Object.assign({}, base, { parentResources: formRes }), 4, new Set([info.stream]));
       if (nested.inkHit) inkHit = true;
       if (nested.unresolved) unresolved = true;
+      (nested.reasons || []).forEach(x => reasons.add(x));
       if (!collectOnly && fRes.changed && !fRes.unresolved) {
         // clone-on-write: fresh form stream + this page's own resources copy
         if (!clonedXoDict) {
@@ -38873,7 +38897,7 @@ async function peScrubPageRegionsInDoc(doc, pageIdx, rects) {
     page.node.set(PDFLib.PDFName.of('Contents'), newRef);
     changed = true;
   }
-  return { changed, inkHit, unresolved, removedBoxes };
+  return { changed, inkHit, unresolved, removedBoxes, reasons: Array.from(reasons) };
 }
 
 
