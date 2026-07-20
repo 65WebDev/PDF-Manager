@@ -17348,6 +17348,29 @@
     }
 
     // pdfBytes → per-page array of lines, each line an array of cell strings.
+    // Renders a page to PNG (with the page's own point-size, for DOCX image
+    // sizing) - used as the fallback for pages with NO extractable text at
+    // all (typically a scan): without this, such a page silently produced
+    // an empty paragraph/sheet and the exported file looked entirely blank,
+    // which was indistinguishable from "export is broken".
+    async function peRenderPdfPageToPngBytes(pjPage) {
+      const vp1 = pjPage.getViewport({ scale: 1 });
+      const S = Math.min(2.5, Math.max(1, 1500 / Math.max(vp1.width, vp1.height)));
+      const vp = pjPage.getViewport({ scale: S });
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.ceil(vp.width));
+      canvas.height = Math.max(1, Math.ceil(vp.height));
+      const ctx = canvas.getContext('2d');
+      await pjPage.render({ canvasContext: ctx, viewport: vp, annotationMode: 0 }).promise;
+      const b64 = canvas.toDataURL('image/png').split(',')[1];
+      const bin = atob(b64);
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return { bytes, widthPt: vp1.width, heightPt: vp1.height };
+    }
+
+    // pdfBytes → per-page { cells, png, widthPt, heightPt }. `png` is only
+    // set when the page has no extractable text at all (cells is then []).
     async function peBuildPagesCellData(pdfBytes) {
       const doc = await pdfjsLib.getDocument({ data: pdfBytes.slice() }).promise;
       try {
@@ -17355,7 +17378,13 @@
         for (let i = 1; i <= doc.numPages; i++) {
           const pjPage = await doc.getPage(i);
           const lines = await peExtractPageLines(pjPage);
-          pages.push(lines.map(peLineToCells));
+          const cells = lines.map(peLineToCells);
+          if (cells.length) {
+            pages.push({ cells, png: null, widthPt: 0, heightPt: 0 });
+          } else {
+            const rendered = await peRenderPdfPageToPngBytes(pjPage);
+            pages.push({ cells: [], png: rendered.bytes, widthPt: rendered.widthPt, heightPt: rendered.heightPt });
+          }
         }
         return pages;
       } finally {
@@ -17370,15 +17399,65 @@
     // Hand-rolled minimal .docx (OOXML is just a zip of XML parts) - one
     // paragraph per detected line, cells within a line joined back with
     // double spaces so columns stay roughly visible as plain text, explicit
-    // page breaks between source PDF pages. Uses JSZip, already bundled for
-    // DOCX import.
-    async function peBuildDocxBytes(pagesOfCellRows) {
+    // page breaks between source PDF pages. Pages with no extractable text
+    // (pg.png set - see peBuildPagesCellData) are inserted as a picture
+    // instead of being left blank, with a short note underneath. Uses
+    // JSZip, already bundled for DOCX import.
+    async function peBuildDocxBytes(pages) {
       const zip = new JSZip();
+      const EMU_PER_PT = 12700;
+      const PRINTABLE_EMU_W = (11906 - 1701 - 850) * 635; // page width minus L/R margins, twips→EMU
+      const imageRels = [];
+      let imgCounter = 0;
+
+      const body = [];
+      pages.forEach((pg, pageIdx) => {
+        if (pageIdx > 0) body.push('<w:p><w:r><w:br w:type="page"/></w:r></w:p>');
+
+        if (pg.png) {
+          imgCounter++;
+          const rId = 'rIdImg' + imgCounter;
+          imageRels.push({ rId, fileName: 'image' + imgCounter + '.png', bytes: pg.png });
+          let w = pg.widthPt * EMU_PER_PT, h = pg.heightPt * EMU_PER_PT;
+          if (w > PRINTABLE_EMU_W) { const k = PRINTABLE_EMU_W / w; w *= k; h *= k; }
+          w = Math.round(w); h = Math.round(h);
+          body.push(
+            '<w:p><w:r><w:drawing ' +
+            'xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" ' +
+            'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" ' +
+            'xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" ' +
+            'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' +
+            '<wp:inline distT="0" distB="0" distL="0" distR="0">' +
+            '<wp:extent cx="' + w + '" cy="' + h + '"/>' +
+            '<wp:docPr id="' + imgCounter + '" name="Picture ' + imgCounter + '"/>' +
+            '<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>' +
+            '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">' +
+            '<pic:pic><pic:nvPicPr><pic:cNvPr id="' + imgCounter + '" name="Picture ' + imgCounter + '"/><pic:cNvPicPr/></pic:nvPicPr>' +
+            '<pic:blipFill><a:blip r:embed="' + rId + '"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>' +
+            '<pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="' + w + '" cy="' + h + '"/></a:xfrm>' +
+            '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>' +
+            '</pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>'
+          );
+          body.push('<w:p><w:r><w:t xml:space="preserve">[Страница без текстового слоя — похоже на скан; ' +
+            'вставлена как картинка, текст не распознан. Для распознавания нужен OCR.]</w:t></w:r></w:p>');
+          return;
+        }
+
+        if (!pg.cells.length) { body.push('<w:p/>'); return; }
+        pg.cells.forEach(cells => {
+          const text = cells.join('  ').trim();
+          body.push(text
+            ? '<w:p><w:r><w:t xml:space="preserve">' + peXmlEscape(text) + '</w:t></w:r></w:p>'
+            : '<w:p/>');
+        });
+      });
+
       zip.file('[Content_Types].xml',
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
         '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
         '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
         '<Default Extension="xml" ContentType="application/xml"/>' +
+        (imageRels.length ? '<Default Extension="png" ContentType="image/png"/>' : '') +
         '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
         '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>' +
         '</Types>');
@@ -17391,6 +17470,9 @@
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
         '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
         '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' +
+        imageRels.map(r => '<Relationship Id="' + r.rId +
+          '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/' +
+          r.fileName + '"/>').join('') +
         '</Relationships>');
       zip.file('word/styles.xml',
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
@@ -17398,18 +17480,7 @@
         '<w:docDefaults><w:rPrDefault><w:rPr><w:sz w:val="22"/></w:rPr></w:rPrDefault></w:docDefaults>' +
         '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>' +
         '</w:styles>');
-
-      const body = [];
-      pagesOfCellRows.forEach((lines, pageIdx) => {
-        if (pageIdx > 0) body.push('<w:p><w:r><w:br w:type="page"/></w:r></w:p>');
-        if (!lines.length) { body.push('<w:p/>'); return; }
-        lines.forEach(cells => {
-          const text = cells.join('  ').trim();
-          body.push(text
-            ? '<w:p><w:r><w:t xml:space="preserve">' + peXmlEscape(text) + '</w:t></w:r></w:p>'
-            : '<w:p/>');
-        });
-      });
+      imageRels.forEach(r => zip.file('word/media/' + r.fileName, r.bytes));
 
       const documentXml =
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
@@ -17424,10 +17495,14 @@
     }
 
     // One worksheet per PDF page (SheetJS, already bundled for XLSX import).
-    function peBuildXlsxBytes(pagesOfCellRows) {
+    // Pages with no extractable text (scans) get a one-cell note instead of
+    // a silently blank sheet - XLSX has no good place to put the actual
+    // page image, so this at least explains why the sheet is empty.
+    function peBuildXlsxBytes(pages) {
       const wb = XLSX.utils.book_new();
-      pagesOfCellRows.forEach((lines, pageIdx) => {
-        const aoa = lines.length ? lines : [['']];
+      pages.forEach((pg, pageIdx) => {
+        const aoa = pg.cells.length ? pg.cells
+          : [[pg.png ? '[Страница без текстового слоя — похоже на скан. Для таблиц нужен OCR.]' : '']];
         const ws = XLSX.utils.aoa_to_sheet(aoa);
         let name = ('Стр. ' + (pageIdx + 1)).replace(/[:\\/?*[\]]/g, '').slice(0, 31);
         XLSX.utils.book_append_sheet(wb, ws, name || ('Sheet' + (pageIdx + 1)));
@@ -17476,9 +17551,12 @@
       if (indicesToExport.length === 0) return;
       const suggestedName = buildExportFileName(indicesToExport).replace(/\.pdf$/i, '.docx');
       showLoading('Экспорт в DOCX (эксперимент)…');
+      let scannedCount = 0, totalCount = 0;
       try {
         const pdfBytes = await buildExportPdfBytes(indicesToExport);
         const pages = await peBuildPagesCellData(pdfBytes);
+        totalCount = pages.length;
+        scannedCount = pages.filter(p => p.png).length;
         const bytes = await peBuildDocxBytes(pages);
         await peSaveExportedBytes(bytes, suggestedName, 'Word документ',
           'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
@@ -17486,8 +17564,14 @@
         if (e && e.name === 'AbortError') { hideLoading(); return; }
         console.error(e);
         alert('Ошибка при экспорте в DOCX');
+        hideLoading();
+        return;
       }
       hideLoading();
+      if (scannedCount) {
+        alert(scannedCount + ' из ' + totalCount + ' стр. без текстового слоя (похоже на скан) — ' +
+          'вставлены в DOCX как картинки, без текста для редактирования. Для распознавания текста нужен OCR.');
+      }
     }
 
     async function exportSelectedPagesAsXlsx() {
@@ -17496,9 +17580,12 @@
       if (indicesToExport.length === 0) return;
       const suggestedName = buildExportFileName(indicesToExport).replace(/\.pdf$/i, '.xlsx');
       showLoading('Экспорт в XLSX (эксперимент)…');
+      let scannedCount = 0, totalCount = 0;
       try {
         const pdfBytes = await buildExportPdfBytes(indicesToExport);
         const pages = await peBuildPagesCellData(pdfBytes);
+        totalCount = pages.length;
+        scannedCount = pages.filter(p => p.png).length;
         const bytes = peBuildXlsxBytes(pages);
         await peSaveExportedBytes(bytes, suggestedName, 'Excel таблица',
           'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -17506,8 +17593,14 @@
         if (e && e.name === 'AbortError') { hideLoading(); return; }
         console.error(e);
         alert('Ошибка при экспорте в XLSX');
+        hideLoading();
+        return;
       }
       hideLoading();
+      if (scannedCount) {
+        alert(scannedCount + ' из ' + totalCount + ' стр. без текстового слоя (похоже на скан) — ' +
+          'таблица для них не распознана. Для распознавания текста нужен OCR.');
+      }
     }
 
     // Printing only the selected pages - the same scheme as printPDF(), but we take
