@@ -89,14 +89,17 @@
     <div class="actions">
       <a class="btn btn-primary" href="PDF_manager_online.html">Открыть онлайн</a>
       <a class="btn btn-secondary" id="downloadBtn" href="https://github.com/5451165-bot/PDF-Manager/releases/latest/download/PDF_manager_online.html">
-        Скачать последнюю версию
+        Скачать онлайн-версию
+      </a>
+      <a class="btn btn-secondary" id="downloadOfflineBtn" href="https://github.com/5451165-bot/PDF-Manager/releases/latest/download/PDF_manager_offline.html">
+        Скачать офлайн-версию
       </a>
     </div>
 
     <div class="meta" id="versionInfo">Загрузка информации о версии…</div>
 
     <p class="hint">
-      После скачивания откройте файл двойным щелчком. Интернет нужен только для загрузки библиотек при первом запуске.
+      После скачивания откройте файл двойным щелчком. Онлайн-версия подгружает библиотеки из интернета; офлайн-версия работает полностью без сети.
     </p>
   </main>
 
@@ -104,11 +107,13 @@
     (async function () {
       const el = document.getElementById('versionInfo');
       const downloadBtn = document.getElementById('downloadBtn');
+      const downloadOfflineBtn = document.getElementById('downloadOfflineBtn');
       try {
         const res = await fetch('version.json', { cache: 'no-store' });
         if (!res.ok) throw new Error('no version');
         const v = await res.json();
         if (v.downloadUrl) downloadBtn.href = v.downloadUrl;
+        if (v.offlineDownloadUrl) downloadOfflineBtn.href = v.offlineDownloadUrl;
         const date = v.date ? new Date(v.date).toLocaleString('ru-RU') : '—';
         el.innerHTML =
           '<strong>Текущая сборка:</strong> ' + (v.build || '—') +

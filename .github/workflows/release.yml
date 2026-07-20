@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - 'PDF_manager_online.html'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'scripts/**'
       - '.github/workflows/release.yml'
   workflow_dispatch:
 
@@ -16,6 +19,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install build dependencies
+        run: npm ci
+
+      - name: Build offline HTML
+        run: npm run build:offline
 
       - name: Generate version info
         run: |
@@ -30,7 +44,8 @@ jobs:
             "commit": "${{ github.sha }}",
             "shortCommit": "${SHORT_SHA}",
             "date": "${DATE}",
-            "downloadUrl": "https://github.com/${{ github.repository }}/releases/latest/download/PDF_manager_online.html"
+            "downloadUrl": "https://github.com/${{ github.repository }}/releases/latest/download/PDF_manager_online.html",
+            "offlineDownloadUrl": "https://github.com/${{ github.repository }}/releases/latest/download/PDF_manager_offline.html"
           }
           EOF
           cat > release-notes.md <<EOF
@@ -41,7 +56,8 @@ jobs:
           - **Дата:** ${DATE_HUMAN}
 
           ### Скачать
-          Нажмите на файл \`PDF_manager_online.html\` ниже или используйте [прямую ссылку](https://github.com/${{ github.repository }}/releases/latest/download/PDF_manager_online.html).
+          - **Онлайн-версия** (\`PDF_manager_online.html\`) — компактный файл, библиотеки подгружаются из CDN при первом запуске. [Прямая ссылка](https://github.com/${{ github.repository }}/releases/latest/download/PDF_manager_online.html)
+          - **Офлайн-версия** (\`PDF_manager_offline.html\`) — все библиотеки встроены в файл, интернет не нужен. [Прямая ссылка](https://github.com/${{ github.repository }}/releases/latest/download/PDF_manager_offline.html)
           EOF
 
       - name: Create GitHub Release
@@ -52,5 +68,6 @@ jobs:
           body_path: release-notes.md
           files: |
             PDF_manager_online.html
+            PDF_manager_offline.html
             version.json
           generate_release_notes: true
