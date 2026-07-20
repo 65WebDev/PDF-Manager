@@ -17289,20 +17289,13 @@
 
     // Groups a page's text items into reading-order lines (by Y proximity)
     // - shared analysis behind both exporters.
-    async function peExtractPageLines(pjPage) {
-      const vp = pjPage.getViewport({ scale: 1 });
-      const tc = await pjPage.getTextContent();
-      const items = [];
-      for (const it of tc.items) {
-        if (!it.str || !it.str.trim() || !it.transform) continue;
-        const pt = vp.convertToViewportPoint(it.transform[4], it.transform[5]);
-        const w = Math.max(0, Number(it.width) || 0);
-        const h = Number(it.height) || Math.hypot(it.transform[2], it.transform[3]) || 10;
-        items.push({ str: it.str, x: pt[0], y: pt[1], w, h });
-      }
+    // Shared by the PDF-text path (peExtractPageLines) and the OCR path
+    // (peOcrPagesToLines) - groups arbitrary {str,x,y,w,h} items (glyph runs
+    // or OCR word boxes, both top-down pixel/point space) into reading-order
+    // lines by Y proximity.
+    function peGroupItemsIntoLines(items) {
       items.sort((a, b) => a.y - b.y || a.x - b.x);
-
-      const LINE_TOL = 0.55; // fraction of glyph height allowed before starting a new line
+      const LINE_TOL = 0.55; // fraction of item height allowed before starting a new line
       const lines = [];
       for (const it of items) {
         const line = lines.length ? lines[lines.length - 1] : null;
@@ -17316,6 +17309,20 @@
       }
       lines.forEach(line => line.items.sort((a, b) => a.x - b.x));
       return lines;
+    }
+
+    async function peExtractPageLines(pjPage) {
+      const vp = pjPage.getViewport({ scale: 1 });
+      const tc = await pjPage.getTextContent();
+      const items = [];
+      for (const it of tc.items) {
+        if (!it.str || !it.str.trim() || !it.transform) continue;
+        const pt = vp.convertToViewportPoint(it.transform[4], it.transform[5]);
+        const w = Math.max(0, Number(it.width) || 0);
+        const h = Number(it.height) || Math.hypot(it.transform[2], it.transform[3]) || 10;
+        items.push({ str: it.str, x: pt[0], y: pt[1], w, h });
+      }
+      return peGroupItemsIntoLines(items);
     }
 
     // Splits one line into cells using the gaps between glyph runs - a gap
@@ -17394,6 +17401,72 @@
 
     function peXmlEscape(s) {
       return String(s).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+    }
+
+    // ─── Optional OCR for scanned pages (DOCX/XLSX export) ─────────────────
+    // Not part of the app's normal library set - Tesseract.js (~65KB) plus
+    // its WASM core (~3MB) and per-language data (~1-4MB each) are only
+    // fetched from jsdelivr the first time OCR is actually used, so pages
+    // that never touch this feature pay nothing for it. This also means OCR
+    // needs internet even in the offline build - there is currently no
+    // bundled/embedded alternative (unlike every other library in this app).
+    let peTesseractLibPromise = null;
+    function peLoadTesseract() {
+      if (window.Tesseract) return Promise.resolve(window.Tesseract);
+      if (!peTesseractLibPromise) {
+        peTesseractLibPromise = new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js';
+          s.onload = () => (window.Tesseract ? resolve(window.Tesseract) : reject(new Error('Tesseract.js failed to initialize')));
+          s.onerror = () => reject(new Error('Не удалось загрузить библиотеку OCR (нет соединения с интернетом?)'));
+          document.head.appendChild(s);
+        }).catch(err => { peTesseractLibPromise = null; throw err; });
+      }
+      return peTesseractLibPromise;
+    }
+
+    // Runs OCR (Russian+English) over every page still marked as scanned
+    // (pg.png set, see peBuildPagesCellData) and replaces its `cells` with
+    // the recognized text when Tesseract actually found something - one
+    // worker is reused across all pages in the batch. Pages where OCR finds
+    // nothing keep the existing image+note fallback untouched.
+    async function peOcrPagesToLines(pages, onProgress) {
+      const scannedIdx = [];
+      pages.forEach((p, i) => { if (p.png) scannedIdx.push(i); });
+      if (!scannedIdx.length) return { recognizedCount: 0 };
+
+      const Tesseract = await peLoadTesseract();
+      const worker = await Tesseract.createWorker('rus+eng', 1, {
+        logger: (m) => {
+          if (onProgress && m && m.status === 'recognizing text') onProgress(m.progress || 0);
+        }
+      });
+      let recognizedCount = 0;
+      try {
+        for (let k = 0; k < scannedIdx.length; k++) {
+          const idx = scannedIdx[k];
+          if (onProgress) onProgress(0, k + 1, scannedIdx.length);
+          const blob = new Blob([pages[idx].png], { type: 'image/png' });
+          const { data } = await worker.recognize(blob);
+          const items = (data.words || [])
+            .filter(w => w && w.text && w.text.trim() && w.bbox)
+            .map(w => ({
+              str: w.text,
+              x: w.bbox.x0,
+              y: (w.bbox.y0 + w.bbox.y1) / 2,
+              w: Math.max(1, w.bbox.x1 - w.bbox.x0),
+              h: Math.max(1, w.bbox.y1 - w.bbox.y0)
+            }));
+          const cells = peGroupItemsIntoLines(items).map(peLineToCells);
+          if (cells.length) {
+            pages[idx] = { cells, png: null, widthPt: 0, heightPt: 0 };
+            recognizedCount++;
+          }
+        }
+      } finally {
+        try { await worker.terminate(); } catch (_) {}
+      }
+      return { recognizedCount };
     }
 
     // Hand-rolled minimal .docx (OOXML is just a zip of XML parts) - one
@@ -17545,18 +17618,68 @@
       }
     }
 
+    // Shown once per export when scanned pages are found; on acceptance runs
+    // OCR IN PLACE on `pages` (replacing .cells for whatever it managed to
+    // recognize) and reports how it went. Declining, or OCR itself failing
+    // (e.g. no internet), just leaves the existing image+note fallback -
+    // never blocks the export.
+    async function peOfferOcrForScans(pages) {
+      const scannedBefore = pages.filter(p => p.png).length;
+      if (!scannedBefore) return { scannedBefore: 0, recognizedCount: 0, declined: false };
+
+      hideLoading();
+      const proceed = await showConfirmDialog(
+        scannedBefore + ' из ' + pages.length + ' стр. без текстового слоя (похоже на скан).<br>' +
+        'Попробовать распознать текст (OCR, рус+англ)?<br>' +
+        '<span style="font-size:12px;color:#888;font-weight:normal;">Требуется интернет — первый запуск ' +
+        'скачивает библиотеку и языковые модели (~10‑15 МБ) и может занять время.</span>',
+        { yesText: 'Распознать (OCR)', noText: 'Без OCR', html: true }
+      );
+      if (!proceed) return { scannedBefore, recognizedCount: 0, declined: true };
+
+      showLoading('Загрузка библиотеки OCR…');
+      try {
+        const res = await peOcrPagesToLines(pages, (progress, pageNum, pageTotal) => {
+          if (pageNum) {
+            showLoading('OCR: страница ' + pageNum + ' из ' + pageTotal +
+              (progress ? ' (' + Math.round(progress * 100) + '%)' : '…'));
+          }
+        });
+        return { scannedBefore, recognizedCount: res.recognizedCount, declined: false };
+      } catch (e) {
+        console.error(e);
+        alert('OCR не удалось выполнить: ' + (e && e.message || e) + '\nПродолжаю без распознавания.');
+        return { scannedBefore, recognizedCount: 0, declined: false, failed: true };
+      }
+    }
+
+    function peSummarizeOcrResult(ocrInfo, totalCount, forXlsx) {
+      if (ocrInfo.recognizedCount) {
+        const stillScanned = ocrInfo.scannedBefore - ocrInfo.recognizedCount;
+        return 'OCR распознал текст на ' + ocrInfo.recognizedCount + ' из ' + ocrInfo.scannedBefore + ' скан-стр.' +
+          (stillScanned ? ' Ещё ' + stillScanned + ' — без результата' +
+            (forXlsx ? ', оставлены пустыми с пометкой.' : ', вставлены как картинки.') : '');
+      }
+      if (!ocrInfo.scannedBefore) return null;
+      const base = ocrInfo.scannedBefore + ' из ' + totalCount + ' стр. без текстового слоя (похоже на скан) — ' +
+        (forXlsx ? 'таблица для них не распознана.' : 'вставлены как картинки, без текста для редактирования.');
+      return base + (ocrInfo.declined ? '' : ocrInfo.failed ? '' : ' OCR не смог ничего распознать.');
+    }
+
     async function exportSelectedPagesAsDocx() {
       if (isLoading || selectedPages.size === 0) return;
       const indicesToExport = getExportSelectedIndices();
       if (indicesToExport.length === 0) return;
       const suggestedName = buildExportFileName(indicesToExport).replace(/\.pdf$/i, '.docx');
       showLoading('Экспорт в DOCX (эксперимент)…');
-      let scannedCount = 0, totalCount = 0;
+      let ocrInfo = { scannedBefore: 0, recognizedCount: 0, declined: false };
+      let totalCount = 0;
       try {
         const pdfBytes = await buildExportPdfBytes(indicesToExport);
         const pages = await peBuildPagesCellData(pdfBytes);
         totalCount = pages.length;
-        scannedCount = pages.filter(p => p.png).length;
+        ocrInfo = await peOfferOcrForScans(pages);
+        showLoading('Экспорт в DOCX (эксперимент)…');
         const bytes = await peBuildDocxBytes(pages);
         await peSaveExportedBytes(bytes, suggestedName, 'Word документ',
           'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
@@ -17568,10 +17691,8 @@
         return;
       }
       hideLoading();
-      if (scannedCount) {
-        alert(scannedCount + ' из ' + totalCount + ' стр. без текстового слоя (похоже на скан) — ' +
-          'вставлены в DOCX как картинки, без текста для редактирования. Для распознавания текста нужен OCR.');
-      }
+      const msg = peSummarizeOcrResult(ocrInfo, totalCount, false);
+      if (msg) alert(msg);
     }
 
     async function exportSelectedPagesAsXlsx() {
@@ -17580,12 +17701,14 @@
       if (indicesToExport.length === 0) return;
       const suggestedName = buildExportFileName(indicesToExport).replace(/\.pdf$/i, '.xlsx');
       showLoading('Экспорт в XLSX (эксперимент)…');
-      let scannedCount = 0, totalCount = 0;
+      let ocrInfo = { scannedBefore: 0, recognizedCount: 0, declined: false };
+      let totalCount = 0;
       try {
         const pdfBytes = await buildExportPdfBytes(indicesToExport);
         const pages = await peBuildPagesCellData(pdfBytes);
         totalCount = pages.length;
-        scannedCount = pages.filter(p => p.png).length;
+        ocrInfo = await peOfferOcrForScans(pages);
+        showLoading('Экспорт в XLSX (эксперимент)…');
         const bytes = peBuildXlsxBytes(pages);
         await peSaveExportedBytes(bytes, suggestedName, 'Excel таблица',
           'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -17597,10 +17720,8 @@
         return;
       }
       hideLoading();
-      if (scannedCount) {
-        alert(scannedCount + ' из ' + totalCount + ' стр. без текстового слоя (похоже на скан) — ' +
-          'таблица для них не распознана. Для распознавания текста нужен OCR.');
-      }
+      const msg = peSummarizeOcrResult(ocrInfo, totalCount, true);
+      if (msg) alert(msg);
     }
 
     // Printing only the selected pages - the same scheme as printPDF(), but we take
