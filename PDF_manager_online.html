@@ -37283,6 +37283,7 @@ async function peApplyPendingRedactRasterization(doc) {
       if (pePageShouldFullRasterForRedact(doc.getPage(i), null)) indices.push(i);
     } catch (_) {}
   }
+  const fallbackInfo = [];
   for (let k = 0; k < indices.length; k++) {
     const idx = indices[k];
     let rebuilt = null;
@@ -37290,9 +37291,13 @@ async function peApplyPendingRedactRasterization(doc) {
       rebuilt = await peBuildRegionalRedactedPage(doc, idx);
     } catch (err) {
       console.warn('peApplyPendingRedactRasterization: regional path failed', err);
+      peLastRegionalFallbackReason = 'exception: ' + (err && err.message || err);
       rebuilt = null;
     }
-    if (!rebuilt) rebuilt = await peRasterizePageInDoc(doc, idx);
+    if (!rebuilt) {
+      fallbackInfo.push('p' + (idx + 1) + ': ' + (peLastRegionalFallbackReason || 'unknown'));
+      rebuilt = await peRasterizePageInDoc(doc, idx);
+    }
     const [replacement] = await doc.copyPages(rebuilt, [idx]);
     doc.removePage(idx);
     doc.insertPage(idx, replacement);
@@ -37303,6 +37308,14 @@ async function peApplyPendingRedactRasterization(doc) {
       page.node.delete(PDFLib.PDFName.of(PE_NEEDS_SHAPE_RASTER_KEY));
     } catch (_) {}
   }
+  // Diagnostics: record WHY pages were fully rasterized right in the saved
+  // file (hidden catalog key — invisible to viewers, survives upload).
+  try {
+    if (fallbackInfo.length) {
+      doc.catalog.set(PDFLib.PDFName.of('PDFManagerRedactFallbackInfo'),
+        PDFLib.PDFString.of(fallbackInfo.join(' | ').slice(0, 900)));
+    }
+  } catch (_) {}
   return doc;
 }
 
@@ -37412,6 +37425,8 @@ function peClonePdfBytes(bytes) {
 // would treat an old plate near/under a NEW box as "vector ink under box"
 // and needlessly fall back to full-page rasterization.
 const PE_FLATTENED_COVERS_KEY = 'PDFManagerFlattenedCovers';
+// Why the last regional attempt gave up (diagnostics only).
+let peLastRegionalFallbackReason = '';
 
 function peGetFlattenedCovers(page) {
   if (!page) return [];
@@ -37446,8 +37461,9 @@ function peSetFlattenedCovers(page, covers) {
 // Any doubt returns null and the caller falls back to the old full-page
 // rasterization for that page, so the worst case is the previous behavior.
 async function peBuildRegionalRedactedPage(doc, pageIdx) {
+  peLastRegionalFallbackReason = '';
   const stored = peRegionsAsObjects(pePageRedactedRegions(doc.getPage(pageIdx)));
-  if (!stored.length) return null;
+  if (!stored.length) { peLastRegionalFallbackReason = 'no stored regions'; return null; }
   const pad = 0.003;
   const rects = stored.map(r => ({
     minX: Math.max(0, r.minX - pad),
@@ -37456,11 +37472,11 @@ async function peBuildRegionalRedactedPage(doc, pageIdx) {
     maxY: Math.min(1, r.maxY + pad),
     core: { minX: r.minX, minY: r.minY, maxX: r.maxX, maxY: r.maxY }
   })).filter(r => r.maxX > r.minX && r.maxY > r.minY);
-  if (!rects.length) return null;
+  if (!rects.length) { peLastRegionalFallbackReason = 'degenerate regions'; return null; }
   const priorCovers = peGetFlattenedCovers(doc.getPage(pageIdx));
 
   const bytesBefore = peClonePdfBytes(await doc.save());
-  if (!bytesBefore.length) return null;
+  if (!bytesBefore.length) { peLastRegionalFallbackReason = 'empty save'; return null; }
   const workDoc = await PDFLib.PDFDocument.load(peClonePdfBytes(bytesBefore));
 
   let scrub;
@@ -37468,6 +37484,7 @@ async function peBuildRegionalRedactedPage(doc, pageIdx) {
     scrub = await peScrubPageRegionsInDoc(workDoc, pageIdx, rects, priorCovers);
   } catch (err) {
     console.warn('peBuildRegionalRedactedPage: scrub failed', err);
+    peLastRegionalFallbackReason = 'scrub exception: ' + (err && err.message || err);
     return null;
   }
   if (!scrub || scrub.inkHit || scrub.unresolved) {
@@ -37475,15 +37492,17 @@ async function peBuildRegionalRedactedPage(doc, pageIdx) {
       ? scrub.reasons.join('; ')
       : (scrub && scrub.inkHit ? 'ink under box' : 'unsupported content');
     console.warn('peBuildRegionalRedactedPage: page ' + (pageIdx + 1) + ' needs full raster: ' + why);
+    peLastRegionalFallbackReason = why;
     return null;
   }
 
   const bytesAfter = peClonePdfBytes(await workDoc.save());
-  if (!bytesAfter.length) return null;
+  if (!bytesAfter.length) { peLastRegionalFallbackReason = 'empty save after scrub'; return null; }
   const ok = await peVerifyRegionalRedaction(bytesBefore, bytesAfter, pageIdx, rects,
     scrub.removedBoxes || []);
   if (!ok) {
     console.warn('peBuildRegionalRedactedPage: verification failed for page ' + (pageIdx + 1));
+    peLastRegionalFallbackReason = 'verification: ' + (peLastVerifyFailReason || 'failed');
     return null;
   }
 
@@ -37528,7 +37547,9 @@ async function peRenderPageWithMaskedBoxes(bytes, pageIdx, boxes, scale, maskPad
   }
 }
 
+let peLastVerifyFailReason = '';
 async function peVerifyRegionalRedaction(bytesBefore, bytesAfter, pageIdx, rects, removedBoxes) {
+  peLastVerifyFailReason = '';
   // (a) no extractable text may remain under any box
   let pj = null;
   try {
@@ -37555,14 +37576,29 @@ async function peVerifyRegionalRedaction(bytesBefore, bytesAfter, pageIdx, rects
         const gRight = nx + (k + 1) / n * wNorm;
         const gTop = ny - hNorm;
         const gBot = ny + hNorm * 0.2;
-        if (peRedactGlyphHit(gLeft, gRight, gTop, gBot, rects)) {
-          console.warn('peVerifyRegionalRedaction: text still under box:', JSON.stringify(item.str));
-          return false;
+        // Flag only glyphs that are MOSTLY (≥50% of their area) inside a
+        // box. The engine and this check estimate glyph geometry from
+        // different sources (font metrics vs pdf.js uniform split), so an
+        // any-overlap rule here misfires on letters merely grazed by a
+        // generously drawn box edge — those are intentionally kept and are
+        // more than half visible anyway.
+        const cellArea = Math.max(1e-9, (gRight - gLeft) * (gBot - gTop));
+        for (let ri = 0; ri < rects.length; ri++) {
+          const r = rects[ri];
+          const ovX = Math.min(gRight, r.maxX) - Math.max(gLeft, r.minX);
+          const ovY = Math.min(gBot, r.maxY) - Math.max(gTop, r.minY);
+          if (ovX <= 0 || ovY <= 0) continue;
+          if ((ovX * ovY) / cellArea >= 0.5) {
+            console.warn('peVerifyRegionalRedaction: text still under box:', JSON.stringify(item.str));
+            peLastVerifyFailReason = 'text still under box';
+            return false;
+          }
         }
       }
     }
   } catch (err) {
     console.warn('peVerifyRegionalRedaction: text check failed', err);
+    peLastVerifyFailReason = 'text check exception';
     return false;
   } finally {
     if (pj) try { pj.destroy(); } catch (_) {}
@@ -37591,10 +37627,12 @@ async function peVerifyRegionalRedaction(bytesBefore, bytesAfter, pageIdx, rects
     }
     if (bad > 50) {
       console.warn('peVerifyRegionalRedaction: ' + bad + ' of ' + total + ' pixels changed outside boxes');
+      peLastVerifyFailReason = bad + ' pixels changed outside boxes';
       return false;
     }
   } catch (err) {
     console.warn('peVerifyRegionalRedaction: pixel check failed', err);
+    peLastVerifyFailReason = 'pixel check exception';
     return false;
   }
   return true;
