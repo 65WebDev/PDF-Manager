@@ -37406,6 +37406,36 @@ function peClonePdfBytes(bytes) {
   return new Uint8Array(bytes).slice();
 }
 
+// Cover plates already flattened by a PREVIOUS regional save, remembered in
+// the page's own dictionary. On later redaction rounds these black plates are
+// ordinary filled paths in the content — without this list the ink detector
+// would treat an old plate near/under a NEW box as "vector ink under box"
+// and needlessly fall back to full-page rasterization.
+const PE_FLATTENED_COVERS_KEY = 'PDFManagerFlattenedCovers';
+
+function peGetFlattenedCovers(page) {
+  if (!page) return [];
+  try {
+    const val = page.node.get(PDFLib.PDFName.of(PE_FLATTENED_COVERS_KEY));
+    if (!val) return [];
+    const s = typeof val.decodeText === 'function' ? val.decodeText()
+      : (typeof val.asString === 'function' ? val.asString() : String(val));
+    const arr = JSON.parse(s);
+    return Array.isArray(arr)
+      ? arr.map(r => ({ minX: r[0], minY: r[1], maxX: r[2], maxY: r[3] }))
+      : [];
+  } catch (_) { return []; }
+}
+
+function peSetFlattenedCovers(page, covers) {
+  if (!page) return;
+  try {
+    const arr = (covers || []).map(c => [c.minX, c.minY, c.maxX, c.maxY]);
+    page.node.set(PDFLib.PDFName.of(PE_FLATTENED_COVERS_KEY),
+      PDFLib.PDFString.of(JSON.stringify(arr)));
+  } catch (_) {}
+}
+
 // Regional redaction for save/export/print: instead of rasterizing the whole
 // page, remove only the text operators under each confirmed box (with exact
 // TJ width compensation, see peScrubEngineParse) and keep everything else —
@@ -37427,6 +37457,7 @@ async function peBuildRegionalRedactedPage(doc, pageIdx) {
     core: { minX: r.minX, minY: r.minY, maxX: r.maxX, maxY: r.maxY }
   })).filter(r => r.maxX > r.minX && r.maxY > r.minY);
   if (!rects.length) return null;
+  const priorCovers = peGetFlattenedCovers(doc.getPage(pageIdx));
 
   const bytesBefore = peClonePdfBytes(await doc.save());
   if (!bytesBefore.length) return null;
@@ -37434,7 +37465,7 @@ async function peBuildRegionalRedactedPage(doc, pageIdx) {
 
   let scrub;
   try {
-    scrub = await peScrubPageRegionsInDoc(workDoc, pageIdx, rects);
+    scrub = await peScrubPageRegionsInDoc(workDoc, pageIdx, rects, priorCovers);
   } catch (err) {
     console.warn('peBuildRegionalRedactedPage: scrub failed', err);
     return null;
@@ -37457,13 +37488,16 @@ async function peBuildRegionalRedactedPage(doc, pageIdx) {
   }
 
   // Reload so the rewritten streams are committed, then drop the redact
-  // bookkeeping from the page — the text is now really gone.
+  // bookkeeping from the page — the text is now really gone. Remember the
+  // plate geometry so future redaction rounds don't mistake these covers
+  // for foreign vector ink.
   const finalDoc = await PDFLib.PDFDocument.load(peClonePdfBytes(bytesAfter));
   try {
     const pg = finalDoc.getPage(pageIdx);
     pg.node.delete(PDFLib.PDFName.of(PE_NEEDS_REDACT_RASTER_KEY));
     pg.node.delete(PDFLib.PDFName.of(PE_REDACTED_REGIONS_KEY));
     pg.node.delete(PDFLib.PDFName.of(PE_NEEDS_SHAPE_RASTER_KEY));
+    peSetFlattenedCovers(pg, priorCovers.concat(rects.map(r => r.core)));
   } catch (_) {}
   return finalDoc;
 }
@@ -38114,11 +38148,14 @@ function peScrubEngineParse(src, ctx) {
 
   let lastName = '';
 
-  // current path AABB in user space
+  // current path AABB in user space (+ raw points to recognize plain rects)
   let pathValid = false;
   let pMinX = 0, pMinY = 0, pMaxX = 0, pMaxY = 0;
-  function pathReset() { pathValid = false; }
+  let pathPoints = [];
+  let pathHasCurve = false;
+  function pathReset() { pathValid = false; pathPoints = []; pathHasCurve = false; }
   function pathAddUser(x, y) {
+    if (pathPoints.length < 20) pathPoints.push({ x, y });
     if (!pathValid) { pMinX = pMaxX = x; pMinY = pMaxY = y; pathValid = true; return; }
     if (x < pMinX) pMinX = x; if (x > pMaxX) pMaxX = x;
     if (y < pMinY) pMinY = y; if (y > pMaxY) pMaxY = y;
@@ -38208,18 +38245,44 @@ function peScrubEngineParse(src, ctx) {
   function evalPathInk(strokeOnly) {
     if (!pathValid || !rects.length) { pathReset(); return; }
     const b = userAabbToNorm(pMinX, pMinY, pMaxX, pMaxY);
+    // plain axis-aligned rectangle? (every point sits on a corner of the AABB)
+    let isPlainRect = !pathHasCurve && pathPoints.length >= 3 && pathPoints.length <= 12;
+    if (isPlainRect) {
+      const tolU = 1.0;
+      for (let k = 0; k < pathPoints.length; k++) {
+        const p = pathPoints[k];
+        const nearX = Math.abs(p.x - pMinX) <= tolU || Math.abs(p.x - pMaxX) <= tolU;
+        const nearY = Math.abs(p.y - pMinY) <= tolU || Math.abs(p.y - pMaxY) <= tolU;
+        if (!(nearX && nearY)) { isPlainRect = false; break; }
+      }
+    }
     pathReset();
     const w = Math.max(0, Math.min(1, b.maxX) - Math.max(0, b.minX));
     const h = Math.max(0, Math.min(1, b.maxY) - Math.max(0, b.minY));
     if (w * h >= 0.88) return; // page-scale background
-    // The confirmed cover rectangles themselves: a fill whose AABB matches
-    // the CORE of any box is one of ours — ignore it entirely, otherwise
-    // box #1 registers as "ink" inside the padded area of a nearby box #2.
+    // The confirmed cover rectangles themselves — current boxes AND plates
+    // flattened by previous saves (ctx.exempt): a fill whose AABB matches
+    // one of them is ours — ignore it entirely, otherwise box #1 registers
+    // as "ink" inside the padded area of a nearby box #2.
     const tol = 0.006;
-    for (let k = 0; k < rects.length; k++) {
-      const core = rects[k].core || rects[k];
+    const coverList = rects.map(r => r.core || r).concat(ctx.exempt || []);
+    for (let k = 0; k < coverList.length; k++) {
+      const core = coverList[k];
       if (Math.abs(b.minX - core.minX) <= tol && Math.abs(b.maxX - core.maxX) <= tol &&
           Math.abs(b.minY - core.minY) <= tol && Math.abs(b.maxY - core.maxY) <= tol) return;
+    }
+    // A plain solid rectangle FULLY inside a current box (or inside a plate
+    // recorded by an earlier save) is either an old cover plate being
+    // re-redacted or an equally harmless bar: it is completely hidden under
+    // an opaque plate, and a bare rectangle carries no recoverable content
+    // beyond its geometry. Curved/complex shapes (signatures etc.) never
+    // take this exemption.
+    if (isPlainRect && !strokeOnly) {
+      for (let k = 0; k < coverList.length; k++) {
+        const r = coverList[k];
+        if (b.minX >= r.minX - tol && b.maxX <= r.maxX + tol &&
+            b.minY >= r.minY - tol && b.maxY <= r.maxY + tol) return;
+      }
     }
     for (let k = 0; k < rects.length; k++) {
       const r = rects[k];
@@ -38510,9 +38573,29 @@ function peScrubEngineParse(src, ctx) {
       continue;
     }
 
-    // graphics state
-    if (matchOp('q')) { ctmStack.push(ctm.slice()); i += 1; emitRange(i - 1, i); resetNums(); continue; }
-    if (matchOp('Q')) { ctm = ctmStack.length ? ctmStack.pop() : (ctx.initialCtm || [1, 0, 0, 1, 0, 0]).slice(); i += 1; emitRange(i - 1, i); resetNums(); continue; }
+    // graphics state — text-state parameters (Tc/Tw/Tz/Tf/TL) are part of
+    // the graphics state per the PDF spec and must be restored by Q too;
+    // restoring only the CTM leaks e.g. a q-scoped Tc into later lines and
+    // skews the width compensation.
+    if (matchOp('q')) {
+      ctmStack.push({ ctm: ctm.slice(), charSpacing, wordSpacing, hScale, fontSize, curFontName, leading });
+      i += 1; emitRange(i - 1, i); resetNums(); continue;
+    }
+    if (matchOp('Q')) {
+      if (ctmStack.length) {
+        const st = ctmStack.pop();
+        ctm = st.ctm;
+        charSpacing = st.charSpacing;
+        wordSpacing = st.wordSpacing;
+        hScale = st.hScale;
+        fontSize = st.fontSize;
+        curFontName = st.curFontName;
+        leading = st.leading;
+      } else {
+        ctm = (ctx.initialCtm || [1, 0, 0, 1, 0, 0]).slice();
+      }
+      i += 1; emitRange(i - 1, i); resetNums(); continue;
+    }
     if (matchOp('cm')) {
       if (numBuf.length >= 6) {
         const a = numBuf[numBuf.length - 6], b2 = numBuf[numBuf.length - 5];
@@ -38595,12 +38678,14 @@ function peScrubEngineParse(src, ctx) {
     }
     if (matchOp('c')) {
       if (numBuf.length >= 6) {
+        pathHasCurve = true;
         for (let k = 6; k >= 2; k -= 2) pathAddPoint(numBuf[numBuf.length - k], numBuf[numBuf.length - k + 1]);
       }
       i += 1; emitRange(i - 1, i); resetNums(); continue;
     }
     if (matchOp('v') || matchOp('y')) {
       if (numBuf.length >= 4) {
+        pathHasCurve = true;
         pathAddPoint(numBuf[numBuf.length - 4], numBuf[numBuf.length - 3]);
         pathAddPoint(numBuf[numBuf.length - 2], numBuf[numBuf.length - 1]);
       }
@@ -38794,7 +38879,7 @@ async function peCollectNestedFormInk(doc, xobjects, formHits, base, depth, visi
       let r;
       try {
         r = peScrubEngineParse(bytes, {
-          rects: base.rects, rot: base.rot, cb: base.cb,
+          rects: base.rects, rot: base.rot, cb: base.cb, exempt: base.exempt,
           metrics, xobjects: xo, initialCtm: ctmEff, collect: true
         });
       } catch (_) { unresolved = true; reasons.add('nested form /' + name + ' parse failed'); continue; }
@@ -38818,7 +38903,7 @@ async function peCollectNestedFormInk(doc, xobjects, formHits, base, depth, visi
 // Form XObjects — leaving everything else byte-identical. Returns
 // { changed, inkHit, unresolved }; inkHit/unresolved mean the caller must
 // fall back to full-page rasterization for this page.
-async function peScrubPageRegionsInDoc(doc, pageIdx, rects) {
+async function peScrubPageRegionsInDoc(doc, pageIdx, rects, exemptCovers) {
   const page = doc.getPage(pageIdx);
   const rot = page.getRotation().angle || 0;
   const cb = page.getCropBox();
@@ -38828,9 +38913,10 @@ async function peScrubPageRegionsInDoc(doc, pageIdx, rects) {
   const content = peGetPageContentBytes(doc, page);
   if (!content) return { changed: false, inkHit: false, unresolved: true, reasons: ['page content undecodable'] };
 
-  const base = { rects, rot, cb };
+  const exempt = exemptCovers || [];
+  const base = { rects, rot, cb, exempt };
   const res = peScrubEngineParse(content, {
-    rects, rot, cb, metrics, xobjects, initialCtm: [1, 0, 0, 1, 0, 0], collect: false
+    rects, rot, cb, exempt, metrics, xobjects, initialCtm: [1, 0, 0, 1, 0, 0], collect: false
   });
   let changed = false;
   let inkHit = res.inkHit;
@@ -38857,7 +38943,7 @@ async function peScrubPageRegionsInDoc(doc, pageIdx, rects) {
       let fRes;
       try {
         fRes = peScrubEngineParse(formBytes, {
-          rects, rot, cb, metrics: fMetrics, xobjects: fXobjects,
+          rects, rot, cb, exempt, metrics: fMetrics, xobjects: fXobjects,
           initialCtm: ctmEff, collect: collectOnly
         });
       } catch (err) {
