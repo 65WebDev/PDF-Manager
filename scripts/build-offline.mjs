@@ -180,6 +180,16 @@ function addOfflineBanner(html) {
   return html.replace(marker, marker + banner);
 }
 
+// The "About" modal only claims "no network calls" for this (offline) build.
+function setOfflineFlag(html) {
+  const needle = 'const PDF_MANAGER_OFFLINE_BUILD = false;';
+  const replacement = 'const PDF_MANAGER_OFFLINE_BUILD = true;';
+  if (!html.includes(needle)) {
+    throw new Error('Could not find PDF_MANAGER_OFFLINE_BUILD flag');
+  }
+  return html.replace(needle, replacement);
+}
+
 async function main() {
   console.log('Reading', inputPath);
   let html = readFileSync(inputPath, 'utf8');
@@ -199,6 +209,7 @@ async function main() {
   const cantooBundle = await bundleCantooPdfLib();
 
   html = addOfflineBanner(html);
+  html = setOfflineFlag(html);
   html = replaceHeadScripts(html, inlinedBlocks);
   html = replacePdfJsWorker(html, workerCode);
   html = replaceCantooImport(html, cantooBundle);

@@ -28,15 +28,15 @@ jobs:
       - name: Install build dependencies
         run: npm ci
 
-      - name: Build offline HTML
-        run: npm run build:offline
-
       - name: Generate version info
         run: |
           BUILD="build-${{ github.run_number }}"
           DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          DATE_ONLY=$(date -u +%Y-%m-%d)
           DATE_HUMAN=$(date -u +"%Y-%m-%d %H:%M UTC")
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "BUILD=${BUILD}" >> "$GITHUB_ENV"
+          echo "DATE_ONLY=${DATE_ONLY}" >> "$GITHUB_ENV"
           cat > version.json <<EOF
           {
             "build": "${BUILD}",
@@ -59,6 +59,23 @@ jobs:
           - **Онлайн-версия** (\`PDF_manager_online.html\`) — компактный файл, библиотеки подгружаются из CDN при первом запуске. [Прямая ссылка](https://github.com/${{ github.repository }}/releases/latest/download/PDF_manager_online.html)
           - **Офлайн-версия** (\`PDF_manager_offline.html\`) — все библиотеки встроены в файл, интернет не нужен. [Прямая ссылка](https://github.com/${{ github.repository }}/releases/latest/download/PDF_manager_offline.html)
           EOF
+
+      - name: Stamp version into PDF_manager_online.html
+        # Runner-local edit only - never committed back to the repo, so the
+        # tracked source keeps the placeholders and the "About" modal falls
+        # back gracefully to "Версия неизвестна" outside the release pipeline
+        # (e.g. the raw file served by GitHub Pages).
+        run: |
+          sed -i \
+            -e "s/__PDF_MANAGER_BUILD__/${BUILD}/g" \
+            -e "s/__PDF_MANAGER_DATE__/${DATE_ONLY}/g" \
+            PDF_manager_online.html
+
+      - name: Build offline HTML
+        # Reads the now-stamped PDF_manager_online.html, so the offline
+        # artifact carries the same version/date and also flips the
+        # PDF_MANAGER_OFFLINE_BUILD flag used by the "About" modal.
+        run: npm run build:offline
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
