@@ -16453,6 +16453,28 @@
       });
     }
 
+    // Stamped into the shipped release artifacts by scripts/build-offline.mjs
+    // and the release workflow (see PE_BUILD_* markers there) - a plain
+    // source checkout (e.g. GitHub Pages, which serves this file as-is)
+    // keeps the placeholders and falls back to "неизвестна" below.
+    const PDF_MANAGER_BUILD_VERSION = '__PDF_MANAGER_BUILD__';
+    const PDF_MANAGER_BUILD_DATE = '__PDF_MANAGER_DATE__';
+    // Flipped to true only in PDF_manager_offline.html, where every library
+    // below is actually inlined into the file (see scripts/build-offline.mjs).
+    const PDF_MANAGER_OFFLINE_BUILD = false;
+
+    const PDF_MANAGER_LIBRARIES = [
+      ['pdf-lib', '1.17.1'],
+      ['pdf.js', '3.11.174'],
+      ['mammoth', '1.6.0'],
+      ['SheetJS (xlsx)', '0.18.5'],
+      ['html2canvas', '1.4.1'],
+      ['JSZip', '3.10.1'],
+      ['docx-preview', '0.3.7'],
+      ['ExcelJS', '4.4.0'],
+      ['@cantoo/pdf-lib', '2.7.4']
+    ];
+
     function showAboutModal() {
       if (document.querySelector('.modal-overlay-active')) return;
       const overlay = document.createElement('div');
@@ -16463,19 +16485,34 @@
       const box = document.createElement('div');
       box.style.cssText = `
         background: #fff; border-radius: 12px; padding: 26px 30px; max-width: 420px; width: 92vw;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.3); text-align: left; box-sizing: border-box;`;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.3); text-align: center; box-sizing: border-box;`;
+
+      const isStamped = !PDF_MANAGER_BUILD_VERSION.startsWith('__');
+      const versionLine = isStamped
+        ? `Версия ${escapeHtml(PDF_MANAGER_BUILD_VERSION)} от ${escapeHtml(PDF_MANAGER_BUILD_DATE)}`
+        : 'Версия неизвестна (сборка не через релизный пайплайн)';
+      const networkLine = PDF_MANAGER_OFFLINE_BUILD
+        ? 'Все библиотеки встроены в код веб-приложения. Обращение к сети отсутствует.'
+        : 'Библиотеки подгружаются из CDN при первом запуске. Офлайн-версия содержит их прямо в файле, без обращений к сети.';
+      const libsHtml = PDF_MANAGER_LIBRARIES
+        .map(([name, ver]) => `${escapeHtml(name)} ${escapeHtml(ver)}`)
+        .join('<br>');
+
       box.innerHTML = `
-        <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+        <div style="display:flex; align-items:center; justify-content:center; gap:10px; margin-bottom:14px;">
           <span style="font-size:20px;">📄</span>
           <div style="font-size:18px; font-weight:700; color:#2c3e50;">PDF Document Manager</div>
         </div>
         <div style="font-size:14px; color:#333; line-height:1.55;">
-          <p style="margin:0 0 10px;">Веб-приложение для работы с PDF-документами. Вся обработка выполняется прямо в браузере — файлы не передаются на сервер.</p>
-          <p style="margin:0 0 10px;">Разработчик: <b>Евгений Кутьин</b>.</p>
-          <p style="margin:0 0 10px;">Значительная часть кода написана с использованием искусственного интеллекта (языковых моделей Anthropic Claude) по техническому заданию и под контролем разработчика.</p>
-          <p style="margin:0; color:#666; font-size:12.5px;">Программа предоставляется «как есть», без каких-либо гарантий.</p>
+          <p style="margin:0 0 10px;">Веб-приложение для работы с PDF-документами. Вся обработка выполняется в браузере.</p>
+          <p style="margin:0 0 10px; color:#666; font-size:12.5px;">${versionLine}</p>
+          <p style="margin:0 0 6px;">Используемые библиотеки:</p>
+          <p style="margin:0 0 10px; color:#555; font-size:12.5px;">${libsHtml}</p>
+          <p style="margin:0 0 10px;">${networkLine}</p>
+          <p style="margin:0 0 10px;">Значительная часть кода написана с использованием искусственного интеллекта по техническому заданию и под контролем разработчика.</p>
+          <p style="margin:0;">Разработчик: <b>Евгений Кутьин</b>.</p>
         </div>
-        <div style="display:flex; justify-content:flex-end; margin-top:20px;">
+        <div style="display:flex; justify-content:center; margin-top:20px;">
           <button id="aboutCloseBtn" style="padding:9px 22px; border:none; border-radius:6px;
             background:#3498db; color:#fff; font-weight:600; cursor:pointer; font-size:14px;">Закрыть</button>
         </div>`;
