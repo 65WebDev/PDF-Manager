@@ -203,9 +203,40 @@
       transform: translateY(0);
       pointer-events: auto;
     }
+    /*"About" button - pops up right under the "Hide menu" button, same hover area/timing.*/
+    #aboutBtn {
+      position: absolute;
+      top: 92px;             /*just below desktopMenuToggleBtn (44 + 42 + 6 gap)*/
+      right: 0;
+      width: 42px;
+      height: 42px;
+      padding: 0;
+      border: 1px solid rgba(255,255,255,0.28);
+      box-sizing: border-box;
+      border-radius: 8px;
+      background: #3d5468;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+      opacity: 0;
+      transform: translateY(-6px);
+      pointer-events: none;
+      transition: opacity 0.15s, transform 0.15s, background 0.15s;
+    }
+    #aboutBtn:hover { background: #3498db; }
+    #aboutBtn.show {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+    /*Menu collapsed: keep only the show/hide toggle in the corner, not the About button.*/
+    .top-menu.collapsed #aboutBtn { display: none !important; }
     /*We don’t use this desktop button/zone on mobile devices.*/
     @media (pointer: coarse) {
-      #logoMenuArea, #desktopMenuToggleBtn { display: none !important; }
+      #logoMenuArea, #desktopMenuToggleBtn, #aboutBtn { display: none !important; }
     }
     /*When the menu is collapsed (desktop) - the button is fixed in the upper right corner
        on top of the work area and is always visible (as in the mobile version).*/
@@ -4875,6 +4906,9 @@
     <div id="logoMenuArea">
       <button id="desktopMenuToggleBtn" onclick="toggleTopMenu()" title="Скрыть меню" aria-label="Скрыть меню">
         <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
+      </button>
+      <button id="aboutBtn" onclick="showAboutModal()" title="О программе" aria-label="О программе">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="11"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
       </button>
     </div>
 
@@ -16419,6 +16453,47 @@
       });
     }
 
+    function showAboutModal() {
+      if (document.querySelector('.modal-overlay-active')) return;
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay-active';
+      overlay.style.cssText = `
+        position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+        display: flex; align-items: center; justify-content: center; z-index: 100001;`;
+      const box = document.createElement('div');
+      box.style.cssText = `
+        background: #fff; border-radius: 12px; padding: 26px 30px; max-width: 420px; width: 92vw;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.3); text-align: left; box-sizing: border-box;`;
+      box.innerHTML = `
+        <div style="display:flex; align-items:center; gap:10px; margin-bottom:14px;">
+          <span style="font-size:20px;">📄</span>
+          <div style="font-size:18px; font-weight:700; color:#2c3e50;">PDF Document Manager</div>
+        </div>
+        <div style="font-size:14px; color:#333; line-height:1.55;">
+          <p style="margin:0 0 10px;">Веб-приложение для работы с PDF-документами. Вся обработка выполняется прямо в браузере — файлы не передаются на сервер.</p>
+          <p style="margin:0 0 10px;">Разработчик: <b>Евгений Кутьин</b>.</p>
+          <p style="margin:0 0 10px;">Значительная часть кода написана с использованием искусственного интеллекта (языковых моделей Anthropic Claude) по техническому заданию и под контролем разработчика.</p>
+          <p style="margin:0; color:#666; font-size:12.5px;">Программа предоставляется «как есть», без каких-либо гарантий.</p>
+        </div>
+        <div style="display:flex; justify-content:flex-end; margin-top:20px;">
+          <button id="aboutCloseBtn" style="padding:9px 22px; border:none; border-radius:6px;
+            background:#3498db; color:#fff; font-weight:600; cursor:pointer; font-size:14px;">Закрыть</button>
+        </div>`;
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+
+      const close = () => {
+        document.body.removeChild(overlay);
+        document.removeEventListener('keydown', onKey, true);
+      };
+      box.querySelector('#aboutCloseBtn').onclick = close;
+      overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+      const onKey = (e) => {
+        if (e.key === 'Escape' || e.key === 'Enter') { e.preventDefault(); close(); }
+      };
+      document.addEventListener('keydown', onKey, true);
+    }
+
     // Rasterizes the PDF (transferred bytes) into a new PDF, where each page is
     // image (without text objects, etc.). The quality is set by scale and jpegQuality.
     // progressLabel - text for the loading indicator; opts.silent - without indicator;
@@ -19173,22 +19248,28 @@
       const area = document.getElementById('logoMenuArea');
       const logo = document.querySelector('.app-logo');
       const btn  = document.getElementById('desktopMenuToggleBtn');
+      const aboutBtn = document.getElementById('aboutBtn');
       if (!btn) return;
       let hideTimer = null;
 
       function show() {
         clearTimeout(hideTimer);
         // When collapsed, the button is always visible (via CSS) - no class needed
+        // (and the About button is hidden entirely while collapsed, see CSS).
         const menu = document.getElementById('topMenu');
         if (menu && menu.classList.contains('collapsed')) return;
         btn.classList.add('show');
+        if (aboutBtn) aboutBtn.classList.add('show');
       }
       function scheduleHide() {
         clearTimeout(hideTimer);
-        hideTimer = setTimeout(() => btn.classList.remove('show'), POPUP_BTN_HIDE_MS);
+        hideTimer = setTimeout(() => {
+          btn.classList.remove('show');
+          if (aboutBtn) aboutBtn.classList.remove('show');
+        }, POPUP_BTN_HIDE_MS);
       }
 
-      [area, logo, btn].forEach(el => {
+      [area, logo, btn, aboutBtn].forEach(el => {
         if (!el) return;
         el.addEventListener('mouseenter', show);
         el.addEventListener('mouseleave', scheduleHide);
