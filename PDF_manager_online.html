@@ -37576,19 +37576,20 @@ async function peVerifyRegionalRedaction(bytesBefore, bytesAfter, pageIdx, rects
         const gRight = nx + (k + 1) / n * wNorm;
         const gTop = ny - hNorm;
         const gBot = ny + hNorm * 0.2;
-        // Flag only glyphs that are MOSTLY (≥50% of their area) inside a
-        // box. The engine and this check estimate glyph geometry from
-        // different sources (font metrics vs pdf.js uniform split), so an
-        // any-overlap rule here misfires on letters merely grazed by a
-        // generously drawn box edge — those are intentionally kept and are
-        // more than half visible anyway.
+        // Flag only glyphs that are MOSTLY (≥75% of their area) inside a
+        // box. The engine deliberately keeps letters the box covers by less
+        // than 40%×30% (they are readable outside the plate), and this check
+        // estimates glyph geometry from a different source (uniform pdf.js
+        // split vs true font metrics), so the threshold needs a wide margin
+        // above the engine's keep-rule. Genuinely un-scrubbed text under a
+        // box is covered ~100% and is still caught.
         const cellArea = Math.max(1e-9, (gRight - gLeft) * (gBot - gTop));
         for (let ri = 0; ri < rects.length; ri++) {
-          const r = rects[ri];
+          const r = rects[ri].core || rects[ri];
           const ovX = Math.min(gRight, r.maxX) - Math.max(gLeft, r.minX);
           const ovY = Math.min(gBot, r.maxY) - Math.max(gTop, r.minY);
           if (ovX <= 0 || ovY <= 0) continue;
-          if ((ovX * ovY) / cellArea >= 0.5) {
+          if ((ovX * ovY) / cellArea >= 0.75) {
             console.warn('peVerifyRegionalRedaction: text still under box:', JSON.stringify(item.str));
             peLastVerifyFailReason = 'text still under box';
             return false;
@@ -37863,21 +37864,26 @@ function peDecodePdfNameToken(raw) {
   return raw.replace(/#([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
 }
 
-// Shared hit rule for regional redaction (engine + verification must agree).
-// Horizontally any overlap counts — a half-covered letter must be removed.
-// Vertically the overlap must be substantial (≥30% of the glyph box or ≥60%
-// of the box height), otherwise the ascender/descender slivers of ADJACENT
-// lines that merely touch the box would be eaten too.
+// Hit rule for the scrub engine: a glyph is removed only when the DRAWN box
+// (the core rect, without the technical padding) covers a substantial part
+// of it — ≥40% of its width AND ≥30% of its height (or the box is narrower/
+// shorter than the glyph and mostly crosses it). Letters that merely touch
+// the box edge stay: they are mostly visible outside the plate anyway, and
+// eating them was mangling the words neighbouring the redacted area.
 function peRedactGlyphHit(gLeft, gRight, gTop, gBot, rects) {
+  const gw = Math.max(1e-6, gRight - gLeft);
+  const gh = Math.max(1e-6, gBot - gTop);
   for (let k = 0; k < rects.length; k++) {
-    const r = rects[k];
-    const ovX = Math.min(gRight, r.maxX) - Math.max(gLeft, r.minX);
+    const c = rects[k].core || rects[k];
+    const ovX = Math.min(gRight, c.maxX) - Math.max(gLeft, c.minX);
     if (ovX <= 0) continue;
-    const ovY = Math.min(gBot, r.maxY) - Math.max(gTop, r.minY);
+    const ovY = Math.min(gBot, c.maxY) - Math.max(gTop, c.minY);
     if (ovY <= 0) continue;
-    const gh = Math.max(1e-6, gBot - gTop);
-    const rh = Math.max(1e-6, r.maxY - r.minY);
-    if (ovY >= 0.3 * gh || ovY >= 0.6 * rh) return true;
+    const cw = Math.max(1e-6, c.maxX - c.minX);
+    const ch = Math.max(1e-6, c.maxY - c.minY);
+    const xHit = ovX >= gw / 3 || ovX >= 0.9 * cw;
+    const yHit = ovY >= 0.3 * gh || ovY >= 0.6 * ch;
+    if (xHit && yHit) return true;
   }
   return false;
 }
