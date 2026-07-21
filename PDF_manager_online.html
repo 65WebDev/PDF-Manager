@@ -3984,10 +3984,10 @@
     .pm-page-nav-btn.pm-nav-autoscroll .pm-page-nav-ring { opacity: 1; }
     .pm-page-nav-btn .pm-page-nav-ring-prog {
       fill: none;
-      stroke: #4a9a5c;
+      stroke: #ffffff;
       stroke-width: 2.8;
       stroke-linecap: round;
-      filter: drop-shadow(0 0 1px rgba(0,0,0,0.45));
+      filter: drop-shadow(0 0 1.5px rgba(0,0,0,0.55));
     }
     .pm-page-nav-btn.pm-nav-autoscroll .pm-page-nav-ring-prog {
       stroke: #ffffff;
@@ -3998,7 +3998,21 @@
     /* While page-nav auto-scroll is actively running (not paused): force hand cursor/pan */
     body.pm-nav-autoscrolling #scrollContainer { cursor: grab; }
     body.pm-nav-autoscrolling.nav-grabbing #scrollContainer { cursor: grabbing; }
-    body.pm-nav-autoscrolling .page { pointer-events: none; }
+    body.pm-nav-autoscrolling,
+    body.pm-nav-autoscrolling * {
+      user-select: none !important;
+      -webkit-user-select: none !important;
+    }
+    body.pm-nav-autoscrolling .page { pointer-events: none !important; }
+    body.pm-nav-autoscrolling .page .page-text-layer,
+    body.pm-nav-autoscrolling .page .page-text-layer *,
+    body.pm-nav-autoscrolling .page .textLayer,
+    body.pm-nav-autoscrolling .page .textLayer * {
+      pointer-events: none !important;
+      cursor: inherit !important;
+      user-select: none !important;
+      -webkit-user-select: none !important;
+    }
     body.pm-nav-autoscrolling .page:hover {
       border-color: #ccc;
       box-shadow: 0 2px 8px rgba(0,0,0,0.1);
@@ -5925,7 +5939,7 @@
       <input id="pmAutoScrollSpeedRange" type="range" min="0" max="200" value="100" step="1" />
     </div>
     <button id="pmAutoScrollPauseBtn" type="button"
-      title="Остановить прокрутку" aria-label="Остановить прокрутку">
+      title="Остановить прокрутку (правая кнопка мыши)" aria-label="Остановить прокрутку (правая кнопка мыши)">
       <svg class="pm-autoscroll-pause-icon" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
         <rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>
       </svg>
@@ -9963,9 +9977,8 @@
       if (!Number.isFinite(v)) v = max / 2;
       v = Math.max(0, Math.min(max, v));
       const t = v / max; // 0..1
-      // Smoothstep: denser control at the low end; floor never reaches 0
-      // (sub-pixel frames used to feel "stuck" at the old minimum).
-      const minS = 55;
+      // Smoothstep: denser control at the low end; floor never reaches 0.
+      const minS = 28;
       const maxS = 560;
       const eased = t * t * (3 - 2 * t);
       return minS + (maxS - minS) * eased;
@@ -9997,7 +10010,14 @@
       // When paused, restore whatever cursor the user's selected mode uses.
       const hand = !!pmNavAutoDir && !pmNavAutoPaused;
       document.body.classList.toggle('pm-nav-autoscrolling', hand);
-      if (!hand) pmNavAutoPointerPaused = false;
+      if (!hand) {
+        pmNavAutoPointerPaused = false;
+      } else {
+        try {
+          const sel = window.getSelection && window.getSelection();
+          if (sel && sel.rangeCount) sel.removeAllRanges();
+        } catch (_) {}
+      }
     }
 
     function pmNavUpdatePauseBtnUI() {
@@ -10024,12 +10044,20 @@
       }
     }
 
+    let pmNavHqInFlight = false;
     function pmNavRequestVisibleHQ() {
       if (!pmNavAutoDir) return;
+      if (pmNavHqInFlight) return;
       const now = performance.now();
-      if (now - pmNavAutoHqLastAt < 120) return;
+      // Throttle starts; do NOT go through scheduleHQUpgrade — continuous
+      // scroll events keep resetting that debounce so HQ never runs until stop.
+      if (now - pmNavAutoHqLastAt < 280) return;
       pmNavAutoHqLastAt = now;
-      if (typeof scheduleHQUpgrade === 'function') scheduleHQUpgrade({ force: true });
+      if (typeof runHQUpgrade !== 'function') return;
+      pmNavHqInFlight = true;
+      Promise.resolve(runHQUpgrade({ force: true })).finally(() => {
+        pmNavHqInFlight = false;
+      });
     }
 
     function pmNavAutoTick(ts) {
@@ -10046,8 +10074,10 @@
           scrollContainer.scrollTop += step;
           pmNavAutoScrollAccum -= step;
           if (typeof syncScrollLockFromContainer === 'function') syncScrollLockFromContainer();
-          pmNavRequestVisibleHQ();
         }
+        // Request HQ even on tiny/no-step frames so newly visible pages upgrade
+        // while auto-scroll is moving (not only after the user stops).
+        pmNavRequestVisibleHQ();
       } else {
         pmNavAutoScrollAccum = 0;
       }
@@ -10068,6 +10098,7 @@
       pmNavAutoPointerPaused = false;
       pmNavAutoHqLastAt = 0;
       pmNavAutoScrollAccum = 0;
+      pmNavIgnoreClickDir = 0;
       pmNavSyncHandCursor();
       ['pmPagePrevBtn', 'pmPageNextBtn'].forEach((id) => {
         const btn = document.getElementById(id);
@@ -10220,7 +10251,6 @@
           pmNavRingTimer = null;
           if (pmNavHoldDir !== dir) return;
           pmNavHoldActivated = true;
-          pmNavIgnoreClickDir = dir;
           pmStartPageNavAutoScroll(dir);
         }, PM_NAV_HOLD_RING_MS);
       }, PM_NAV_HOLD_ARM_MS);
@@ -10235,33 +10265,38 @@
       if (pmNavAutoDir === dir && !pmNavHoldActivated && !pmNavHoldArmed) {
         pmStopPageNavAutoScroll();
         pmNavHoldDir = 0;
+        pmNavIgnoreClickDir = 0;
         return;
       }
 
       if (pmNavHoldActivated) {
         // Activation already happened on the ring timer; just clear hold flags.
+        // Clear ignore so the NEXT short click after exit navigates immediately.
         pmNavClearHoldTimers();
         pmNavHoldDir = 0;
         pmNavHoldArmed = false;
         pmNavHoldActivated = false;
+        pmNavIgnoreClickDir = 0;
         return;
       }
 
       if (pmNavHoldArmed) {
         // Released during the ring animation — cancel without navigating.
         pmNavCancelArming();
+        pmNavIgnoreClickDir = 0;
         return;
       }
 
       // Short press (<300ms) — single page jump.
       pmNavClearHoldTimers();
       const wasHoldDir = pmNavHoldDir;
+      const ignoreDir = pmNavIgnoreClickDir;
       pmNavHoldDir = 0;
-      if (wasHoldDir === dir && pmNavIgnoreClickDir !== dir) {
+      pmNavIgnoreClickDir = 0;
+      if (wasHoldDir === dir && ignoreDir !== dir) {
         if (pmNavAutoDir && pmNavAutoDir !== dir) pmStopPageNavAutoScroll();
         pmNavigateSingleColPage(dir);
       }
-      pmNavIgnoreClickDir = 0;
     }
 
     function pmNavOnPointerCancel() {
@@ -10291,6 +10326,7 @@
         range.addEventListener('click', (e) => e.stopPropagation());
         range.addEventListener('wheel', (e) => {
           if (!pmNavAutoDir) return;
+          if (e.altKey) return; // Alt+wheel is zoom — leave it alone
           e.preventDefault();
           e.stopPropagation();
           pmNavAdjustSpeedByWheel(e.deltaY);
@@ -10307,8 +10343,10 @@
       }
 
       // Mouse wheel adjusts auto-scroll speed while the mode is active.
+      // Alt+wheel must remain zoom-only.
       document.addEventListener('wheel', (e) => {
         if (!pmNavAutoDir) return;
+        if (e.altKey) return;
         if (e.target.closest && e.target.closest(
           '.top-menu, #helpToggle, #helpPanel, #pageCountBox, input, textarea, select'
         )) return;
@@ -10363,9 +10401,10 @@
       pokeMobileScrollRail();
       updateScrollPageIndicator();
       // If the zoom is ≥ threshold, we load more HD for pages that fall within the visible area.
-      // During page-nav auto-scroll, force HQ even below the normal zoom threshold.
-      if (typeof scheduleHQUpgrade === 'function') {
-        scheduleHQUpgrade(pmNavAutoDir ? { force: true } : undefined);
+      // During page-nav auto-scroll HQ is driven by pmNavRequestVisibleHQ (direct, not
+      // debounced) — calling scheduleHQUpgrade here would keep resetting that debounce.
+      if (typeof scheduleHQUpgrade === 'function' && !pmNavAutoDir) {
+        scheduleHQUpgrade();
       }
     }, { passive: true });
 
