@@ -5918,9 +5918,10 @@
         column (one page fits per row) - desktop and mobile, including
         reading mode. Position is kept in sync with the top chrome (menu /
         sticky file bar / mobile page-count badge) from JS.
-        Hold LMB ~300ms then 1s ring → continuous auto-scroll in that direction.-->
+        Desktop: RMB on arrow → auto-scroll; LMB or RMB on arrow → exit.
+        Touch: long-press → auto-scroll (no right button).-->
     <button id="pmPagePrevBtn" class="pm-page-nav-btn" type="button"
-      title="Переход к предыдущей странице (удерживайте для автопрокрутки)" aria-label="Переход к предыдущей странице (удерживайте для автопрокрутки)"
+      title="Предыдущая страница (ПКМ — автопрокрутка; Shift+↑)" aria-label="Предыдущая страница (ПКМ — автопрокрутка; Shift+↑)"
       data-pm-nav-dir="-1">
       <svg class="pm-page-nav-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 15 12 9 18 15"/></svg>
       <svg class="pm-page-nav-ring" viewBox="0 0 44 44" aria-hidden="true">
@@ -5928,7 +5929,7 @@
       </svg>
     </button>
     <button id="pmPageNextBtn" class="pm-page-nav-btn" type="button"
-      title="Переход к следующей странице (удерживайте для автопрокрутки)" aria-label="Переход к следующей странице (удерживайте для автопрокрутки)"
+      title="Следующая страница (ПКМ — автопрокрутка; Shift+↓)" aria-label="Следующая страница (ПКМ — автопрокрутка; Shift+↓)"
       data-pm-nav-dir="1">
       <svg class="pm-page-nav-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
       <svg class="pm-page-nav-ring" viewBox="0 0 44 44" aria-hidden="true">
@@ -5939,7 +5940,7 @@
       <input id="pmAutoScrollSpeedRange" type="range" min="0" max="200" value="100" step="1" />
     </div>
     <button id="pmAutoScrollPauseBtn" type="button"
-      title="Остановить прокрутку (правая кнопка мыши)" aria-label="Остановить прокрутку (правая кнопка мыши)">
+      title="Остановить прокрутку (ПКМ / Esc)" aria-label="Остановить прокрутку (ПКМ / Esc)">
       <svg class="pm-autoscroll-pause-icon" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
         <rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>
       </svg>
@@ -5974,6 +5975,8 @@
       <div class="help-row">Удерживайте <span class="hk">Ctrl</span> — выделить отдельные страницы</div>
       <div class="help-row"><span class="hk">Alt + колесико мыши</span> — изменение масштаба</div>
       <div class="help-row">Удерживайте <span class="hk">Alt</span> — выделение страниц рамкой</div>
+      <div class="help-row"><span class="hk">Shift + ↑ / ↓</span> — предыдущая / следующая страница</div>
+      <div class="help-row"><span class="hk">ПКМ</span> на стрелке — автопрокрутка; <span class="hk">Esc</span> — пауза / выход</div>
     </div>
   </div>
 
@@ -6177,11 +6180,13 @@
       '<polyline points="6 18 12 12 18 18"/><polyline points="6 12 12 6 18 12"/>';
     const PM_NAV_ICON_AUTO_NEXT =
       '<polyline points="6 6 12 12 18 6"/><polyline points="6 12 12 18 18 12"/>';
-    const PM_NAV_HOLD_ARM_MS = 300;
-    const PM_NAV_HOLD_RING_MS = 500;
+    const PM_NAV_HOLD_ARM_MS = 300;   // touch-only long-press arm
+    const PM_NAV_HOLD_RING_MS = 500;  // touch-only ring fill
     const PM_NAV_RING_LEN = 100; // matches pathLength on the SVG circle
-    const PM_NAV_TITLE_PREV = 'Переход к предыдущей странице (удерживайте для автопрокрутки)';
-    const PM_NAV_TITLE_NEXT = 'Переход к следующей странице (удерживайте для автопрокрутки)';
+    const PM_NAV_TITLE_PREV = 'Предыдущая страница (ПКМ — автопрокрутка; Shift+↑)';
+    const PM_NAV_TITLE_NEXT = 'Следующая страница (ПКМ — автопрокрутка; Shift+↓)';
+    const PM_NAV_TITLE_AUTO_PREV = 'Автопрокрутка вверх (ЛКМ или ПКМ — выключить)';
+    const PM_NAV_TITLE_AUTO_NEXT = 'Автопрокрутка вниз (ЛКМ или ПКМ — выключить)';
     let pmNavAutoDir = 0;              // -1 | 0 | 1
     let pmNavAutoRaf = 0;
     let pmNavAutoLastTs = 0;
@@ -6191,7 +6196,7 @@
     let pmNavHoldArmed = false;
     let pmNavHoldActivated = false;
     let pmNavIgnoreClickDir = 0;
-    let pmNavAutoPaused = false;       // pause button
+    let pmNavAutoPaused = false;       // pause button / Esc
     let pmNavAutoPointerPaused = false; // LMB held on a page
     let pmNavAutoHqLastAt = 0;
     let pmNavAutoScrollAccum = 0;      // sub-pixel scroll residue
@@ -10006,12 +10011,24 @@
     }
 
     function pmNavSyncHandCursor() {
-      // Hand/pan only while auto-scroll mode is on and not button-paused.
-      // When paused, restore whatever cursor the user's selected mode uses.
+      // Hand/pan only while auto-scroll is actively moving (not button-paused).
+      // When paused, restore the user's mode so text selection works again.
       const hand = !!pmNavAutoDir && !pmNavAutoPaused;
+      const wasHand = document.body.classList.contains('pm-nav-autoscrolling');
       document.body.classList.toggle('pm-nav-autoscrolling', hand);
       if (!hand) {
         pmNavAutoPointerPaused = false;
+        // Rebuild text layers only when leaving active hand-scroll — continuous
+        // scroll + HQ can leave layers missing/stale, and pointer-events were
+        // blocked while the hand class was on. Avoid re-running on every
+        // pmStop from layout updates (would starve selection).
+        if (wasHand) {
+          if (typeof updateZoomPanMode === 'function') {
+            try { updateZoomPanMode(); } catch (_) {}
+          } else if (typeof schedulePageTextLayerBuild === 'function') {
+            try { schedulePageTextLayerBuild(); } catch (_) {}
+          }
+        }
       } else {
         try {
           const sel = window.getSelection && window.getSelection();
@@ -10027,8 +10044,8 @@
       const paused = !!pmNavAutoPaused;
       if (icon) icon.innerHTML = paused ? PM_NAV_PLAY_ICON : PM_NAV_PAUSE_ICON;
       btn.title = paused
-        ? 'Продолжить прокрутку (правая кнопка мыши)'
-        : 'Остановить прокрутку (правая кнопка мыши)';
+        ? 'Продолжить прокрутку (ПКМ / Esc — выход)'
+        : 'Остановить прокрутку (ПКМ / Esc)';
       btn.setAttribute('aria-label', btn.title);
       btn.setAttribute('aria-pressed', paused ? 'true' : 'false');
     }
@@ -10145,9 +10162,7 @@
         prog.style.strokeDashoffset = '0';
       }
       pmNavSetIcon(btn, dir < 0 ? PM_NAV_ICON_AUTO_PREV : PM_NAV_ICON_AUTO_NEXT);
-      btn.title = dir < 0
-        ? 'Автопрокрутка вверх (нажмите, чтобы выключить)'
-        : 'Автопрокрутка вниз (нажмите, чтобы выключить)';
+      btn.title = dir < 0 ? PM_NAV_TITLE_AUTO_PREV : PM_NAV_TITLE_AUTO_NEXT;
       btn.setAttribute('aria-label', btn.title);
       btn.disabled = false;
 
@@ -10171,6 +10186,21 @@
         pmNavAutoLastTs = 0;
         pmNavRequestVisibleHQ();
       }
+    }
+
+    function pmNavHandleEscape() {
+      if (!pmNavAutoDir) return false;
+      if (!pmNavAutoPaused) {
+        // Esc while scrolling → pause (text select becomes available again)
+        pmNavAutoPaused = true;
+        pmNavAutoPointerPaused = false;
+        pmNavUpdatePauseBtnUI();
+        pmNavSyncHandCursor();
+      } else {
+        // Esc while paused → leave auto-scroll mode entirely
+        pmStopPageNavAutoScroll();
+      }
+      return true;
     }
 
     function pmUpdatePageNavButtons() {
@@ -10223,11 +10253,26 @@
     function pmNavOnPointerDown(e) {
       const btn = e.currentTarget;
       if (!btn || btn.disabled) return;
-      if (e.pointerType === 'mouse' && e.button !== 0) return;
       const dir = parseInt(btn.getAttribute('data-pm-nav-dir'), 10);
       if (!dir) return;
 
-      // Already auto-scrolling this way → short click will toggle off.
+      // Desktop RMB: activate immediately, or deactivate if already on this dir.
+      if (e.pointerType === 'mouse' && e.button === 2) {
+        e.preventDefault();
+        e.stopPropagation();
+        pmNavCancelArming();
+        if (pmNavAutoDir === dir) {
+          pmStopPageNavAutoScroll();
+        } else {
+          pmStartPageNavAutoScroll(dir);
+        }
+        return;
+      }
+
+      // Only primary button / touch for the rest.
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+
+      // Already auto-scrolling this way → LMB/tap will toggle off on pointerup.
       if (pmNavAutoDir === dir) {
         pmNavHoldDir = dir;
         pmNavHoldActivated = false;
@@ -10236,11 +10281,15 @@
         return;
       }
 
+      // Desktop LMB: no hold-to-activate — short click navigates on pointerup.
+      // Touch: keep long-press → auto-scroll (no right button on touch).
       pmNavCancelArming();
       pmNavHoldDir = dir;
       pmNavHoldArmed = false;
       pmNavHoldActivated = false;
       try { btn.setPointerCapture(e.pointerId); } catch (_) {}
+
+      if (e.pointerType === 'mouse') return;
 
       pmNavHoldTimer = setTimeout(() => {
         pmNavHoldTimer = null;
@@ -10261,8 +10310,14 @@
       const dir = parseInt(btn.getAttribute('data-pm-nav-dir'), 10) || pmNavHoldDir;
       try { btn.releasePointerCapture(e.pointerId); } catch (_) {}
 
-      // Toggle off if this was a click on the already-active auto-scroll button.
-      if (pmNavAutoDir === dir && !pmNavHoldActivated && !pmNavHoldArmed) {
+      // Ignore non-primary mouse buttons (RMB was handled on pointerdown).
+      if (e.pointerType === 'mouse' && e.button !== 0) {
+        pmNavHoldDir = 0;
+        return;
+      }
+
+      // LMB/tap on any arrow while auto-scroll mode is active → exit mode.
+      if (pmNavAutoDir && !pmNavHoldActivated && !pmNavHoldArmed) {
         pmStopPageNavAutoScroll();
         pmNavHoldDir = 0;
         pmNavIgnoreClickDir = 0;
@@ -10270,8 +10325,7 @@
       }
 
       if (pmNavHoldActivated) {
-        // Activation already happened on the ring timer; just clear hold flags.
-        // Clear ignore so the NEXT short click after exit navigates immediately.
+        // Touch activation already happened on the ring timer.
         pmNavClearHoldTimers();
         pmNavHoldDir = 0;
         pmNavHoldArmed = false;
@@ -10287,7 +10341,7 @@
         return;
       }
 
-      // Short press (<300ms) — single page jump.
+      // Short press — single page jump (and exit other-dir mode if needed).
       pmNavClearHoldTimers();
       const wasHoldDir = pmNavHoldDir;
       const ignoreDir = pmNavIgnoreClickDir;
@@ -10316,8 +10370,10 @@
         btn.addEventListener('lostpointercapture', () => {
           if (!pmNavHoldActivated && pmNavHoldArmed) pmNavCancelArming();
         });
+        // Always suppress the browser menu on the arrows (RMB activates scroll).
         btn.addEventListener('contextmenu', (e) => {
-          if (pmNavHoldArmed || pmNavHoldActivated || pmNavHoldTimer) e.preventDefault();
+          e.preventDefault();
+          e.stopPropagation();
         });
       });
       const range = document.getElementById('pmAutoScrollSpeedRange');
@@ -11815,6 +11871,14 @@
           case 'KeyE': e.preventDefault(); click(document.getElementById('exportBtn')); return; // Export
           case 'KeyC': e.preventDefault(); click(document.getElementById('replaceBtn')); return; // Replace
           case 'KeyH': e.preventDefault(); toggleDeletedVisibility(); return;                    // show/hide marked
+          case 'ArrowDown':
+            e.preventDefault();
+            if (typeof pmNavigateSingleColPage === 'function') pmNavigateSingleColPage(1);
+            return;
+          case 'ArrowUp':
+            e.preventDefault();
+            if (typeof pmNavigateSingleColPage === 'function') pmNavigateSingleColPage(-1);
+            return;
         }
         return;
       }
@@ -11823,6 +11887,7 @@
       switch (code) {
         case 'Escape':
           e.preventDefault();
+          if (typeof pmNavHandleEscape === 'function' && pmNavHandleEscape()) break;
           if (readModeActive) {
             exitReadMode();
           } else if (!isTouchDevice && (loupeModeOn || interactionMode === 'nav')) {
