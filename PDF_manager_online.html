@@ -5002,6 +5002,12 @@
     html[data-theme="dark"] .pm-tab.pm-tab-hover-activate.pm-tab-hover-activate-run {
       background: #14171c !important; color: #e8ecef !important;
     }
+    /* The close-button hover circle used a black tint, invisible against the
+       active tab's now-dark background - use a light tint there instead. */
+    html[data-theme="dark"] .pm-tab.active .pm-tab-close:hover,
+    html[data-theme="dark"] .pm-tab.pm-tab-selected:not(.active) .pm-tab-close:hover {
+      background: rgba(255,255,255,.18);
+    }
 
     html[data-theme="dark"] #stickyFileBar {
       background: #1c2128; border-bottom-color: #3a4048; color: #d7dbe0;
@@ -25673,8 +25679,10 @@ function peOnKeyDown(e) {
       peExitDrawToolMode();
       return;
     }
-    // Object-select is sticky: Esc / re-click must NOT bounce to Hand.
-    if (peState.objSelectMode) return;
+    // Object-select mode itself is sticky (Esc / re-click must not just
+    // bounce back to Hand) - but with nothing left to back out of (no
+    // popup, no selection, no active draw), Esc here should act exactly
+    // like clicking "Отмена".
     void pageEditClose(false);
     return;
   }
