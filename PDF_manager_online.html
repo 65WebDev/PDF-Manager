@@ -8974,20 +8974,13 @@
       return isPagesSingleColumnLayout();
     }
 
-    // Top/bottom insert indicators when the preview is a true one-column
-    // layout AND the page card already dominates the work-area width (zoomed
-    // in enough that side gutters are small). At lower zoom — even if only one
-    // column fits — keep left/right so pages can be inserted beside the card.
-    // At ≥400% page transfer is in zoom-pan mode and is not used here.
+    // Top/bottom insert indicators whenever the preview is a true one-column
+    // layout (zoomed/narrow so a second card does not fit). At lower zoom on a
+    // wide work area — including a lone page with room beside it — keep
+    // left/right. At ≥400% page transfer is in zoom-pan mode and unused here.
     function useVerticalInsertIndicator() {
       if (typeof isZoomPanMode === 'function' && isZoomPanMode()) return false;
-      if (!isPagesSingleColumnLayout()) return false;
-      const avail = getScrollAvailWidth();
-      if (avail <= 0) return false;
-      // ~0.5 ≈ just lost the second column; require a clearer fill before
-      // switching to top/bottom so "small" single-column previews stay L/R.
-      const VERTICAL_WIDTH_FILL = 0.68;
-      return cardOuterWidth(currentScale) >= avail * VERTICAL_WIDTH_FILL;
+      return isPagesSingleColumnLayout();
     }
 
     function pagesShareColumn(aRect, bRect) {
