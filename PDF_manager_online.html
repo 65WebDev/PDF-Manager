@@ -3984,10 +3984,10 @@
     .pm-page-nav-btn.pm-nav-autoscroll .pm-page-nav-ring { opacity: 1; }
     .pm-page-nav-btn .pm-page-nav-ring-prog {
       fill: none;
-      stroke: #ffcc33;
+      stroke: #4a9a5c;
       stroke-width: 2.8;
       stroke-linecap: round;
-      filter: drop-shadow(0 0 1px rgba(0,0,0,0.55));
+      filter: drop-shadow(0 0 1px rgba(0,0,0,0.45));
     }
     .pm-page-nav-btn.pm-nav-autoscroll .pm-page-nav-ring-prog {
       stroke: #ffffff;
@@ -5921,8 +5921,8 @@
         <circle class="pm-page-nav-ring-prog" cx="22" cy="22" r="19" pathLength="100"></circle>
       </svg>
     </button>
-    <div id="pmAutoScrollSpeed" title="Скорость автопрокрутки" aria-label="Скорость автопрокрутки">
-      <input id="pmAutoScrollSpeedRange" type="range" min="0" max="100" value="50" step="1" />
+    <div id="pmAutoScrollSpeed" title="Скорость прокрутки (колесико мыши)" aria-label="Скорость прокрутки (колесико мыши)">
+      <input id="pmAutoScrollSpeedRange" type="range" min="0" max="200" value="100" step="1" />
     </div>
     <button id="pmAutoScrollPauseBtn" type="button"
       title="Остановить прокрутку" aria-label="Остановить прокрутку">
@@ -6180,6 +6180,7 @@
     let pmNavAutoPaused = false;       // pause button
     let pmNavAutoPointerPaused = false; // LMB held on a page
     let pmNavAutoHqLastAt = 0;
+    let pmNavAutoScrollAccum = 0;      // sub-pixel scroll residue
 
     const CONCURRENCY_LIMIT = 6;
     const THUMBNAIL_SCALE = 0.75;
@@ -9957,14 +9958,29 @@
 
     function pmNavAutoSpeedPxPerSec() {
       const range = document.getElementById('pmAutoScrollSpeedRange');
-      const v = range ? Number(range.value) : 50;
-      // 0 → slow, 50 → medium (default), 100 → fast (px/sec).
-      // Default mid reduced by ~1/3 vs the first autoscroll build.
-      const minS = 27;
-      const midS = 147;
-      const maxS = 467;
-      if (v <= 50) return minS + (midS - minS) * (v / 50);
-      return midS + (maxS - midS) * ((v - 50) / 50);
+      const max = range ? (Number(range.max) || 200) : 200;
+      let v = range ? Number(range.value) : max / 2;
+      if (!Number.isFinite(v)) v = max / 2;
+      v = Math.max(0, Math.min(max, v));
+      const t = v / max; // 0..1
+      // Smoothstep: denser control at the low end; floor never reaches 0
+      // (sub-pixel frames used to feel "stuck" at the old minimum).
+      const minS = 55;
+      const maxS = 560;
+      const eased = t * t * (3 - 2 * t);
+      return minS + (maxS - minS) * eased;
+    }
+
+    function pmNavAdjustSpeedByWheel(deltaY) {
+      const range = document.getElementById('pmAutoScrollSpeedRange');
+      if (!range || !pmNavAutoDir) return false;
+      const max = Number(range.max) || 200;
+      const step = 6;
+      const next = Number(range.value) + (deltaY > 0 ? -step : step);
+      range.value = String(Math.max(0, Math.min(max, next)));
+      // Fire input for any future listeners / accessibility sync.
+      try { range.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+      return true;
     }
 
     const PM_NAV_PAUSE_ICON =
@@ -9990,7 +10006,9 @@
       const icon = btn.querySelector('.pm-autoscroll-pause-icon');
       const paused = !!pmNavAutoPaused;
       if (icon) icon.innerHTML = paused ? PM_NAV_PLAY_ICON : PM_NAV_PAUSE_ICON;
-      btn.title = paused ? 'Продолжить прокрутку' : 'Остановить прокрутку';
+      btn.title = paused
+        ? 'Продолжить прокрутку (правая кнопка мыши)'
+        : 'Остановить прокрутку (правая кнопка мыши)';
       btn.setAttribute('aria-label', btn.title);
       btn.setAttribute('aria-pressed', paused ? 'true' : 'false');
     }
@@ -10020,10 +10038,18 @@
       const dt = Math.min(48, Math.max(0, ts - pmNavAutoLastTs));
       pmNavAutoLastTs = ts;
       if (pmNavAutoIsScrolling()) {
-        const delta = pmNavAutoDir * pmNavAutoSpeedPxPerSec() * (dt / 1000);
-        scrollContainer.scrollTop += delta;
-        if (typeof syncScrollLockFromContainer === 'function') syncScrollLockFromContainer();
-        pmNavRequestVisibleHQ();
+        pmNavAutoScrollAccum += pmNavAutoDir * pmNavAutoSpeedPxPerSec() * (dt / 1000);
+        const step = pmNavAutoScrollAccum > 0
+          ? Math.floor(pmNavAutoScrollAccum)
+          : Math.ceil(pmNavAutoScrollAccum);
+        if (step !== 0) {
+          scrollContainer.scrollTop += step;
+          pmNavAutoScrollAccum -= step;
+          if (typeof syncScrollLockFromContainer === 'function') syncScrollLockFromContainer();
+          pmNavRequestVisibleHQ();
+        }
+      } else {
+        pmNavAutoScrollAccum = 0;
       }
       // Reached the end in this direction — keep mode on so the user can
       // turn it off explicitly; scrolling simply stops at the bound.
@@ -10041,6 +10067,7 @@
       pmNavAutoPaused = false;
       pmNavAutoPointerPaused = false;
       pmNavAutoHqLastAt = 0;
+      pmNavAutoScrollAccum = 0;
       pmNavSyncHandCursor();
       ['pmPagePrevBtn', 'pmPageNextBtn'].forEach((id) => {
         const btn = document.getElementById(id);
@@ -10075,6 +10102,7 @@
       pmNavAutoDir = dir;
       pmNavAutoPaused = false;
       pmNavAutoPointerPaused = false;
+      pmNavAutoScrollAccum = 0;
       btn.classList.remove('pm-nav-arming');
       btn.classList.add('pm-nav-autoscroll');
       pmNavResetRing(btn);
@@ -10261,6 +10289,12 @@
       if (range) {
         range.addEventListener('pointerdown', (e) => e.stopPropagation());
         range.addEventListener('click', (e) => e.stopPropagation());
+        range.addEventListener('wheel', (e) => {
+          if (!pmNavAutoDir) return;
+          e.preventDefault();
+          e.stopPropagation();
+          pmNavAdjustSpeedByWheel(e.deltaY);
+        }, { passive: false });
       }
       const pauseBtn = document.getElementById('pmAutoScrollPauseBtn');
       if (pauseBtn) {
@@ -10272,12 +10306,39 @@
         pauseBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
       }
 
-      // RMB while auto-scroll is active = same as the pause/resume button.
+      // Mouse wheel adjusts auto-scroll speed while the mode is active.
+      document.addEventListener('wheel', (e) => {
+        if (!pmNavAutoDir) return;
+        if (e.target.closest && e.target.closest(
+          '.top-menu, #helpToggle, #helpPanel, #pageCountBox, input, textarea, select'
+        )) return;
+        if (pmNavAdjustSpeedByWheel(e.deltaY)) {
+          e.preventDefault();
+        }
+      }, { passive: false, capture: true });
+
+      // RMB while auto-scroll is active = same as the pause/resume button,
+      // except when paused in select mode over selected page text — then the
+      // normal text-selection context menu must open instead.
       const onAutoScrollContextMenu = (e) => {
         if (!pmNavAutoDir) return;
         if (e.target.closest && e.target.closest(
           '.pm-page-nav-btn, #pmAutoScrollSpeed, #pmAutoScrollPauseBtn, .top-menu, #helpToggle, #helpPanel'
         )) return;
+
+        if (pmNavAutoPaused
+            && typeof interactionMode !== 'undefined'
+            && interactionMode === 'select') {
+          const onText = e.target.closest
+            && e.target.closest('.page-text-layer, .textLayer');
+          let hasTextSel = false;
+          try {
+            const sel = window.getSelection && window.getSelection();
+            hasTextSel = !!(sel && !sel.isCollapsed && String(sel).trim());
+          } catch (_) {}
+          if (onText && hasTextSel) return;
+        }
+
         e.preventDefault();
         e.stopPropagation();
         pmNavTogglePause();
