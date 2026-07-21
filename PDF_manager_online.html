@@ -3956,11 +3956,99 @@
       box-shadow: 0 3px 10px rgba(0,0,0,0.3);
       z-index: 95;
       transition: top 0.15s ease, background 0.15s;
+      -webkit-user-select: none;
+      user-select: none;
+      touch-action: none;
     }
     .pm-page-nav-btn.visible { display: flex; }
     .pm-page-nav-btn:hover:not(:disabled) { background: #3498db; }
     .pm-page-nav-btn:disabled { opacity: 0.35; cursor: default; pointer-events: none; }
+    .pm-page-nav-btn.pm-nav-autoscroll {
+      background: #3498db;
+      pointer-events: auto;
+      opacity: 1;
+    }
+    .pm-page-nav-btn .pm-page-nav-icon { display: block; pointer-events: none; }
+    .pm-page-nav-btn .pm-page-nav-ring {
+      position: absolute;
+      left: -3px;
+      top: -3px;
+      width: 44px;
+      height: 44px;
+      pointer-events: none;
+      overflow: visible;
+      transform: rotate(-90deg);
+      opacity: 0;
+    }
+    .pm-page-nav-btn.pm-nav-arming .pm-page-nav-ring,
+    .pm-page-nav-btn.pm-nav-autoscroll .pm-page-nav-ring { opacity: 1; }
+    .pm-page-nav-btn .pm-page-nav-ring-prog {
+      fill: none;
+      stroke: #3498db;
+      stroke-width: 2.2;
+      stroke-linecap: round;
+    }
     #pmPageNextBtn { top: 116px; }
+
+    /* Speed slider shown while page-nav auto-scroll is active */
+    #pmAutoScrollSpeed {
+      position: fixed;
+      left: 66px;
+      top: 70px;
+      width: 28px;
+      height: 84px;
+      z-index: 95;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      box-sizing: border-box;
+      padding: 8px 0;
+      border-radius: 10px;
+      background: #2c3e50;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.3);
+    }
+    #pmAutoScrollSpeed.visible { display: flex; }
+    #pmAutoScrollSpeed input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 68px;
+      height: 18px;
+      margin: 0;
+      background: transparent;
+      transform: rotate(-90deg);
+      cursor: pointer;
+    }
+    #pmAutoScrollSpeed input[type="range"]::-webkit-slider-runnable-track {
+      height: 4px;
+      border-radius: 2px;
+      background: rgba(255,255,255,0.28);
+    }
+    #pmAutoScrollSpeed input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 14px;
+      height: 14px;
+      margin-top: -5px;
+      border-radius: 50%;
+      background: #3498db;
+      border: 2px solid #fff;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+      cursor: pointer;
+    }
+    #pmAutoScrollSpeed input[type="range"]::-moz-range-track {
+      height: 4px;
+      border-radius: 2px;
+      background: rgba(255,255,255,0.28);
+    }
+    #pmAutoScrollSpeed input[type="range"]::-moz-range-thumb {
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #3498db;
+      border: 2px solid #fff;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.35);
+      cursor: pointer;
+    }
 
     /*=== HINT IN THE BOTTOM RIGHT CORNER ===*/
     /*─── Tooltip with hotkeys (lower right corner) ───*/
@@ -5773,17 +5861,27 @@
     <!--Prev/next-page shortcuts: shown only when the layout is a single
         column (one page fits per row) - desktop and mobile, including
         reading mode. Position is kept in sync with the top chrome (menu /
-        sticky file bar / mobile page-count badge) from JS.-->
+        sticky file bar / mobile page-count badge) from JS.
+        Hold LMB ~300ms then 1s ring → continuous auto-scroll in that direction.-->
     <button id="pmPagePrevBtn" class="pm-page-nav-btn" type="button"
       title="Переход к предыдущей странице" aria-label="Переход к предыдущей странице"
-      onclick="pmNavigateSingleColPage(-1)">
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 15 12 9 18 15"/></svg>
+      data-pm-nav-dir="-1">
+      <svg class="pm-page-nav-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 15 12 9 18 15"/></svg>
+      <svg class="pm-page-nav-ring" viewBox="0 0 44 44" aria-hidden="true">
+        <circle class="pm-page-nav-ring-prog" cx="22" cy="22" r="19" pathLength="100"></circle>
+      </svg>
     </button>
     <button id="pmPageNextBtn" class="pm-page-nav-btn" type="button"
       title="Переход к следующей странице" aria-label="Переход к следующей странице"
-      onclick="pmNavigateSingleColPage(1)">
-      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+      data-pm-nav-dir="1">
+      <svg class="pm-page-nav-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+      <svg class="pm-page-nav-ring" viewBox="0 0 44 44" aria-hidden="true">
+        <circle class="pm-page-nav-ring-prog" cx="22" cy="22" r="19" pathLength="100"></circle>
+      </svg>
     </button>
+    <div id="pmAutoScrollSpeed" title="Скорость автопрокрутки" aria-label="Скорость автопрокрутки">
+      <input id="pmAutoScrollSpeedRange" type="range" min="0" max="100" value="50" step="1" />
+    </div>
 
     <!--Hint in the lower right corner-->
     <button id="helpToggle" title="Горячие клавиши" onclick="toggleHelpPanel()">?</button>
@@ -9693,6 +9791,7 @@
     function pmPositionPageNavButtons() {
       const prevBtn = document.getElementById('pmPagePrevBtn');
       const nextBtn = document.getElementById('pmPageNextBtn');
+      const speedEl = document.getElementById('pmAutoScrollSpeed');
       if (!prevBtn || !nextBtn) return;
       // Sit right below whichever "header row" is currently on screen: the
       // sticky file-name bar once scrolled past the top, otherwise the
@@ -9720,6 +9819,176 @@
       }
       prevBtn.style.top = top + 'px';
       nextBtn.style.top = (top + 46) + 'px';
+      if (speedEl) {
+        speedEl.style.top = top + 'px';
+        speedEl.style.height = '84px'; // 38 + 8 gap + 38
+      }
+    }
+
+    const PM_NAV_ICON_PREV =
+      '<polyline points="6 15 12 9 18 15"/>';
+    const PM_NAV_ICON_NEXT =
+      '<polyline points="6 9 12 15 18 9"/>';
+    // Double chevron = continuous auto-scroll in that direction.
+    const PM_NAV_ICON_AUTO_PREV =
+      '<polyline points="6 18 12 12 18 18"/><polyline points="6 12 12 6 18 12"/>';
+    const PM_NAV_ICON_AUTO_NEXT =
+      '<polyline points="6 6 12 12 18 6"/><polyline points="6 12 12 18 18 12"/>';
+
+    const PM_NAV_HOLD_ARM_MS = 300;
+    const PM_NAV_HOLD_RING_MS = 1000;
+    const PM_NAV_RING_LEN = 100; // matches pathLength on the SVG circle
+
+    let pmNavAutoDir = 0;              // -1 | 0 | 1
+    let pmNavAutoRaf = 0;
+    let pmNavAutoLastTs = 0;
+    let pmNavHoldTimer = null;
+    let pmNavRingTimer = null;
+    let pmNavHoldDir = 0;
+    let pmNavHoldArmed = false;        // ring animation started
+    let pmNavHoldActivated = false;    // became auto-scroll during this press
+    let pmNavIgnoreClickDir = 0;       // suppress navigate after a completed hold
+
+    function pmNavBtnForDir(dir) {
+      return document.getElementById(dir < 0 ? 'pmPagePrevBtn' : 'pmPageNextBtn');
+    }
+
+    function pmNavSetIcon(btn, polylinesHtml) {
+      const icon = btn && btn.querySelector('.pm-page-nav-icon');
+      if (!icon) return;
+      icon.innerHTML = polylinesHtml;
+    }
+
+    function pmNavResetRing(btn) {
+      if (!btn) return;
+      const prog = btn.querySelector('.pm-page-nav-ring-prog');
+      if (!prog) return;
+      prog.style.transition = 'none';
+      prog.style.strokeDasharray = String(PM_NAV_RING_LEN);
+      prog.style.strokeDashoffset = String(PM_NAV_RING_LEN);
+    }
+
+    function pmNavStartRing(btn) {
+      if (!btn) return;
+      const prog = btn.querySelector('.pm-page-nav-ring-prog');
+      if (!prog) return;
+      pmNavResetRing(btn);
+      // Force style flush so the 1s transition runs from full → empty offset.
+      void prog.getBoundingClientRect();
+      btn.classList.add('pm-nav-arming');
+      prog.style.transition = 'stroke-dashoffset ' + (PM_NAV_HOLD_RING_MS / 1000) + 's linear';
+      prog.style.strokeDashoffset = '0';
+    }
+
+    function pmNavClearHoldTimers() {
+      if (pmNavHoldTimer) { clearTimeout(pmNavHoldTimer); pmNavHoldTimer = null; }
+      if (pmNavRingTimer) { clearTimeout(pmNavRingTimer); pmNavRingTimer = null; }
+    }
+
+    function pmNavCancelArming() {
+      pmNavClearHoldTimers();
+      const btn = pmNavHoldDir ? pmNavBtnForDir(pmNavHoldDir) : null;
+      if (btn && !btn.classList.contains('pm-nav-autoscroll')) {
+        btn.classList.remove('pm-nav-arming');
+        pmNavResetRing(btn);
+      }
+      pmNavHoldDir = 0;
+      pmNavHoldArmed = false;
+      pmNavHoldActivated = false;
+    }
+
+    function pmNavAutoSpeedPxPerSec() {
+      const range = document.getElementById('pmAutoScrollSpeedRange');
+      const v = range ? Number(range.value) : 50;
+      // 0 → slow, 50 → medium, 100 → fast (px/sec).
+      const minS = 40;
+      const midS = 220;
+      const maxS = 700;
+      if (v <= 50) return minS + (midS - minS) * (v / 50);
+      return midS + (maxS - midS) * ((v - 50) / 50);
+    }
+
+    function pmNavAutoTick(ts) {
+      if (!pmNavAutoDir) { pmNavAutoRaf = 0; return; }
+      if (!pmNavAutoLastTs) pmNavAutoLastTs = ts;
+      const dt = Math.min(48, Math.max(0, ts - pmNavAutoLastTs));
+      pmNavAutoLastTs = ts;
+      const delta = pmNavAutoDir * pmNavAutoSpeedPxPerSec() * (dt / 1000);
+      const before = scrollContainer.scrollTop;
+      scrollContainer.scrollTop = before + delta;
+      if (typeof syncScrollLockFromContainer === 'function') syncScrollLockFromContainer();
+      // Reached the end in this direction — keep mode on so the user can
+      // turn it off explicitly; scrolling simply stops at the bound.
+      pmNavAutoRaf = requestAnimationFrame(pmNavAutoTick);
+    }
+
+    function pmStopPageNavAutoScroll() {
+      pmNavClearHoldTimers();
+      if (pmNavAutoRaf) { cancelAnimationFrame(pmNavAutoRaf); pmNavAutoRaf = 0; }
+      pmNavAutoLastTs = 0;
+      pmNavAutoDir = 0;
+      pmNavHoldDir = 0;
+      pmNavHoldArmed = false;
+      pmNavHoldActivated = false;
+      ['pmPagePrevBtn', 'pmPageNextBtn'].forEach((id) => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        btn.classList.remove('pm-nav-arming', 'pm-nav-autoscroll');
+        pmNavResetRing(btn);
+        pmNavSetIcon(btn, id === 'pmPagePrevBtn' ? PM_NAV_ICON_PREV : PM_NAV_ICON_NEXT);
+        btn.title = id === 'pmPagePrevBtn'
+          ? 'Переход к предыдущей странице'
+          : 'Переход к следующей странице';
+        btn.setAttribute('aria-label', btn.title);
+      });
+      const speedEl = document.getElementById('pmAutoScrollSpeed');
+      if (speedEl) speedEl.classList.remove('visible');
+    }
+
+    function pmStartPageNavAutoScroll(dir) {
+      if (!dir) return;
+      // Switching direction (or re-arming the same side) resets visual state.
+      const prevDir = pmNavAutoDir;
+      if (prevDir && prevDir !== dir) pmStopPageNavAutoScroll();
+
+      const btn = pmNavBtnForDir(dir);
+      const other = pmNavBtnForDir(-dir);
+      if (!btn) return;
+
+      if (other) {
+        other.classList.remove('pm-nav-arming', 'pm-nav-autoscroll');
+        pmNavResetRing(other);
+        pmNavSetIcon(other, dir < 0 ? PM_NAV_ICON_NEXT : PM_NAV_ICON_PREV);
+      }
+
+      pmNavAutoDir = dir;
+      btn.classList.remove('pm-nav-arming');
+      btn.classList.add('pm-nav-autoscroll');
+      pmNavResetRing(btn);
+      // Keep the completed ring visible.
+      const prog = btn.querySelector('.pm-page-nav-ring-prog');
+      if (prog) {
+        prog.style.transition = 'none';
+        prog.style.strokeDasharray = String(PM_NAV_RING_LEN);
+        prog.style.strokeDashoffset = '0';
+      }
+      pmNavSetIcon(btn, dir < 0 ? PM_NAV_ICON_AUTO_PREV : PM_NAV_ICON_AUTO_NEXT);
+      btn.title = dir < 0
+        ? 'Автопрокрутка вверх (нажмите, чтобы выключить)'
+        : 'Автопрокрутка вниз (нажмите, чтобы выключить)';
+      btn.setAttribute('aria-label', btn.title);
+      btn.disabled = false;
+
+      const speedEl = document.getElementById('pmAutoScrollSpeed');
+      if (speedEl) {
+        speedEl.classList.add('visible');
+        pmPositionPageNavButtons();
+      }
+
+      if (!pmNavAutoRaf) {
+        pmNavAutoLastTs = 0;
+        pmNavAutoRaf = requestAnimationFrame(pmNavAutoTick);
+      }
     }
 
     function pmUpdatePageNavButtons() {
@@ -9727,12 +9996,14 @@
       const nextBtn = document.getElementById('pmPageNextBtn');
       if (!prevBtn || !nextBtn) return;
       if (!pdfDoc || pdfDoc.getPageCount() <= 1) {
+        pmStopPageNavAutoScroll();
         prevBtn.classList.remove('visible');
         nextBtn.classList.remove('visible');
         return;
       }
       const pages = pmVisiblePageEls();
       if (pages.length < 2 || !isSingleColumn(pages)) {
+        pmStopPageNavAutoScroll();
         prevBtn.classList.remove('visible');
         nextBtn.classList.remove('visible');
         return;
@@ -9740,8 +10011,9 @@
       prevBtn.classList.add('visible');
       nextBtn.classList.add('visible');
       const idx = pmBestVisiblePageIndex(pages);
-      prevBtn.disabled = idx <= 0;
-      nextBtn.disabled = idx < 0 || idx >= pages.length - 1;
+      // Keep the active auto-scroll button clickable so the user can turn it off.
+      prevBtn.disabled = (pmNavAutoDir === -1) ? false : (idx <= 0);
+      nextBtn.disabled = (pmNavAutoDir === 1) ? false : (idx < 0 || idx >= pages.length - 1);
       pmPositionPageNavButtons();
     }
 
@@ -9765,6 +10037,109 @@
       const maxTop = scrollContainer.scrollHeight - scrollContainer.clientHeight;
       scrollContainer.scrollTo({ top: Math.max(0, Math.min(targetTop, maxTop)), behavior: 'smooth' });
     }
+
+    function pmNavOnPointerDown(e) {
+      const btn = e.currentTarget;
+      if (!btn || btn.disabled) return;
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      const dir = parseInt(btn.getAttribute('data-pm-nav-dir'), 10);
+      if (!dir) return;
+
+      // Already auto-scrolling this way → short click will toggle off.
+      if (pmNavAutoDir === dir) {
+        pmNavHoldDir = dir;
+        pmNavHoldActivated = false;
+        pmNavHoldArmed = false;
+        try { btn.setPointerCapture(e.pointerId); } catch (_) {}
+        return;
+      }
+
+      pmNavCancelArming();
+      pmNavHoldDir = dir;
+      pmNavHoldArmed = false;
+      pmNavHoldActivated = false;
+      try { btn.setPointerCapture(e.pointerId); } catch (_) {}
+
+      pmNavHoldTimer = setTimeout(() => {
+        pmNavHoldTimer = null;
+        if (pmNavHoldDir !== dir) return;
+        pmNavHoldArmed = true;
+        pmNavStartRing(btn);
+        pmNavRingTimer = setTimeout(() => {
+          pmNavRingTimer = null;
+          if (pmNavHoldDir !== dir) return;
+          pmNavHoldActivated = true;
+          pmNavIgnoreClickDir = dir;
+          pmStartPageNavAutoScroll(dir);
+        }, PM_NAV_HOLD_RING_MS);
+      }, PM_NAV_HOLD_ARM_MS);
+    }
+
+    function pmNavOnPointerUp(e) {
+      const btn = e.currentTarget;
+      const dir = parseInt(btn.getAttribute('data-pm-nav-dir'), 10) || pmNavHoldDir;
+      try { btn.releasePointerCapture(e.pointerId); } catch (_) {}
+
+      // Toggle off if this was a click on the already-active auto-scroll button.
+      if (pmNavAutoDir === dir && !pmNavHoldActivated && !pmNavHoldArmed) {
+        pmStopPageNavAutoScroll();
+        pmNavHoldDir = 0;
+        return;
+      }
+
+      if (pmNavHoldActivated) {
+        // Activation already happened on the ring timer; just clear hold flags.
+        pmNavClearHoldTimers();
+        pmNavHoldDir = 0;
+        pmNavHoldArmed = false;
+        pmNavHoldActivated = false;
+        return;
+      }
+
+      if (pmNavHoldArmed) {
+        // Released during the 1s ring — cancel without navigating.
+        pmNavCancelArming();
+        return;
+      }
+
+      // Short press (<300ms) — single page jump.
+      pmNavClearHoldTimers();
+      const wasHoldDir = pmNavHoldDir;
+      pmNavHoldDir = 0;
+      if (wasHoldDir === dir && pmNavIgnoreClickDir !== dir) {
+        if (pmNavAutoDir && pmNavAutoDir !== dir) pmStopPageNavAutoScroll();
+        pmNavigateSingleColPage(dir);
+      }
+      pmNavIgnoreClickDir = 0;
+    }
+
+    function pmNavOnPointerCancel() {
+      if (pmNavHoldActivated) return;
+      pmNavCancelArming();
+    }
+
+    (function pmInitPageNavAutoScroll() {
+      const prevBtn = document.getElementById('pmPagePrevBtn');
+      const nextBtn = document.getElementById('pmPageNextBtn');
+      [prevBtn, nextBtn].forEach((btn) => {
+        if (!btn) return;
+        pmNavResetRing(btn);
+        btn.addEventListener('pointerdown', pmNavOnPointerDown);
+        btn.addEventListener('pointerup', pmNavOnPointerUp);
+        btn.addEventListener('pointercancel', pmNavOnPointerCancel);
+        btn.addEventListener('lostpointercapture', () => {
+          if (!pmNavHoldActivated && pmNavHoldArmed) pmNavCancelArming();
+        });
+        btn.addEventListener('contextmenu', (e) => {
+          if (pmNavHoldArmed || pmNavHoldActivated || pmNavHoldTimer) e.preventDefault();
+        });
+      });
+      const range = document.getElementById('pmAutoScrollSpeedRange');
+      if (range) {
+        range.addEventListener('pointerdown', (e) => e.stopPropagation());
+        range.addEventListener('click', (e) => e.stopPropagation());
+      }
+    })();
 
     scrollContainer.addEventListener('scroll', () => {
       enforceScrollLock();
@@ -10573,7 +10948,7 @@
       if (t.closest('.page')) {
         if (!e.altKey) return false;
         if (t.closest('.quick-actions, .selection-checkbox')) return false;
-      } else if (t.closest('.top-menu, #pageCountBox, #insertMenu, #insertIndicator, #helpToggle, #helpPanel, .pm-page-nav-btn')) {
+      } else if (t.closest('.top-menu, #pageCountBox, #insertMenu, #insertIndicator, #helpToggle, #helpPanel, .pm-page-nav-btn, #pmAutoScrollSpeed')) {
         return false;
       }
       // We block selection only on the text ITSELF (file name #info and heading h1),
@@ -10633,7 +11008,7 @@
       // We block only on menus/counters/buttons/indicators - but NOT on .page
       if (el.closest('.top-menu, #pageCountBox, #insertMenu, #insertIndicator, ' +
                       '#menuToggleBtn, #desktopMenuToggleBtn, #helpToggle, #helpPanel, ' +
-                      '.quick-actions, .selection-checkbox, .pm-page-nav-btn')) return false;
+                      '.quick-actions, .selection-checkbox, .pm-page-nav-btn, #pmAutoScrollSpeed')) return false;
       return true;
     }
 
@@ -11282,7 +11657,7 @@
         && !e.target.closest('.quick-actions, .selection-checkbox, button, a, input, textarea, select');
       if (interactionMode !== 'nav' && !zoomPan && !desktopOutsidePagePan) return;
       if (e.button !== 0) return;
-      if (e.target.closest('.top-menu, #helpToggle, #helpPanel, #pageCountBox, .pm-page-nav-btn')) return;
+      if (e.target.closest('.top-menu, #helpToggle, #helpPanel, #pageCountBox, .pm-page-nav-btn, #pmAutoScrollSpeed')) return;
       navPanning = true;
       navStartX = e.clientX;
       navStartY = e.clientY;
@@ -11440,7 +11815,7 @@
       scrollContainer.addEventListener('mousedown', (e) => {
         if (e.button !== 0 || !loupeModeOn || !loupeModeAllowed() || !pdfDoc) return;
         if (isDragActive || document.querySelector('.modal-overlay-active')) return;
-        if (e.target.closest('.top-menu, #helpToggle, #helpPanel, #pageCountBox, .pm-page-nav-btn')) return;
+        if (e.target.closest('.top-menu, #helpToggle, #helpPanel, #pageCountBox, .pm-page-nav-btn, #pmAutoScrollSpeed')) return;
         const pages = pagesContainer.querySelectorAll('.page');
         let found = null, foundRect = null;
         for (const p of pages) {
@@ -15187,7 +15562,7 @@
         }
 
         const el = document.elementFromPoint(ct.clientX, ct.clientY);
-        if (el && el.closest && el.closest('.top-menu, #pageCountBox, #menuToggleBtn, .pm-page-nav-btn')) return;
+        if (el && el.closest && el.closest('.top-menu, #pageCountBox, #menuToggleBtn, .pm-page-nav-btn, #pmAutoScrollSpeed')) return;
       }, { passive: true, capture: true });
     })();
 
@@ -24058,7 +24433,7 @@ function editSelectedPage() {
   function isOverDocumentArea(target) {
     if (!target || !scrollContainer) return false;
     if (target.closest && target.closest(
-      '.top-menu, #helpToggle, #helpPanel, #pageCountBox, #stickyFileBar, .tab-bar, #loadingOverlay, #pageEditModal, .modal-overlay-active, .pm-page-nav-btn'
+      '.top-menu, #helpToggle, #helpPanel, #pageCountBox, #stickyFileBar, .tab-bar, #loadingOverlay, #pageEditModal, .modal-overlay-active, .pm-page-nav-btn, #pmAutoScrollSpeed'
     )) return false;
     return scrollContainer.contains(target) || target === scrollContainer;
   }
