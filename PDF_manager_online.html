@@ -6,6 +6,19 @@
   <title>Менеджер документов PDF</title>
   <!--build:UERGIERvY3VtZW50IE1hbmFnZXIgfCBBdXRob3I6IEV2Z2VuaXkgS3V0eWluIHwgQ2Fub25pY2FsIHJlcG86IGh0dHBzOi8vZ2l0aHViLmNvbS81NDUxMTY1LWJvdC9QREYtTWFuYWdlcg==-->
 
+  <!--Applied synchronously, before any CSS/CDN script runs, so the page never
+       paints in the wrong theme for a frame (the usual "dark mode flash").-->
+  <script>
+    (function () {
+      try {
+        var saved = localStorage.getItem('pmTheme');
+        var theme = (saved === 'dark' || saved === 'light') ? saved
+          : ((window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light');
+        document.documentElement.setAttribute('data-theme', theme);
+      } catch (e) { /* localStorage/matchMedia unavailable - default (light) stays */ }
+    })();
+  </script>
+
   <!--pdf-lib: PDF assembly/editing (pages, rotations, merging, saving)-->
   <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
   <!--pdf.js: render PDF pages to canvas (thumbnails, preview)-->
@@ -204,10 +217,39 @@
       transform: translateY(0);
       pointer-events: auto;
     }
-    /*"About" button - pops up right under the "Hide menu" button, same hover area/timing.*/
-    #aboutBtn {
+    /*Theme toggle - pops up right under the "Hide menu" button, same hover area/timing.*/
+    #themeToggleBtn {
       position: absolute;
       top: 92px;             /*just below desktopMenuToggleBtn (44 + 42 + 6 gap)*/
+      right: 0;
+      width: 42px;
+      height: 42px;
+      padding: 0;
+      border: 1px solid rgba(255,255,255,0.28);
+      box-sizing: border-box;
+      border-radius: 8px;
+      background: #3d5468;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+      opacity: 0;
+      transform: translateY(-6px);
+      pointer-events: none;
+      transition: opacity 0.15s, transform 0.15s, background 0.15s;
+    }
+    #themeToggleBtn:hover { background: #3498db; }
+    #themeToggleBtn.show {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+    /*"About" button - pops up right under the theme toggle, same hover area/timing.*/
+    #aboutBtn {
+      position: absolute;
+      top: 140px;            /*just below themeToggleBtn (92 + 42 + 6 gap)*/
       right: 0;
       width: 42px;
       height: 42px;
@@ -233,11 +275,12 @@
       transform: translateY(0);
       pointer-events: auto;
     }
-    /*Menu collapsed: keep only the show/hide toggle in the corner, not the About button.*/
+    /*Menu collapsed: keep only the show/hide toggle in the corner, not the theme/About buttons.*/
+    .top-menu.collapsed #themeToggleBtn,
     .top-menu.collapsed #aboutBtn { display: none !important; }
     /*We don’t use this desktop button/zone on mobile devices.*/
     @media (pointer: coarse) {
-      #logoMenuArea, #desktopMenuToggleBtn, #aboutBtn { display: none !important; }
+      #logoMenuArea, #desktopMenuToggleBtn, #themeToggleBtn, #aboutBtn { display: none !important; }
     }
     /*When the menu is collapsed (desktop) - the button is fixed in the upper right corner
        on top of the work area and is always visible (as in the mobile version).*/
@@ -1270,7 +1313,7 @@
       display: flex; align-items: center; gap: 10px; flex-shrink: 0;
       box-sizing: border-box;
       height: 36px;
-      padding: 0 13px;
+      padding: 0 9px 0 13px;
       border-radius: 8px;
       background: rgba(0,0,0,.18); font-size: 16.25px; white-space: nowrap;
     }
@@ -1284,6 +1327,16 @@
       padding-bottom: 0;
       justify-content: center;
       box-sizing: border-box;
+    }
+    /* Stage 3: peLayoutToolbarEdgeAlign() aligns the scale pill's right edge
+       with Insert-image and Crop's left with the pill's left (see JS) - at
+       that width, 7.25em Cancel/Save buttons didn't leave enough room for
+       the scale slider, so it visually overlapped Cancel. 6.9em is the
+       smallest shared min-width both buttons actually need ("Сохранить" is
+       the longer label) - anything smaller makes Cancel and Save render at
+       different widths, since Cancel's shorter text no longer needs it. */
+    .pe-toolbar.pe-tb-tools-wrap #peEndActions .pe-btn {
+      min-width: 6.9em;
     }
 
     /* Stage 2: scale + Cancel/Save on their own row, right-aligned (no overlap) */
@@ -1832,11 +1885,17 @@
     .pe-toolbar.pe-tb-tools-wrap .pe-scale {
       flex: 1 1 auto;
       min-width: 0;
+      padding-right: 13px;
     }
+    /* The slider grows to fill whatever room the pill's own flex-grow
+       allocation leaves after label + gap + padding - at this stage that's
+       often less than the old 56px floor, which forced the slider past its
+       own padding-right and left almost no visible gap there. A lower floor
+       lets it settle at its real available width instead of overflowing. */
     .pe-toolbar.pe-tb-tools-wrap .pe-scale input[type=range] {
       flex: 1 1 auto;
       width: auto;
-      min-width: 56px;
+      min-width: 36px;
     }
     /* Active target while picking text color vs background. */
     #pePropColorWrap.pe-color-picking,
@@ -4409,7 +4468,7 @@
         font-size: 14px;
         gap: 8px;
         height: 36px;
-        padding: 0 10px;
+        padding: 0 7px 0 10px;
       }
       #pageEditModal .pe-scale input[type=range] { width: 72px; }
       #pageEditModal #peEndActions .pe-btn {
@@ -4872,6 +4931,121 @@
       margin-left: 0;
       margin-right: 0;
     }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       DARK MODE
+       Additive overrides only - the light-mode rules above are untouched.
+       The page-editor overlay (#pageEditModal and everything inside it:
+       redaction/shapes/text tools, its toolbars, color popups, context
+       menus) is already dark by design in both themes, so it needs no
+       overrides here. Likewise #helpPanel/#helpToggle/#pageNumTab/
+       #loadingOverlay/.pe-crop-hint are already dark. .quick-actions and
+       .selection-checkbox are deliberately left light - they sit directly
+       on top of the (unavoidably still-white) rendered page thumbnail, so
+       a light control there reads as consistent, not a light island.
+       ═══════════════════════════════════════════════════════════════════ */
+    html[data-theme="dark"] {
+      color-scheme: dark; /* native scrollbars/checkboxes/range inputs follow */
+    }
+    html[data-theme="dark"] body {
+      background: #14171c;
+      color: #d7dbe0;
+    }
+    html[data-theme="dark"] #scrollContainer::-webkit-scrollbar-track { background: #14171c; }
+    html[data-theme="dark"] #scrollContainer::-webkit-scrollbar-thumb {
+      background: #3a4048; border-radius: 6px;
+    }
+    html[data-theme="dark"] #scrollContainer::-webkit-scrollbar-thumb:hover { background: #4a5058; }
+
+    /* Page cards: only the border/chrome changes - the thumbnail image itself
+       is the rendered PDF page and stays white, same as any document viewer. */
+    html[data-theme="dark"] .page { border-color: #3a4048; }
+    html[data-theme="dark"] .page:hover {
+      border-color: #5a6472; box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    }
+    html[data-theme="dark"] body.rubber-selecting .page:hover,
+    html[data-theme="dark"] body.os-file-dragging .page:hover {
+      border-color: #3a4048; box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+    }
+
+    html[data-theme="dark"] .drop-zone {
+      background: #1c2128; border-color: #454c56; color: #cfd5db;
+    }
+    html[data-theme="dark"] .drop-zone .dz-desktop,
+    html[data-theme="dark"] .drop-zone .dz-mobile { color: #cfd5db; }
+    html[data-theme="dark"] .drop-zone.dragover {
+      border-color: #3498db; background: #16324a;
+    }
+    html[data-theme="dark"] .drop-zone.dz-pressed { background: #1a2734; }
+
+    html[data-theme="dark"] #insertMenu {
+      background: #262b33; border-color: #3a4048; box-shadow: 0 6px 20px rgba(0,0,0,0.5);
+    }
+    html[data-theme="dark"] #insertMenu button { color: #d7dbe0; }
+    html[data-theme="dark"] #insertMenu button:hover { background: #333a44; }
+
+    html[data-theme="dark"] #pmTabMenu {
+      background: #262b33; border-color: #3a4048;
+    }
+    html[data-theme="dark"] #pmTabMenu button { color: #d7dbe0; }
+    html[data-theme="dark"] #pmTabMenu button:hover:not(:disabled) { background: #333a44; }
+
+    /* Active/selected tab chrome matches the new dark canvas background,
+       same "merges with the content below" effect as in light mode. */
+    html[data-theme="dark"] .pm-tab.active,
+    html[data-theme="dark"] .pm-tab.pm-tab-selected:not(.active),
+    html[data-theme="dark"] .pm-tab.pm-tab-selected:not(.active):hover {
+      background: #14171c; color: #e8ecef;
+    }
+    html[data-theme="dark"] .pm-tab.pm-page-drag-source,
+    html[data-theme="dark"] body.pm-page-tab-dragging .pm-tab.pm-page-drag-source:hover,
+    html[data-theme="dark"] .pm-tab.pm-tab-hover-activate.pm-tab-hover-activate-run {
+      background: #14171c !important; color: #e8ecef !important;
+    }
+    /* The close-button hover circle used a black tint, invisible against the
+       active tab's now-dark background - use a light tint there instead. */
+    html[data-theme="dark"] .pm-tab.active .pm-tab-close:hover,
+    html[data-theme="dark"] .pm-tab.pm-tab-selected:not(.active) .pm-tab-close:hover {
+      background: rgba(255,255,255,.18);
+    }
+
+    html[data-theme="dark"] #stickyFileBar {
+      background: #1c2128; border-bottom-color: #3a4048; color: #d7dbe0;
+    }
+    html[data-theme="dark"] #stickyFileBar .sticky-page-count { color: #d7dbe0; }
+
+    /* Page counter (no sticky bar), document name, and the page number under
+       each card all had an explicit dark text color that doesn't pick up the
+       body's inherited light color - they blended into the dark background. */
+    html[data-theme="dark"] .header-page-count { color: #d7dbe0; }
+    html[data-theme="dark"] .info { color: #d7dbe0; }
+    html[data-theme="dark"] .page-title { color: #c7ccd2; }
+
+    /* Confirm/About/password/image-save/merge-order dialogs: they're built in
+       JS with inline styles, so a shared .pm-modal-box class (added at the
+       call sites) is what lets this section reach them. Accent buttons
+       (confirm/danger/primary - already colored inline, e.g. #cfmYes) are
+       left alone; only the plain "cancel/close" buttons are neutral enough
+       to need a dark background, targeted here by their existing ids. */
+    html[data-theme="dark"] .pm-modal-box {
+      background: #262b33 !important;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.6) !important;
+    }
+    html[data-theme="dark"] .pm-modal-box * { color: #e2e6ea !important; }
+    html[data-theme="dark"] .pm-modal-box #cfmNo,
+    html[data-theme="dark"] .pm-modal-box #jpegCancel,
+    html[data-theme="dark"] .pm-modal-box #pdfPwdCancel,
+    html[data-theme="dark"] .pm-modal-box #cancelBtn {
+      background: #333a44 !important; border-color: #4a5058 !important;
+    }
+    html[data-theme="dark"] .pm-modal-box input[type="password"],
+    html[data-theme="dark"] .pm-modal-box input[type="text"] {
+      background: #1c2128 !important; border-color: #4a5058 !important;
+    }
+    html[data-theme="dark"] .pm-modal-box #fileList { border-color: #3a4048 !important; }
+    html[data-theme="dark"] .pm-modal-box .file-item {
+      background: #262b33 !important; border-bottom-color: #333a44 !important;
+    }
   </style>
 </head>
 <body>
@@ -4908,6 +5082,10 @@
     <div id="logoMenuArea">
       <button id="desktopMenuToggleBtn" onclick="toggleTopMenu()" title="Скрыть меню" aria-label="Скрыть меню">
         <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="4" y1="7" x2="20" y2="7"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="17" x2="20" y2="17"/></svg>
+      </button>
+      <button id="themeToggleBtn" onclick="pmToggleTheme()" title="Тёмный режим" aria-label="Тёмный режим">
+        <svg id="themeToggleIcoDark" viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg id="themeToggleIcoLight" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><circle cx="12" cy="12" r="4.5"/><line x1="12" y1="1.5" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22.5"/><line x1="4.2" y1="4.2" x2="5.9" y2="5.9"/><line x1="18.1" y1="18.1" x2="19.8" y2="19.8"/><line x1="1.5" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="22.5" y2="12"/><line x1="4.2" y1="19.8" x2="5.9" y2="18.1"/><line x1="18.1" y1="5.9" x2="19.8" y2="4.2"/></svg>
       </button>
       <button id="aboutBtn" onclick="showAboutModal()" title="О программе" aria-label="О программе">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="11"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
@@ -6664,6 +6842,45 @@
         e.returnValue = '';
       });
     }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // THEME (light/dark). The actual <html data-theme="..."> attribute is set
+    // synchronously in <head> (before this script even loads) to avoid a
+    // flash of the wrong theme - this section only handles the toggle button
+    // and keeping localStorage in sync from here on.
+    // ═══════════════════════════════════════════════════════════════════════
+    const PM_THEME_KEY = 'pmTheme';
+
+    function pmCurrentTheme() {
+      return document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'light';
+    }
+
+    function pmUpdateThemeToggleUI(theme) {
+      const btn = document.getElementById('themeToggleBtn');
+      const icoDark = document.getElementById('themeToggleIcoDark');
+      const icoLight = document.getElementById('themeToggleIcoLight');
+      if (icoDark) icoDark.style.display = theme === 'dark' ? 'none' : '';
+      if (icoLight) icoLight.style.display = theme === 'dark' ? '' : 'none';
+      if (btn) {
+        const label = theme === 'dark' ? 'Светлый режим' : 'Тёмный режим';
+        btn.title = label;
+        btn.setAttribute('aria-label', label);
+      }
+    }
+
+    function pmApplyTheme(theme) {
+      document.documentElement.setAttribute('data-theme', theme === 'dark' ? 'dark' : 'light');
+      pmUpdateThemeToggleUI(theme);
+    }
+
+    function pmToggleTheme() {
+      const next = pmCurrentTheme() === 'dark' ? 'light' : 'dark';
+      try { localStorage.setItem(PM_THEME_KEY, next); } catch (e) { /* best effort only */ }
+      pmApplyTheme(next);
+    }
+
+    // Sync the toggle button's icon/title with whatever <head> already applied.
+    pmUpdateThemeToggleUI(pmCurrentTheme());
 
     // ═══════════════════════════════════════════════════════════════════════
     // CRASH RECOVERY (IndexedDB, best-effort/local-only)
@@ -16654,6 +16871,7 @@
           position: fixed; inset: 0; background: rgba(0,0,0,0.6);
           display: flex; align-items: center; justify-content: center; z-index: 100001;`;
         const box = document.createElement('div');
+        box.className = 'pm-modal-box';
         box.style.cssText = `
           background: #fff; border-radius: 12px; padding: 24px 28px; max-width: 92vw;
           box-shadow: 0 10px 30px rgba(0,0,0,0.3); text-align: center; min-width: 300px;`;
@@ -16711,6 +16929,7 @@
         position: fixed; inset: 0; background: rgba(0,0,0,0.6);
         display: flex; align-items: center; justify-content: center; z-index: 100001;`;
       const box = document.createElement('div');
+      box.className = 'pm-modal-box';
       box.style.cssText = `
         background: #fff; border-radius: 12px; padding: 20px 26px; max-width: 420px; width: 92vw;
         box-shadow: 0 10px 30px rgba(0,0,0,0.3); text-align: center; box-sizing: border-box;`;
@@ -17070,6 +17289,7 @@
           'position:fixed;inset:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;' +
           'justify-content:center;z-index:100001;';
         const box = document.createElement('div');
+        box.className = 'pm-modal-box';
         box.style.cssText =
           'background:#fff;border-radius:12px;padding:24px 28px;max-width:92vw;min-width:320px;' +
           'box-shadow:0 10px 30px rgba(0,0,0,0.3);';
@@ -17248,6 +17468,7 @@
           position: fixed; inset: 0; background: rgba(0,0,0,0.6);
           display: flex; align-items: center; justify-content: center; z-index: 100001;`;
         const box = document.createElement('div');
+        box.className = 'pm-modal-box';
         box.style.cssText = `
           background: #fff; border-radius: 12px; padding: 24px 28px; max-width: 92vw;
           box-shadow: 0 10px 30px rgba(0,0,0,0.3); text-align: left; min-width: min(340px, 92vw);`;
@@ -17960,6 +18181,7 @@
       `;
 
       const content = document.createElement('div');
+      content.className = 'pm-modal-box';
       content.style.cssText = `
         background: white; border-radius: 12px; padding: 24px; width: 520px; max-width: 92vw;
         box-shadow: 0 10px 30px rgba(0,0,0,0.3);
@@ -19599,6 +19821,7 @@
       const area = document.getElementById('logoMenuArea');
       const logo = document.querySelector('.app-logo');
       const btn  = document.getElementById('desktopMenuToggleBtn');
+      const themeBtn = document.getElementById('themeToggleBtn');
       const aboutBtn = document.getElementById('aboutBtn');
       if (!btn) return;
       let hideTimer = null;
@@ -19606,21 +19829,23 @@
       function show() {
         clearTimeout(hideTimer);
         // When collapsed, the button is always visible (via CSS) - no class needed
-        // (and the About button is hidden entirely while collapsed, see CSS).
+        // (and the theme/About buttons are hidden entirely while collapsed, see CSS).
         const menu = document.getElementById('topMenu');
         if (menu && menu.classList.contains('collapsed')) return;
         btn.classList.add('show');
+        if (themeBtn) themeBtn.classList.add('show');
         if (aboutBtn) aboutBtn.classList.add('show');
       }
       function scheduleHide() {
         clearTimeout(hideTimer);
         hideTimer = setTimeout(() => {
           btn.classList.remove('show');
+          if (themeBtn) themeBtn.classList.remove('show');
           if (aboutBtn) aboutBtn.classList.remove('show');
         }, POPUP_BTN_HIDE_MS);
       }
 
-      [area, logo, btn, aboutBtn].forEach(el => {
+      [area, logo, btn, themeBtn, aboutBtn].forEach(el => {
         if (!el) return;
         el.addEventListener('mouseenter', show);
         el.addEventListener('mouseleave', scheduleHide);
@@ -25454,8 +25679,10 @@ function peOnKeyDown(e) {
       peExitDrawToolMode();
       return;
     }
-    // Object-select is sticky: Esc / re-click must NOT bounce to Hand.
-    if (peState.objSelectMode) return;
+    // Object-select mode itself is sticky (Esc / re-click must not just
+    // bounce back to Hand) - but with nothing left to back out of (no
+    // popup, no selection, no active draw), Esc here should act exactly
+    // like clicking "Отмена".
     void pageEditClose(false);
     return;
   }
@@ -35117,7 +35344,10 @@ function peObjMouseDown(e, o) {
       title.style.transform = dx ? ('translateX(' + dx + 'px)') : '';
     }
 
-    // Tail: scale starts at Crop; Cancel/Save end at Delete; 6px gaps (scale grows).
+    // Tail: scale pill starts at Crop; Save ends at Delete (the pill grows
+    // to absorb whatever room is left between them, pushing Cancel/Save
+    // flush against Delete's right edge) - the pill/Cancel boundary itself
+    // isn't tied to any other button, only these two outer edges matter.
     const padL = Math.max(0, Math.round(cropL - barPadL));
     const contentRight = barRect.width - barPadR;
     const padR = Math.max(0, Math.round(contentRight - delR));
