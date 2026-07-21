@@ -6612,7 +6612,12 @@
       if (!isTouchDevice && selectModeBtn && navModeBtn) {
         selectModeBtn.disabled = modeBtnsDisabled;
         navModeBtn.disabled = modeBtnsDisabled;
-        if (modeBtnsDisabled && interactionMode === 'nav') {
+        // Reading mode enforces nav mode as a strict invariant (its own top-menu
+        // buttons are hidden anyway) - don't let a transient disable (e.g. the
+        // loading overlay flashing while the page editor opens/closes) permanently
+        // kick it back to select mode with nothing to ever restore it afterward.
+        const readModeIsActive = typeof readModeActive !== 'undefined' && readModeActive;
+        if (modeBtnsDisabled && interactionMode === 'nav' && !readModeIsActive) {
           interactionMode = 'select';
           document.body.classList.remove('nav-mode-active', 'nav-grabbing');
           selectModeBtn.classList.add('active-mode');
