@@ -3993,7 +3993,7 @@
     }
     #pmPageNextBtn { top: 116px; }
 
-    /* Speed slider shown while page-nav auto-scroll is active */
+    /* Speed slider + pause shown while page-nav auto-scroll is active */
     #pmAutoScrollSpeed {
       position: fixed;
       left: 66px;
@@ -4002,6 +4002,7 @@
       height: 84px;
       z-index: 95;
       display: none;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
       box-sizing: border-box;
@@ -4052,6 +4053,28 @@
       box-shadow: 0 1px 4px rgba(0,0,0,0.35);
       cursor: pointer;
     }
+    #pmAutoScrollPauseBtn {
+      position: fixed;
+      left: 66px;
+      top: 160px; /* fallback; JS syncs with speed strip */
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      border: none;
+      border-radius: 8px;
+      background: #2c3e50;
+      color: #fff;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.3);
+      z-index: 95;
+      transition: background 0.15s;
+    }
+    #pmAutoScrollPauseBtn.visible { display: flex; }
+    #pmAutoScrollPauseBtn:hover { background: #3498db; }
+    #pmAutoScrollPauseBtn svg { display: block; pointer-events: none; }
 
     /*=== HINT IN THE BOTTOM RIGHT CORNER ===*/
     /*─── Tooltip with hotkeys (lower right corner) ───*/
@@ -5885,6 +5908,12 @@
     <div id="pmAutoScrollSpeed" title="Скорость автопрокрутки" aria-label="Скорость автопрокрутки">
       <input id="pmAutoScrollSpeedRange" type="range" min="0" max="100" value="50" step="1" />
     </div>
+    <button id="pmAutoScrollPauseBtn" type="button"
+      title="Остановить прокрутку" aria-label="Остановить прокрутку">
+      <svg class="pm-autoscroll-pause-icon" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
+        <rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>
+      </svg>
+    </button>
 
     <!--Hint in the lower right corner-->
     <button id="helpToggle" title="Горячие клавиши" onclick="toggleHelpPanel()">?</button>
@@ -6130,6 +6159,9 @@
     let pmNavHoldArmed = false;
     let pmNavHoldActivated = false;
     let pmNavIgnoreClickDir = 0;
+    let pmNavAutoPaused = false;       // pause button
+    let pmNavAutoPointerPaused = false; // LMB held on a page
+    let pmNavAutoHqLastAt = 0;
 
     const CONCURRENCY_LIMIT = 6;
     const THUMBNAIL_SCALE = 0.75;
@@ -9166,16 +9198,19 @@
       return doc;
     }
 
-    function scheduleHQUpgrade() {
+    function scheduleHQUpgrade(opts) {
       clearTimeout(hqScheduleTimer);
-      //If we go below the threshold, we don’t do anything (low-quality previews remain,
-      //they are drawn at a standard scale and are sufficient).
-      if (currentScale < HQ_SCALE_THRESHOLD) return;
-      hqScheduleTimer = setTimeout(runHQUpgrade, 180); //slight delay after the gesture
+      const force = !!(opts && opts.force);
+      // If we go below the threshold, we don’t do anything (low-quality previews remain,
+      // they are drawn at a standard scale and are sufficient) — unless forced
+      // (page-nav auto-scroll upgrades whatever is on screen).
+      if (!force && currentScale < HQ_SCALE_THRESHOLD) return;
+      hqScheduleTimer = setTimeout(() => runHQUpgrade({ force }), force ? 60 : 180);
     }
 
-    async function runHQUpgrade() {
-      if (!pdfDoc || currentScale < HQ_SCALE_THRESHOLD) return;
+    async function runHQUpgrade(opts) {
+      const force = !!(opts && opts.force);
+      if (!pdfDoc || (!force && currentScale < HQ_SCALE_THRESHOLD)) return;
       const token = hqPdfjsToken;
 
       //Visible pages (cross the work area)
@@ -9196,7 +9231,7 @@
       if (!doc || token !== hqPdfjsToken) return;
 
       for (const div of todo) {
-        if (token !== hqPdfjsToken || currentScale < HQ_SCALE_THRESHOLD) return;
+        if (token !== hqPdfjsToken || (!force && currentScale < HQ_SCALE_THRESHOLD)) return;
         const idx = parseInt(div.dataset.index);
         // Skip pages currently being rotated — applying HQ mid-animation would show
         // the new-orientation image inside the still-animating wrapper, causing a flash.
@@ -9850,6 +9885,8 @@
         speedEl.style.top = top + 'px';
         speedEl.style.height = '84px'; // 38 + 8 gap + 38
       }
+      const pauseBtn = document.getElementById('pmAutoScrollPauseBtn');
+      if (pauseBtn) pauseBtn.style.top = (top + 84 + 6) + 'px';
     }
 
     function pmNavBtnForDir(dir) {
@@ -9911,15 +9948,56 @@
       return midS + (maxS - midS) * ((v - 50) / 50);
     }
 
+    const PM_NAV_PAUSE_ICON =
+      '<rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/>';
+    const PM_NAV_PLAY_ICON =
+      '<path d="M8 5v14l11-7z"/>';
+
+    function pmNavAutoIsScrolling() {
+      return !!pmNavAutoDir && !pmNavAutoPaused && !pmNavAutoPointerPaused;
+    }
+
+    function pmNavUpdatePauseBtnUI() {
+      const btn = document.getElementById('pmAutoScrollPauseBtn');
+      if (!btn) return;
+      const icon = btn.querySelector('.pm-autoscroll-pause-icon');
+      const paused = !!pmNavAutoPaused;
+      if (icon) icon.innerHTML = paused ? PM_NAV_PLAY_ICON : PM_NAV_PAUSE_ICON;
+      btn.title = paused ? 'Продолжить прокрутку' : 'Остановить прокрутку';
+      btn.setAttribute('aria-label', btn.title);
+      btn.setAttribute('aria-pressed', paused ? 'true' : 'false');
+    }
+
+    function pmNavShowAutoControls(show) {
+      const speedEl = document.getElementById('pmAutoScrollSpeed');
+      const pauseBtn = document.getElementById('pmAutoScrollPauseBtn');
+      if (speedEl) speedEl.classList.toggle('visible', !!show);
+      if (pauseBtn) pauseBtn.classList.toggle('visible', !!show);
+      if (show) {
+        pmNavUpdatePauseBtnUI();
+        pmPositionPageNavButtons();
+      }
+    }
+
+    function pmNavRequestVisibleHQ() {
+      if (!pmNavAutoDir) return;
+      const now = performance.now();
+      if (now - pmNavAutoHqLastAt < 120) return;
+      pmNavAutoHqLastAt = now;
+      if (typeof scheduleHQUpgrade === 'function') scheduleHQUpgrade({ force: true });
+    }
+
     function pmNavAutoTick(ts) {
       if (!pmNavAutoDir) { pmNavAutoRaf = 0; return; }
       if (!pmNavAutoLastTs) pmNavAutoLastTs = ts;
       const dt = Math.min(48, Math.max(0, ts - pmNavAutoLastTs));
       pmNavAutoLastTs = ts;
-      const delta = pmNavAutoDir * pmNavAutoSpeedPxPerSec() * (dt / 1000);
-      const before = scrollContainer.scrollTop;
-      scrollContainer.scrollTop = before + delta;
-      if (typeof syncScrollLockFromContainer === 'function') syncScrollLockFromContainer();
+      if (pmNavAutoIsScrolling()) {
+        const delta = pmNavAutoDir * pmNavAutoSpeedPxPerSec() * (dt / 1000);
+        scrollContainer.scrollTop += delta;
+        if (typeof syncScrollLockFromContainer === 'function') syncScrollLockFromContainer();
+        pmNavRequestVisibleHQ();
+      }
       // Reached the end in this direction — keep mode on so the user can
       // turn it off explicitly; scrolling simply stops at the bound.
       pmNavAutoRaf = requestAnimationFrame(pmNavAutoTick);
@@ -9933,6 +10011,9 @@
       pmNavHoldDir = 0;
       pmNavHoldArmed = false;
       pmNavHoldActivated = false;
+      pmNavAutoPaused = false;
+      pmNavAutoPointerPaused = false;
+      pmNavAutoHqLastAt = 0;
       ['pmPagePrevBtn', 'pmPageNextBtn'].forEach((id) => {
         const btn = document.getElementById(id);
         if (!btn) return;
@@ -9944,8 +10025,7 @@
           : 'Переход к следующей странице';
         btn.setAttribute('aria-label', btn.title);
       });
-      const speedEl = document.getElementById('pmAutoScrollSpeed');
-      if (speedEl) speedEl.classList.remove('visible');
+      pmNavShowAutoControls(false);
     }
 
     function pmStartPageNavAutoScroll(dir) {
@@ -9965,6 +10045,8 @@
       }
 
       pmNavAutoDir = dir;
+      pmNavAutoPaused = false;
+      pmNavAutoPointerPaused = false;
       btn.classList.remove('pm-nav-arming');
       btn.classList.add('pm-nav-autoscroll');
       pmNavResetRing(btn);
@@ -9982,15 +10064,22 @@
       btn.setAttribute('aria-label', btn.title);
       btn.disabled = false;
 
-      const speedEl = document.getElementById('pmAutoScrollSpeed');
-      if (speedEl) {
-        speedEl.classList.add('visible');
-        pmPositionPageNavButtons();
-      }
+      pmNavShowAutoControls(true);
+      pmNavRequestVisibleHQ();
 
       if (!pmNavAutoRaf) {
         pmNavAutoLastTs = 0;
         pmNavAutoRaf = requestAnimationFrame(pmNavAutoTick);
+      }
+    }
+
+    function pmNavTogglePause() {
+      if (!pmNavAutoDir) return;
+      pmNavAutoPaused = !pmNavAutoPaused;
+      pmNavUpdatePauseBtnUI();
+      if (!pmNavAutoPaused) {
+        pmNavAutoLastTs = 0;
+        pmNavRequestVisibleHQ();
       }
     }
 
@@ -10142,6 +10231,40 @@
         range.addEventListener('pointerdown', (e) => e.stopPropagation());
         range.addEventListener('click', (e) => e.stopPropagation());
       }
+      const pauseBtn = document.getElementById('pmAutoScrollPauseBtn');
+      if (pauseBtn) {
+        pauseBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          pmNavTogglePause();
+        });
+        pauseBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+      }
+
+      // Hold LMB on a page while auto-scrolling → temporary pause until release.
+      const onPagePointerDown = (e) => {
+        if (!pmNavAutoDir) return;
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        if (e.target.closest && e.target.closest(
+          '.pm-page-nav-btn, #pmAutoScrollSpeed, #pmAutoScrollPauseBtn, .top-menu, #helpToggle, #helpPanel'
+        )) return;
+        const page = e.target.closest && e.target.closest('.page');
+        if (!page || page.style.display === 'none') return;
+        pmNavAutoPointerPaused = true;
+        pmNavAutoLastTs = 0;
+        try { page.setPointerCapture(e.pointerId); } catch (_) {}
+      };
+      const onPagePointerEnd = (e) => {
+        if (!pmNavAutoPointerPaused) return;
+        pmNavAutoPointerPaused = false;
+        pmNavAutoLastTs = 0;
+        if (pmNavAutoIsScrolling()) pmNavRequestVisibleHQ();
+      };
+      if (pagesContainer) {
+        pagesContainer.addEventListener('pointerdown', onPagePointerDown, true);
+        pagesContainer.addEventListener('pointerup', onPagePointerEnd, true);
+        pagesContainer.addEventListener('pointercancel', onPagePointerEnd, true);
+      }
     })();
 
     scrollContainer.addEventListener('scroll', () => {
@@ -10160,8 +10283,11 @@
       updateMobileScrollRail();
       pokeMobileScrollRail();
       updateScrollPageIndicator();
-      // If the zoom is ≥ threshold, we load more HD for pages that fall within the visible area
-      if (typeof scheduleHQUpgrade === 'function') scheduleHQUpgrade();
+      // If the zoom is ≥ threshold, we load more HD for pages that fall within the visible area.
+      // During page-nav auto-scroll, force HQ even below the normal zoom threshold.
+      if (typeof scheduleHQUpgrade === 'function') {
+        scheduleHQUpgrade(pmNavAutoDir ? { force: true } : undefined);
+      }
     }, { passive: true });
 
     // Desktop: the dice is shown only when working with a native vertical
@@ -10951,7 +11077,7 @@
       if (t.closest('.page')) {
         if (!e.altKey) return false;
         if (t.closest('.quick-actions, .selection-checkbox')) return false;
-      } else if (t.closest('.top-menu, #pageCountBox, #insertMenu, #insertIndicator, #helpToggle, #helpPanel, .pm-page-nav-btn, #pmAutoScrollSpeed')) {
+      } else if (t.closest('.top-menu, #pageCountBox, #insertMenu, #insertIndicator, #helpToggle, #helpPanel, .pm-page-nav-btn, #pmAutoScrollSpeed, #pmAutoScrollPauseBtn')) {
         return false;
       }
       // We block selection only on the text ITSELF (file name #info and heading h1),
@@ -11011,7 +11137,7 @@
       // We block only on menus/counters/buttons/indicators - but NOT on .page
       if (el.closest('.top-menu, #pageCountBox, #insertMenu, #insertIndicator, ' +
                       '#menuToggleBtn, #desktopMenuToggleBtn, #helpToggle, #helpPanel, ' +
-                      '.quick-actions, .selection-checkbox, .pm-page-nav-btn, #pmAutoScrollSpeed')) return false;
+                      '.quick-actions, .selection-checkbox, .pm-page-nav-btn, #pmAutoScrollSpeed, #pmAutoScrollPauseBtn')) return false;
       return true;
     }
 
@@ -11660,7 +11786,7 @@
         && !e.target.closest('.quick-actions, .selection-checkbox, button, a, input, textarea, select');
       if (interactionMode !== 'nav' && !zoomPan && !desktopOutsidePagePan) return;
       if (e.button !== 0) return;
-      if (e.target.closest('.top-menu, #helpToggle, #helpPanel, #pageCountBox, .pm-page-nav-btn, #pmAutoScrollSpeed')) return;
+      if (e.target.closest('.top-menu, #helpToggle, #helpPanel, #pageCountBox, .pm-page-nav-btn, #pmAutoScrollSpeed, #pmAutoScrollPauseBtn')) return;
       navPanning = true;
       navStartX = e.clientX;
       navStartY = e.clientY;
@@ -11818,7 +11944,7 @@
       scrollContainer.addEventListener('mousedown', (e) => {
         if (e.button !== 0 || !loupeModeOn || !loupeModeAllowed() || !pdfDoc) return;
         if (isDragActive || document.querySelector('.modal-overlay-active')) return;
-        if (e.target.closest('.top-menu, #helpToggle, #helpPanel, #pageCountBox, .pm-page-nav-btn, #pmAutoScrollSpeed')) return;
+        if (e.target.closest('.top-menu, #helpToggle, #helpPanel, #pageCountBox, .pm-page-nav-btn, #pmAutoScrollSpeed, #pmAutoScrollPauseBtn')) return;
         const pages = pagesContainer.querySelectorAll('.page');
         let found = null, foundRect = null;
         for (const p of pages) {
@@ -15565,7 +15691,7 @@
         }
 
         const el = document.elementFromPoint(ct.clientX, ct.clientY);
-        if (el && el.closest && el.closest('.top-menu, #pageCountBox, #menuToggleBtn, .pm-page-nav-btn, #pmAutoScrollSpeed')) return;
+        if (el && el.closest && el.closest('.top-menu, #pageCountBox, #menuToggleBtn, .pm-page-nav-btn, #pmAutoScrollSpeed, #pmAutoScrollPauseBtn')) return;
       }, { passive: true, capture: true });
     })();
 
@@ -24436,7 +24562,7 @@ function editSelectedPage() {
   function isOverDocumentArea(target) {
     if (!target || !scrollContainer) return false;
     if (target.closest && target.closest(
-      '.top-menu, #helpToggle, #helpPanel, #pageCountBox, #stickyFileBar, .tab-bar, #loadingOverlay, #pageEditModal, .modal-overlay-active, .pm-page-nav-btn, #pmAutoScrollSpeed'
+      '.top-menu, #helpToggle, #helpPanel, #pageCountBox, #stickyFileBar, .tab-bar, #loadingOverlay, #pageEditModal, .modal-overlay-active, .pm-page-nav-btn, #pmAutoScrollSpeed, #pmAutoScrollPauseBtn'
     )) return false;
     return scrollContainer.contains(target) || target === scrollContainer;
   }
