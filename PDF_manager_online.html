@@ -8260,13 +8260,13 @@
 
     //Non-linear scale: slider 0–200, center(100) = 100% scale.
     //Left half 0→100: 70%→100% (linear).
-    //Right half 100→200: 100%→500% by QUADRATIC curve -
+    //Right half 100→200: 100%→900% by QUADRATIC curve -
     //Around 100% the increase is smooth, accelerating towards the edge.
     function sliderToScale(v) {
       v = parseInt(v);
       if (v <= 100) return Math.round(70 + 0.30 * v);     // 0→70%, 100→100%
       const d = v - 100;                                  // 0..100
-      return Math.round(100 + 6 * (d * d) / 100);         // 100→100%, 200→700%
+      return Math.round(100 + 8 * (d * d) / 100);         // 100→100%, 200→900%
     }
 
     //Inverse transformation: scale (%) → slider value 0..200
@@ -8274,7 +8274,7 @@
       if (scale <= 100) {
         return Math.round((scale - 70) / 0.30);           //inverse of 70 + 0.30*v
       }
-      return Math.round(100 + Math.sqrt((scale - 100) * 100 / 6)); //inverse to quadratic
+      return Math.round(100 + Math.sqrt((scale - 100) * 100 / 8)); //inverse to quadratic
     }
 
     //Called from the slider (user input) and Alt+wheel / pinch.
@@ -8705,7 +8705,7 @@
         const minS = mobileMinScale || computeMobilePinchMinScale();
         return Math.max(minS, Math.min(500, scale));
       }
-      return Math.max(70, Math.min(700, scale));
+      return Math.max(70, Math.min(900, scale));
     }
 
     //Mobile fit: when opened - 2/4 column; pinch can reduce to 4/8.
@@ -10874,7 +10874,7 @@
     }
 
     function fadeDistanceForScale() {
-      const t = Math.max(0, Math.min(1, (currentScale - 70) / (700 - 70)));
+      const t = Math.max(0, Math.min(1, (currentScale - 70) / (900 - 70)));
       return 40 + (400 - 40) * t;
     }
 
