@@ -3930,6 +3930,31 @@
     }
     .merge-order-insert-line.visible { display: block; }
 
+    /*─── Prev/next page shortcuts (top-left of the work area, single-column layout only) ───*/
+    .pm-page-nav-btn {
+      position: fixed;
+      left: 20px;
+      top: 70px;              /*fallback - JS (pmPositionPageNavButtons) keeps this in sync*/
+      width: 38px;
+      height: 38px;
+      padding: 0;
+      border: none;
+      border-radius: 50%;
+      background: #2c3e50;
+      color: #fff;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.3);
+      z-index: 95;
+      transition: top 0.15s ease, background 0.15s;
+    }
+    .pm-page-nav-btn.visible { display: flex; }
+    .pm-page-nav-btn:hover:not(:disabled) { background: #3498db; }
+    .pm-page-nav-btn:disabled { opacity: 0.35; cursor: default; pointer-events: none; }
+    #pmPageNextBtn { top: 116px; }
+
     /*=== HINT IN THE BOTTOM RIGHT CORNER ===*/
     /*─── Tooltip with hotkeys (lower right corner) ───*/
     #helpToggle {
@@ -5732,6 +5757,21 @@
     <div id="rubberCursorBadge" aria-hidden="true"></div>
     <div id="touchTooltip"></div>
 
+    <!--Prev/next-page shortcuts: shown only when the layout is a single
+        column (one page fits per row) - desktop and mobile, including
+        reading mode. Position is kept in sync with the top chrome (menu /
+        sticky file bar / mobile page-count badge) from JS.-->
+    <button id="pmPagePrevBtn" class="pm-page-nav-btn" type="button"
+      title="Переход к предыдущей странице" aria-label="Переход к предыдущей странице"
+      onclick="pmNavigateSingleColPage(-1)">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 15 12 9 18 15"/></svg>
+    </button>
+    <button id="pmPageNextBtn" class="pm-page-nav-btn" type="button"
+      title="Переход к следующей странице" aria-label="Переход к следующей странице"
+      onclick="pmNavigateSingleColPage(1)">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
+    </button>
+
     <!--Hint in the lower right corner-->
     <button id="helpToggle" title="Горячие клавиши" onclick="toggleHelpPanel()">?</button>
     <div id="helpPanel" onclick="toggleHelpPanel()" title="Нажмите для скрытия окна">
@@ -6572,7 +6612,12 @@
       if (!isTouchDevice && selectModeBtn && navModeBtn) {
         selectModeBtn.disabled = modeBtnsDisabled;
         navModeBtn.disabled = modeBtnsDisabled;
-        if (modeBtnsDisabled && interactionMode === 'nav') {
+        // Reading mode enforces nav mode as a strict invariant (its own top-menu
+        // buttons are hidden anyway) - don't let a transient disable (e.g. the
+        // loading overlay flashing while the page editor opens/closes) permanently
+        // kick it back to select mode with nothing to ever restore it afterward.
+        const readModeIsActive = typeof readModeActive !== 'undefined' && readModeActive;
+        if (modeBtnsDisabled && interactionMode === 'nav' && !readModeIsActive) {
           interactionMode = 'select';
           document.body.classList.remove('nav-mode-active', 'nav-grabbing');
           selectModeBtn.classList.add('active-mode');
@@ -6603,6 +6648,7 @@
 
       updateMobileQuickActions();
       updateUndoRedoUI();
+      if (typeof pmUpdatePageNavButtons === 'function') pmUpdatePageNavButtons();
     }
 
     function syncPageCountValues(total) {
@@ -8219,13 +8265,13 @@
 
     //Non-linear scale: slider 0–200, center(100) = 100% scale.
     //Left half 0→100: 70%→100% (linear).
-    //Right half 100→200: 100%→500% by QUADRATIC curve -
+    //Right half 100→200: 100%→900% by QUADRATIC curve -
     //Around 100% the increase is smooth, accelerating towards the edge.
     function sliderToScale(v) {
       v = parseInt(v);
       if (v <= 100) return Math.round(70 + 0.30 * v);     // 0→70%, 100→100%
       const d = v - 100;                                  // 0..100
-      return Math.round(100 + 6 * (d * d) / 100);         // 100→100%, 200→700%
+      return Math.round(100 + 8 * (d * d) / 100);         // 100→100%, 200→900%
     }
 
     //Inverse transformation: scale (%) → slider value 0..200
@@ -8233,7 +8279,7 @@
       if (scale <= 100) {
         return Math.round((scale - 70) / 0.30);           //inverse of 70 + 0.30*v
       }
-      return Math.round(100 + Math.sqrt((scale - 100) * 100 / 6)); //inverse to quadratic
+      return Math.round(100 + Math.sqrt((scale - 100) * 100 / 8)); //inverse to quadratic
     }
 
     //Called from the slider (user input) and Alt+wheel / pinch.
@@ -8380,6 +8426,7 @@
       opts = opts || {};
       if (typeof alignRowNumbers === 'function') alignRowNumbers();
       if (typeof updatePageNumTab === 'function') updatePageNumTab();
+      if (typeof pmUpdatePageNavButtons === 'function') pmUpdatePageNavButtons();
       if (typeof pmSearchRenderAllHighlights === 'function') pmSearchRenderAllHighlights();
       if (!opts.skipDeferredHeavy) {
         if (typeof scheduleHQUpgrade === 'function') scheduleHQUpgrade();
@@ -8507,7 +8554,7 @@
       const n = pdfDoc ? pdfDoc.getPageCount() : 1;
       cols = Math.max(1, Math.min(n, cols));
       let best = MOBILE_SCALE_FLOOR;
-      for (let s = MOBILE_SCALE_FLOOR; s <= 500; s++) {
+      for (let s = MOBILE_SCALE_FLOOR; s <= 700; s++) {
         if (cardRowFits(s, cols, avail)) best = s;
         else break;
       }
@@ -8661,9 +8708,9 @@
       scale = Math.round(scale);
       if (isTouchDevice) {
         const minS = mobileMinScale || computeMobilePinchMinScale();
-        return Math.max(minS, Math.min(500, scale));
+        return Math.max(minS, Math.min(700, scale));
       }
-      return Math.max(70, Math.min(700, scale));
+      return Math.max(70, Math.min(900, scale));
     }
 
     //Mobile fit: when opened - 2/4 column; pinch can reduce to 4/8.
@@ -8781,6 +8828,7 @@
       if (typeof alignRowNumbers === 'function') requestAnimationFrame(alignRowNumbers);
       //The scale has changed → the number of columns may have changed → we recalculate the curtain
       if (typeof updatePageNumTab === 'function') requestAnimationFrame(updatePageNumTab);
+      if (typeof pmUpdatePageNavButtons === 'function') requestAnimationFrame(pmUpdatePageNavButtons);
       //The scale has changed the size of the page image - we recalculate the frame of the exact search highlighting
       if (typeof pmSearchRenderAllHighlights === 'function') requestAnimationFrame(pmSearchRenderAllHighlights);
       //With high magnification, we load visible pages in high quality
@@ -9519,6 +9567,7 @@
         alignRowNumbers();           // align page numbers along lines
         updateStickyFileBar();       // recalculation of the pinned file name strip
         updatePageNumTab();          // recalculation of curtains with page number (1 column)
+        if (typeof pmUpdatePageNavButtons === 'function') pmUpdatePageNavButtons();
         updateMobileQuickActions();
         updateMobilePagesRowOverflow();
         updateDesktopPagesAlignment();
@@ -9591,6 +9640,108 @@
       }
     }
 
+    // ─── Prev/next page shortcuts (top-left, single-column layout only) ───
+    // Shown whenever exactly one page fits per row (desktop or mobile,
+    // including reading mode) and the document has more than one page.
+    // Clicking scrolls (smoothly, not a jump) to the adjacent page in
+    // current visual order, without touching the zoom level.
+    function pmVisiblePageEls() {
+      return Array.from(pagesContainer.querySelectorAll('.page'))
+        .filter(p => p.style.display !== 'none');
+    }
+
+    // Same "which page currently occupies the most visible area" heuristic
+    // used by updatePageNumTab, factored out so navigation and the
+    // enabled/disabled state agree on "the current page".
+    function pmBestVisiblePageIndex(pages) {
+      const host = scrollContainer.getBoundingClientRect();
+      const viewTop = host.top, viewBottom = host.bottom;
+      let bestIdx = -1, bestVisible = 0;
+      pages.forEach((p, i) => {
+        const r = p.getBoundingClientRect();
+        const visible = Math.max(0, Math.min(r.bottom, viewBottom) - Math.max(r.top, viewTop));
+        const frac = r.height > 0 ? visible / r.height : 0;
+        if (frac > bestVisible) { bestVisible = frac; bestIdx = i; }
+      });
+      return bestIdx;
+    }
+
+    function pmPositionPageNavButtons() {
+      const prevBtn = document.getElementById('pmPagePrevBtn');
+      const nextBtn = document.getElementById('pmPageNextBtn');
+      if (!prevBtn || !nextBtn) return;
+      // Sit right below whichever "header row" is currently on screen: the
+      // sticky file-name bar once scrolled past the top, otherwise the
+      // normal content-header (page counter / file name / title) - using
+      // just the menu's bottom edge left them floating over that header's
+      // text (e.g. "Страниц: N") whenever the page hadn't been scrolled yet.
+      const bar = document.getElementById('stickyFileBar');
+      const barActive = bar && bar.classList.contains('visible');
+      let referenceBottom;
+      if (barActive) {
+        referenceBottom = bar.getBoundingClientRect().bottom;
+      } else {
+        const header = document.querySelector('.content-header');
+        const headerRect = header ? header.getBoundingClientRect() : null;
+        referenceBottom = (headerRect && headerRect.height > 0) ? headerRect.bottom : stickyBarTop();
+      }
+      let top = referenceBottom + 12;
+      // Mobile: don't sit on top of the (possibly pinned) page-count badge.
+      if (isTouchDevice) {
+        const box = document.getElementById('pageCountBox');
+        if (box && getComputedStyle(box).display !== 'none') {
+          const boxRect = box.getBoundingClientRect();
+          if (boxRect.height > 0) top = Math.max(top, boxRect.bottom + 10);
+        }
+      }
+      prevBtn.style.top = top + 'px';
+      nextBtn.style.top = (top + 46) + 'px';
+    }
+
+    function pmUpdatePageNavButtons() {
+      const prevBtn = document.getElementById('pmPagePrevBtn');
+      const nextBtn = document.getElementById('pmPageNextBtn');
+      if (!prevBtn || !nextBtn) return;
+      if (!pdfDoc || pdfDoc.getPageCount() <= 1) {
+        prevBtn.classList.remove('visible');
+        nextBtn.classList.remove('visible');
+        return;
+      }
+      const pages = pmVisiblePageEls();
+      if (pages.length < 2 || !isSingleColumn(pages)) {
+        prevBtn.classList.remove('visible');
+        nextBtn.classList.remove('visible');
+        return;
+      }
+      prevBtn.classList.add('visible');
+      nextBtn.classList.add('visible');
+      const idx = pmBestVisiblePageIndex(pages);
+      prevBtn.disabled = idx <= 0;
+      nextBtn.disabled = idx < 0 || idx >= pages.length - 1;
+      pmPositionPageNavButtons();
+    }
+
+    // dir: -1 = previous page, +1 = next page. Scale/zoom is untouched -
+    // this only scrolls. Uses scrollContainer.scrollTo(...) rather than
+    // target.scrollIntoView(...) - the latter has to resolve the whole
+    // scrolling-ancestor chain itself and was observed to occasionally cut
+    // its smooth-scroll animation short; computing the target offset off
+    // the container we already scroll everywhere else is more predictable.
+    function pmNavigateSingleColPage(dir) {
+      const pages = pmVisiblePageEls();
+      if (pages.length < 2) return;
+      const idx = pmBestVisiblePageIndex(pages);
+      if (idx < 0) return;
+      const targetIdx = idx + (dir < 0 ? -1 : 1);
+      const target = pages[targetIdx];
+      if (!target) return;
+      const containerRect = scrollContainer.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      const targetTop = scrollContainer.scrollTop + (targetRect.top - containerRect.top);
+      const maxTop = scrollContainer.scrollHeight - scrollContainer.clientHeight;
+      scrollContainer.scrollTo({ top: Math.max(0, Math.min(targetTop, maxTop)), behavior: 'smooth' });
+    }
+
     scrollContainer.addEventListener('scroll', () => {
       enforceScrollLock();
       if (pageTouchActive) {
@@ -9603,6 +9754,7 @@
       // Unpinned counter block is hidden when scrolling (only visible at the top)
       refreshPageCountVisibility();
       updatePageNumTab();
+      pmUpdatePageNavButtons();
       updateMobileScrollRail();
       pokeMobileScrollRail();
       updateScrollPageIndicator();
@@ -10313,7 +10465,7 @@
       // and the post-pinch fill-snap never had a chance to run.
       const ratio = dist / pinchStartDist;
       const minS = mobileMinScale || computeMobilePinchMinScale();
-      const newScale = Math.max(minS, Math.min(500, Math.round(pinchStartScale * ratio)));
+      const newScale = Math.max(minS, Math.min(700, Math.round(pinchStartScale * ratio)));
 
       const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
       const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
@@ -10397,7 +10549,7 @@
       if (t.closest('.page')) {
         if (!e.altKey) return false;
         if (t.closest('.quick-actions, .selection-checkbox')) return false;
-      } else if (t.closest('.top-menu, #pageCountBox, #insertMenu, #insertIndicator, #helpToggle, #helpPanel')) {
+      } else if (t.closest('.top-menu, #pageCountBox, #insertMenu, #insertIndicator, #helpToggle, #helpPanel, .pm-page-nav-btn')) {
         return false;
       }
       // We block selection only on the text ITSELF (file name #info and heading h1),
@@ -10457,7 +10609,7 @@
       // We block only on menus/counters/buttons/indicators - but NOT on .page
       if (el.closest('.top-menu, #pageCountBox, #insertMenu, #insertIndicator, ' +
                       '#menuToggleBtn, #desktopMenuToggleBtn, #helpToggle, #helpPanel, ' +
-                      '.quick-actions, .selection-checkbox')) return false;
+                      '.quick-actions, .selection-checkbox, .pm-page-nav-btn')) return false;
       return true;
     }
 
@@ -10709,7 +10861,7 @@
     //   • cursor inside the window → 100% visibility;
     //   • as you move away, visibility drops to 10% at the boundary of the attenuation distance;
     //   • beyond the border (but while the cursor is in the square) 10% remains.
-    // The fade distance depends on the scale: 40px at 75%, 400px at 500%.
+    // The fade distance depends on the scale: 40px at 70%, 400px at 900%.
     const MIN_OPACITY = 0.10;
     let activeActionsPage = null;
 
@@ -10727,7 +10879,7 @@
     }
 
     function fadeDistanceForScale() {
-      const t = Math.max(0, Math.min(1, (currentScale - 70) / (700 - 70)));
+      const t = Math.max(0, Math.min(1, (currentScale - 70) / (900 - 70)));
       return 40 + (400 - 40) * t;
     }
 
@@ -11106,7 +11258,7 @@
         && !e.target.closest('.quick-actions, .selection-checkbox, button, a, input, textarea, select');
       if (interactionMode !== 'nav' && !zoomPan && !desktopOutsidePagePan) return;
       if (e.button !== 0) return;
-      if (e.target.closest('.top-menu, #helpToggle, #helpPanel, #pageCountBox')) return;
+      if (e.target.closest('.top-menu, #helpToggle, #helpPanel, #pageCountBox, .pm-page-nav-btn')) return;
       navPanning = true;
       navStartX = e.clientX;
       navStartY = e.clientY;
@@ -11264,7 +11416,7 @@
       scrollContainer.addEventListener('mousedown', (e) => {
         if (e.button !== 0 || !loupeModeOn || !loupeModeAllowed() || !pdfDoc) return;
         if (isDragActive || document.querySelector('.modal-overlay-active')) return;
-        if (e.target.closest('.top-menu, #helpToggle, #helpPanel, #pageCountBox')) return;
+        if (e.target.closest('.top-menu, #helpToggle, #helpPanel, #pageCountBox, .pm-page-nav-btn')) return;
         const pages = pagesContainer.querySelectorAll('.page');
         let found = null, foundRect = null;
         for (const p of pages) {
@@ -11959,12 +12111,14 @@
     }
 
     // Calculate target zoom for reading mode on desktop:
-    // the maximum possible, but the page is no wider than 50% of the screen width.
+    // the maximum possible at which one page's square card still fits the
+    // available working-area width (same "fit the square block" logic as mobile).
     function computeReadModeDesktopScale() {
-      const maxW = screen.width * 0.5;
+      const avail = getScrollAvailWidth();
+      if (avail <= 0) return clampScale(900);
       let best = 70;
-      for (let s = 70; s <= 500; s++) {
-        if (cardRowWidth(s, 1) <= maxW) best = s;
+      for (let s = 70; s <= 900; s++) {
+        if (cardRowWidth(s, 1) <= avail) best = s;
         else break;
       }
       return best;
@@ -11974,9 +12128,9 @@
     // the maximum possible at which one page fits in width.
     function computeReadModeMobileScale() {
       const avail = getScrollAvailWidth();
-      if (avail <= 0) return clampScale(500);
+      if (avail <= 0) return clampScale(700);
       let best = 70;
-      for (let s = 70; s <= 500; s++) {
+      for (let s = 70; s <= 700; s++) {
         if (cardRowWidth(s, 1) <= avail) best = s;
         else break;
       }
@@ -15008,7 +15162,7 @@
         }
 
         const el = document.elementFromPoint(ct.clientX, ct.clientY);
-        if (el && el.closest && el.closest('.top-menu, #pageCountBox, #menuToggleBtn')) return;
+        if (el && el.closest && el.closest('.top-menu, #pageCountBox, #menuToggleBtn, .pm-page-nav-btn')) return;
       }, { passive: true, capture: true });
     })();
 
@@ -23879,7 +24033,7 @@ function editSelectedPage() {
   function isOverDocumentArea(target) {
     if (!target || !scrollContainer) return false;
     if (target.closest && target.closest(
-      '.top-menu, #helpToggle, #helpPanel, #pageCountBox, #stickyFileBar, .tab-bar, #loadingOverlay, #pageEditModal, .modal-overlay-active'
+      '.top-menu, #helpToggle, #helpPanel, #pageCountBox, #stickyFileBar, .tab-bar, #loadingOverlay, #pageEditModal, .modal-overlay-active, .pm-page-nav-btn'
     )) return false;
     return scrollContainer.contains(target) || target === scrollContainer;
   }
