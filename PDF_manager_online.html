@@ -3984,14 +3984,30 @@
     .pm-page-nav-btn.pm-nav-autoscroll .pm-page-nav-ring { opacity: 1; }
     .pm-page-nav-btn .pm-page-nav-ring-prog {
       fill: none;
-      stroke: #3498db;
-      stroke-width: 2.2;
+      stroke: #ffcc33;
+      stroke-width: 2.8;
       stroke-linecap: round;
+      filter: drop-shadow(0 0 1px rgba(0,0,0,0.55));
     }
     .pm-page-nav-btn.pm-nav-autoscroll .pm-page-nav-ring-prog {
       stroke: #ffffff;
+      filter: drop-shadow(0 0 1px rgba(0,0,0,0.35));
     }
     #pmPageNextBtn { top: 116px; }
+
+    /* While page-nav auto-scroll is actively running (not paused): force hand cursor/pan */
+    body.pm-nav-autoscrolling #scrollContainer { cursor: grab; }
+    body.pm-nav-autoscrolling.nav-grabbing #scrollContainer { cursor: grabbing; }
+    body.pm-nav-autoscrolling .page { pointer-events: none; }
+    body.pm-nav-autoscrolling .page:hover {
+      border-color: #ccc;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      transform: none;
+    }
+    html[data-theme="dark"] body.pm-nav-autoscrolling .page:hover {
+      border-color: #3a4048;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.35);
+    }
 
     /* Speed slider + pause shown while page-nav auto-scroll is active */
     #pmAutoScrollSpeed {
@@ -5890,7 +5906,7 @@
         sticky file bar / mobile page-count badge) from JS.
         Hold LMB ~300ms then 1s ring → continuous auto-scroll in that direction.-->
     <button id="pmPagePrevBtn" class="pm-page-nav-btn" type="button"
-      title="Переход к предыдущей странице" aria-label="Переход к предыдущей странице"
+      title="Переход к предыдущей странице (удерживайте для автопрокрутки)" aria-label="Переход к предыдущей странице (удерживайте для автопрокрутки)"
       data-pm-nav-dir="-1">
       <svg class="pm-page-nav-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 15 12 9 18 15"/></svg>
       <svg class="pm-page-nav-ring" viewBox="0 0 44 44" aria-hidden="true">
@@ -5898,7 +5914,7 @@
       </svg>
     </button>
     <button id="pmPageNextBtn" class="pm-page-nav-btn" type="button"
-      title="Переход к следующей странице" aria-label="Переход к следующей странице"
+      title="Переход к следующей странице (удерживайте для автопрокрутки)" aria-label="Переход к следующей странице (удерживайте для автопрокрутки)"
       data-pm-nav-dir="1">
       <svg class="pm-page-nav-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
       <svg class="pm-page-nav-ring" viewBox="0 0 44 44" aria-hidden="true">
@@ -6148,8 +6164,10 @@
     const PM_NAV_ICON_AUTO_NEXT =
       '<polyline points="6 6 12 12 18 6"/><polyline points="6 12 12 18 18 12"/>';
     const PM_NAV_HOLD_ARM_MS = 300;
-    const PM_NAV_HOLD_RING_MS = 1000;
+    const PM_NAV_HOLD_RING_MS = 500;
     const PM_NAV_RING_LEN = 100; // matches pathLength on the SVG circle
+    const PM_NAV_TITLE_PREV = 'Переход к предыдущей странице (удерживайте для автопрокрутки)';
+    const PM_NAV_TITLE_NEXT = 'Переход к следующей странице (удерживайте для автопрокрутки)';
     let pmNavAutoDir = 0;              // -1 | 0 | 1
     let pmNavAutoRaf = 0;
     let pmNavAutoLastTs = 0;
@@ -9940,10 +9958,11 @@
     function pmNavAutoSpeedPxPerSec() {
       const range = document.getElementById('pmAutoScrollSpeedRange');
       const v = range ? Number(range.value) : 50;
-      // 0 → slow, 50 → medium, 100 → fast (px/sec).
-      const minS = 40;
-      const midS = 220;
-      const maxS = 700;
+      // 0 → slow, 50 → medium (default), 100 → fast (px/sec).
+      // Default mid reduced by ~1/3 vs the first autoscroll build.
+      const minS = 27;
+      const midS = 147;
+      const maxS = 467;
       if (v <= 50) return minS + (midS - minS) * (v / 50);
       return midS + (maxS - midS) * ((v - 50) / 50);
     }
@@ -9955,6 +9974,14 @@
 
     function pmNavAutoIsScrolling() {
       return !!pmNavAutoDir && !pmNavAutoPaused && !pmNavAutoPointerPaused;
+    }
+
+    function pmNavSyncHandCursor() {
+      // Hand/pan only while auto-scroll mode is on and not button-paused.
+      // When paused, restore whatever cursor the user's selected mode uses.
+      const hand = !!pmNavAutoDir && !pmNavAutoPaused;
+      document.body.classList.toggle('pm-nav-autoscrolling', hand);
+      if (!hand) pmNavAutoPointerPaused = false;
     }
 
     function pmNavUpdatePauseBtnUI() {
@@ -10014,15 +10041,14 @@
       pmNavAutoPaused = false;
       pmNavAutoPointerPaused = false;
       pmNavAutoHqLastAt = 0;
+      pmNavSyncHandCursor();
       ['pmPagePrevBtn', 'pmPageNextBtn'].forEach((id) => {
         const btn = document.getElementById(id);
         if (!btn) return;
         btn.classList.remove('pm-nav-arming', 'pm-nav-autoscroll');
         pmNavResetRing(btn);
         pmNavSetIcon(btn, id === 'pmPagePrevBtn' ? PM_NAV_ICON_PREV : PM_NAV_ICON_NEXT);
-        btn.title = id === 'pmPagePrevBtn'
-          ? 'Переход к предыдущей странице'
-          : 'Переход к следующей странице';
+        btn.title = id === 'pmPagePrevBtn' ? PM_NAV_TITLE_PREV : PM_NAV_TITLE_NEXT;
         btn.setAttribute('aria-label', btn.title);
       });
       pmNavShowAutoControls(false);
@@ -10042,6 +10068,8 @@
         other.classList.remove('pm-nav-arming', 'pm-nav-autoscroll');
         pmNavResetRing(other);
         pmNavSetIcon(other, dir < 0 ? PM_NAV_ICON_NEXT : PM_NAV_ICON_PREV);
+        other.title = dir < 0 ? PM_NAV_TITLE_NEXT : PM_NAV_TITLE_PREV;
+        other.setAttribute('aria-label', other.title);
       }
 
       pmNavAutoDir = dir;
@@ -10065,6 +10093,7 @@
       btn.disabled = false;
 
       pmNavShowAutoControls(true);
+      pmNavSyncHandCursor();
       pmNavRequestVisibleHQ();
 
       if (!pmNavAutoRaf) {
@@ -10076,7 +10105,9 @@
     function pmNavTogglePause() {
       if (!pmNavAutoDir) return;
       pmNavAutoPaused = !pmNavAutoPaused;
+      pmNavAutoPointerPaused = false;
       pmNavUpdatePauseBtnUI();
+      pmNavSyncHandCursor();
       if (!pmNavAutoPaused) {
         pmNavAutoLastTs = 0;
         pmNavRequestVisibleHQ();
@@ -10189,7 +10220,7 @@
       }
 
       if (pmNavHoldArmed) {
-        // Released during the 1s ring — cancel without navigating.
+        // Released during the ring animation — cancel without navigating.
         pmNavCancelArming();
         return;
       }
@@ -10241,30 +10272,17 @@
         pauseBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
       }
 
-      // Hold LMB on a page while auto-scrolling → temporary pause until release.
-      const onPagePointerDown = (e) => {
+      // RMB while auto-scroll is active = same as the pause/resume button.
+      const onAutoScrollContextMenu = (e) => {
         if (!pmNavAutoDir) return;
-        if (e.pointerType === 'mouse' && e.button !== 0) return;
         if (e.target.closest && e.target.closest(
           '.pm-page-nav-btn, #pmAutoScrollSpeed, #pmAutoScrollPauseBtn, .top-menu, #helpToggle, #helpPanel'
         )) return;
-        const page = e.target.closest && e.target.closest('.page');
-        if (!page || page.style.display === 'none') return;
-        pmNavAutoPointerPaused = true;
-        pmNavAutoLastTs = 0;
-        try { page.setPointerCapture(e.pointerId); } catch (_) {}
+        e.preventDefault();
+        e.stopPropagation();
+        pmNavTogglePause();
       };
-      const onPagePointerEnd = (e) => {
-        if (!pmNavAutoPointerPaused) return;
-        pmNavAutoPointerPaused = false;
-        pmNavAutoLastTs = 0;
-        if (pmNavAutoIsScrolling()) pmNavRequestVisibleHQ();
-      };
-      if (pagesContainer) {
-        pagesContainer.addEventListener('pointerdown', onPagePointerDown, true);
-        pagesContainer.addEventListener('pointerup', onPagePointerEnd, true);
-        pagesContainer.addEventListener('pointercancel', onPagePointerEnd, true);
-      }
+      document.addEventListener('contextmenu', onAutoScrollContextMenu, true);
     })();
 
     scrollContainer.addEventListener('scroll', () => {
@@ -11784,7 +11802,12 @@
       const desktopOutsidePagePan = isDesktopZoomTextSelect()
         && !e.target.closest('.page-text-layer')
         && !e.target.closest('.quick-actions, .selection-checkbox, button, a, input, textarea, select');
-      if (interactionMode !== 'nav' && !zoomPan && !desktopOutsidePagePan) return;
+      // Page-nav auto-scroll forces hand/pan regardless of the selected mode
+      // (while not button-paused). Holding LMB pauses auto-scroll until release.
+      const autoHandPan = typeof pmNavAutoDir !== 'undefined'
+        && !!pmNavAutoDir
+        && !pmNavAutoPaused;
+      if (interactionMode !== 'nav' && !zoomPan && !desktopOutsidePagePan && !autoHandPan) return;
       if (e.button !== 0) return;
       if (e.target.closest('.top-menu, #helpToggle, #helpPanel, #pageCountBox, .pm-page-nav-btn, #pmAutoScrollSpeed, #pmAutoScrollPauseBtn')) return;
       navPanning = true;
@@ -11792,6 +11815,10 @@
       navStartY = e.clientY;
       navScrollX = scrollContainer.scrollLeft;
       navScrollY = scrollContainer.scrollTop;
+      if (autoHandPan) {
+        pmNavAutoPointerPaused = true;
+        pmNavAutoLastTs = 0;
+      }
       document.body.classList.add('nav-grabbing');
       document.addEventListener('mousemove', navPanMove);
       document.addEventListener('mouseup', navPanEnd);
@@ -11809,6 +11836,14 @@
       document.body.classList.remove('nav-grabbing');
       document.removeEventListener('mousemove', navPanMove);
       document.removeEventListener('mouseup', navPanEnd);
+      if (pmNavAutoPointerPaused) {
+        pmNavAutoPointerPaused = false;
+        pmNavAutoLastTs = 0;
+        if (typeof pmNavAutoIsScrolling === 'function' && pmNavAutoIsScrolling()
+            && typeof pmNavRequestVisibleHQ === 'function') {
+          pmNavRequestVisibleHQ();
+        }
+      }
     }
 
     // ─────────────────────────────────────────────────────────────────────
