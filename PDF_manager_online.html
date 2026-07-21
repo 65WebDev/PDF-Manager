@@ -1328,13 +1328,15 @@
       justify-content: center;
       box-sizing: border-box;
     }
-    /* Stage 3: peLayoutToolbarEdgeAlign() aligns the tail's left edge with Crop
-       and right edge with Delete (see JS) - at that width, 7.25em Cancel/Save
-       buttons don't leave enough room for the scale slider between them and
-       the tail's left edge, so it visually overlaps Cancel. Narrower (but
-       still equal-sized) buttons free up exactly that room. */
+    /* Stage 3: peLayoutToolbarEdgeAlign() aligns the scale pill's right edge
+       with Insert-image and Crop's left with the pill's left (see JS) - at
+       that width, 7.25em Cancel/Save buttons didn't leave enough room for
+       the scale slider, so it visually overlapped Cancel. 6.9em is the
+       smallest shared min-width both buttons actually need ("Сохранить" is
+       the longer label) - anything smaller makes Cancel and Save render at
+       different widths, since Cancel's shorter text no longer needs it. */
     .pe-toolbar.pe-tb-tools-wrap #peEndActions .pe-btn {
-      min-width: 6.5em;
+      min-width: 6.9em;
     }
 
     /* Stage 2: scale + Cancel/Save on their own row, right-aligned (no overlap) */
@@ -35281,8 +35283,9 @@ function peObjMouseDown(e, o) {
     const bar = document.querySelector('#pageEditModal .pe-toolbar');
     const title = bar?.querySelector('.pe-title');
     const crop = document.getElementById('peToolCrop');
-    const del = document.getElementById('peDeleteObj');
+    const img = document.getElementById('peToolImage');
     const tail = document.getElementById('peToolbarTail');
+    const endActions = document.getElementById('peEndActions');
     if (!bar || !title) return;
 
     const reset = () => {
@@ -35296,16 +35299,17 @@ function peObjMouseDown(e, o) {
 
     if (!document.getElementById('pageEditModal')?.classList.contains('open')
         || !bar.classList.contains('pe-tb-tools-wrap')
-        || !crop || !del || !tail
-        || crop.offsetParent == null || del.offsetParent == null) {
+        || !crop || !img || !tail || !endActions
+        || crop.offsetParent == null || img.offsetParent == null) {
       reset();
       return;
     }
 
     const barRect = bar.getBoundingClientRect();
     const cropRect = crop.getBoundingClientRect();
-    const delRect = del.getBoundingClientRect();
-    if (!(cropRect.width > 0) || !(delRect.width > 0)) {
+    const imgRect = img.getBoundingClientRect();
+    const endActionsRect = endActions.getBoundingClientRect();
+    if (!(cropRect.width > 0) || !(imgRect.width > 0)) {
       reset();
       return;
     }
@@ -35314,7 +35318,7 @@ function peObjMouseDown(e, o) {
     const barPadL = parseFloat(barStyles.paddingLeft) || 0;
     const barPadR = parseFloat(barStyles.paddingRight) || 0;
     const cropL = cropRect.left - barRect.left;
-    const delR = delRect.right - barRect.left;
+    const imgR = imgRect.right - barRect.left;
     const portrait = typeof window.matchMedia === 'function'
       && window.matchMedia('(orientation: portrait)').matches;
     const textBtn = document.getElementById('peToolText');
@@ -35334,12 +35338,18 @@ function peObjMouseDown(e, o) {
       title.style.transform = dx ? ('translateX(' + dx + 'px)') : '';
     }
 
-    // Tail: scale starts at Crop; Cancel/Save end at Delete; 6px gaps (scale grows).
+    // Tail: scale starts at Crop (unchanged); the scale pill grows so its own
+    // right edge (its background, not the whole tail) lands under Insert
+    // image / Prev page - which puts Cancel's left edge (pill right + the
+    // fixed 6px tail gap) under Shape / Next page, since those two button
+    // columns are themselves already aligned with each other.
     const padL = Math.max(0, Math.round(cropL - barPadL));
-    const contentRight = barRect.width - barPadR;
-    const padR = Math.max(0, Math.round(contentRight - delR));
+    const TAIL_GAP = 6;
+    const padR = Math.max(0, Math.round(
+      barRect.width - barPadR - TAIL_GAP - endActionsRect.width - imgR
+    ));
     tail.style.justifyContent = 'flex-start';
-    tail.style.gap = '6px';
+    tail.style.gap = TAIL_GAP + 'px';
     tail.style.paddingLeft = padL + 'px';
     tail.style.paddingRight = padR + 'px';
   }
