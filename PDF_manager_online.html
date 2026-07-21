@@ -29486,20 +29486,19 @@ function peVectorShapeEndpoints(obj, W, H) {
   };
 }
 
+// Line/arrow endpoint drag: no automatic angle magnet - only the explicit
+// Shift hard-snap (handled by peSnapVectorAngle) constrains the angle.
 function peStartVectorEndpointResize(e, o, which) {
   const { w: W, h: H } = peStageSize();
   const ep = peVectorShapeEndpoints(o, W, H);
   const fixedIsEnd = which === 'start';
-  const startRot = o.rot || 0;
   peState.drag = {
     kind: 'resize-vector',
     obj: o,
     which: which === 'start' ? 'start' : 'end',
     fixedX: fixedIsEnd ? ep.x2 : ep.x1,
     fixedY: fixedIsEnd ? ep.y2 : ep.y1,
-    shiftKey: !!e.shiftKey,
-    startRot,
-    rotMagnet: peCreateRotMagnet(startRot)
+    shiftKey: !!e.shiftKey
   };
   peUpdatePanUi();
 }
@@ -33152,13 +33151,14 @@ function peProcessDrag(clientX, clientY) {
     peShapeSetPosFromFixedCorner(d.obj, d.oppCorner, d.anchorX, d.anchorY, WW, HH);
     peRedrawObjects();
   } else if (d.kind === 'resize-vector') {
+    // Shift forces a hard 45° angle snap while held - no automatic magnet.
     const { w: WW, h: HH } = peStageSize();
     let mx = pt.x, my = pt.y;
     const dx = d.which === 'start' ? (d.fixedX - mx) : (mx - d.fixedX);
     const dy = d.which === 'start' ? (d.fixedY - my) : (my - d.fixedY);
     const len = Math.max(1, Math.hypot(dx, dy));
     let angle = Math.atan2(dy, dx) * 180 / Math.PI;
-    angle = peSnapVectorAngle(d, angle);
+    if (d.shiftKey) angle = peSnapVectorAngle(d, angle);
     const rad = angle * Math.PI / 180;
     if (d.which === 'start') {
       mx = d.fixedX - Math.cos(rad) * len;
@@ -33201,15 +33201,13 @@ function peProcessDrag(clientX, clientY) {
     }
   } else if (d.kind === 'highlight-draw' || d.kind === 'shape-draw' || d.kind === 'redact-draw') {
     if (d.kind === 'shape-draw' && d.obj && peShapeIsVectorStroke(d.obj.shape)) {
-      // Press = tail/start, drag = tip/end direction (+ soft 45° magnet).
+      // Press = tail/start, drag = tip/end direction. Shift forces a hard
+      // 45° angle snap while held - no automatic magnet for line/arrow.
       let mx = pt.x, my = pt.y;
-      const dx = mx - d.startX, dy = my - d.startY;
-      const len = Math.max(1, Math.hypot(dx, dy));
-      let angle = Math.atan2(dy, dx) * 180 / Math.PI;
-      if (d.rotMagnet || d.shiftKey) {
-        if (d.startRot == null) d.startRot = 0;
-        if (!d.rotMagnet) d.rotMagnet = peCreateRotMagnet(0);
-        angle = peSnapVectorAngle(d, angle);
+      if (d.shiftKey) {
+        const dx = mx - d.startX, dy = my - d.startY;
+        const len = Math.max(1, Math.hypot(dx, dy));
+        const angle = peSnapVectorAngle(d, Math.atan2(dy, dx) * 180 / Math.PI);
         const rad = angle * Math.PI / 180;
         mx = d.startX + Math.cos(rad) * len;
         my = d.startY + Math.sin(rad) * len;
@@ -34404,10 +34402,6 @@ function peObjMouseDown(e, o) {
       peState.objects.push(o);
       peState.draftShapeId = o.id;
       peState.drag.obj = o;
-      if (peShapeIsVectorStroke(peLastShapeKind)) {
-        peState.drag.startRot = 0;
-        peState.drag.rotMagnet = peCreateRotMagnet(0);
-      }
       peRedrawObjects();
       peUpdatePanUi();
       return;
