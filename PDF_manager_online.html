@@ -8549,7 +8549,7 @@
       const n = pdfDoc ? pdfDoc.getPageCount() : 1;
       cols = Math.max(1, Math.min(n, cols));
       let best = MOBILE_SCALE_FLOOR;
-      for (let s = MOBILE_SCALE_FLOOR; s <= 500; s++) {
+      for (let s = MOBILE_SCALE_FLOOR; s <= 700; s++) {
         if (cardRowFits(s, cols, avail)) best = s;
         else break;
       }
@@ -8703,7 +8703,7 @@
       scale = Math.round(scale);
       if (isTouchDevice) {
         const minS = mobileMinScale || computeMobilePinchMinScale();
-        return Math.max(minS, Math.min(500, scale));
+        return Math.max(minS, Math.min(700, scale));
       }
       return Math.max(70, Math.min(900, scale));
     }
@@ -10460,7 +10460,7 @@
       // and the post-pinch fill-snap never had a chance to run.
       const ratio = dist / pinchStartDist;
       const minS = mobileMinScale || computeMobilePinchMinScale();
-      const newScale = Math.max(minS, Math.min(500, Math.round(pinchStartScale * ratio)));
+      const newScale = Math.max(minS, Math.min(700, Math.round(pinchStartScale * ratio)));
 
       const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
       const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
@@ -10856,7 +10856,7 @@
     //   • cursor inside the window → 100% visibility;
     //   • as you move away, visibility drops to 10% at the boundary of the attenuation distance;
     //   • beyond the border (but while the cursor is in the square) 10% remains.
-    // The fade distance depends on the scale: 40px at 75%, 400px at 500%.
+    // The fade distance depends on the scale: 40px at 70%, 400px at 900%.
     const MIN_OPACITY = 0.10;
     let activeActionsPage = null;
 
@@ -12106,12 +12106,14 @@
     }
 
     // Calculate target zoom for reading mode on desktop:
-    // the maximum possible, but the page is no wider than 50% of the screen width.
+    // the maximum possible at which one page's square card still fits the
+    // available working-area width (same "fit the square block" logic as mobile).
     function computeReadModeDesktopScale() {
-      const maxW = screen.width * 0.5;
+      const avail = getScrollAvailWidth();
+      if (avail <= 0) return clampScale(900);
       let best = 70;
-      for (let s = 70; s <= 500; s++) {
-        if (cardRowWidth(s, 1) <= maxW) best = s;
+      for (let s = 70; s <= 900; s++) {
+        if (cardRowWidth(s, 1) <= avail) best = s;
         else break;
       }
       return best;
@@ -12121,9 +12123,9 @@
     // the maximum possible at which one page fits in width.
     function computeReadModeMobileScale() {
       const avail = getScrollAvailWidth();
-      if (avail <= 0) return clampScale(500);
+      if (avail <= 0) return clampScale(700);
       let best = 70;
-      for (let s = 70; s <= 500; s++) {
+      for (let s = 70; s <= 700; s++) {
         if (cardRowWidth(s, 1) <= avail) best = s;
         else break;
       }
