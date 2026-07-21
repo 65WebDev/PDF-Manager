@@ -1895,7 +1895,7 @@
     .pe-toolbar.pe-tb-tools-wrap .pe-scale input[type=range] {
       flex: 1 1 auto;
       width: auto;
-      min-width: 40px;
+      min-width: 36px;
     }
     /* Active target while picking text color vs background. */
     #pePropColorWrap.pe-color-picking,
@@ -35283,9 +35283,8 @@ function peObjMouseDown(e, o) {
     const bar = document.querySelector('#pageEditModal .pe-toolbar');
     const title = bar?.querySelector('.pe-title');
     const crop = document.getElementById('peToolCrop');
-    const img = document.getElementById('peToolImage');
+    const del = document.getElementById('peDeleteObj');
     const tail = document.getElementById('peToolbarTail');
-    const endActions = document.getElementById('peEndActions');
     if (!bar || !title) return;
 
     const reset = () => {
@@ -35299,17 +35298,16 @@ function peObjMouseDown(e, o) {
 
     if (!document.getElementById('pageEditModal')?.classList.contains('open')
         || !bar.classList.contains('pe-tb-tools-wrap')
-        || !crop || !img || !tail || !endActions
-        || crop.offsetParent == null || img.offsetParent == null) {
+        || !crop || !del || !tail
+        || crop.offsetParent == null || del.offsetParent == null) {
       reset();
       return;
     }
 
     const barRect = bar.getBoundingClientRect();
     const cropRect = crop.getBoundingClientRect();
-    const imgRect = img.getBoundingClientRect();
-    const endActionsRect = endActions.getBoundingClientRect();
-    if (!(cropRect.width > 0) || !(imgRect.width > 0)) {
+    const delRect = del.getBoundingClientRect();
+    if (!(cropRect.width > 0) || !(delRect.width > 0)) {
       reset();
       return;
     }
@@ -35318,7 +35316,7 @@ function peObjMouseDown(e, o) {
     const barPadL = parseFloat(barStyles.paddingLeft) || 0;
     const barPadR = parseFloat(barStyles.paddingRight) || 0;
     const cropL = cropRect.left - barRect.left;
-    const imgR = imgRect.right - barRect.left;
+    const delR = delRect.right - barRect.left;
     const portrait = typeof window.matchMedia === 'function'
       && window.matchMedia('(orientation: portrait)').matches;
     const textBtn = document.getElementById('peToolText');
@@ -35338,18 +35336,15 @@ function peObjMouseDown(e, o) {
       title.style.transform = dx ? ('translateX(' + dx + 'px)') : '';
     }
 
-    // Tail: scale starts at Crop (unchanged); the scale pill grows so its own
-    // right edge (its background, not the whole tail) lands under Insert
-    // image / Prev page - which puts Cancel's left edge (pill right + the
-    // fixed 6px tail gap) under Shape / Next page, since those two button
-    // columns are themselves already aligned with each other.
+    // Tail: scale pill starts at Crop; Save ends at Delete (the pill grows
+    // to absorb whatever room is left between them, pushing Cancel/Save
+    // flush against Delete's right edge) - the pill/Cancel boundary itself
+    // isn't tied to any other button, only these two outer edges matter.
     const padL = Math.max(0, Math.round(cropL - barPadL));
-    const TAIL_GAP = 6;
-    const padR = Math.max(0, Math.round(
-      barRect.width - barPadR - TAIL_GAP - endActionsRect.width - imgR
-    ));
+    const contentRight = barRect.width - barPadR;
+    const padR = Math.max(0, Math.round(contentRight - delR));
     tail.style.justifyContent = 'flex-start';
-    tail.style.gap = TAIL_GAP + 'px';
+    tail.style.gap = '6px';
     tail.style.paddingLeft = padL + 'px';
     tail.style.paddingRight = padR + 'px';
   }
