@@ -8956,20 +8956,28 @@
     }
 
     // True when the page grid is a single column (phone, or desktop zoomed so
-    // only one card fits across). Insert indicators then sit above/below cards
-    // (horizontal bars) instead of between them left/right.
+    // only one card fits across). Used for layout overflow and as part of the
+    // insert-indicator orientation test (see useVerticalInsertIndicator).
     function isPagesSingleColumnLayout() {
       if (!pdfDoc) return false;
-      const pages = getVisiblePages();
-      if (pages.length <= 1) return true;
       const avail = getScrollAvailWidth();
+      // Prefer geometry over visible-page count: a lone page on a wide desktop
+      // still has room for a neighbor, so it is NOT a single-column layout.
       if (avail > 0 && cardRowWidth(currentScale, 2) > avail + 1) return true;
+      const pages = getVisiblePages();
+      if (pages.length <= 1) return false;
       return groupVisiblePagesIntoRows(pages).every(row => row.length === 1);
     }
 
     // Legacy name kept for call sites; same layout test on mobile and desktop.
     function isMobilePagesSingleColumn() {
       return isPagesSingleColumnLayout();
+    }
+
+    // Top/bottom (horizontal bar) insert indicators only when a single page
+    // fits across the work area AND zoom is above 400%. Otherwise left/right.
+    function useVerticalInsertIndicator() {
+      return isPagesSingleColumnLayout() && currentScale > 400;
     }
 
     function pagesShareColumn(aRect, bRect) {
@@ -14496,7 +14504,7 @@
         return;
       }
 
-      const vertical = isMobilePagesSingleColumn();
+      const vertical = useVerticalInsertIndicator();
       let targetPage = null;
       let insertBefore = true;
       let targetRect = null;
@@ -14764,7 +14772,7 @@
     function positionInsertIndicatorEl(ind, targetPage, insertBefore, pages, opacity) {
       if (!ind) return;
 
-      const vertical = isMobilePagesSingleColumn();
+      const vertical = useVerticalInsertIndicator();
       const host = scrollContainer;
       const hostRect = host.getBoundingClientRect();
       const tRect = targetPage.getBoundingClientRect();
@@ -14933,7 +14941,7 @@
       const pages = getVisiblePages();
       if (!pages.length) { clearHoverInsert(); return; }
 
-      const vertical = isMobilePagesSingleColumn();
+      const vertical = useVerticalInsertIndicator();
       let best = null;
 
       if (vertical) {
@@ -15039,7 +15047,7 @@
 
       const hitX = isTouchDevice ? INSERT_IND_TOUCH_HIT_X : 0;
       const hitY = isTouchDevice ? INSERT_IND_TOUCH_HIT_Y : 0;
-      const vertical = isMobilePagesSingleColumn();
+      const vertical = useVerticalInsertIndicator();
 
       if (vertical) {
         for (let i = 0; i < pages.length; i++) {
