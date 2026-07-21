@@ -3988,6 +3988,9 @@
       stroke-width: 2.2;
       stroke-linecap: round;
     }
+    .pm-page-nav-btn.pm-nav-autoscroll .pm-page-nav-ring-prog {
+      stroke: #ffffff;
+    }
     #pmPageNextBtn { top: 116px; }
 
     /* Speed slider shown while page-nav auto-scroll is active */
@@ -6103,6 +6106,30 @@
     const AUTO_SCROLL_SPEED = 15;
     const AUTO_SCROLL_THRESHOLD_TOP = 50;
     const AUTO_SCROLL_THRESHOLD_BOTTOM = 75;
+
+    // Single-column page-nav hold → continuous auto-scroll (must be declared
+    // before the first updateUIState() call — that path reaches these via the
+    // hoisted pmUpdatePageNavButtons / pmNavResetRing).
+    const PM_NAV_ICON_PREV =
+      '<polyline points="6 15 12 9 18 15"/>';
+    const PM_NAV_ICON_NEXT =
+      '<polyline points="6 9 12 15 18 9"/>';
+    const PM_NAV_ICON_AUTO_PREV =
+      '<polyline points="6 18 12 12 18 18"/><polyline points="6 12 12 6 18 12"/>';
+    const PM_NAV_ICON_AUTO_NEXT =
+      '<polyline points="6 6 12 12 18 6"/><polyline points="6 12 12 18 18 12"/>';
+    const PM_NAV_HOLD_ARM_MS = 300;
+    const PM_NAV_HOLD_RING_MS = 1000;
+    const PM_NAV_RING_LEN = 100; // matches pathLength on the SVG circle
+    let pmNavAutoDir = 0;              // -1 | 0 | 1
+    let pmNavAutoRaf = 0;
+    let pmNavAutoLastTs = 0;
+    let pmNavHoldTimer = null;
+    let pmNavRingTimer = null;
+    let pmNavHoldDir = 0;
+    let pmNavHoldArmed = false;
+    let pmNavHoldActivated = false;
+    let pmNavIgnoreClickDir = 0;
 
     const CONCURRENCY_LIMIT = 6;
     const THUMBNAIL_SCALE = 0.75;
@@ -9824,30 +9851,6 @@
         speedEl.style.height = '84px'; // 38 + 8 gap + 38
       }
     }
-
-    const PM_NAV_ICON_PREV =
-      '<polyline points="6 15 12 9 18 15"/>';
-    const PM_NAV_ICON_NEXT =
-      '<polyline points="6 9 12 15 18 9"/>';
-    // Double chevron = continuous auto-scroll in that direction.
-    const PM_NAV_ICON_AUTO_PREV =
-      '<polyline points="6 18 12 12 18 18"/><polyline points="6 12 12 6 18 12"/>';
-    const PM_NAV_ICON_AUTO_NEXT =
-      '<polyline points="6 6 12 12 18 6"/><polyline points="6 12 12 18 18 12"/>';
-
-    const PM_NAV_HOLD_ARM_MS = 300;
-    const PM_NAV_HOLD_RING_MS = 1000;
-    const PM_NAV_RING_LEN = 100; // matches pathLength on the SVG circle
-
-    let pmNavAutoDir = 0;              // -1 | 0 | 1
-    let pmNavAutoRaf = 0;
-    let pmNavAutoLastTs = 0;
-    let pmNavHoldTimer = null;
-    let pmNavRingTimer = null;
-    let pmNavHoldDir = 0;
-    let pmNavHoldArmed = false;        // ring animation started
-    let pmNavHoldActivated = false;    // became auto-scroll during this press
-    let pmNavIgnoreClickDir = 0;       // suppress navigate after a completed hold
 
     function pmNavBtnForDir(dir) {
       return document.getElementById(dir < 0 ? 'pmPagePrevBtn' : 'pmPageNextBtn');
