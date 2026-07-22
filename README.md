@@ -41,19 +41,22 @@ npm run build:offline
 
 ## Windows-приложение (Tauri, экспериментально)
 
-Оболочка **не** входит в автоматический release-pipeline. Сборка вручную на Windows для проверки.
+Оболочка **не** входит в автоматический release-pipeline. Обсуждение и ручная сборка — в ветке `cursor/tauri-windows-shell-1aac` (доработки редактора туда не смешиваем).
+
+**Подробная инструкция (RU):** [docs/windows-tauri-build.md](docs/windows-tauri-build.md)
 
 ### Требования (Windows)
 
 - [Node.js](https://nodejs.org/) 20+
 - [Rust](https://rustup.rs/) (stable, **1.85+**)
-- [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) (workload «Desktop development with C++»)
+- [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) — workload **«Разработка классических приложений на C++»**
 - WebView2 обычно уже есть на Windows 10/11; если нет — установщик подтянет bootstrapper
 
 Проверка окружения после установки:
 
 ```bash
 rustc --version   # >= 1.85
+where link        # должен найти link.exe (Windows)
 npm run tauri -- info
 ```
 
@@ -62,6 +65,7 @@ npm run tauri -- info
 ```bash
 git clone https://github.com/5451165-bot/PDF-Manager.git
 cd PDF-Manager
+git checkout cursor/tauri-windows-shell-1aac
 npm ci
 
 # Режим разработки (окно + UI из офлайн-HTML):
