@@ -80,4 +80,4 @@ npm run tauri:build
 - `src-tauri/target/release/PDF Manager.exe` — запуск без установщика
 - `src-tauri/target/release/bundle/nsis/` — установщик `.exe`
 
-`npm run tauri:build` сначала собирает офлайн-HTML (нужен интернет на этом шаге), копирует его в `tauri-ui/index.html` и упаковывает в Tauri.
+`npm run tauri:build` сначала собирает офлайн-HTML (нужен интернет на этом шаге), копирует его в `tauri-ui/index.html` (с мостом открытия PDF) и упаковывает в Tauri. NSIS-установщик регистрирует ассоциацию с файлами **`.pdf`**.
