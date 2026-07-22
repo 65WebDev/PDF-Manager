@@ -137,8 +137,8 @@ npm run tauri:build
 Что происходит:
 
 1. `npm run build:offline` → `PDF_manager_offline.html`  
-2. Копия в `tauri-ui\index.html`  
-3. `tauri build` → `PDF Manager.exe` + NSIS‑установщик  
+2. Копия в `tauri-ui\index.html` + мост для открытия PDF из ОС  
+3. `tauri build` → `PDF Manager.exe` + NSIS‑установщик с ассоциацией `.pdf`  
 
 Первая сборка часто занимает **10–20+ минут**. Повторные быстрее (кэш).
 
@@ -148,9 +148,38 @@ npm run tauri:build
 npm run tauri:dev
 ```
 
+Проверка ассоциации в dev (без установщика):
+
+```powershell
+npm run tauri:dev
+# в другом окне, подставьте свой путь:
+& "src-tauri\target\debug\PDF Manager.exe" "C:\path\to\file.pdf"
+```
+
+Или после релизной сборки:
+
+```powershell
+& "src-tauri\target\release\PDF Manager.exe" "C:\path\to\file.pdf"
+```
+
 ---
 
-## 5. Частые ошибки
+## 5. Ассоциация с PDF (установщик)
+
+NSIS‑установщик регистрирует приложение как обработчик **`.pdf`** (`bundle.fileAssociations`).
+
+После установки:
+
+1. ПКМ по PDF → **Открыть с помощью** → **PDF Manager**  
+2. Или: Параметры Windows → Приложения → **Приложения по умолчанию** → выбрать PDF Manager для `.pdf`
+
+При двойном клике (если PDF Manager выбран по умолчанию) или «Открыть с помощью» файл передаётся в уже запущенное окно (один экземпляр) либо открывает приложение с этим файлом.
+
+> Windows может не дать стать «единственным» просмотрщиком без согласия пользователя — это ограничение системы, не баг установщика.
+
+---
+
+## 6. Частые ошибки
 
 | Симптом | Что сделать |
 |---------|-------------|
@@ -160,17 +189,19 @@ npm run tauri:dev
 | Долго `Updating crates.io` / Downloading crates | Нормально на первом запуске |
 | Антивирус ругается на `.exe` | Типично для неподписанной сборки; разрешить для своего теста |
 | VS Code установлен, а `link.exe` нет | VS Code ≠ Build Tools; нужен отдельный установщик Build Tools |
+| PDF не открывается из проводника | Сначала проверьте запуск с путём в кавычках (см. выше); затем ассоциацию в «Приложения по умолчанию» |
 
 ---
 
-## 6. Краткий чеклист
+## 7. Краткий чеклист
 
 1. Node 20+, Git, Rust 1.85+, Build Tools (**C++**)  
 2. `git checkout cursor/tauri-windows-shell-1aac`  
 3. `npm ci`  
 4. `where.exe link` — команда что‑то находит  
 5. `npm run tauri:build`  
-6. Запустить `src-tauri\target\release\PDF Manager.exe`
+6. Запустить `src-tauri\target\release\PDF Manager.exe`  
+7. Установить NSIS‑сборку и проверить «Открыть с помощью» для PDF  
 
 ---
 
