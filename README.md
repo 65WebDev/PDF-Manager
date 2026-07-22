@@ -38,3 +38,42 @@ npm ci
 npm run build:offline
 # Результат: PDF_manager_offline.html
 ```
+
+## Windows-приложение (Tauri, экспериментально)
+
+Оболочка **не** входит в автоматический release-pipeline. Сборка вручную на Windows для проверки.
+
+### Требования (Windows)
+
+- [Node.js](https://nodejs.org/) 20+
+- [Rust](https://rustup.rs/) (stable, **1.85+**)
+- [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) (workload «Desktop development with C++»)
+- WebView2 обычно уже есть на Windows 10/11; если нет — установщик подтянет bootstrapper
+
+Проверка окружения после установки:
+
+```bash
+rustc --version   # >= 1.85
+npm run tauri -- info
+```
+
+### Сборка
+
+```bash
+git clone https://github.com/5451165-bot/PDF-Manager.git
+cd PDF-Manager
+npm ci
+
+# Режим разработки (окно + UI из офлайн-HTML):
+npm run tauri:dev
+
+# Релизная сборка (.exe + NSIS-установщик):
+npm run tauri:build
+```
+
+Готовые файлы появятся в:
+
+- `src-tauri/target/release/PDF Manager.exe` — запуск без установщика
+- `src-tauri/target/release/bundle/nsis/` — установщик `.exe`
+
+`npm run tauri:build` сначала собирает офлайн-HTML (нужен интернет на этом шаге), копирует его в `tauri-ui/index.html` и упаковывает в Tauri.
