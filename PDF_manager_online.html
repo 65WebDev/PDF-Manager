@@ -165,8 +165,16 @@
       width: 42px;
       display: block;
       z-index: 110;
+      border-radius: 10px;
+      transition: filter 0.15s ease, box-shadow 0.15s ease;
     }
     .app-logo svg { display: block; width: 42px; height: 42px; }
+    /* Light highlight while the logo hover-zone (or the logo itself) is hot */
+    .app-logo.logo-hot,
+    body:has(#logoMenuArea:hover) .app-logo {
+      filter: brightness(1.14);
+      box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.45);
+    }
 
     /*─── Desktop: hiding the menu via the button under the logo ───*/
     /*Hover area around the logo (logo + space below it for the button)*/
@@ -177,6 +185,12 @@
       width: 42px;
       height: 42px;
       z-index: 111;
+    }
+    /* While the popup stack is open, stretch the hit-area over all three
+       buttons so the menu does not rely on a hide-timeout when moving the
+       cursor from the logo down to About. */
+    #logoMenuArea.expanded {
+      height: 188px; /* logo slot + hide/theme/about (top 140 + 42 + slack) */
     }
     /*Hide menu button (desktop) - pops up under the logo when hovered over.
        Visibility is controlled by JS (.show class) with a timeout to allow time for hovering.*/
@@ -275,12 +289,54 @@
       transform: translateY(0);
       pointer-events: auto;
     }
+    /* Restore help («?»): sits above About only while the corner tip is hidden. */
+    #restoreHelpBtn {
+      position: absolute;
+      top: 140px;
+      right: 0;
+      width: 42px;
+      height: 42px;
+      padding: 0;
+      border: 1px solid rgba(255,255,255,0.28);
+      box-sizing: border-box;
+      border-radius: 8px;
+      background: #3d5468;
+      color: #fff;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.5);
+      opacity: 0;
+      transform: translateY(-6px);
+      pointer-events: none;
+      transition: opacity 0.15s, transform 0.15s, background 0.15s;
+      font-size: 24px;
+      font-weight: bold;
+      line-height: 1;
+    }
+    #restoreHelpBtn:hover { background: #3498db; }
+    #logoMenuArea.help-restore-on #restoreHelpBtn {
+      display: flex;
+    }
+    #logoMenuArea.help-restore-on #restoreHelpBtn.show {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+    #logoMenuArea.help-restore-on #aboutBtn {
+      top: 188px; /* below restore-help (140 + 42 + 6) */
+    }
+    #logoMenuArea.help-restore-on.expanded {
+      height: 236px; /* logo + hide + theme + restore-help + about */
+    }
     /*Menu collapsed: keep only the show/hide toggle in the corner, not the theme/About buttons.*/
     .top-menu.collapsed #themeToggleBtn,
-    .top-menu.collapsed #aboutBtn { display: none !important; }
+    .top-menu.collapsed #aboutBtn,
+    .top-menu.collapsed #restoreHelpBtn { display: none !important; }
     /*We don’t use this desktop button/zone on mobile devices.*/
     @media (pointer: coarse) {
-      #logoMenuArea, #desktopMenuToggleBtn, #themeToggleBtn, #aboutBtn { display: none !important; }
+      #logoMenuArea, #desktopMenuToggleBtn, #themeToggleBtn, #aboutBtn, #restoreHelpBtn { display: none !important; }
     }
     /*When the menu is collapsed (desktop) - the button is fixed in the upper right corner
        on top of the work area and is always visible (as in the mobile version).*/
@@ -291,6 +347,9 @@
       width: 42px;
       height: 42px;
       z-index: 120;
+    }
+    .top-menu.collapsed #logoMenuArea.expanded {
+      height: 42px; /* collapsed corner control only — never stretch */
     }
     .top-menu.collapsed #desktopMenuToggleBtn {
       position: fixed;
@@ -899,11 +958,12 @@
     #readModeScaleSlider:focus,
     #scaleSlider:focus { outline: none; }
 
-    /*Hint “ESC to exit reading mode” - fade-in/fade-out overlay*/
+    /*Hint “ESC to exit reading mode” - fade-in/fade-out overlay.
+       left clears the prev-page nav button (~20+38) in single-column layout.*/
     #readModeEscHint {
       position: fixed;
       top: 18px;
-      left: 18px;
+      left: 72px;
       z-index: 9000;
       background: rgba(30, 30, 40, 0.82);
       color: #fff;
@@ -1019,7 +1079,8 @@
     #pageCtxMenu,
     #readModeCtxMenu,
     #navModeCtxMenu,
-    #loupeModeCtxMenu {
+    #loupeModeCtxMenu,
+    #helpToggleCtxMenu {
       position: fixed; z-index: 99998; display: none;
       background: #fff; border: 1px solid #d5d9de; border-radius: 7px;
       box-shadow: 0 6px 22px rgba(0,0,0,.18); padding: 3px; min-width: 196px;
@@ -1027,11 +1088,13 @@
     #pageCtxMenu.visible,
     #readModeCtxMenu.visible,
     #navModeCtxMenu.visible,
-    #loupeModeCtxMenu.visible { display: block; }
+    #loupeModeCtxMenu.visible,
+    #helpToggleCtxMenu.visible { display: block; }
     #pageCtxMenu button,
     #readModeCtxMenu button,
     #navModeCtxMenu button,
-    #loupeModeCtxMenu button {
+    #loupeModeCtxMenu button,
+    #helpToggleCtxMenu button {
       display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%;
       border: none; background: transparent; padding: 5px 8px;
       font-size: 12.5px; color: #2c3e50; border-radius: 5px; cursor: pointer; text-align: left;
@@ -1071,11 +1134,23 @@
     #pageCtxMenu button:hover:not(:disabled),
     #readModeCtxMenu button:hover:not(:disabled),
     #navModeCtxMenu button:hover:not(:disabled),
-    #loupeModeCtxMenu button:hover:not(:disabled) { background: #eef4fa; }
+    #loupeModeCtxMenu button:hover:not(:disabled),
+    #helpToggleCtxMenu button:hover:not(:disabled) { background: #eef4fa; }
     #pageCtxMenu button:disabled,
     #readModeCtxMenu button:disabled,
     #navModeCtxMenu button:disabled,
     #loupeModeCtxMenu button:disabled { opacity: .45; cursor: default; }
+    #pageCtxMenu button[data-action="fit-width"].active-mode,
+    #navModeCtxMenu button[data-action="fit-width"].active-mode,
+    #loupeModeCtxMenu button[data-action="fit-width"].active-mode {
+      background: #3498db;
+      color: #fff;
+    }
+    #pageCtxMenu button[data-action="fit-width"].active-mode:hover:not(:disabled),
+    #navModeCtxMenu button[data-action="fit-width"].active-mode:hover:not(:disabled),
+    #loupeModeCtxMenu button[data-action="fit-width"].active-mode:hover:not(:disabled) {
+      background: #2f89c5;
+    }
     #pageCtxMenu hr,
     #readModeCtxMenu hr,
     #navModeCtxMenu hr,
@@ -2968,14 +3043,52 @@
     .scale-control {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
       background: #34495e;
-      padding: 8px 16px;
+      /* Fixed height matches pre–fit-width strip (padding 8+8 + ~20px content).
+         Vertical padding is 0 so a slightly larger fit-width button can sit inside
+         without growing the background. */
+      height: 36px;
+      box-sizing: border-box;
+      padding: 0 16px;
       border-radius: 6px;
       color: white;
       position: relative;
       flex-shrink: 1;
       min-width: 140px; /*can be compressed to this size*/
+    }
+    /* Must NOT inherit .top-menu button 42×42 / height:42px sizing. */
+    #fitWidthBtn {
+      flex: 0 0 auto;
+      width: 26px;
+      height: 26px;
+      min-width: 26px;
+      min-height: 26px;
+      max-height: 26px;
+      padding: 0;
+      margin: 0;
+      border: none;
+      border-radius: 4px;
+      background: transparent;
+      color: #fff;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-sizing: border-box;
+      line-height: 1;
+      font-size: inherit;
+    }
+    #fitWidthBtn:hover:not(:disabled) { background: rgba(255,255,255,0.12); }
+    #fitWidthBtn.active-mode { background: #3498db; }
+    #fitWidthBtn:disabled { opacity: 0.4; cursor: default; }
+    #fitWidthBtn svg { display: block; width: 18px; height: 18px; pointer-events: none; }
+    /* While measuring wrap breakpoints, kill button transitions so scrollWidth
+       reflects final text/icon sizes — otherwise removing .icons-mode leaves
+       font-size mid-transition (~22px) and the menu re-enters icons-mode forever. */
+    .main-row.pm-measuring,
+    .main-row.pm-measuring * {
+      transition: none !important;
     }
     .slider-wrapper {
       position: relative;
@@ -3336,7 +3449,7 @@
     .page { 
       border: 2px solid #ccc; 
       border-radius: 10px; 
-      cursor: grab;
+      cursor: default;
       box-shadow: 0 2px 8px rgba(0,0,0,0.1); 
       position: relative; 
       /*We animate only the color/shadow, NOT the dimensions - otherwise the adjacent pages will “shake”*/
@@ -4105,6 +4218,21 @@
     #pmAutoScrollPauseBtn.visible { display: flex; }
     #pmAutoScrollPauseBtn:hover { background: #3498db; }
     #pmAutoScrollPauseBtn svg { display: block; pointer-events: none; }
+    /* Outline highlight for autoscroll UI feedback.
+       Speed strip uses a held class (no keyframe fade) so continuous wheel
+       keeps the contour lit; pause button still uses a short flash. */
+    @keyframes pm-autoscroll-flash {
+      0% { box-shadow: 0 3px 10px rgba(0,0,0,0.3), 0 0 0 0 rgba(52,152,219,0); }
+      35% { box-shadow: 0 3px 10px rgba(0,0,0,0.3), 0 0 0 2px rgba(52,152,219,0.55); }
+      100% { box-shadow: 0 3px 10px rgba(0,0,0,0.3), 0 0 0 0 rgba(52,152,219,0); }
+    }
+    #pmAutoScrollPauseBtn.pm-autoscroll-flash {
+      animation: pm-autoscroll-flash 0.4s ease;
+    }
+    #pmAutoScrollSpeed.pm-autoscroll-flash-hold {
+      box-shadow: 0 3px 10px rgba(0,0,0,0.3), 0 0 0 2px rgba(52,152,219,0.55);
+      transition: box-shadow 0.12s ease;
+    }
 
     /*=== HINT IN THE BOTTOM RIGHT CORNER ===*/
     /*─── Tooltip with hotkeys (lower right corner) ───*/
@@ -5269,6 +5397,7 @@
         <svg id="themeToggleIcoDark" viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
         <svg id="themeToggleIcoLight" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none;"><circle cx="12" cy="12" r="4.5"/><line x1="12" y1="1.5" x2="12" y2="4"/><line x1="12" y1="20" x2="12" y2="22.5"/><line x1="4.2" y1="4.2" x2="5.9" y2="5.9"/><line x1="18.1" y1="18.1" x2="19.8" y2="19.8"/><line x1="1.5" y1="12" x2="4" y2="12"/><line x1="20" y1="12" x2="22.5" y2="12"/><line x1="4.2" y1="19.8" x2="5.9" y2="18.1"/><line x1="18.1" y1="5.9" x2="19.8" y2="4.2"/></svg>
       </button>
+      <button id="restoreHelpBtn" type="button" onclick="restoreHelpToggle()" title="Вернуть подсказку по горячим клавишам" aria-label="Вернуть подсказку по горячим клавишам">?</button>
       <button id="aboutBtn" onclick="showAboutModal()" title="О программе" aria-label="О программе">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="11"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
       </button>
@@ -5290,7 +5419,7 @@
           <button id="readModeBtn" class="icon-btn mode-btn rl-slot-main" onclick="onReadModeBtnClick()" disabled title="Режим чтения (R)"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></button>
           <button id="loupeModeBtn" class="icon-btn mode-btn rl-slot-popup" onclick="toggleLoupeMode()" disabled title="Режим увеличения (Z)"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20.5 20.5l-4.8-4.8"/></svg></button>
         </div>
-        <button id="selectModeBtn" class="icon-btn mode-btn active-mode" onclick="setMode('select')" disabled title="Режим выбора страниц (C)"><svg viewBox="-1 0 24 24" width="30" height="30" fill="currentColor"><path d="M7 4 L7 19 L11 15.2 L13.7 21.2 L16 20.2 L13.4 14.4 L18 14 Z"/></svg></button>
+        <button id="selectModeBtn" class="icon-btn mode-btn active-mode" onclick="setMode('select')" disabled title="Режим выбора (C)"><svg viewBox="-1 0 24 24" width="30" height="30" fill="currentColor"><path d="M7 4 L7 19 L11 15.2 L13.7 21.2 L16 20.2 L13.4 14.4 L18 14 Z"/></svg></button>
         <button id="navModeBtn" class="icon-btn mode-btn mode-sep" onclick="setMode('nav')" disabled title="Режим навигации по документу (H)"><svg viewBox="0 0 69.0645142 89.838707" width="22" height="22" fill="#ffffff" stroke="#000000" stroke-width="0.8" stroke-linejoin="round" aria-hidden="true"><path d="M40.4849663,82.8033905  c-9.1123066,0-16.3754902-5.1455078-19.4277363-13.7636719c-0.1801758-0.5087891-0.3701172-1.015625-0.5893555-1.5087891  c-0.6171875-1.3886719-0.6171875-1.3886719-0.7412109-1.5224609l-0.015625,0.0146484  c-0.7080078-1.3291016-3.1923828-5.6308632-11.9047842-20.7168007c-0.909668-1.5717773-0.3686523-3.5917969,1.2021484-4.5014648  c0.7021484-0.4023438,1.5004883-0.6147461,2.3085938-0.6147461c1.6572266,0,3.1967773,0.8867188,4.0185547,2.315918  l6.8134756,11.7963867c0.2260742,0.3916016,0.6865234,0.5839844,1.125,0.4648438  c0.4370117-0.1171875,0.7407227-0.5136719,0.7407227-0.9658203V16.7179394c0-2.1977549,1.6191406-4.0249033,3.6865234-4.1601572  c1.1650391-0.0810547,2.2583008,0.3310547,3.0761719,1.1494141c0.7470703,0.7475586,1.1586914,1.7426758,1.1586914,2.802247  v24.2529278c0,0.5522461,0.4477558,1,1.0000019,1s1-0.4477539,1-1V10.9962587c0-2.184082,1.7768555-3.960937,3.9604492-3.960937  c1.0600586,0,2.0551758,0.4116211,2.8022461,1.1591792c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v5.5131845  v0.277832v23.9750957c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1V16.7872753v-0.277832  c0-2.184083,1.7773438-3.9609385,3.9609375-3.9609385c1.0595703,0,2.0546875,0.4116211,2.8027344,1.1586914  c0.7470703,0.7475586,1.1582031,1.7426758,1.1582031,2.802247v5.9462891v18.3066387c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1  V22.4557323c0-2.184082,1.7773438-3.9609375,3.9609375-3.9609375c1.0595703,0,2.0546875,0.4116211,2.8017578,1.1591797  c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v37.1074219  C61.69981,72.3776093,52.1832085,82.8033905,40.4849663,82.8033905z"/></svg></button>
         <button id="rotateLeftBtn" class="icon-btn" onclick="rotateSelected(-90)" disabled title="Повернуть выбранные страницы против часовой стрелки (Q)"><span class="rotate-glyph" aria-hidden="true">↺</span></button>
         <button id="rotateRightBtn" class="icon-btn" onclick="rotateSelected(90)" disabled title="Повернуть выбранные страницы по часовой стрелке (W)"><span class="rotate-glyph" aria-hidden="true">↻</span></button>
@@ -5338,6 +5467,12 @@
           <div class="slider-wrapper">
             <input type="range" id="scaleSlider" min="0" max="200" value="100" step="1" oninput="changeScale(this.value)" onmouseup="this.blur()" ontouchend="this.blur()" title="Alt + колесико мыши — изменение масштаба">
           </div>
+          <button type="button" id="fitWidthBtn" onclick="toggleFitWidthScale({ anchor: 'viewport-center' })" disabled title="По ширине страницы (средняя кнопка мыши)" aria-pressed="false" aria-label="По ширине страницы">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="6" y="3" width="12" height="18" rx="1.5"/>
+              <path d="M2 12h4M18 12h4M3.5 9.5 2 12l1.5 2.5M20.5 9.5 22 12l-1.5 2.5"/>
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -5354,6 +5489,7 @@
     <button type="button" data-action="nav"><span class="ctx-label">Режим навигации по документу</span><span class="ctx-icon"><svg viewBox="0 0 69.0645142 89.838707" width="18" height="18" fill="currentColor" stroke="currentColor" stroke-width="0.8" stroke-linejoin="round" aria-hidden="true"><path d="M40.4849663,82.8033905  c-9.1123066,0-16.3754902-5.1455078-19.4277363-13.7636719c-0.1801758-0.5087891-0.3701172-1.015625-0.5893555-1.5087891  c-0.6171875-1.3886719-0.6171875-1.3886719-0.7412109-1.5224609l-0.015625,0.0146484  c-0.7080078-1.3291016-3.1923828-5.6308632-11.9047842-20.7168007c-0.909668-1.5717773-0.3686523-3.5917969,1.2021484-4.5014648  c0.7021484-0.4023438,1.5004883-0.6147461,2.3085938-0.6147461c1.6572266,0,3.1967773,0.8867188,4.0185547,2.315918  l6.8134756,11.7963867c0.2260742,0.3916016,0.6865234,0.5839844,1.125,0.4648438  c0.4370117-0.1171875,0.7407227-0.5136719,0.7407227-0.9658203V16.7179394c0-2.1977549,1.6191406-4.0249033,3.6865234-4.1601572  c1.1650391-0.0810547,2.2583008,0.3310547,3.0761719,1.1494141c0.7470703,0.7475586,1.1586914,1.7426758,1.1586914,2.802247  v24.2529278c0,0.5522461,0.4477558,1,1.0000019,1s1-0.4477539,1-1V10.9962587c0-2.184082,1.7768555-3.960937,3.9604492-3.960937  c1.0600586,0,2.0551758,0.4116211,2.8022461,1.1591792c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v5.5131845  v0.277832v23.9750957c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1V16.7872753v-0.277832  c0-2.184083,1.7773438-3.9609385,3.9609375-3.9609385c1.0595703,0,2.0546875,0.4116211,2.8027344,1.1586914  c0.7470703,0.7475586,1.1582031,1.7426758,1.1582031,2.802247v5.9462891v18.3066387c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1  V22.4557323c0-2.184082,1.7773438-3.9609375,3.9609375-3.9609375c1.0595703,0,2.0546875,0.4116211,2.8017578,1.1591797  c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v37.1074219  C61.69981,72.3776093,52.1832085,82.8033905,40.4849663,82.8033905z"/></svg></span></button>
     <button type="button" data-action="read"><span class="ctx-label">Режим чтения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span></button>
     <button type="button" data-action="loupe"><span class="ctx-label">Режим увеличения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20.5 20.5l-4.8-4.8"/></svg></span></button>
+    <button type="button" data-action="fit-width"><span class="ctx-label">По ширине страницы</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M2 12h4M18 12h4M3.5 9.5 2 12l1.5 2.5M20.5 9.5 22 12l-1.5 2.5"/></svg></span></button>
     <hr>
     <button type="button" data-action="rot-left"><span class="ctx-label">Повернуть против часовой стрелки</span><span class="ctx-icon"><span class="rotate-glyph" aria-hidden="true">↺</span></span></button>
     <button type="button" data-action="rot-right"><span class="ctx-label">Повернуть по часовой стрелке</span><span class="ctx-icon"><span class="rotate-glyph" aria-hidden="true">↻</span></span></button>
@@ -5384,16 +5520,18 @@
 
   <!--RMB menu in document navigation (Hand) mode-->
   <div id="navModeCtxMenu" aria-hidden="true">
-    <button type="button" data-action="select"><span class="ctx-label">Режим выбора страниц</span><span class="ctx-icon"><svg viewBox="-1 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M7 4 L7 19 L11 15.2 L13.7 21.2 L16 20.2 L13.4 14.4 L18 14 Z"/></svg></span></button>
+    <button type="button" data-action="select"><span class="ctx-label">Режим выбора</span><span class="ctx-icon"><svg viewBox="-1 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M7 4 L7 19 L11 15.2 L13.7 21.2 L16 20.2 L13.4 14.4 L18 14 Z"/></svg></span></button>
     <button type="button" data-action="loupe"><span class="ctx-label">Режим увеличения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20.5 20.5l-4.8-4.8"/></svg></span></button>
     <button type="button" data-action="read"><span class="ctx-label">Режим чтения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span></button>
+    <button type="button" data-action="fit-width"><span class="ctx-label">По ширине страницы</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M2 12h4M18 12h4M3.5 9.5 2 12l1.5 2.5M20.5 9.5 22 12l-1.5 2.5"/></svg></span></button>
   </div>
 
   <!--RMB menu in page magnification (loupe) mode-->
   <div id="loupeModeCtxMenu" aria-hidden="true">
-    <button type="button" data-action="select"><span class="ctx-label">Режим выбора страниц</span><span class="ctx-icon"><svg viewBox="-1 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M7 4 L7 19 L11 15.2 L13.7 21.2 L16 20.2 L13.4 14.4 L18 14 Z"/></svg></span></button>
+    <button type="button" data-action="select"><span class="ctx-label">Режим выбора</span><span class="ctx-icon"><svg viewBox="-1 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M7 4 L7 19 L11 15.2 L13.7 21.2 L16 20.2 L13.4 14.4 L18 14 Z"/></svg></span></button>
     <button type="button" data-action="nav"><span class="ctx-label">Режим навигации по документу</span><span class="ctx-icon"><svg viewBox="0 0 69.0645142 89.838707" width="18" height="18" fill="currentColor" stroke="currentColor" stroke-width="0.8" stroke-linejoin="round" aria-hidden="true"><path d="M40.4849663,82.8033905  c-9.1123066,0-16.3754902-5.1455078-19.4277363-13.7636719c-0.1801758-0.5087891-0.3701172-1.015625-0.5893555-1.5087891  c-0.6171875-1.3886719-0.6171875-1.3886719-0.7412109-1.5224609l-0.015625,0.0146484  c-0.7080078-1.3291016-3.1923828-5.6308632-11.9047842-20.7168007c-0.909668-1.5717773-0.3686523-3.5917969,1.2021484-4.5014648  c0.7021484-0.4023438,1.5004883-0.6147461,2.3085938-0.6147461c1.6572266,0,3.1967773,0.8867188,4.0185547,2.315918  l6.8134756,11.7963867c0.2260742,0.3916016,0.6865234,0.5839844,1.125,0.4648438  c0.4370117-0.1171875,0.7407227-0.5136719,0.7407227-0.9658203V16.7179394c0-2.1977549,1.6191406-4.0249033,3.6865234-4.1601572  c1.1650391-0.0810547,2.2583008,0.3310547,3.0761719,1.1494141c0.7470703,0.7475586,1.1586914,1.7426758,1.1586914,2.802247  v24.2529278c0,0.5522461,0.4477558,1,1.0000019,1s1-0.4477539,1-1V10.9962587c0-2.184082,1.7768555-3.960937,3.9604492-3.960937  c1.0600586,0,2.0551758,0.4116211,2.8022461,1.1591792c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v5.5131845  v0.277832v23.9750957c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1V16.7872753v-0.277832  c0-2.184083,1.7773438-3.9609385,3.9609375-3.9609385c1.0595703,0,2.0546875,0.4116211,2.8027344,1.1586914  c0.7470703,0.7475586,1.1582031,1.7426758,1.1582031,2.802247v5.9462891v18.3066387c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1  V22.4557323c0-2.184082,1.7773438-3.9609375,3.9609375-3.9609375c1.0595703,0,2.0546875,0.4116211,2.8017578,1.1591797  c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v37.1074219  C61.69981,72.3776093,52.1832085,82.8033905,40.4849663,82.8033905z"/></svg></span></button>
     <button type="button" data-action="read"><span class="ctx-label">Режим чтения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span></button>
+    <button type="button" data-action="fit-width"><span class="ctx-label">По ширине страницы</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M2 12h4M18 12h4M3.5 9.5 2 12l1.5 2.5M20.5 9.5 22 12l-1.5 2.5"/></svg></span></button>
   </div>
 
   <!--Context menu for selected page text in preview mode (desktop, >400% zoom) - same options as the page editor's-->
@@ -5948,7 +6086,10 @@
 
     <!--Hint in the lower right corner-->
     <button id="helpToggle" title="Горячие клавиши" onclick="toggleHelpPanel()">?</button>
-    <div id="helpPanel" onclick="toggleHelpPanel()" title="Нажмите для скрытия окна">
+    <div id="helpToggleCtxMenu" aria-hidden="true">
+      <button type="button" data-action="hide-help"><span class="ctx-label">Скрыть подсказку</span></button>
+    </div>
+    <div id="helpPanel" onclick="toggleHelpPanel()" oncontextmenu="event.preventDefault(); hideHelpPanel();" title="Нажмите для скрытия окна">
       <div class="help-title">Основные горячие клавиши:</div>
       <div class="help-row"><span class="hk">Q</span> — Повернуть выбранные страницы против часовой стрелки</div>
       <div class="help-row"><span class="hk">W</span> — Повернуть выбранные страницы по часовой стрелке</div>
@@ -5956,7 +6097,7 @@
       <div class="help-row"><span class="hk">P</span> — Печать</div>
       <div class="help-row"><span class="hk">S</span> — Сохранить документ</div>
       <hr>
-      <div class="help-row"><span class="hk">C</span> — режим выбора страниц</div>
+      <div class="help-row"><span class="hk">C</span> — режим выбора</div>
       <div class="help-row"><span class="hk">H</span> — режим навигации по документу</div>
       <div class="help-row"><span class="hk">R</span> — режим чтения</div>
       <div class="help-row"><span class="hk">Z</span> — режим увеличения</div>
@@ -5974,9 +6115,7 @@
       <div class="help-row">Удерживайте <span class="hk">Shift</span> — выделить диапазон страниц</div>
       <div class="help-row">Удерживайте <span class="hk">Ctrl</span> — выделить отдельные страницы</div>
       <div class="help-row"><span class="hk">Alt + колесико мыши</span> — изменение масштаба</div>
-      <div class="help-row">Удерживайте <span class="hk">Alt</span> — выделение страниц рамкой</div>
-      <div class="help-row"><span class="hk">Shift + ↑ / ↓</span> — предыдущая / следующая страница</div>
-      <div class="help-row"><span class="hk">ПКМ</span> на стрелке — автопрокрутка; <span class="hk">Esc</span> — пауза / выход</div>
+      <div class="help-row"><span class="hk">Средняя кнопка мыши</span> — по ширине страницы</div>
     </div>
   </div>
 
@@ -6800,6 +6939,8 @@
       }
       saveBtn.disabled = baseDisabled;
       scaleSlider.disabled = baseDisabled;
+      const fitWidthBtnEl = document.getElementById('fitWidthBtn');
+      if (fitWidthBtnEl) fitWidthBtnEl.disabled = baseDisabled;
       multiSelectCheckbox.disabled = baseDisabled;
 
       //Desktop: selection/navigation modes - only with ≥1 visible (not marked for deletion) page
@@ -8659,6 +8800,7 @@
     function changeScale(value, opts) {
       if (isLoading) return;
       opts = opts || {};
+      if (!opts.fromFitWidth) clearFitWidthToggle();
       const zoomAnchor = !isTouchDevice
         ? beginOrContinueZoomSession(opts.clientX, opts.clientY)
         : null;
@@ -8666,17 +8808,191 @@
       scaleUserLocked = true;
       autoScaleEnabled = false;
       if (scaleSlider) scaleSlider.value = Math.max(0, Math.min(200, scaleToSlider(currentScale)));
+      const rms = document.getElementById('readModeScaleSlider');
+      if (rms) rms.value = scaleSlider ? scaleSlider.value : Math.max(0, Math.min(200, scaleToSlider(currentScale)));
       applyScale({ zoomAnchor });
     }
 
     //Software scale setting (used by auto logic), does NOT block auto mode
-    function setScaleProgrammatic(scale) {
+    function setScaleProgrammatic(scale, opts) {
+      opts = opts || {};
+      if (!opts.fromFitWidth) clearFitWidthToggle();
       const zoomAnchor = !isTouchDevice ? captureZoomAnchor() : null;
       currentScale = clampScale(scale);
       const sliderVal = Math.max(0, Math.min(200, scaleToSlider(currentScale)));
       if (scaleSlider) scaleSlider.value = sliderVal;
+      const rms = document.getElementById('readModeScaleSlider');
+      if (rms) rms.value = sliderVal;
       applyScale({ zoomAnchor });
     }
+
+    /** Fit-width toggle (toolbar / СКМ / context menus). */
+    let fitWidthToggleOn = false;
+    let fitWidthSavedScale = null;
+    let fitWidthPointer = { x: null, y: null };
+
+    function clearFitWidthToggle() {
+      if (!fitWidthToggleOn && fitWidthSavedScale == null) return;
+      fitWidthToggleOn = false;
+      fitWidthSavedScale = null;
+      updateFitWidthBtnUI();
+    }
+
+    function updateFitWidthBtnUI() {
+      const btn = document.getElementById('fitWidthBtn');
+      if (btn) {
+        btn.classList.toggle('active-mode', !!fitWidthToggleOn);
+        btn.setAttribute('aria-pressed', fitWidthToggleOn ? 'true' : 'false');
+      }
+      document.querySelectorAll(
+        '#pageCtxMenu button[data-action="fit-width"],' +
+        '#navModeCtxMenu button[data-action="fit-width"],' +
+        '#loupeModeCtxMenu button[data-action="fit-width"]'
+      ).forEach((el) => {
+        el.classList.toggle('active-mode', !!fitWidthToggleOn);
+      });
+    }
+
+    function computeFitWidthScale() {
+      if (typeof computeReadModeDesktopScale !== 'function') return currentScale;
+      return isTouchDevice
+        ? computeReadModeMobileScale()
+        : computeReadModeDesktopScale();
+    }
+
+    function applyFitWidthScaleValue(scale) {
+      const zoomAnchor = !isTouchDevice ? captureZoomAnchor() : null;
+      currentScale = clampScale(scale);
+      scaleUserLocked = true;
+      autoScaleEnabled = false;
+      const sliderVal = Math.max(0, Math.min(200, scaleToSlider(currentScale)));
+      if (scaleSlider) scaleSlider.value = sliderVal;
+      const rms = document.getElementById('readModeScaleSlider');
+      if (rms) rms.value = sliderVal;
+      applyScale({ zoomAnchor });
+    }
+
+    /** Page whose center is closest to (clientX, clientY); falls back to best visible. */
+    function findNearestPageToPoint(clientX, clientY) {
+      const pages = typeof pmVisiblePageEls === 'function'
+        ? pmVisiblePageEls()
+        : Array.from(pagesContainer.querySelectorAll('.page')).filter(p => p.style.display !== 'none');
+      if (!pages.length) return null;
+      if (clientX == null || clientY == null || !Number.isFinite(clientX) || !Number.isFinite(clientY)) {
+        if (typeof pmBestVisiblePageIndex === 'function') {
+          const i = pmBestVisiblePageIndex(pages);
+          return i >= 0 ? pages[i] : pages[0];
+        }
+        return pages[0];
+      }
+      let best = null;
+      let bestDist = Infinity;
+      for (let i = 0; i < pages.length; i++) {
+        const r = pages[i].getBoundingClientRect();
+        const cx = (r.left + r.right) / 2;
+        const cy = (r.top + r.bottom) / 2;
+        const d = (cx - clientX) * (cx - clientX) + (cy - clientY) * (cy - clientY);
+        if (d < bestDist) { bestDist = d; best = pages[i]; }
+      }
+      return best;
+    }
+
+    function scrollPageIntoViewTop(pageEl) {
+      if (!pageEl || !scrollContainer) return;
+      const containerRect = scrollContainer.getBoundingClientRect();
+      const targetRect = pageEl.getBoundingClientRect();
+      const targetTop = scrollContainer.scrollTop + (targetRect.top - containerRect.top);
+      const maxTop = Math.max(0, scrollContainer.scrollHeight - scrollContainer.clientHeight);
+      scrollContainer.scrollTo({ top: Math.max(0, Math.min(targetTop, maxTop)), behavior: 'auto' });
+      if (typeof syncScrollLockFromContainer === 'function') syncScrollLockFromContainer();
+    }
+
+    function toggleFitWidthScale(opts) {
+      if (isLoading || !pdfDoc) return;
+      opts = opts || {};
+      if (typeof pageEditModal !== 'undefined') {
+        const pe = document.getElementById('pageEditModal');
+        if (pe && pe.classList.contains('open')) return;
+      }
+      // Toolbar button: page nearest the work-area center.
+      // RMB / MMB: page nearest the pointer (opts.clientX/Y or last tracked position).
+      let ptrX, ptrY;
+      if (opts.anchor === 'viewport-center') {
+        if (scrollContainer) {
+          const r = scrollContainer.getBoundingClientRect();
+          ptrX = (r.left + r.right) / 2;
+          ptrY = (r.top + r.bottom) / 2;
+        } else {
+          ptrX = window.innerWidth / 2;
+          ptrY = window.innerHeight / 2;
+        }
+      } else {
+        ptrX = (opts.clientX != null && Number.isFinite(opts.clientX))
+          ? opts.clientX : fitWidthPointer.x;
+        ptrY = (opts.clientY != null && Number.isFinite(opts.clientY))
+          ? opts.clientY : fitWidthPointer.y;
+      }
+      if (fitWidthToggleOn) {
+        const restore = fitWidthSavedScale;
+        fitWidthToggleOn = false;
+        fitWidthSavedScale = null;
+        updateFitWidthBtnUI();
+        if (restore != null && Math.abs(restore - currentScale) > 0.25) {
+          applyFitWidthScaleValue(restore);
+        }
+        return;
+      }
+      // Capture the nearest page BEFORE scale changes reflow the layout.
+      const anchorPage = findNearestPageToPoint(ptrX, ptrY);
+      const anchorIdx = anchorPage ? parseInt(anchorPage.dataset.index, 10) : NaN;
+      fitWidthSavedScale = currentScale;
+      const target = computeFitWidthScale();
+      fitWidthToggleOn = true;
+      updateFitWidthBtnUI();
+      if (Math.abs(target - currentScale) > 0.25) {
+        applyFitWidthScaleValue(target);
+      }
+      // After reflow (or immediately if scale unchanged), bring the anchor page into view.
+      requestAnimationFrame(() => {
+        let page = null;
+        if (!Number.isNaN(anchorIdx)) {
+          page = pagesContainer.querySelector('.page[data-index="' + anchorIdx + '"]');
+        }
+        if (!page) page = findNearestPageToPoint(ptrX, ptrY);
+        if (page) scrollPageIntoViewTop(page);
+      });
+    }
+    window.toggleFitWidthScale = toggleFitWidthScale;
+
+    // Middle mouse button: toggle fit-width in preview (all cursor modes).
+    (function initFitWidthMiddleClick() {
+      document.addEventListener('mousemove', (e) => {
+        fitWidthPointer.x = e.clientX;
+        fitWidthPointer.y = e.clientY;
+      }, { passive: true });
+      function overPreviewWorkspace(target) {
+        if (!target || !scrollContainer) return false;
+        if (target.closest && target.closest(
+          '.top-menu, #helpToggle, #helpPanel, #pageCountBox, #stickyFileBar, .tab-bar, #loadingOverlay, #pageEditModal, .modal-overlay-active, .pm-page-nav-btn, #pmAutoScrollSpeed, #pmAutoScrollPauseBtn, #fitWidthBtn'
+        )) return false;
+        return scrollContainer.contains(target) || target === scrollContainer;
+      }
+      document.addEventListener('mousedown', (e) => {
+        if (e.button !== 1) return;
+        if (!pdfDoc || isLoading) return;
+        if (!overPreviewWorkspace(e.target)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        fitWidthPointer.x = e.clientX;
+        fitWidthPointer.y = e.clientY;
+        toggleFitWidthScale({ clientX: e.clientX, clientY: e.clientY });
+      }, true);
+      document.addEventListener('auxclick', (e) => {
+        if (e.button !== 1) return;
+        if (!overPreviewWorkspace(e.target)) return;
+        e.preventDefault();
+      }, true);
+    })();
 
     //Initial scale by number of pages when opening/merging a file.
     function scaleForPageCount(n) {
@@ -8689,6 +9005,7 @@
     //Sets the initial scale to the number of pages, then adjusts it to the width of the window.
     function applyInitialScale() {
       if (!pdfDoc) return;
+      clearFitWidthToggle();
       const n = pdfDoc.getPageCount();
       scaleUserLocked = false;
       autoScaleEnabled = true;
@@ -9313,68 +9630,79 @@
       const scale  = document.querySelector('.scale-wrapper');
       if (!row || !left || !center || !right || !scale) return;
 
-      //Complete reset of states before measurement
-      center.classList.remove('wrapped');
-      scale.classList.remove('wrapped');
-      row.classList.remove('icons-mode');
-      //We also return the “Print” button to its original place UNCONDITIONALLY and BEFORE everyone
-      //dimensions below (and not just in relocatePrintIfNeeded at the very end).
-      //Otherwise, if the function returns earlier (for example, step 1: everything fits anyway
-      //in one line) - the measurement will take place without printBtn (it is still in
-      //.scale-control from last time), .centered-actions will be measured LOWER
-      // width, the early return will work, and the “Print” button will remain in
-      // scale block forever (that block will visually become taller).
-      resetPrintButtonHome();
+      // Disable .top-menu button { transition: all } for the duration of the
+      // measure — otherwise removing .icons-mode leaves font-size/padding mid-
+      // transition (~22px / wider labels), the sum no longer fits, and icons-mode
+      // is immediately re-applied (menu stuck at compression stage 3 on widen).
+      row.classList.add('pm-measuring');
+      try {
+        //Complete reset of states before measurement
+        center.classList.remove('wrapped');
+        scale.classList.remove('wrapped');
+        row.classList.remove('icons-mode');
+        //We also return the “Print” button to its original place UNCONDITIONALLY and BEFORE everyone
+        //dimensions below (and not just in relocatePrintIfNeeded at the very end).
+        //Otherwise, if the function returns earlier (for example, step 1: everything fits anyway
+        //in one line) - the measurement will take place without printBtn (it is still in
+        //.scale-control from last time), .centered-actions will be measured LOWER
+        // width, the early return will work, and the “Print” button will remain in
+        // scale block forever (that block will visually become taller).
+        resetPrintButtonHome();
+        void row.offsetWidth;
 
-      const styles   = getComputedStyle(row);
-      const padRight = parseFloat(styles.paddingRight) || 0;
-      const padLeft  = parseFloat(styles.paddingLeft)  || 0;
-      const avail    = row.clientWidth - padLeft - padRight;
-      const gap      = parseFloat(styles.columnGap) || 12;
+        const styles   = getComputedStyle(row);
+        const padRight = parseFloat(styles.paddingRight) || 0;
+        const padLeft  = parseFloat(styles.paddingLeft)  || 0;
+        const avail    = row.clientWidth - padLeft - padRight;
+        const gap      = parseFloat(styles.columnGap) || 12;
 
-      // If the line is not yet measurable (for example, the menu has just been expanded and the width is 0) -
-      // do not recalculate the transfer now (otherwise we will mistakenly add wrapped/icons-mode →
-      // the menu will become higher), and we plan to try again on the next frame. Without this
-      // Maximizing a window from a minimized state could “hang” with classes
-      // wrapped/icons-mode set during animation on the intermediate narrow
-      // width - there were no backup recalculations after that same resize event.
-      if (row.clientWidth <= 0) {
-        if (updateCenteredWrapRetries < 20) {
-          updateCenteredWrapRetries++;
-          requestAnimationFrame(updateCenteredWrap);
+        // If the line is not yet measurable (for example, the menu has just been expanded and the width is 0) -
+        // do not recalculate the transfer now (otherwise we will mistakenly add wrapped/icons-mode →
+        // the menu will become higher), and we plan to try again on the next frame. Without this
+        // Maximizing a window from a minimized state could “hang” with classes
+        // wrapped/icons-mode set during animation on the intermediate narrow
+        // width - there were no backup recalculations after that same resize event.
+        if (row.clientWidth <= 0) {
+          if (updateCenteredWrapRetries < 20) {
+            updateCenteredWrapRetries++;
+            requestAnimationFrame(updateCenteredWrap);
+          }
+          return;
         }
-        return;
+        updateCenteredWrapRetries = 0;
+
+        // Row width = blocks + gaps between them
+        const rowWidth = (...ws) =>
+          ws.reduce((a, b) => a + b, 0) + gap * (ws.length - 1);
+
+        // ── Step 1: does everything (text buttons) fit on one line? ──
+        let wL = left.scrollWidth, wC = center.scrollWidth,
+            wR = right.scrollWidth, wS = scale.scrollWidth;
+        if (rowWidth(wL, wC, wR, wS) <= avail) return;
+
+        // ── Step 2: move the central block down ──
+        center.classList.add('wrapped');
+        // Now the top line = left + right + scale (the buttons are still text).
+        // Does it fit? — we leave it as it is (only the center has moved).
+        if (rowWidth(wL, wR, wS) <= avail) return;
+
+        // ── Step 3: “Export” hits “Merge” - turn on icon mode ──
+        row.classList.add('icons-mode');
+        void row.offsetWidth;
+        // Let's measure the widths with icons
+        wL = left.scrollWidth; wR = right.scrollWidth; wS = scale.scrollWidth;
+
+        // ── Step 4: if even with the icons the scale does not fit next to it, move the scale ──
+        if (rowWidth(wL, wR, wS) > avail) {
+          scale.classList.add('wrapped');
+        }
+
+        // ── Step 5: with a very narrow window - if the central block (icons) is not
+        //    placed in the line, move the “Print” button up to the scale slider.
+        relocatePrintIfNeeded(avail);
+      } finally {
+        row.classList.remove('pm-measuring');
       }
-      updateCenteredWrapRetries = 0;
-
-      // Row width = blocks + gaps between them
-      const rowWidth = (...ws) =>
-        ws.reduce((a, b) => a + b, 0) + gap * (ws.length - 1);
-
-      // ── Step 1: does everything (text buttons) fit on one line? ──
-      let wL = left.scrollWidth, wC = center.scrollWidth,
-          wR = right.scrollWidth, wS = scale.scrollWidth;
-      if (rowWidth(wL, wC, wR, wS) <= avail) return;
-
-      // ── Step 2: move the central block down ──
-      center.classList.add('wrapped');
-      // Now the top line = left + right + scale (the buttons are still text).
-      // Does it fit? — we leave it as it is (only the center has moved).
-      if (rowWidth(wL, wR, wS) <= avail) return;
-
-      // ── Step 3: “Export” hits “Merge” - turn on icon mode ──
-      row.classList.add('icons-mode');
-      // Let's measure the widths with icons
-      wL = left.scrollWidth; wR = right.scrollWidth; wS = scale.scrollWidth;
-
-      // ── Step 4: if even with the icons the scale does not fit next to it, move the scale ──
-      if (rowWidth(wL, wR, wS) > avail) {
-        scale.classList.add('wrapped');
-      }
-
-      // ── Step 5: with a very narrow window - if the central block (icons) is not
-      //    placed in the line, move the “Print” button up to the scale slider.
-      relocatePrintIfNeeded(avail);
     }
 
     // Returns the "Print" button from the scale block (if it has moved there) to
@@ -9469,6 +9797,7 @@
       const btn = document.getElementById('helpToggle');
       const panel = document.getElementById('helpPanel');
       if (!btn) return;
+      if (typeof isHelpToggleUserHidden === 'function' && isHelpToggleUserHidden()) return;
       if (panel && panel.style.display === 'block') return;
       const ind = document.getElementById('scrollPageIndicator');
       const hide = scrollbarDragging || !!(ind && ind.classList.contains('visible'));
@@ -9996,6 +10325,7 @@
       range.value = String(Math.max(0, Math.min(max, next)));
       // Fire input for any future listeners / accessibility sync.
       try { range.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
+      pmNavHoldSpeedFlash();
       return true;
     }
 
@@ -10174,12 +10504,37 @@
       }
     }
 
-    function pmNavTogglePause() {
+    function pmNavFlashUi(el) {
+      if (!el) return;
+      el.classList.remove('pm-autoscroll-flash');
+      // Retrigger CSS animation
+      void el.offsetWidth;
+      el.classList.add('pm-autoscroll-flash');
+      clearTimeout(el._pmFlashTimer);
+      el._pmFlashTimer = setTimeout(() => {
+        el.classList.remove('pm-autoscroll-flash');
+      }, 450);
+    }
+
+    /** Keep speed-strip outline lit while the wheel keeps firing; fade only after idle. */
+    function pmNavHoldSpeedFlash() {
+      const el = document.getElementById('pmAutoScrollSpeed');
+      if (!el) return;
+      el.classList.add('pm-autoscroll-flash-hold');
+      clearTimeout(el._pmFlashHoldTimer);
+      el._pmFlashHoldTimer = setTimeout(() => {
+        el.classList.remove('pm-autoscroll-flash-hold');
+      }, 320);
+    }
+
+    function pmNavTogglePause(opts) {
       if (!pmNavAutoDir) return;
+      opts = opts || {};
       pmNavAutoPaused = !pmNavAutoPaused;
       pmNavAutoPointerPaused = false;
       pmNavUpdatePauseBtnUI();
       pmNavSyncHandCursor();
+      if (opts.flash) pmNavFlashUi(document.getElementById('pmAutoScrollPauseBtn'));
       if (!pmNavAutoPaused) {
         pmNavAutoLastTs = 0;
         pmNavRequestVisibleHQ();
@@ -10433,7 +10788,7 @@
 
         e.preventDefault();
         e.stopPropagation();
-        pmNavTogglePause();
+        pmNavTogglePause({ flash: true });
       };
       document.addEventListener('contextmenu', onAutoScrollContextMenu, true);
     })();
@@ -12752,6 +13107,20 @@
       const menu = document.getElementById('topMenu');
       if (!menu) return;
       const collapsed = menu.classList.toggle('collapsed');
+      if (collapsed) {
+        const area = document.getElementById('logoMenuArea');
+        const logo = document.querySelector('.app-logo');
+        const dToggle = document.getElementById('desktopMenuToggleBtn');
+        const themeBtn = document.getElementById('themeToggleBtn');
+        const aboutBtn = document.getElementById('aboutBtn');
+        const restoreHelpBtn = document.getElementById('restoreHelpBtn');
+        if (area) area.classList.remove('expanded');
+        if (logo) logo.classList.remove('logo-hot');
+        if (dToggle) dToggle.classList.remove('show');
+        if (themeBtn) themeBtn.classList.remove('show');
+        if (aboutBtn) aboutBtn.classList.remove('show');
+        if (restoreHelpBtn) restoreHelpBtn.classList.remove('show');
+      }
       // The user manually showed the menu in reading mode - exit the mode,
       // maintaining the current scale and position, and switch to page selection mode.
       if (!_readModeToggleGuard && readModeActive && !collapsed) {
@@ -12931,6 +13300,7 @@
       if (typeof pmSyncLayout === 'function') pmSyncLayout();
 
       // 1. Calculate and set the target scale
+      clearFitWidthToggle();
       const targetScale = isTouchDevice
         ? computeReadModeMobileScale()
         : computeReadModeDesktopScale();
@@ -13077,14 +13447,124 @@
     }
 
     // Maximize/collapse windows with hotkeys
-    function toggleHelpPanel() {
+    const PM_HELP_TOGGLE_HIDDEN_KEY = 'pmHelpToggleHidden';
+    function isHelpToggleUserHidden() {
+      try { return localStorage.getItem(PM_HELP_TOGGLE_HIDDEN_KEY) === '1'; }
+      catch (_) { return false; }
+    }
+    function hideHelpToggleCtxMenu() {
+      const menu = document.getElementById('helpToggleCtxMenu');
+      if (!menu) return;
+      if (document.activeElement && menu.contains(document.activeElement)) {
+        document.activeElement.blur();
+      }
+      menu.classList.remove('visible');
+      menu.setAttribute('aria-hidden', 'true');
+    }
+    function hideHelpPanel() {
       const panel = document.getElementById('helpPanel');
       const btn = document.getElementById('helpToggle');
       if (!panel || !btn) return;
+      if (panel.style.display !== 'block') return;
+      panel.style.display = 'none';
+      if (!isHelpToggleUserHidden()) btn.style.display = 'flex';
+    }
+    function hideHelpTogglePermanently() {
+      try { localStorage.setItem(PM_HELP_TOGGLE_HIDDEN_KEY, '1'); } catch (_) { /* best effort */ }
+      hideHelpToggleCtxMenu();
+      const panel = document.getElementById('helpPanel');
+      const btn = document.getElementById('helpToggle');
+      if (panel) panel.style.display = 'none';
+      if (btn) btn.style.display = 'none';
+      updateLogoHelpRestoreUI();
+    }
+    function restoreHelpToggle() {
+      try { localStorage.removeItem(PM_HELP_TOGGLE_HIDDEN_KEY); } catch (_) { /* best effort */ }
+      hideHelpToggleCtxMenu();
+      const panel = document.getElementById('helpPanel');
+      const btn = document.getElementById('helpToggle');
+      if (panel) panel.style.display = 'none';
+      if (btn) {
+        btn.style.display = 'flex';
+        btn.classList.remove('help-hidden-scrollbar');
+      }
+      updateLogoHelpRestoreUI();
+    }
+    function toggleHelpPanel() {
+      if (isHelpToggleUserHidden()) return;
+      const panel = document.getElementById('helpPanel');
+      const btn = document.getElementById('helpToggle');
+      if (!panel || !btn) return;
+      hideHelpToggleCtxMenu();
       const open = panel.style.display === 'block';
       panel.style.display = open ? 'none' : 'block';
       btn.style.display = open ? 'flex' : 'none';
     }
+    function updateLogoHelpRestoreUI() {
+      const area = document.getElementById('logoMenuArea');
+      const restoreBtn = document.getElementById('restoreHelpBtn');
+      const hidden = isHelpToggleUserHidden();
+      if (area) area.classList.toggle('help-restore-on', hidden);
+      if (restoreBtn && !hidden) restoreBtn.classList.remove('show');
+    }
+    function applyHelpToggleUserPreference() {
+      if (!isHelpToggleUserHidden()) {
+        updateLogoHelpRestoreUI();
+        return;
+      }
+      const panel = document.getElementById('helpPanel');
+      const btn = document.getElementById('helpToggle');
+      if (panel) panel.style.display = 'none';
+      if (btn) btn.style.display = 'none';
+      updateLogoHelpRestoreUI();
+    }
+    window.hideHelpPanel = hideHelpPanel;
+    window.toggleHelpPanel = toggleHelpPanel;
+    window.hideHelpTogglePermanently = hideHelpTogglePermanently;
+    window.restoreHelpToggle = restoreHelpToggle;
+    applyHelpToggleUserPreference();
+
+    (function initHelpToggleCtxMenu() {
+      if (isTouchDevice) return;
+      const btn = document.getElementById('helpToggle');
+      const menu = document.getElementById('helpToggleCtxMenu');
+      if (!btn || !menu) return;
+
+      function positionMenu(clientX, clientY) {
+        menu.classList.add('visible');
+        menu.setAttribute('aria-hidden', 'false');
+        const w = menu.offsetWidth, h = menu.offsetHeight;
+        let x = clientX, y = clientY;
+        if (x + w > window.innerWidth - 6) x = window.innerWidth - w - 6;
+        if (y + h > window.innerHeight - 6) y = window.innerHeight - h - 6;
+        if (x < 6) x = 6;
+        if (y < 6) y = 6;
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
+      }
+
+      btn.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (isHelpToggleUserHidden()) return;
+        positionMenu(e.clientX, e.clientY);
+      });
+      menu.addEventListener('click', (e) => {
+        const item = e.target.closest('button[data-action]');
+        if (!item || item.disabled) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (item.getAttribute('data-action') === 'hide-help') hideHelpTogglePermanently();
+      });
+      document.addEventListener('mousedown', (e) => {
+        if (!menu.classList.contains('visible')) return;
+        if (e.target.closest('#helpToggleCtxMenu, #helpToggle')) return;
+        hideHelpToggleCtxMenu();
+      }, true);
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && menu.classList.contains('visible')) hideHelpToggleCtxMenu();
+      });
+    })();
 
     async function renderInitialThumbnailsFromOriginalBytes() {
       try {
@@ -15901,6 +16381,14 @@
 
       ind.addEventListener('click', (e) => {
         if (!ind.classList.contains('insert-clickable') || !hoverInsert) return;
+        e.stopPropagation();
+        pendingInsert = { ...hoverInsert };
+        openInsertMenu(e.clientX, e.clientY);
+      });
+      // RMB on the blue insert indicator → same insert menu as LMB
+      ind.addEventListener('contextmenu', (e) => {
+        if (!ind.classList.contains('insert-clickable') || !hoverInsert) return;
+        e.preventDefault();
         e.stopPropagation();
         pendingInsert = { ...hoverInsert };
         openInsertMenu(e.clientX, e.clientY);
@@ -20695,8 +21183,9 @@
     })();
 
     // ─── Desktop: show hide menu button when hovering over logo ───
-    // We control visibility via JS with a timeout before hiding so that the user
-    // managed to move the cursor from the logo to the button.
+    // We control visibility via JS so that the user can move the cursor from
+    // the logo onto the popup buttons. The hit-area expands while open, so the
+    // menu stays until the pointer leaves the whole column (no hide-timeout).
     (function initDesktopMenuToggle() {
       if (isTouchDevice) return;
       const area = document.getElementById('logoMenuArea');
@@ -20704,11 +21193,10 @@
       const btn  = document.getElementById('desktopMenuToggleBtn');
       const themeBtn = document.getElementById('themeToggleBtn');
       const aboutBtn = document.getElementById('aboutBtn');
-      if (!btn) return;
-      let hideTimer = null;
+      const restoreHelpBtn = document.getElementById('restoreHelpBtn');
+      if (!btn || !area) return;
 
       function show() {
-        clearTimeout(hideTimer);
         // When collapsed, the button is always visible (via CSS) - no class needed
         // (and the theme/About buttons are hidden entirely while collapsed, see CSS).
         const menu = document.getElementById('topMenu');
@@ -20716,21 +21204,23 @@
         btn.classList.add('show');
         if (themeBtn) themeBtn.classList.add('show');
         if (aboutBtn) aboutBtn.classList.add('show');
+        if (restoreHelpBtn && isHelpToggleUserHidden()) restoreHelpBtn.classList.add('show');
+        area.classList.add('expanded');
+        if (logo) logo.classList.add('logo-hot');
       }
-      function scheduleHide() {
-        clearTimeout(hideTimer);
-        hideTimer = setTimeout(() => {
-          btn.classList.remove('show');
-          if (themeBtn) themeBtn.classList.remove('show');
-          if (aboutBtn) aboutBtn.classList.remove('show');
-        }, POPUP_BTN_HIDE_MS);
+      function hide() {
+        btn.classList.remove('show');
+        if (themeBtn) themeBtn.classList.remove('show');
+        if (aboutBtn) aboutBtn.classList.remove('show');
+        if (restoreHelpBtn) restoreHelpBtn.classList.remove('show');
+        area.classList.remove('expanded');
+        if (logo) logo.classList.remove('logo-hot');
       }
 
-      [area, logo, btn, themeBtn, aboutBtn].forEach(el => {
-        if (!el) return;
-        el.addEventListener('mouseenter', show);
-        el.addEventListener('mouseleave', scheduleHide);
-      });
+      area.addEventListener('mouseenter', show);
+      area.addEventListener('mouseleave', hide);
+      // Logo sits under the area; keep a listener in case hit-testing differs.
+      if (logo) logo.addEventListener('mouseenter', show);
     })();
 
     // Show "save/export as images" buttons on hover (with timeout,
@@ -24760,7 +25250,7 @@ function editSelectedPage() {
   function isOverDocumentArea(target) {
     if (!target || !scrollContainer) return false;
     if (target.closest && target.closest(
-      '.top-menu, #helpToggle, #helpPanel, #pageCountBox, #stickyFileBar, .tab-bar, #loadingOverlay, #pageEditModal, .modal-overlay-active, .pm-page-nav-btn, #pmAutoScrollSpeed, #pmAutoScrollPauseBtn'
+      '.top-menu, #helpToggle, #helpPanel, #pageCountBox, #stickyFileBar, .tab-bar, #loadingOverlay, #pageEditModal, .modal-overlay-active, .pm-page-nav-btn, #pmAutoScrollSpeed, #pmAutoScrollPauseBtn, #insertIndicator, #insertMenu'
     )) return false;
     return scrollContainer.contains(target) || target === scrollContainer;
   }
@@ -24823,6 +25313,7 @@ function editSelectedPage() {
     navMenu.querySelectorAll('button[data-action]').forEach(btn => {
       btn.disabled = baseDisabled;
     });
+    if (typeof updateFitWidthBtnUI === 'function') updateFitWidthBtnUI();
   }
 
   function updateLoupeModeCtxMenuState() {
@@ -24831,6 +25322,7 @@ function editSelectedPage() {
     loupeMenu.querySelectorAll('button[data-action]').forEach(btn => {
       btn.disabled = baseDisabled;
     });
+    if (typeof updateFitWidthBtnUI === 'function') updateFitWidthBtnUI();
   }
 
   function hideTextCopyMenu() {
@@ -25138,13 +25630,21 @@ function editSelectedPage() {
   function updatePageCtxMenuState() {
     const targets = ctxMenuTargetPages();
     const baseDisabled = isLoading || !pdfDoc;
+    const selectedNd = selectedNonDeletedPages();
+    let editIdx = ctxPageIdx;
+    if (editIdx == null && selectedNd.length) {
+      editIdx = (lastSelectedIndex != null && selectedNd.includes(lastSelectedIndex))
+        ? lastSelectedIndex
+        : selectedNd[0];
+    }
     const states = {
       nav: baseDisabled,
       read: baseDisabled,
       loupe: baseDisabled,
+      'fit-width': baseDisabled,
       'rot-right': baseDisabled || targets.length === 0,
       'rot-left': baseDisabled || targets.length === 0,
-      edit: baseDisabled || !pageEditAvailable() || ctxPageIdx == null || markedForDeletion.has(ctxPageIdx),
+      edit: baseDisabled || !pageEditAvailable() || editIdx == null || markedForDeletion.has(editIdx),
       export: baseDisabled || targets.length === 0,
       replace: baseDisabled || targets.length === 0 || !ctxMenuTargetsContiguous(targets),
       cut: baseDisabled || targets.length === 0,
@@ -25156,6 +25656,7 @@ function editSelectedPage() {
     menu.querySelectorAll('button[data-action]').forEach(btn => {
       btn.disabled = !!states[btn.dataset.action];
     });
+    if (typeof updateFitWidthBtnUI === 'function') updateFitWidthBtnUI();
   }
 
   document.addEventListener('contextmenu', (e) => {
@@ -25227,7 +25728,25 @@ function editSelectedPage() {
     }
 
     const pageDiv = e.target.closest && e.target.closest('.page');
-    if (!pageDiv) { hideMenu(); hideTextCopyMenu(); return; }
+    if (!pageDiv) {
+      // Select mode: RMB on empty workspace shows the same menu; page-dependent
+      // actions stay disabled when nothing is selected.
+      if (!isOverDocumentArea(e.target)) { hideMenu(); hideTextCopyMenu(); return; }
+      hideTextCopyMenu();
+      e.preventDefault();
+      ctxPageIdx = null;
+      pageCtxSelectionSnapshot = {
+        selected: [...selectedPages],
+        lastSel: lastSelectedIndex
+      };
+      if (typeof clearHoverInsert === 'function') clearHoverInsert();
+      if (readMenu) readMenu.classList.remove('visible');
+      if (navMenu) navMenu.classList.remove('visible');
+      if (loupeMenu) loupeMenu.classList.remove('visible');
+      updatePageCtxMenuState();
+      positionCtxMenu(menu, e.clientX, e.clientY);
+      return;
+    }
     const idx = parseInt(pageDiv.dataset.index, 10);
     if (Number.isNaN(idx)) { hideMenu(); hideTextCopyMenu(); return; }
 
@@ -25292,6 +25811,9 @@ function editSelectedPage() {
       case 'loupe':
         toggleLoupeMode();
         break;
+      case 'fit-width':
+        if (typeof toggleFitWidthScale === 'function') toggleFitWidthScale();
+        break;
       case 'rot-right':
         if (selOk) rotateSelected(90);
         break;
@@ -25299,8 +25821,17 @@ function editSelectedPage() {
         if (selOk) rotateSelected(-90);
         break;
       case 'edit': {
-        if (anchorIdx != null && !markedForDeletion.has(anchorIdx) && pageEditAvailable()) {
-          openPageEditor(anchorIdx, selSnapshot);
+        let editIdx = anchorIdx;
+        if (editIdx == null) {
+          const selNd = [...selectedPages].filter(i => !markedForDeletion.has(i));
+          if (selNd.length) {
+            editIdx = (lastSelectedIndex != null && selNd.includes(lastSelectedIndex))
+              ? lastSelectedIndex
+              : selNd[0];
+          }
+        }
+        if (editIdx != null && !markedForDeletion.has(editIdx) && pageEditAvailable()) {
+          openPageEditor(editIdx, selSnapshot);
         }
         break;
       }
@@ -25384,6 +25915,9 @@ function editSelectedPage() {
           enterReadMode(anchorIdx);
           break;
         }
+        case 'fit-width':
+          if (typeof toggleFitWidthScale === 'function') toggleFitWidthScale();
+          break;
       }
     });
   }
@@ -25410,6 +25944,9 @@ function editSelectedPage() {
           enterReadMode(anchorIdx);
           break;
         }
+        case 'fit-width':
+          if (typeof toggleFitWidthScale === 'function') toggleFitWidthScale();
+          break;
       }
     });
   }
