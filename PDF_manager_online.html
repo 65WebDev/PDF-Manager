@@ -4125,15 +4125,20 @@
     #pmAutoScrollPauseBtn.visible { display: flex; }
     #pmAutoScrollPauseBtn:hover { background: #3498db; }
     #pmAutoScrollPauseBtn svg { display: block; pointer-events: none; }
-    /* Brief outline flash when RMB toggles pause or wheel changes auto-scroll speed */
+    /* Outline highlight for autoscroll UI feedback.
+       Speed strip uses a held class (no keyframe fade) so continuous wheel
+       keeps the contour lit; pause button still uses a short flash. */
     @keyframes pm-autoscroll-flash {
       0% { box-shadow: 0 3px 10px rgba(0,0,0,0.3), 0 0 0 0 rgba(52,152,219,0); }
-      40% { box-shadow: 0 3px 10px rgba(0,0,0,0.3), 0 0 0 2px rgba(52,152,219,0.55); }
+      35% { box-shadow: 0 3px 10px rgba(0,0,0,0.3), 0 0 0 2px rgba(52,152,219,0.55); }
       100% { box-shadow: 0 3px 10px rgba(0,0,0,0.3), 0 0 0 0 rgba(52,152,219,0); }
     }
-    #pmAutoScrollPauseBtn.pm-autoscroll-flash,
-    #pmAutoScrollSpeed.pm-autoscroll-flash {
+    #pmAutoScrollPauseBtn.pm-autoscroll-flash {
       animation: pm-autoscroll-flash 0.4s ease;
+    }
+    #pmAutoScrollSpeed.pm-autoscroll-flash-hold {
+      box-shadow: 0 3px 10px rgba(0,0,0,0.3), 0 0 0 2px rgba(52,152,219,0.55);
+      transition: box-shadow 0.12s ease;
     }
 
     /*=== HINT IN THE BOTTOM RIGHT CORNER ===*/
@@ -8727,6 +8732,7 @@
     /** Fit-width toggle (toolbar / СКМ / context menus). */
     let fitWidthToggleOn = false;
     let fitWidthSavedScale = null;
+    let fitWidthPointer = { x: null, y: null };
 
     function clearFitWidthToggle() {
       if (!fitWidthToggleOn && fitWidthSavedScale == null) return;
@@ -8761,12 +8767,52 @@
       applyScale({ zoomAnchor });
     }
 
-    function toggleFitWidthScale() {
+    /** Page whose center is closest to (clientX, clientY); falls back to best visible. */
+    function findNearestPageToPoint(clientX, clientY) {
+      const pages = typeof pmVisiblePageEls === 'function'
+        ? pmVisiblePageEls()
+        : Array.from(pagesContainer.querySelectorAll('.page')).filter(p => p.style.display !== 'none');
+      if (!pages.length) return null;
+      if (clientX == null || clientY == null || !Number.isFinite(clientX) || !Number.isFinite(clientY)) {
+        if (typeof pmBestVisiblePageIndex === 'function') {
+          const i = pmBestVisiblePageIndex(pages);
+          return i >= 0 ? pages[i] : pages[0];
+        }
+        return pages[0];
+      }
+      let best = null;
+      let bestDist = Infinity;
+      for (let i = 0; i < pages.length; i++) {
+        const r = pages[i].getBoundingClientRect();
+        const cx = (r.left + r.right) / 2;
+        const cy = (r.top + r.bottom) / 2;
+        const d = (cx - clientX) * (cx - clientX) + (cy - clientY) * (cy - clientY);
+        if (d < bestDist) { bestDist = d; best = pages[i]; }
+      }
+      return best;
+    }
+
+    function scrollPageIntoViewTop(pageEl) {
+      if (!pageEl || !scrollContainer) return;
+      const containerRect = scrollContainer.getBoundingClientRect();
+      const targetRect = pageEl.getBoundingClientRect();
+      const targetTop = scrollContainer.scrollTop + (targetRect.top - containerRect.top);
+      const maxTop = Math.max(0, scrollContainer.scrollHeight - scrollContainer.clientHeight);
+      scrollContainer.scrollTo({ top: Math.max(0, Math.min(targetTop, maxTop)), behavior: 'auto' });
+      if (typeof syncScrollLockFromContainer === 'function') syncScrollLockFromContainer();
+    }
+
+    function toggleFitWidthScale(opts) {
       if (isLoading || !pdfDoc) return;
+      opts = opts || {};
       if (typeof pageEditModal !== 'undefined') {
         const pe = document.getElementById('pageEditModal');
         if (pe && pe.classList.contains('open')) return;
       }
+      const ptrX = (opts.clientX != null && Number.isFinite(opts.clientX))
+        ? opts.clientX : fitWidthPointer.x;
+      const ptrY = (opts.clientY != null && Number.isFinite(opts.clientY))
+        ? opts.clientY : fitWidthPointer.y;
       if (fitWidthToggleOn) {
         const restore = fitWidthSavedScale;
         fitWidthToggleOn = false;
@@ -8777,6 +8823,9 @@
         }
         return;
       }
+      // Capture the nearest page BEFORE scale changes reflow the layout.
+      const anchorPage = findNearestPageToPoint(ptrX, ptrY);
+      const anchorIdx = anchorPage ? parseInt(anchorPage.dataset.index, 10) : NaN;
       fitWidthSavedScale = currentScale;
       const target = computeFitWidthScale();
       fitWidthToggleOn = true;
@@ -8784,11 +8833,24 @@
       if (Math.abs(target - currentScale) > 0.25) {
         applyFitWidthScaleValue(target);
       }
+      // After reflow, bring the cursor-nearest page into view.
+      requestAnimationFrame(() => {
+        let page = null;
+        if (!Number.isNaN(anchorIdx)) {
+          page = pagesContainer.querySelector('.page[data-index="' + anchorIdx + '"]');
+        }
+        if (!page) page = findNearestPageToPoint(ptrX, ptrY);
+        if (page) scrollPageIntoViewTop(page);
+      });
     }
     window.toggleFitWidthScale = toggleFitWidthScale;
 
     // Middle mouse button: toggle fit-width in preview (all cursor modes).
     (function initFitWidthMiddleClick() {
+      document.addEventListener('mousemove', (e) => {
+        fitWidthPointer.x = e.clientX;
+        fitWidthPointer.y = e.clientY;
+      }, { passive: true });
       function overPreviewWorkspace(target) {
         if (!target || !scrollContainer) return false;
         if (target.closest && target.closest(
@@ -8802,7 +8864,9 @@
         if (!overPreviewWorkspace(e.target)) return;
         e.preventDefault();
         e.stopPropagation();
-        toggleFitWidthScale();
+        fitWidthPointer.x = e.clientX;
+        fitWidthPointer.y = e.clientY;
+        toggleFitWidthScale({ clientX: e.clientX, clientY: e.clientY });
       }, true);
       document.addEventListener('auxclick', (e) => {
         if (e.button !== 1) return;
@@ -10130,7 +10194,7 @@
       range.value = String(Math.max(0, Math.min(max, next)));
       // Fire input for any future listeners / accessibility sync.
       try { range.dispatchEvent(new Event('input', { bubbles: true })); } catch (_) {}
-      pmNavFlashUi(document.getElementById('pmAutoScrollSpeed'));
+      pmNavHoldSpeedFlash();
       return true;
     }
 
@@ -10319,6 +10383,17 @@
       el._pmFlashTimer = setTimeout(() => {
         el.classList.remove('pm-autoscroll-flash');
       }, 450);
+    }
+
+    /** Keep speed-strip outline lit while the wheel keeps firing; fade only after idle. */
+    function pmNavHoldSpeedFlash() {
+      const el = document.getElementById('pmAutoScrollSpeed');
+      if (!el) return;
+      el.classList.add('pm-autoscroll-flash-hold');
+      clearTimeout(el._pmFlashHoldTimer);
+      el._pmFlashHoldTimer = setTimeout(() => {
+        el.classList.remove('pm-autoscroll-flash-hold');
+      }, 320);
     }
 
     function pmNavTogglePause(opts) {
