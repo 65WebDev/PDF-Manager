@@ -3356,7 +3356,7 @@
     .page { 
       border: 2px solid #ccc; 
       border-radius: 10px; 
-      cursor: grab;
+      cursor: default;
       box-shadow: 0 2px 8px rgba(0,0,0,0.1); 
       position: relative; 
       /*We animate only the color/shadow, NOT the dimensions - otherwise the adjacent pages will “shake”*/
@@ -4125,15 +4125,15 @@
     #pmAutoScrollPauseBtn.visible { display: flex; }
     #pmAutoScrollPauseBtn:hover { background: #3498db; }
     #pmAutoScrollPauseBtn svg { display: block; pointer-events: none; }
-    /* Brief flash when RMB toggles pause or wheel changes auto-scroll speed */
+    /* Brief outline flash when RMB toggles pause or wheel changes auto-scroll speed */
     @keyframes pm-autoscroll-flash {
-      0% { filter: brightness(1); box-shadow: 0 3px 10px rgba(0,0,0,0.3); }
-      40% { filter: brightness(1.35); box-shadow: 0 0 0 3px rgba(52,152,219,0.55), 0 3px 10px rgba(0,0,0,0.3); background: #3498db; }
-      100% { filter: brightness(1); box-shadow: 0 3px 10px rgba(0,0,0,0.3); }
+      0% { box-shadow: 0 3px 10px rgba(0,0,0,0.3), 0 0 0 0 rgba(52,152,219,0); }
+      40% { box-shadow: 0 3px 10px rgba(0,0,0,0.3), 0 0 0 2px rgba(52,152,219,0.55); }
+      100% { box-shadow: 0 3px 10px rgba(0,0,0,0.3), 0 0 0 0 rgba(52,152,219,0); }
     }
     #pmAutoScrollPauseBtn.pm-autoscroll-flash,
     #pmAutoScrollSpeed.pm-autoscroll-flash {
-      animation: pm-autoscroll-flash 0.42s ease;
+      animation: pm-autoscroll-flash 0.4s ease;
     }
 
     /*=== HINT IN THE BOTTOM RIGHT CORNER ===*/
@@ -16055,6 +16055,14 @@
         pendingInsert = { ...hoverInsert };
         openInsertMenu(e.clientX, e.clientY);
       });
+      // RMB on the blue insert indicator → same insert menu as LMB
+      ind.addEventListener('contextmenu', (e) => {
+        if (!ind.classList.contains('insert-clickable') || !hoverInsert) return;
+        e.preventDefault();
+        e.stopPropagation();
+        pendingInsert = { ...hoverInsert };
+        openInsertMenu(e.clientX, e.clientY);
+      });
 
       document.getElementById('insertFromFileBtn').addEventListener('click', async (e) => {
         e.stopPropagation();
@@ -24910,7 +24918,7 @@ function editSelectedPage() {
   function isOverDocumentArea(target) {
     if (!target || !scrollContainer) return false;
     if (target.closest && target.closest(
-      '.top-menu, #helpToggle, #helpPanel, #pageCountBox, #stickyFileBar, .tab-bar, #loadingOverlay, #pageEditModal, .modal-overlay-active, .pm-page-nav-btn, #pmAutoScrollSpeed, #pmAutoScrollPauseBtn'
+      '.top-menu, #helpToggle, #helpPanel, #pageCountBox, #stickyFileBar, .tab-bar, #loadingOverlay, #pageEditModal, .modal-overlay-active, .pm-page-nav-btn, #pmAutoScrollSpeed, #pmAutoScrollPauseBtn, #insertIndicator, #insertMenu'
     )) return false;
     return scrollContainer.contains(target) || target === scrollContainer;
   }
