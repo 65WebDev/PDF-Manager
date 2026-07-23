@@ -28737,6 +28737,24 @@ function peArmTextKeyboardQuiet(ms) {
   peTextKbScrollQuietUntil = Date.now() + (ms || 400);
 }
 
+/**
+ * True when text editing needs OSK-oriented pad/scroll (phones/tablets, or a
+ * real on-screen keyboard already covering the viewport).
+ * Do NOT key off isTouchDevice / maxTouchPoints alone: Windows desktops often
+ * report touch points without a touchscreen, and the OSK pad dance then slides
+ * the whole page under the floating mini-toolbar.
+ */
+function peNeedsOskTextFocusAssist() {
+  if (peKeyboardOcclusionPx() >= 40) return true;
+  try {
+    if (typeof window.matchMedia === 'function') {
+      if (window.matchMedia('(pointer: coarse)').matches) return true;
+      if (window.matchMedia('(hover: none)').matches) return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
 function peInlineEditorDomEl() {
   if (!peState?.inlineEditId) return null;
   return peInlineTextEl() || document.querySelector(
@@ -28772,40 +28790,65 @@ function pePropsTopOcclusionPx() {
  * Grow bottom pad + top spacer so wrap.scrollTop can bring text into the band
  * not covered by the OSK (bottom) or the fixed mini-panel (top). The top spacer
  * is a real block (not padding) so flex centering cannot swallow the offset.
+ * Desktop (fine pointer, no OSK): do not invent large pads — that shifts the
+ * whole page under the mini-toolbar when placing text.
  */
 function peEnsureEditorKbScrollRoom(opts) {
   const pad = document.getElementById('peStagePad');
   const spacer = document.getElementById('peStageFocusSpacer');
   if (!pad) return;
+  const wrap = document.getElementById('peStageWrap');
+  const stage = document.getElementById('peStage');
+  const oskAssist = peNeedsOskTextFocusAssist();
   const forceEstimate = !!(opts && opts.estimate);
   let needBottom = peKeyboardOcclusionPx();
-  if (forceEstimate || (needBottom < 96 && typeof isTouchDevice !== 'undefined' && isTouchDevice
-      && peState && (peState.inlineEditId || (opts && opts.forTextCreate)))) {
+  if (oskAssist && (forceEstimate || (needBottom < 96
+      && peState && (peState.inlineEditId || (opts && opts.forTextCreate))))) {
     needBottom = Math.max(needBottom, Math.round(window.innerHeight * 0.45));
   }
   needBottom = Math.max(0, Math.min(Math.round(window.innerHeight * 0.7), needBottom));
 
-  let needTop = pePropsTopOcclusionPx();
-  // Creating/editing: always reserve room for the text mini-panel (often not
-  // .visible yet on the first frame, and taller than a single toolbar row).
-  if (peState && (peState.inlineEditId || (opts && opts.forTextCreate))) {
-    const props = document.getElementById('peProps');
-    let ph = 0;
-    if (props) {
-      try { ph = props.getBoundingClientRect().height || props.offsetHeight || 0; } catch (_) { ph = 0; }
+  let needTop = 0;
+  if (oskAssist) {
+    needTop = pePropsTopOcclusionPx();
+    // Creating/editing: reserve room for the text mini-panel (often not
+    // .visible yet on the first frame, and taller than a single toolbar row).
+    if (peState && (peState.inlineEditId || (opts && opts.forTextCreate))) {
+      const props = document.getElementById('peProps');
+      let ph = 0;
+      if (props) {
+        try { ph = props.getBoundingClientRect().height || props.offsetHeight || 0; } catch (_) { ph = 0; }
+      }
+      if (!(ph > 0)) ph = 96; // portrait text panel (size/color/format rows)
+      // + rotate-handle clearance so the knob above the block stays below the panel.
+      needTop = Math.max(needTop, Math.round(ph + 28 + PE_TEXT_ROT_HANDLE_CLEAR_PX));
     }
-    if (!(ph > 0)) ph = 96; // portrait text panel (size/color/format rows)
-    // + rotate-handle clearance so the knob above the block stays below the panel.
-    needTop = Math.max(needTop, Math.round(ph + 28 + PE_TEXT_ROT_HANDLE_CLEAR_PX));
+  } else if (opts && opts.allowDesktopTopPad) {
+    // Mouse desktop: only when the caret is under the floating panel, add just
+    // enough spacer to scroll it clear — never a blanket page shift.
+    needTop = pePropsTopOcclusionPx();
+    if (needTop > 0) needTop = Math.max(needTop, PE_TEXT_ROT_HANDLE_CLEAR_PX + 12);
   }
   needTop = Math.max(0, Math.min(Math.round(window.innerHeight * 0.5), needTop));
 
   if (needBottom === peEditorKbPadPx && needTop === peEditorTopPadPx) return;
+  // Keep the sheet visually stable when switching flex-center → flex-start + spacer.
+  let beforeTop = null;
+  if (wrap && stage && (needTop > 0 || needBottom > 0)
+      && !pad.classList.contains('pe-stage-pad-focus')) {
+    try { beforeTop = stage.getBoundingClientRect().top; } catch (_) { beforeTop = null; }
+  }
   peEditorKbPadPx = needBottom;
   peEditorTopPadPx = needTop;
   pad.style.paddingBottom = (18 + needBottom) + 'px';
   pad.classList.toggle('pe-stage-pad-focus', needTop > 0 || needBottom > 0);
   if (spacer) spacer.style.height = needTop > 0 ? (needTop + 'px') : '0px';
+  if (beforeTop != null && wrap && stage) {
+    try {
+      const drift = stage.getBoundingClientRect().top - beforeTop;
+      if (Math.abs(drift) > 1) wrap.scrollTop += drift;
+    } catch (_) {}
+  }
 }
 
 function peClearEditorKbScrollRoom() {
@@ -28836,7 +28879,7 @@ function peGetTextFocusSafeRect() {
   // Before OSK reports via visualViewport, assume lower ~42% will be covered.
   if (peState && peState.inlineEditId && !peInlineEditFocusSuppressed
       && peKeyboardOcclusionPx() < 48
-      && typeof isTouchDevice !== 'undefined' && isTouchDevice) {
+      && peNeedsOskTextFocusAssist()) {
     bottom = Math.min(bottom, top + Math.max(160, window.innerHeight * 0.55));
   }
   const editingText = !!(peState && peState.inlineEditId && !peInlineEditFocusSuppressed);
@@ -28946,22 +28989,35 @@ function peScrollElementIntoTextFocusCenter(el, opts) {
   if (!el || !wrap) return false;
   const force = !!(opts && opts.force);
   const withPad = !!(opts && opts.withPad);
-  if (withPad) peEnsureEditorKbScrollRoom({ estimate: !!(opts && opts.estimate) });
+  const oskAssist = peNeedsOskTextFocusAssist();
+  const propsHit = peElCoveredByPropsPanel(el);
+  if (withPad) {
+    peEnsureEditorKbScrollRoom({
+      estimate: !!(opts && opts.estimate) && oskAssist,
+      allowDesktopTopPad: !!(opts && opts.allowDesktopTopPad) || (!oskAssist && propsHit)
+    });
+  }
   const safe = peGetTextFocusSafeRect();
   const er = el.getBoundingClientRect();
   const elMid = er.top + Math.min(Math.max(er.height, 8), 36) / 2;
   const margin = 12;
   const covered = elMid < safe.top + margin || elMid > safe.bottom - margin
     || er.bottom > safe.bottom - 8 || er.top < safe.top + 8;
-  const propsHit = peElCoveredByPropsPanel(el);
   if (!force && !covered && !propsHit) return false;
+  // Desktop without OSK: never force-center into mid-viewport — only clear the panel.
+  if (!oskAssist && !force) {
+    if (!propsHit && !covered) return false;
+  }
   // If the block sits under the mini-panel and we still have no scroll room,
   // grow the top spacer before scrolling.
   if ((covered || propsHit) && withPad === false) {
     const maxScroll = Math.max(0, wrap.scrollHeight - wrap.clientHeight);
     const needDelta = elMid - safe.midY;
     if (wrap.scrollTop + needDelta > maxScroll + 2 || wrap.scrollTop + needDelta < -2) {
-      peEnsureEditorKbScrollRoom({ estimate: false });
+      peEnsureEditorKbScrollRoom({
+        estimate: false,
+        allowDesktopTopPad: !oskAssist && propsHit
+      });
     }
   }
   const safe2 = peGetTextFocusSafeRect();
@@ -28975,7 +29031,12 @@ function peScrollElementIntoTextFocusCenter(el, opts) {
     try {
       const pr = props.getBoundingClientRect();
       if (pr.height > 0) {
-        targetY = Math.max(targetY, pr.bottom + 36 + PE_TEXT_ROT_HANDLE_CLEAR_PX);
+        if (oskAssist) {
+          targetY = Math.max(targetY, pr.bottom + 36 + PE_TEXT_ROT_HANDLE_CLEAR_PX);
+        } else if (propsHit) {
+          // Desktop: aim just below the panel, not mid-screen.
+          targetY = pr.bottom + 16 + PE_TEXT_ROT_HANDLE_CLEAR_PX;
+        }
       }
     } catch (_) {}
   }
@@ -28999,6 +29060,14 @@ function peScrollInlineEditorIntoWrapSafeZone() {
   if (peGeomDragActive || peInlineEditFocusSuppressed) return;
   const el = peInlineEditorDomEl();
   if (!el) return;
+  if (!peNeedsOskTextFocusAssist()) {
+    if (peElCoveredByPropsPanel(el)) {
+      peScrollElementIntoTextFocusCenter(el, {
+        force: false, withPad: true, allowDesktopTopPad: true
+      });
+    }
+    return;
+  }
   peScrollElementIntoTextFocusCenter(el, { force: true, withPad: true, estimate: true });
 }
 
@@ -29506,7 +29575,7 @@ function peResumeInlineTextEditAfterMove(o) {
     peStartMobileEditOverlay(o);
   }
   peFocusInlineEditorNow();
-  if (typeof isTouchDevice !== 'undefined' && isTouchDevice) {
+  if (peNeedsOskTextFocusAssist()) {
     peBindTextKeyboardGuards(true);
     peScheduleTextEditVisibility(o);
   } else {
@@ -29560,12 +29629,19 @@ function peBeginCalloutEdit(o) {
   peArmTextKeyboardQuiet(120);
   peFocusInlineEditorNow();
   peFocusInlineEditorIfNeeded();
-  if (typeof isTouchDevice !== 'undefined' && isTouchDevice) {
+  if (peNeedsOskTextFocusAssist()) {
     peScheduleTextEditVisibility(o);
   } else {
-    peEnsureEditorKbScrollRoom({ estimate: true });
-    peScrollInlineEditorIntoWrapSafeZone();
-    peFocusInlineEditorNow();
+    requestAnimationFrame(() => {
+      if (!peState || peState.inlineEditId !== o.id) return;
+      const el = peInlineEditorDomEl();
+      if (el && peElCoveredByPropsPanel(el)) {
+        peScrollElementIntoTextFocusCenter(el, {
+          force: false, withPad: true, allowDesktopTopPad: true
+        });
+      }
+      peFocusInlineEditorNow();
+    });
   }
 }
 
@@ -29622,13 +29698,22 @@ function peBeginInlineEdit(o, opts) {
   // Scroll/pad adjustments must not precede focus() — they dismiss the OSK.
   peArmTextKeyboardQuiet(120);
   peFocusInlineEditorNow();
-  if (typeof isTouchDevice !== 'undefined' && isTouchDevice) {
+  if (peNeedsOskTextFocusAssist()) {
     peBindTextKeyboardGuards(true);
     peScheduleTextEditVisibility(o);
   } else {
-    peEnsureEditorKbScrollRoom({ estimate: true, forTextCreate: !!(opts && opts.isNewDraft) });
-    peScrollInlineEditorIntoWrapSafeZone();
-    peFocusInlineEditorNow();
+    // Desktop: keep the page where it is. Only nudge if the caret sits under
+    // the floating mini-panel (no blanket OSK spacer / mid-viewport center).
+    requestAnimationFrame(() => {
+      if (!peState || peState.inlineEditId !== o.id) return;
+      const el = peInlineEditorDomEl();
+      if (el && peElCoveredByPropsPanel(el)) {
+        peScrollElementIntoTextFocusCenter(el, {
+          force: false, withPad: true, allowDesktopTopPad: true
+        });
+      }
+      peFocusInlineEditorNow();
+    });
   }
 }
 
