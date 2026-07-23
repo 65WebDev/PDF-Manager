@@ -187,6 +187,29 @@ const TAURI_OPEN_BRIDGE = `
       var pos = mapDragPos(position);
       if (!pos) return;
       var x = pos.x, y = pos.y;
+
+      // Open “merge order” modal owns OS-file hover/drop (Tauri native DnD).
+      var mergeOrderTarget = null;
+      try { mergeOrderTarget = window.__pmMergeOrderOsTarget; } catch (_) {}
+      if (mergeOrderTarget && typeof mergeOrderTarget.onHover === 'function') {
+        clearPageInsertUi();
+        clearTabHoverActivate();
+        tabInsertIndex = null;
+        var hideTabInd = getGlobalFn('pmHideTabInsertIndicator');
+        var tabHint = getGlobalFn('pmShowTabDropHint');
+        var mergeHint = getGlobalFn('pmShowMergeBtnDropHint');
+        var clearGhosts = getGlobalFn('pmClearFileDragGhosts');
+        if (hideTabInd) hideTabInd();
+        if (tabHint) tabHint(false);
+        if (mergeHint) mergeHint(false);
+        if (clearGhosts) clearGhosts();
+        document.body.classList.remove('os-file-drag-active', 'pm-tab-file-drag');
+        var mergeBtn = document.getElementById('mergeBtn');
+        if (mergeBtn) mergeBtn.classList.remove('merge-drop-active');
+        mergeOrderTarget.onHover(x, y);
+        return;
+      }
+
       var n = osDragPdfCount;
       var tabsOn = !!(getGlobalFn('pmTabsEnabled') && getGlobalFn('pmTabsEnabled')());
       var tabBar = document.getElementById('tabBar');
@@ -368,6 +391,19 @@ const TAURI_OPEN_BRIDGE = `
 
     var clientPos = mapDragPos(position);
 
+    // 0) Open merge-order modal: insert into its list (or swallow if over modal chrome).
+    try {
+      var mergeOrderTarget = null;
+      try { mergeOrderTarget = window.__pmMergeOrderOsTarget; } catch (_) {}
+      if (mergeOrderTarget && typeof mergeOrderTarget.onDrop === 'function' && clientPos) {
+        endOsDragUi();
+        await mergeOrderTarget.onDrop(clientPos.x, clientPos.y, files);
+        return;
+      }
+    } catch (err) {
+      console.warn('[Tauri] merge-order-drop fallback', err);
+    }
+
     // 1) Drop on Merge (≥2 files) → merge into a new tab.
     try {
       var mergeBtn = document.getElementById('mergeBtn');
@@ -479,6 +515,10 @@ const TAURI_OPEN_BRIDGE = `
           return;
         }
         if (payload.type === 'leave' || payload.type === 'cancel') {
+          try {
+            var mot = window.__pmMergeOrderOsTarget;
+            if (mot && typeof mot.clear === 'function') mot.clear();
+          } catch (_) {}
           endOsDragUi();
           return;
         }
