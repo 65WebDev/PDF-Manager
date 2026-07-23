@@ -130,6 +130,8 @@ npm run tauri -- info
 
 Нужен **интернет** (скачивание CDN‑библиотек для офлайн‑HTML + crates Rust).
 
+Также нужен [GitHub CLI](https://cli.github.com/) и авторизация (`gh auth login`) — после сборки установщик **автоматически** заливается в GitHub Release.
+
 ```powershell
 npm run tauri:build
 ```
@@ -139,8 +141,21 @@ npm run tauri:build
 1. `npm run build:offline` → `PDF_manager_offline.html`  
 2. Копия в `tauri-ui\index.html` + мост для открытия PDF из ОС  
 3. `tauri build` → `PDF Manager.exe` + NSIS‑установщик с ассоциацией `.pdf`  
+4. `scripts/upload-windows-installer.mjs` → GitHub Release `windows-v{version}`  
 
 Первая сборка часто занимает **10–20+ минут**. Повторные быстрее (кэш).
+
+Полезные варианты:
+
+```powershell
+# Сборка без загрузки на GitHub:
+npm run tauri:build:local
+# или
+$env:TAURI_SKIP_UPLOAD="1"; npm run tauri:build
+
+# Только повторно залить уже собранные .exe:
+npm run tauri:upload
+```
 
 ### Режим разработки (без установщика)
 

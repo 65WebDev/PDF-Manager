@@ -20,4 +20,6 @@ See **[docs/windows-tauri-build.md](../docs/windows-tauri-build.md)** — уст
 |---------|---------|
 | `npm run build:tauri-ui` | Build offline HTML → `tauri-ui/index.html` (+ open-file bridge) |
 | `npm run tauri:dev` | Dev window |
-| `npm run tauri:build` | Release `.exe` + NSIS installer |
+| `npm run tauri:build` | Release `.exe` + NSIS, then upload to GitHub Release |
+| `npm run tauri:build:local` | Release build only (no upload) |
+| `npm run tauri:upload` | Upload already-built installers to GitHub |
