@@ -101,17 +101,83 @@ const TAURI_OPEN_BRIDGE = `
     return { x: position.x / scale, y: position.y / scale };
   }
 
+  // Paths arrive on enter/drop only (not on over) — keep count for hover UI.
+  var osDragPdfCount = 0;
+  var TAB_HOVER_ACTIVATE_MS = 500;
+  var tabHoverActivateId = null;
+  var tabHoverActivateTimer = null;
+  var tabInsertIndex = null;
+
+  function countPdfPaths(paths) {
+    return (paths || []).filter(function (p) {
+      return /\\.pdf$/i.test(String(p || ''));
+    }).length;
+  }
+
+  function pointInRect(x, y, r) {
+    return !!r && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+  }
+
+  function clearTabHoverActivate() {
+    if (tabHoverActivateTimer) {
+      clearTimeout(tabHoverActivateTimer);
+      tabHoverActivateTimer = null;
+    }
+    if (tabHoverActivateId != null) {
+      var tabBar = document.getElementById('tabBar');
+      var el = tabBar && tabBar.querySelector('.pm-tab[data-tab-id="' + tabHoverActivateId + '"]');
+      if (el) el.classList.remove('pm-tab-hover-activate', 'pm-tab-hover-activate-run');
+      tabHoverActivateId = null;
+    }
+  }
+
+  /** Mirror of pmComputeTabDragZone (HTML5 tab-bar DnD). */
+  function computeTabDragZone(clientX) {
+    var tabBar = document.getElementById('tabBar');
+    if (!tabBar) return { type: 'insert', index: 0 };
+    var tabs = Array.prototype.slice.call(tabBar.querySelectorAll('.pm-tab'));
+    if (!tabs.length) return { type: 'insert', index: 0 };
+    for (var i = 0; i < tabs.length; i++) {
+      var r = tabs[i].getBoundingClientRect();
+      if (clientX < r.left) return { type: 'insert', index: i };
+      if (clientX <= r.right) {
+        var frac = r.width ? (clientX - r.left) / r.width : 0.5;
+        if (frac < 1 / 3) return { type: 'insert', index: i };
+        if (frac > 2 / 3) return { type: 'insert', index: i + 1 };
+        return { type: 'activate', tabId: parseInt(tabs[i].dataset.tabId, 10) };
+      }
+    }
+    return { type: 'insert', index: tabs.length };
+  }
+
+  function clearPageInsertUi() {
+    var clearIns = getGlobalFn('clearInsertIndicators');
+    var hideIns = getGlobalFn('hideInsertIndicator');
+    if (clearIns) clearIns();
+    if (hideIns) hideIns();
+  }
+
   function endOsDragUi() {
     try {
-      document.body.classList.remove('os-file-dragging', 'os-file-drag-active');
-      var clearIns = getGlobalFn('clearInsertIndicators');
-      var hideIns = getGlobalFn('hideInsertIndicator');
+      document.body.classList.remove(
+        'os-file-dragging',
+        'os-file-drag-active',
+        'pm-tab-file-drag'
+      );
+      clearPageInsertUi();
+      clearTabHoverActivate();
+      tabInsertIndex = null;
+      osDragPdfCount = 0;
+      var hideTabInd = getGlobalFn('pmHideTabInsertIndicator');
       var hint = getGlobalFn('pmShowTabDropHint');
+      var mergeHint = getGlobalFn('pmShowMergeBtnDropHint');
       var ghosts = getGlobalFn('pmClearFileDragGhosts');
-      if (clearIns) clearIns();
-      if (hideIns) hideIns();
+      if (hideTabInd) hideTabInd();
       if (hint) hint(false);
+      if (mergeHint) mergeHint(false);
       if (ghosts) ghosts();
+      var mergeBtn = document.getElementById('mergeBtn');
+      if (mergeBtn) mergeBtn.classList.remove('merge-drop-active');
     } catch (_) {}
   }
 
@@ -121,16 +187,115 @@ const TAURI_OPEN_BRIDGE = `
       var pos = mapDragPos(position);
       if (!pos) return;
       var x = pos.x, y = pos.y;
+      var n = osDragPdfCount;
+      var tabsOn = !!(getGlobalFn('pmTabsEnabled') && getGlobalFn('pmTabsEnabled')());
+      var tabBar = document.getElementById('tabBar');
+      var mergeBtn = document.getElementById('mergeBtn');
+      var ghosts = getGlobalFn('pmShowFileDragGhosts');
+      var clearGhosts = getGlobalFn('pmClearFileDragGhosts');
+      var tabHint = getGlobalFn('pmShowTabDropHint');
+      var mergeHint = getGlobalFn('pmShowMergeBtnDropHint');
+      var showTabInd = getGlobalFn('pmShowTabInsertIndicator');
+      var hideTabInd = getGlobalFn('pmHideTabInsertIndicator');
       var update = getGlobalFn('updateInsertIndicatorsAt');
+
+      // ── Merge button (2+ PDFs) ──────────────────────────────────────
+      if (mergeBtn && n >= 2 && pointInRect(x, y, mergeBtn.getBoundingClientRect())) {
+        clearPageInsertUi();
+        clearTabHoverActivate();
+        tabInsertIndex = null;
+        if (hideTabInd) hideTabInd();
+        if (tabHint) tabHint(false);
+        document.body.classList.add('os-file-drag-active');
+        mergeBtn.classList.add('merge-drop-active');
+        if (mergeHint) mergeHint(true, x, y);
+        // Merge always creates exactly one new tab → one ghost.
+        if (ghosts) ghosts(1);
+        return;
+      }
+      if (mergeBtn) mergeBtn.classList.remove('merge-drop-active');
+      if (mergeHint) mergeHint(false);
+
+      // Soft outline on Merge while multi-file drag is anywhere in the window.
+      if (n >= 2) document.body.classList.add('os-file-drag-active');
+      else document.body.classList.remove('os-file-drag-active');
+
+      // ── Tab bar: ghosts / insert separator / mid-tab activate ───────
+      var tabBarVisible = !!(tabBar && tabsOn && tabBar.style.display !== 'none'
+        && tabBar.querySelectorAll('.pm-tab').length);
+      if (tabBarVisible && pointInRect(x, y, tabBar.getBoundingClientRect())) {
+        clearPageInsertUi();
+        if (tabHint) tabHint(false);
+        document.body.classList.add('pm-tab-file-drag');
+        var zone = computeTabDragZone(x);
+        var tabCount = tabBar.querySelectorAll('.pm-tab').length;
+
+        if (zone.type === 'activate') {
+          tabInsertIndex = null;
+          if (hideTabInd) hideTabInd();
+          if (clearGhosts) clearGhosts();
+          var activeEl = tabBar.querySelector('.pm-tab.active');
+          var activeId = activeEl ? parseInt(activeEl.dataset.tabId, 10) : null;
+          if (zone.tabId === activeId) {
+            clearTabHoverActivate();
+            return;
+          }
+          if (tabHoverActivateId !== zone.tabId) {
+            clearTabHoverActivate();
+            tabHoverActivateId = zone.tabId;
+            var el = tabBar.querySelector('.pm-tab[data-tab-id="' + zone.tabId + '"]');
+            if (el) {
+              el.classList.add('pm-tab-hover-activate');
+              requestAnimationFrame(function () {
+                requestAnimationFrame(function () {
+                  if (el.isConnected && tabHoverActivateId === zone.tabId) {
+                    el.classList.add('pm-tab-hover-activate-run');
+                  }
+                });
+              });
+            }
+            var targetId = zone.tabId;
+            var activate = getGlobalFn('pmActivate');
+            tabHoverActivateTimer = setTimeout(function () {
+              tabHoverActivateTimer = null;
+              if (activate) activate(targetId);
+              clearTabHoverActivate();
+            }, TAB_HOVER_ACTIVATE_MS);
+          }
+          return;
+        }
+
+        clearTabHoverActivate();
+        tabInsertIndex = zone.index;
+        var atEnd = tabInsertIndex === tabCount;
+        // Don't call pmHideTabInsertIndicator() for atEnd — it also clears
+        // pm-tab-file-drag / insert index used by the HTML5 path.
+        if (atEnd) {
+          var indEl = document.getElementById('pmTabInsertIndicator');
+          if (indEl) indEl.style.display = 'none';
+        } else if (showTabInd) {
+          showTabInd(tabInsertIndex);
+        }
+        document.body.classList.add('pm-tab-file-drag');
+        if (ghosts) ghosts(atEnd ? n : 0);
+        return;
+      }
+
+      // Left the tab bar — clear tab-only chrome.
+      clearTabHoverActivate();
+      tabInsertIndex = null;
+      if (hideTabInd) hideTabInd();
+      if (clearGhosts) clearGhosts();
+      document.body.classList.remove('pm-tab-file-drag');
+
+      // ── Page gaps / empty workspace hints ───────────────────────────
       if (typeof pdfDoc !== 'undefined' && pdfDoc && update) {
         update(x, y);
         var willInsert = !!(document.getElementById('pagesContainer')
           && document.querySelector('#pagesContainer .insert-before, #pagesContainer .insert-after'));
-        var hint = getGlobalFn('pmShowTabDropHint');
-        if (hint) hint(!willInsert, x, y, null);
-      } else {
-        var hintEmpty = getGlobalFn('pmShowTabDropHint');
-        if (hintEmpty) hintEmpty(true, x, y, null);
+        if (tabHint) tabHint(!willInsert, x, y, n);
+      } else if (tabHint) {
+        tabHint(true, x, y, n);
       }
     } catch (err) {
       console.warn('[Tauri] drag hover UI', err);
@@ -201,13 +366,59 @@ const TAURI_OPEN_BRIDGE = `
       return;
     }
 
-    // Drop onto an open document: prefer insert-at-gap when markers exist.
+    var clientPos = mapDragPos(position);
+
+    // 1) Drop on Merge (≥2 files) → merge into a new tab.
+    try {
+      var mergeBtn = document.getElementById('mergeBtn');
+      var mergeFlow = getGlobalFn('mergeFilesFlow');
+      if (
+        clientPos && mergeBtn && mergeFlow && files.length >= 2 &&
+        pointInRect(clientPos.x, clientPos.y, mergeBtn.getBoundingClientRect())
+      ) {
+        endOsDragUi();
+        await mergeFlow(files, { forceNewTab: true });
+        return;
+      }
+    } catch (err) {
+      console.warn('[Tauri] merge-drop fallback', err);
+    }
+
+    // 2) Drop on tab bar → open as tabs at insert index.
+    try {
+      var tabsOn = !!(getGlobalFn('pmTabsEnabled') && getGlobalFn('pmTabsEnabled')());
+      var tabBar = document.getElementById('tabBar');
+      var openDropped = getGlobalFn('pmOpenDroppedFilesAsTabs');
+      var openTabs = getGlobalFn('pmOpenFilesAsTabs');
+      var computeInsert = getGlobalFn('pmComputeTabInsertIndex');
+      if (
+        clientPos && tabsOn && tabBar && tabBar.style.display !== 'none' &&
+        tabBar.querySelectorAll('.pm-tab').length &&
+        pointInRect(clientPos.x, clientPos.y, tabBar.getBoundingClientRect())
+      ) {
+        var insertIdx = tabInsertIndex != null
+          ? tabInsertIndex
+          : (computeInsert ? computeInsert(clientPos.x) : null);
+        endOsDragUi();
+        if (openDropped) {
+          await openDropped(files, insertIdx, null, null);
+        } else if (openTabs) {
+          await openTabs(files, null, insertIdx);
+        } else {
+          await openFiles(files);
+        }
+        return;
+      }
+    } catch (err) {
+      console.warn('[Tauri] tab-drop fallback', err);
+    }
+
+    // 3) Drop onto an open document: prefer insert-at-gap when markers exist.
     try {
       var hasDoc = typeof pdfDoc !== 'undefined' && !!pdfDoc;
       var update = getGlobalFn('updateInsertIndicatorsAt');
       var insertAt = getGlobalFn('insertFilesAtPosition');
       var pagesEl = document.getElementById('pagesContainer');
-      var clientPos = mapDragPos(position);
       if (hasDoc && clientPos && update && insertAt && pagesEl) {
         update(clientPos.x, clientPos.y);
         var beforeEl = pagesEl.querySelector('.insert-before');
@@ -259,8 +470,11 @@ const TAURI_OPEN_BRIDGE = `
         var payload = event && event.payload;
         if (!payload || !payload.type) return;
         if (payload.type === 'enter' || payload.type === 'over') {
-          // Refresh DPI on enter in case the window moved between monitors.
-          if (payload.type === 'enter') refreshDragScaleFactor();
+          // Paths only on enter — keep count for hover (ghosts / merge).
+          if (payload.type === 'enter') {
+            refreshDragScaleFactor();
+            osDragPdfCount = countPdfPaths(payload.paths);
+          }
           onOsDragHover(payload.position);
           return;
         }
@@ -269,6 +483,7 @@ const TAURI_OPEN_BRIDGE = `
           return;
         }
         if (payload.type === 'drop') {
+          osDragPdfCount = countPdfPaths(payload.paths);
           console.log('[Tauri] drag-drop paths:', payload.paths, 'scale=', dragScaleFactor);
           openPaths(payload.paths, invoke, payload.position);
         }

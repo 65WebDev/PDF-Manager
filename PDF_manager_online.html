@@ -17112,6 +17112,11 @@
         left += width + GAP;
       }
     }
+    // Tauri native DnD bridge resolves these via window.*.
+    try {
+      window.pmShowFileDragGhosts = pmShowFileDragGhosts;
+      window.pmClearFileDragGhosts = pmClearFileDragGhosts;
+    } catch (_) {}
 
     // Geometry of the empty space to the right of the last tab (for highlighting).
     function pmNewTabZoneVisualRect() {
@@ -19405,6 +19410,8 @@
         showMergeOrderModal(files, runMerge);
       }
     }
+    // Tauri native DnD bridge (scripts/prepare-tauri-ui.mjs) resolves via window.*.
+    try { window.mergeFilesFlow = mergeFilesFlow; } catch (_) {}
 
     async function mergeAnotherPDF() {
       const handleFiles = mergeFilesFlow;
