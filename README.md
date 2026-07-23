@@ -71,8 +71,13 @@ npm ci
 # Режим разработки (окно + UI из офлайн-HTML):
 npm run tauri:dev
 
-# Релизная сборка (.exe + NSIS-установщик):
+# Релизная сборка (.exe + NSIS) и загрузка на GitHub Releases:
 npm run tauri:build
+# Нужны: GitHub CLI (gh) и `gh auth login`
+# Release tag: windows-v{version} из src-tauri/tauri.conf.json
+# Без загрузки: npm run tauri:build:local
+# или: TAURI_SKIP_UPLOAD=1 npm run tauri:build
+# Повторно залить уже собранный exe: npm run tauri:upload
 ```
 
 Готовые файлы появятся в:
@@ -80,4 +85,4 @@ npm run tauri:build
 - `src-tauri/target/release/PDF Manager.exe` — запуск без установщика
 - `src-tauri/target/release/bundle/nsis/` — установщик `.exe`
 
-`npm run tauri:build` сначала собирает офлайн-HTML (нужен интернет на этом шаге), копирует его в `tauri-ui/index.html` (с мостом открытия PDF) и упаковывает в Tauri. NSIS-установщик регистрирует ассоциацию с файлами **`.pdf`**.
+`npm run tauri:build` сначала собирает офлайн-HTML (нужен интернет на этом шаге), копирует его в `tauri-ui/index.html` (с мостом открытия PDF), упаковывает в Tauri, затем через `gh` заливает установщик в GitHub Release `windows-v*`. NSIS регистрирует ассоциацию с файлами **`.pdf`**.
