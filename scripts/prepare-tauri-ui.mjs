@@ -8,7 +8,7 @@
  * Not part of the GitHub Release pipeline yet — local / manual Windows builds only.
  */
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -23,14 +23,6 @@ const TAURI_OPEN_BRIDGE = `
 <script>
 /* Tauri desktop bridge: open PDFs passed via file association / second instance */
 (function () {
-  function ready(fn) {
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', fn, { once: true });
-    } else {
-      fn();
-    }
-  }
-
   function waitFor(pred, tries, ms) {
     return new Promise(function (resolve) {
       var n = 0;
@@ -45,6 +37,9 @@ const TAURI_OPEN_BRIDGE = `
   function toUint8(data) {
     if (data instanceof Uint8Array) return data;
     if (data instanceof ArrayBuffer) return new Uint8Array(data);
+    if (ArrayBuffer.isView && ArrayBuffer.isView(data)) {
+      return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    }
     if (Array.isArray(data)) return new Uint8Array(data);
     return new Uint8Array(0);
   }
@@ -54,20 +49,26 @@ const TAURI_OPEN_BRIDGE = `
     return parts[parts.length - 1] || 'document.pdf';
   }
 
+  function getLoader() {
+    if (typeof window.loadPDF === 'function') return window.loadPDF;
+    if (typeof loadPDF === 'function') return loadPDF;
+    return null;
+  }
+
   async function openPaths(paths, invoke) {
     if (!paths || !paths.length) return;
     var pdfs = paths.filter(function (p) {
       return /\\.pdf$/i.test(String(p || ''));
     });
-    if (!pdfs.length) return;
+    if (!pdfs.length) {
+      console.warn('[Tauri] no .pdf paths in', paths);
+      return;
+    }
 
-    var ok = await waitFor(function () {
-      return typeof window.loadPDF === 'function'
-        || typeof window.pmOpenFilesAsTabs === 'function'
-        || typeof window.openMultipleAsNewDocument === 'function';
-    }, 400, 50);
+    var ok = await waitFor(function () { return !!getLoader(); }, 600, 50);
     if (!ok) {
       console.error('[Tauri] loadPDF not ready — cannot open associated PDF');
+      alert('Не удалось открыть PDF: редактор ещё не готов.');
       return;
     }
 
@@ -75,7 +76,9 @@ const TAURI_OPEN_BRIDGE = `
     for (var i = 0; i < pdfs.length; i++) {
       var path = pdfs[i];
       try {
-        var bytes = toUint8(await invoke('read_local_file', { path: path }));
+        var raw = await invoke('read_local_file', { path: path });
+        var bytes = toUint8(raw);
+        if (!bytes.length) throw new Error('пустой файл');
         files.push(new File([bytes], basename(path), { type: 'application/pdf' }));
       } catch (err) {
         console.error('[Tauri] failed to read', path, err);
@@ -88,12 +91,12 @@ const TAURI_OPEN_BRIDGE = `
       if (typeof window.pmTabsEnabled === 'function' && window.pmTabsEnabled()
           && typeof window.pmOpenFilesAsTabs === 'function') {
         await window.pmOpenFilesAsTabs(files, null);
-      } else if (files.length === 1 && typeof window.loadPDF === 'function') {
-        await window.loadPDF(files[0]);
+      } else if (files.length === 1) {
+        await getLoader()(files[0]);
       } else if (typeof window.openMultipleAsNewDocument === 'function') {
         await window.openMultipleAsNewDocument(files);
-      } else if (typeof window.loadPDF === 'function') {
-        await window.loadPDF(files[0]);
+      } else {
+        await getLoader()(files[0]);
       }
     } catch (err) {
       console.error('[Tauri] open failed', err);
@@ -101,13 +104,22 @@ const TAURI_OPEN_BRIDGE = `
     }
   }
 
-  ready(async function () {
+  async function boot() {
+    var ready = await waitFor(function () {
+      return !!(window.__TAURI__ && window.__TAURI__.core
+        && typeof window.__TAURI__.core.invoke === 'function');
+    }, 200, 50);
+    if (!ready) {
+      console.error('[Tauri] __TAURI__ API not available');
+      return;
+    }
+
     var tauri = window.__TAURI__;
-    if (!tauri || !tauri.core || typeof tauri.core.invoke !== 'function') return;
     var invoke = tauri.core.invoke.bind(tauri.core);
 
     try {
       var pending = await invoke('take_pending_open_files');
+      console.log('[Tauri] pending open files:', pending);
       await openPaths(pending, invoke);
     } catch (err) {
       console.error('[Tauri] take_pending_open_files', err);
@@ -116,13 +128,20 @@ const TAURI_OPEN_BRIDGE = `
     if (tauri.event && typeof tauri.event.listen === 'function') {
       try {
         await tauri.event.listen('open-files', function (event) {
+          console.log('[Tauri] open-files event:', event && event.payload);
           openPaths(event && event.payload, invoke);
         });
       } catch (err) {
         console.error('[Tauri] listen open-files', err);
       }
     }
-  });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', boot, { once: true });
+  } else {
+    boot();
+  }
 })();
 </script>
 `;

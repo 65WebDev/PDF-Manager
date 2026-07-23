@@ -14,7 +14,17 @@ fn is_pdf_path(path: &Path) -> bool {
     .unwrap_or(false)
 }
 
+fn normalize_arg(raw: &str) -> String {
+  let s = raw.trim();
+  // Windows may wrap paths in quotes when launched via shell / Open with.
+  let s = s.trim_matches('"').trim_matches('\'').trim();
+  s.to_string()
+}
+
 /// Collect PDF paths from OS / shell arguments (skip flags and the exe name).
+///
+/// Important: do NOT feed bare Windows paths like `C:\file.pdf` to `Url::parse` —
+/// the `C:` is treated as a URL scheme and the path was previously skipped.
 fn collect_pdf_paths_from_args<I, S>(args: I) -> Vec<PathBuf>
 where
   I: IntoIterator<Item = S>,
@@ -22,21 +32,26 @@ where
 {
   let mut files = Vec::new();
   for maybe_file in args {
-    let maybe_file = maybe_file.as_ref().trim();
+    let maybe_file = normalize_arg(maybe_file.as_ref());
     if maybe_file.is_empty() || maybe_file.starts_with('-') {
       continue;
     }
-    if let Ok(url) = url::Url::parse(maybe_file) {
-      if url.scheme() == "file" {
-        if let Ok(path) = url.to_file_path() {
-          if is_pdf_path(&path) {
-            files.push(path);
+
+    // Only parse as URL when it really looks like one (file://...).
+    if maybe_file.contains("://") {
+      if let Ok(url) = url::Url::parse(&maybe_file) {
+        if url.scheme() == "file" {
+          if let Ok(path) = url.to_file_path() {
+            if is_pdf_path(&path) {
+              files.push(path);
+            }
           }
         }
       }
       continue;
     }
-    let path = PathBuf::from(maybe_file);
+
+    let path = PathBuf::from(&maybe_file);
     if is_pdf_path(&path) {
       files.push(path);
     }
@@ -46,6 +61,7 @@ where
 
 fn focus_main_window(app: &AppHandle) {
   if let Some(window) = app.get_webview_window("main") {
+    let _ = window.show();
     let _ = window.unminimize();
     let _ = window.set_focus();
   }
@@ -77,7 +93,7 @@ fn take_pending_open_files(state: State<'_, PendingOpenFiles>) -> Vec<String> {
 /// Read a local PDF for the embedded editor (file-association / Open with).
 #[tauri::command]
 fn read_local_file(path: String) -> Result<Vec<u8>, String> {
-  let path = PathBuf::from(path);
+  let path = PathBuf::from(normalize_arg(&path));
   if !is_pdf_path(&path) {
     return Err("Разрешено открывать только файлы .pdf".into());
   }
@@ -118,4 +134,28 @@ pub fn run() {
     })
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn windows_drive_path_is_collected() {
+    let paths = collect_pdf_paths_from_args([r"C:\Users\UJIN\Documents\report.pdf"]);
+    assert_eq!(paths.len(), 1);
+    assert!(paths[0].to_string_lossy().ends_with("report.pdf"));
+  }
+
+  #[test]
+  fn quoted_windows_path_is_collected() {
+    let paths = collect_pdf_paths_from_args([r#""D:\docs\a b.pdf""#]);
+    assert_eq!(paths.len(), 1);
+  }
+
+  #[test]
+  fn file_url_is_collected() {
+    let paths = collect_pdf_paths_from_args(["file:///C:/temp/x.pdf"]);
+    assert_eq!(paths.len(), 1);
+  }
 }
