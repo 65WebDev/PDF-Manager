@@ -165,8 +165,16 @@
       width: 42px;
       display: block;
       z-index: 110;
+      border-radius: 10px;
+      transition: filter 0.15s ease, box-shadow 0.15s ease;
     }
     .app-logo svg { display: block; width: 42px; height: 42px; }
+    /* Light highlight while the logo hover-zone (or the logo itself) is hot */
+    .app-logo.logo-hot,
+    body:has(#logoMenuArea:hover) .app-logo {
+      filter: brightness(1.14);
+      box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.45);
+    }
 
     /*─── Desktop: hiding the menu via the button under the logo ───*/
     /*Hover area around the logo (logo + space below it for the button)*/
@@ -177,6 +185,12 @@
       width: 42px;
       height: 42px;
       z-index: 111;
+    }
+    /* While the popup stack is open, stretch the hit-area over all three
+       buttons so the menu does not rely on a hide-timeout when moving the
+       cursor from the logo down to About. */
+    #logoMenuArea.expanded {
+      height: 188px; /* logo slot + hide/theme/about (top 140 + 42 + slack) */
     }
     /*Hide menu button (desktop) - pops up under the logo when hovered over.
        Visibility is controlled by JS (.show class) with a timeout to allow time for hovering.*/
@@ -291,6 +305,9 @@
       width: 42px;
       height: 42px;
       z-index: 120;
+    }
+    .top-menu.collapsed #logoMenuArea.expanded {
+      height: 42px; /* collapsed corner control only — never stretch */
     }
     .top-menu.collapsed #desktopMenuToggleBtn {
       position: fixed;
@@ -1020,7 +1037,8 @@
     #pageCtxMenu,
     #readModeCtxMenu,
     #navModeCtxMenu,
-    #loupeModeCtxMenu {
+    #loupeModeCtxMenu,
+    #helpToggleCtxMenu {
       position: fixed; z-index: 99998; display: none;
       background: #fff; border: 1px solid #d5d9de; border-radius: 7px;
       box-shadow: 0 6px 22px rgba(0,0,0,.18); padding: 3px; min-width: 196px;
@@ -1028,11 +1046,13 @@
     #pageCtxMenu.visible,
     #readModeCtxMenu.visible,
     #navModeCtxMenu.visible,
-    #loupeModeCtxMenu.visible { display: block; }
+    #loupeModeCtxMenu.visible,
+    #helpToggleCtxMenu.visible { display: block; }
     #pageCtxMenu button,
     #readModeCtxMenu button,
     #navModeCtxMenu button,
-    #loupeModeCtxMenu button {
+    #loupeModeCtxMenu button,
+    #helpToggleCtxMenu button {
       display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%;
       border: none; background: transparent; padding: 5px 8px;
       font-size: 12.5px; color: #2c3e50; border-radius: 5px; cursor: pointer; text-align: left;
@@ -1072,7 +1092,8 @@
     #pageCtxMenu button:hover:not(:disabled),
     #readModeCtxMenu button:hover:not(:disabled),
     #navModeCtxMenu button:hover:not(:disabled),
-    #loupeModeCtxMenu button:hover:not(:disabled) { background: #eef4fa; }
+    #loupeModeCtxMenu button:hover:not(:disabled),
+    #helpToggleCtxMenu button:hover:not(:disabled) { background: #eef4fa; }
     #pageCtxMenu button:disabled,
     #readModeCtxMenu button:disabled,
     #navModeCtxMenu button:disabled,
@@ -6022,6 +6043,9 @@
 
     <!--Hint in the lower right corner-->
     <button id="helpToggle" title="Горячие клавиши" onclick="toggleHelpPanel()">?</button>
+    <div id="helpToggleCtxMenu" aria-hidden="true">
+      <button type="button" data-action="hide-help"><span class="ctx-label">Скрыть подсказку</span></button>
+    </div>
     <div id="helpPanel" onclick="toggleHelpPanel()" oncontextmenu="event.preventDefault(); hideHelpPanel();" title="Нажмите для скрытия окна">
       <div class="help-title">Основные горячие клавиши:</div>
       <div class="help-row"><span class="hk">Q</span> — Повернуть выбранные страницы против часовой стрелки</div>
@@ -9716,6 +9740,7 @@
       const btn = document.getElementById('helpToggle');
       const panel = document.getElementById('helpPanel');
       if (!btn) return;
+      if (typeof isHelpToggleUserHidden === 'function' && isHelpToggleUserHidden()) return;
       if (panel && panel.style.display === 'block') return;
       const ind = document.getElementById('scrollPageIndicator');
       const hide = scrollbarDragging || !!(ind && ind.classList.contains('visible'));
@@ -13025,6 +13050,18 @@
       const menu = document.getElementById('topMenu');
       if (!menu) return;
       const collapsed = menu.classList.toggle('collapsed');
+      if (collapsed) {
+        const area = document.getElementById('logoMenuArea');
+        const logo = document.querySelector('.app-logo');
+        const dToggle = document.getElementById('desktopMenuToggleBtn');
+        const themeBtn = document.getElementById('themeToggleBtn');
+        const aboutBtn = document.getElementById('aboutBtn');
+        if (area) area.classList.remove('expanded');
+        if (logo) logo.classList.remove('logo-hot');
+        if (dToggle) dToggle.classList.remove('show');
+        if (themeBtn) themeBtn.classList.remove('show');
+        if (aboutBtn) aboutBtn.classList.remove('show');
+      }
       // The user manually showed the menu in reading mode - exit the mode,
       // maintaining the current scale and position, and switch to page selection mode.
       if (!_readModeToggleGuard && readModeActive && !collapsed) {
@@ -13351,24 +13388,99 @@
     }
 
     // Maximize/collapse windows with hotkeys
+    const PM_HELP_TOGGLE_HIDDEN_KEY = 'pmHelpToggleHidden';
+    function isHelpToggleUserHidden() {
+      try { return localStorage.getItem(PM_HELP_TOGGLE_HIDDEN_KEY) === '1'; }
+      catch (_) { return false; }
+    }
+    function hideHelpToggleCtxMenu() {
+      const menu = document.getElementById('helpToggleCtxMenu');
+      if (!menu) return;
+      if (document.activeElement && menu.contains(document.activeElement)) {
+        document.activeElement.blur();
+      }
+      menu.classList.remove('visible');
+      menu.setAttribute('aria-hidden', 'true');
+    }
     function hideHelpPanel() {
       const panel = document.getElementById('helpPanel');
       const btn = document.getElementById('helpToggle');
       if (!panel || !btn) return;
       if (panel.style.display !== 'block') return;
       panel.style.display = 'none';
-      btn.style.display = 'flex';
+      if (!isHelpToggleUserHidden()) btn.style.display = 'flex';
+    }
+    function hideHelpTogglePermanently() {
+      try { localStorage.setItem(PM_HELP_TOGGLE_HIDDEN_KEY, '1'); } catch (_) { /* best effort */ }
+      hideHelpToggleCtxMenu();
+      const panel = document.getElementById('helpPanel');
+      const btn = document.getElementById('helpToggle');
+      if (panel) panel.style.display = 'none';
+      if (btn) btn.style.display = 'none';
     }
     function toggleHelpPanel() {
+      if (isHelpToggleUserHidden()) return;
       const panel = document.getElementById('helpPanel');
       const btn = document.getElementById('helpToggle');
       if (!panel || !btn) return;
+      hideHelpToggleCtxMenu();
       const open = panel.style.display === 'block';
       panel.style.display = open ? 'none' : 'block';
       btn.style.display = open ? 'flex' : 'none';
     }
+    function applyHelpToggleUserPreference() {
+      if (!isHelpToggleUserHidden()) return;
+      const panel = document.getElementById('helpPanel');
+      const btn = document.getElementById('helpToggle');
+      if (panel) panel.style.display = 'none';
+      if (btn) btn.style.display = 'none';
+    }
     window.hideHelpPanel = hideHelpPanel;
     window.toggleHelpPanel = toggleHelpPanel;
+    window.hideHelpTogglePermanently = hideHelpTogglePermanently;
+    applyHelpToggleUserPreference();
+
+    (function initHelpToggleCtxMenu() {
+      if (isTouchDevice) return;
+      const btn = document.getElementById('helpToggle');
+      const menu = document.getElementById('helpToggleCtxMenu');
+      if (!btn || !menu) return;
+
+      function positionMenu(clientX, clientY) {
+        menu.classList.add('visible');
+        menu.setAttribute('aria-hidden', 'false');
+        const w = menu.offsetWidth, h = menu.offsetHeight;
+        let x = clientX, y = clientY;
+        if (x + w > window.innerWidth - 6) x = window.innerWidth - w - 6;
+        if (y + h > window.innerHeight - 6) y = window.innerHeight - h - 6;
+        if (x < 6) x = 6;
+        if (y < 6) y = 6;
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
+      }
+
+      btn.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (isHelpToggleUserHidden()) return;
+        positionMenu(e.clientX, e.clientY);
+      });
+      menu.addEventListener('click', (e) => {
+        const item = e.target.closest('button[data-action]');
+        if (!item || item.disabled) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (item.getAttribute('data-action') === 'hide-help') hideHelpTogglePermanently();
+      });
+      document.addEventListener('mousedown', (e) => {
+        if (!menu.classList.contains('visible')) return;
+        if (e.target.closest('#helpToggleCtxMenu, #helpToggle')) return;
+        hideHelpToggleCtxMenu();
+      }, true);
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && menu.classList.contains('visible')) hideHelpToggleCtxMenu();
+      });
+    })();
 
     async function renderInitialThumbnailsFromOriginalBytes() {
       try {
@@ -20987,8 +21099,9 @@
     })();
 
     // ─── Desktop: show hide menu button when hovering over logo ───
-    // We control visibility via JS with a timeout before hiding so that the user
-    // managed to move the cursor from the logo to the button.
+    // We control visibility via JS so that the user can move the cursor from
+    // the logo onto the popup buttons. The hit-area expands while open, so the
+    // menu stays until the pointer leaves the whole column (no hide-timeout).
     (function initDesktopMenuToggle() {
       if (isTouchDevice) return;
       const area = document.getElementById('logoMenuArea');
@@ -20996,11 +21109,9 @@
       const btn  = document.getElementById('desktopMenuToggleBtn');
       const themeBtn = document.getElementById('themeToggleBtn');
       const aboutBtn = document.getElementById('aboutBtn');
-      if (!btn) return;
-      let hideTimer = null;
+      if (!btn || !area) return;
 
       function show() {
-        clearTimeout(hideTimer);
         // When collapsed, the button is always visible (via CSS) - no class needed
         // (and the theme/About buttons are hidden entirely while collapsed, see CSS).
         const menu = document.getElementById('topMenu');
@@ -21008,21 +21119,21 @@
         btn.classList.add('show');
         if (themeBtn) themeBtn.classList.add('show');
         if (aboutBtn) aboutBtn.classList.add('show');
+        area.classList.add('expanded');
+        if (logo) logo.classList.add('logo-hot');
       }
-      function scheduleHide() {
-        clearTimeout(hideTimer);
-        hideTimer = setTimeout(() => {
-          btn.classList.remove('show');
-          if (themeBtn) themeBtn.classList.remove('show');
-          if (aboutBtn) aboutBtn.classList.remove('show');
-        }, POPUP_BTN_HIDE_MS);
+      function hide() {
+        btn.classList.remove('show');
+        if (themeBtn) themeBtn.classList.remove('show');
+        if (aboutBtn) aboutBtn.classList.remove('show');
+        area.classList.remove('expanded');
+        if (logo) logo.classList.remove('logo-hot');
       }
 
-      [area, logo, btn, themeBtn, aboutBtn].forEach(el => {
-        if (!el) return;
-        el.addEventListener('mouseenter', show);
-        el.addEventListener('mouseleave', scheduleHide);
-      });
+      area.addEventListener('mouseenter', show);
+      area.addEventListener('mouseleave', hide);
+      // Logo sits under the area; keep a listener in case hit-testing differs.
+      if (logo) logo.addEventListener('mouseenter', show);
     })();
 
     // Show "save/export as images" buttons on hover (with timeout,
