@@ -67,6 +67,40 @@ const TAURI_OPEN_BRIDGE = `
     return getGlobalFn('loadPDF');
   }
 
+  // Tauri drag-drop positions are PhysicalPosition (screen pixels). DOM APIs
+  // (clientX / getBoundingClientRect) use CSS logical pixels. On Windows DPI
+  // scaling (125%/150%/…) raw physical coords look “shifted” down-right.
+  var dragScaleFactor = (typeof window.devicePixelRatio === 'number' && window.devicePixelRatio > 0)
+    ? window.devicePixelRatio
+    : 1;
+
+  async function refreshDragScaleFactor() {
+    try {
+      var winApi = window.__TAURI__ && window.__TAURI__.window;
+      var getWin = winApi && (winApi.getCurrentWindow || (winApi.Window && winApi.Window.getCurrent));
+      if (typeof getWin === 'function') {
+        var win = getWin.call(winApi);
+        if (win && typeof win.scaleFactor === 'function') {
+          var sf = await win.scaleFactor();
+          if (typeof sf === 'number' && sf > 0) {
+            dragScaleFactor = sf;
+            return;
+          }
+        }
+      }
+    } catch (_) {}
+    if (typeof window.devicePixelRatio === 'number' && window.devicePixelRatio > 0) {
+      dragScaleFactor = window.devicePixelRatio;
+    }
+  }
+
+  /** Map Tauri PhysicalPosition → CSS viewport client coordinates. */
+  function mapDragPos(position) {
+    if (!position || typeof position.x !== 'number' || typeof position.y !== 'number') return null;
+    var scale = dragScaleFactor > 0 ? dragScaleFactor : 1;
+    return { x: position.x / scale, y: position.y / scale };
+  }
+
   function endOsDragUi() {
     try {
       document.body.classList.remove('os-file-dragging', 'os-file-drag-active');
@@ -84,9 +118,9 @@ const TAURI_OPEN_BRIDGE = `
   function onOsDragHover(position) {
     try {
       document.body.classList.add('os-file-dragging');
-      var x = position && typeof position.x === 'number' ? position.x : null;
-      var y = position && typeof position.y === 'number' ? position.y : null;
-      if (x == null || y == null) return;
+      var pos = mapDragPos(position);
+      if (!pos) return;
+      var x = pos.x, y = pos.y;
       var update = getGlobalFn('updateInsertIndicatorsAt');
       if (typeof pdfDoc !== 'undefined' && pdfDoc && update) {
         update(x, y);
@@ -173,8 +207,9 @@ const TAURI_OPEN_BRIDGE = `
       var update = getGlobalFn('updateInsertIndicatorsAt');
       var insertAt = getGlobalFn('insertFilesAtPosition');
       var pagesEl = document.getElementById('pagesContainer');
-      if (hasDoc && position && update && insertAt && pagesEl) {
-        update(position.x, position.y);
+      var clientPos = mapDragPos(position);
+      if (hasDoc && clientPos && update && insertAt && pagesEl) {
+        update(clientPos.x, clientPos.y);
         var beforeEl = pagesEl.querySelector('.insert-before');
         var afterEl = pagesEl.querySelector('.insert-after');
         var insert = null;
@@ -224,6 +259,8 @@ const TAURI_OPEN_BRIDGE = `
         var payload = event && event.payload;
         if (!payload || !payload.type) return;
         if (payload.type === 'enter' || payload.type === 'over') {
+          // Refresh DPI on enter in case the window moved between monitors.
+          if (payload.type === 'enter') refreshDragScaleFactor();
           onOsDragHover(payload.position);
           return;
         }
@@ -232,11 +269,11 @@ const TAURI_OPEN_BRIDGE = `
           return;
         }
         if (payload.type === 'drop') {
-          console.log('[Tauri] drag-drop paths:', payload.paths);
+          console.log('[Tauri] drag-drop paths:', payload.paths, 'scale=', dragScaleFactor);
           openPaths(payload.paths, invoke, payload.position);
         }
       });
-      console.log('[Tauri] Explorer drag-and-drop bridge ready');
+      console.log('[Tauri] Explorer drag-and-drop bridge ready (scaleFactor=' + dragScaleFactor + ')');
     } catch (err) {
       console.error('[Tauri] bindDragDrop', err);
     }
@@ -254,6 +291,18 @@ const TAURI_OPEN_BRIDGE = `
 
     var tauri = window.__TAURI__;
     var invoke = tauri.core.invoke.bind(tauri.core);
+
+    await refreshDragScaleFactor();
+    try {
+      var winApi = tauri.window;
+      var getWin = winApi && (winApi.getCurrentWindow || (winApi.Window && winApi.Window.getCurrent));
+      if (typeof getWin === 'function') {
+        var win = getWin.call(winApi);
+        if (win && typeof win.onScaleChanged === 'function') {
+          win.onScaleChanged(function () { refreshDragScaleFactor(); });
+        }
+      }
+    } catch (_) {}
 
     try {
       var pending = await invoke('take_pending_open_files');
