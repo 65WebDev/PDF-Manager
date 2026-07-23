@@ -3495,20 +3495,37 @@
       font-size: 70px; color: #e74c3c; opacity: 0.9; pointer-events: none; z-index: 10;
     }
 
-    /*Quick actions when hovering over a preview*/
+    /*Quick actions when hovering over a preview.
+       Fit within 70% of the page square: scale padding/buttons/icons down
+       with --thumb-width, never larger than the natural desktop size. */
     .page .quick-actions {
+      --qa-btn: 38px;
+      --qa-gap: 4px;
+      --qa-pad-x: 6px;
+      --qa-pad-y: 4px;
+      --qa-font: 22px;
+      --qa-edit: 20px;
+      --qa-radius: 6px;
+      --qa-natural-w: calc(
+        (4 * var(--qa-btn)) + (3 * var(--qa-gap)) + (2 * var(--qa-pad-x)) + 2px
+      );
+      --qa-max-w: calc(var(--thumb-width) * 1.35 * 0.7);
+      --qa-fit: min(1, calc(var(--qa-max-w) / var(--qa-natural-w)));
       position: absolute;
-      top: 8px;
+      top: max(2px, calc(8px * var(--qa-fit)));
       left: 50%;
       transform: translateX(-50%);
       display: none;
-      gap: 4px;
+      gap: calc(var(--qa-gap) * var(--qa-fit));
       background: rgba(255, 255, 255, 0.95);
-      padding: 4px 6px;
-      border-radius: 6px;
+      padding: calc(var(--qa-pad-y) * var(--qa-fit)) calc(var(--qa-pad-x) * var(--qa-fit));
+      border-radius: calc(var(--qa-radius) * var(--qa-fit));
       box-shadow: 0 2px 8px rgba(0,0,0,0.25);
       z-index: 45;
       border: 1px solid #ddd;
+      box-sizing: border-box;
+      max-width: var(--qa-max-w);
+      width: max-content;
     }
     /*The quick actions window is shown through the actions-fading JS class,
        transparency is set by the distance to the cursor.*/
@@ -3516,9 +3533,9 @@
       display: flex;
     }
     .page .quick-actions button {
-      width: 38px;
-      height: 38px;
-      font-size: 22px;
+      width: calc(var(--qa-btn) * var(--qa-fit));
+      height: calc(var(--qa-btn) * var(--qa-fit));
+      font-size: calc(var(--qa-font) * var(--qa-fit));
       padding: 0;
       display: flex;
       align-items: center;
@@ -3526,9 +3543,12 @@
       border: none;
       background: transparent;
       cursor: pointer;
-      border-radius: 6px;
-      transition: all 0.15s;
+      border-radius: calc(var(--qa-radius) * var(--qa-fit));
+      transition: background 0.15s, color 0.15s;
       color: #333;
+      flex: 0 0 auto;
+      box-sizing: border-box;
+      line-height: 1;
     }
     .page .quick-actions button:hover {
       background: #f0f0f0;
@@ -3538,9 +3558,14 @@
       color: #e74c3c;
     }
     .page .quick-actions .edit-quick svg {
-      width: 20px;
-      height: 20px;
+      width: calc(var(--qa-edit) * var(--qa-fit));
+      height: calc(var(--qa-edit) * var(--qa-fit));
       display: block;
+    }
+    .page .quick-actions .rotate-glyph {
+      display: inline-block;
+      line-height: 1;
+      transform: scaleX(-1) scaleY(-1);
     }
 
     /*Hiding quick actions on pages marked for deletion*/
@@ -4558,6 +4583,10 @@
       .page .quick-actions {
         display: none !important;
         opacity: 1 !important;
+        /* Same 70%-of-square fit as desktop; slightly larger natural buttons. */
+        --qa-btn: 39px;
+        --qa-font: 23px;
+        --qa-edit: 22px;
       }
       .page.mobile-quick-visible .quick-actions {
         display: flex !important;
@@ -4570,26 +4599,12 @@
       .page.keep-actions-visible:not(.mobile-quick-visible) .quick-actions {
         display: none !important;
       }
-      /*Mobile quick action icons are slightly larger than desktop ones (~4%)*/
-      .page .quick-actions button {
-        width: 39px;
-        height: 39px;
-        font-size: 23px;
-      }
-      .page .quick-actions {
-        gap: 4px;
-        padding: 4px 6px;
-      }
-      /* Preview mini-panel rotate glyphs: 1.3× and 2px lower */
+      /* Preview mini-panel rotate glyphs: 1.3× and 2px lower (offset scales with fit) */
       .page .quick-actions .rotate-glyph {
         display: inline-block;
         line-height: 1;
         /* flip first, then translate so +2px is down on screen */
-        transform: translateY(2px) scale(1.3) scaleX(-1) scaleY(-1);
-      }
-      .page .quick-actions .edit-quick svg {
-        width: 22px;
-        height: 22px;
+        transform: translateY(calc(2px * var(--qa-fit))) scale(1.3) scaleX(-1) scaleY(-1);
       }
 
       /*Page editor: keep toolbar usable on phones (wrap already handled in JS)*/
