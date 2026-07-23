@@ -30,36 +30,57 @@ function readVersion() {
   return conf.version || '0.0.0';
 }
 
-function ghCmd() {
-  return process.platform === 'win32' ? 'gh.cmd' : 'gh';
+/** Resolve a real gh binary. Prefer gh.exe on Windows (avoid gh.cmd + shell quirks). */
+function resolveGhBin() {
+  if (process.platform === 'win32') {
+    const where = spawnSync('where.exe', ['gh'], { encoding: 'utf8' });
+    const lines = (where.stdout || '')
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const exe = lines.find((p) => /\.exe$/i.test(p));
+    if (exe) return exe;
+    if (lines[0]) return lines[0];
+    return null;
+  }
+  const which = spawnSync('which', ['gh'], { encoding: 'utf8' });
+  const path = (which.stdout || '').trim();
+  return which.status === 0 && path ? path : null;
 }
 
-function runGh(args, opts = {}) {
-  const r = spawnSync(ghCmd(), args, {
+function runGh(ghBin, args, opts = {}) {
+  // Do NOT use shell:true on Windows — it breaks argument passing for gh.cmd
+  // and makes `gh auth status` look "unauthorized" even when logged in.
+  const r = spawnSync(ghBin, args, {
     cwd: root,
     encoding: 'utf8',
-    shell: process.platform === 'win32',
+    windowsHide: true,
     ...opts,
   });
   return r;
 }
 
-function ensureGhAuth() {
-  const which = spawnSync(
-    process.platform === 'win32' ? 'where.exe' : 'which',
-    [process.platform === 'win32' ? 'gh' : 'gh'],
-    { encoding: 'utf8', shell: process.platform === 'win32' },
-  );
-  if (which.status !== 0) {
-    console.error('GitHub CLI (gh) не найден. Установите: https://cli.github.com/');
-    console.error('Затем: gh auth login');
-    process.exit(1);
+function ensureGhAuth(ghBin) {
+  // Real auth check: call the API. `gh auth status` exit codes are unreliable
+  // when invoked from npm scripts on Windows.
+  const api = runGh(ghBin, ['api', 'user', '--jq', '.login']);
+  const login = (api.stdout || '').trim();
+  if (api.status === 0 && login) {
+    console.log(`GitHub CLI: вход выполнен как ${login}`);
+    return login;
   }
-  const auth = runGh(['auth', 'status']);
-  if (auth.status !== 0) {
-    console.error('gh не авторизован. Выполните: gh auth login');
-    process.exit(1);
-  }
+
+  console.error('Не удалось проверить авторизацию GitHub CLI из скрипта.');
+  if (api.stderr) console.error(api.stderr.trim());
+  if (api.error) console.error(String(api.error));
+  console.error('');
+  console.error('В обычном терминале выполните:');
+  console.error('  gh auth status');
+  console.error('  gh api user --jq .login');
+  console.error('Если там всё ок, а скрипт всё равно падает — пришлите вывод этих двух команд.');
+  console.error('Повторный вход: gh auth login');
+  console.error('Сборка без загрузки: npm run tauri:build:local');
+  process.exit(1);
 }
 
 function findArtifacts() {
@@ -80,12 +101,10 @@ function findArtifacts() {
     for (const name of readdirSync(releaseDir)) {
       if (!name.toLowerCase().endsWith('.exe')) continue;
       if (name.toLowerCase().includes('setup')) continue;
-      // Prefer the product binary; skip build helpers if any.
       files.push(join(releaseDir, name));
     }
   }
 
-  // Deduplicate by basename preference: setup first already from nsis.
   const seen = new Set();
   const unique = [];
   for (const f of files) {
@@ -97,8 +116,8 @@ function findArtifacts() {
   return unique;
 }
 
-function releaseExists(tag) {
-  const r = runGh(['release', 'view', tag], { stdio: 'ignore' });
+function releaseExists(ghBin, tag) {
+  const r = runGh(ghBin, ['release', 'view', tag], { stdio: 'ignore' });
   return r.status === 0;
 }
 
@@ -108,7 +127,16 @@ function main() {
     return;
   }
 
-  ensureGhAuth();
+  const ghBin = resolveGhBin();
+  if (!ghBin) {
+    console.error('GitHub CLI (gh) не найден в PATH.');
+    console.error('Установите: https://cli.github.com/');
+    console.error('Затем: gh auth login');
+    process.exit(1);
+  }
+  console.log('gh binary:', ghBin);
+
+  ensureGhAuth(ghBin);
 
   const version = readVersion();
   const tag = `windows-v${version}`;
@@ -132,37 +160,29 @@ function main() {
   console.log('Артефакты для загрузки:');
   for (const f of artifacts) console.log('  -', f);
 
-  if (!releaseExists(tag)) {
+  if (!releaseExists(ghBin, tag)) {
     console.log(`Создаю release ${tag}…`);
-    const created = runGh([
-      'release',
-      'create',
-      tag,
-      ...artifacts,
-      '--title',
-      title,
-      '--notes',
-      notes,
-    ], { stdio: 'inherit' });
+    const created = runGh(
+      ghBin,
+      ['release', 'create', tag, ...artifacts, '--title', title, '--notes', notes],
+      { stdio: 'inherit' },
+    );
     if (created.status !== 0) process.exit(created.status ?? 1);
   } else {
     console.log(`Release ${tag} уже есть — обновляю файлы (--clobber)…`);
-    const uploaded = runGh([
-      'release',
-      'upload',
-      tag,
-      ...artifacts,
-      '--clobber',
-    ], { stdio: 'inherit' });
+    const uploaded = runGh(
+      ghBin,
+      ['release', 'upload', tag, ...artifacts, '--clobber'],
+      { stdio: 'inherit' },
+    );
     if (uploaded.status !== 0) process.exit(uploaded.status ?? 1);
 
-    // Keep title/notes in sync on re-upload.
-    runGh(['release', 'edit', tag, '--title', title, '--notes', notes], {
+    runGh(ghBin, ['release', 'edit', tag, '--title', title, '--notes', notes], {
       stdio: 'ignore',
     });
   }
 
-  const view = runGh(['release', 'view', tag, '--json', 'url'], { encoding: 'utf8' });
+  const view = runGh(ghBin, ['release', 'view', tag, '--json', 'url']);
   if (view.status === 0 && view.stdout) {
     try {
       const { url } = JSON.parse(view.stdout);

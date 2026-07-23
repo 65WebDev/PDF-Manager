@@ -206,7 +206,7 @@ NSIS‑установщик регистрирует приложение как
 | VS Code установлен, а `link.exe` нет | VS Code ≠ Build Tools; нужен отдельный установщик Build Tools |
 | PDF не открывается из проводника | Обновите ветку и пересоберите: раньше путь `C:\...` ошибочно отбрасывался. Проверьте также запуск с путём в кавычках. |
 | `Permission allow-… not found` | Обновите ветку (`git pull`) — нужны файлы в `src-tauri/permissions/` |
-| `gh` не найден / не авторизован при upload | Установите https://cli.github.com/ и выполните `gh auth login`. Или `npm run tauri:build:local` без загрузки. |
+| `gh` не найден / не авторизован при upload | В том же терминале: `gh api user --jq .login` — должен показать логин. Если ок, обновите ветку (`git pull`) — исправлен вызов gh из npm на Windows. Иначе `gh auth login`. Сборка без upload: `npm run tauri:build:local` |
 
 ---
 
