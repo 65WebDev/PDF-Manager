@@ -1077,6 +1077,17 @@
     #readModeCtxMenu button:disabled,
     #navModeCtxMenu button:disabled,
     #loupeModeCtxMenu button:disabled { opacity: .45; cursor: default; }
+    #pageCtxMenu button[data-action="fit-width"].active-mode,
+    #navModeCtxMenu button[data-action="fit-width"].active-mode,
+    #loupeModeCtxMenu button[data-action="fit-width"].active-mode {
+      background: #3498db;
+      color: #fff;
+    }
+    #pageCtxMenu button[data-action="fit-width"].active-mode:hover:not(:disabled),
+    #navModeCtxMenu button[data-action="fit-width"].active-mode:hover:not(:disabled),
+    #loupeModeCtxMenu button[data-action="fit-width"].active-mode:hover:not(:disabled) {
+      background: #2f89c5;
+    }
     #pageCtxMenu hr,
     #readModeCtxMenu hr,
     #navModeCtxMenu hr,
@@ -2969,7 +2980,7 @@
     .scale-control {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 8px;
       background: #34495e;
       padding: 8px 16px;
       border-radius: 6px;
@@ -2978,25 +2989,32 @@
       flex-shrink: 1;
       min-width: 140px; /*can be compressed to this size*/
     }
+    /* Keep compact: must NOT inherit .top-menu button.icon-btn 42×42 sizing
+       (that made the scale strip taller and broke menu unwrap-on-widen). */
     #fitWidthBtn {
       flex: 0 0 auto;
-      width: 34px;
-      height: 34px;
+      width: 22px;
+      height: 22px;
+      min-width: 22px;
+      min-height: 22px;
       padding: 0;
       margin: 0;
       border: none;
-      border-radius: 6px;
+      border-radius: 4px;
       background: transparent;
       color: #fff;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       cursor: pointer;
+      box-sizing: border-box;
+      line-height: 1;
+      font-size: inherit;
     }
     #fitWidthBtn:hover:not(:disabled) { background: rgba(255,255,255,0.12); }
     #fitWidthBtn.active-mode { background: #3498db; }
     #fitWidthBtn:disabled { opacity: 0.4; cursor: default; }
-    #fitWidthBtn svg { display: block; pointer-events: none; }
+    #fitWidthBtn svg { display: block; width: 16px; height: 16px; pointer-events: none; }
     .slider-wrapper {
       position: relative;
       flex: 1 1 auto;
@@ -5373,8 +5391,8 @@
           <div class="slider-wrapper">
             <input type="range" id="scaleSlider" min="0" max="200" value="100" step="1" oninput="changeScale(this.value)" onmouseup="this.blur()" ontouchend="this.blur()" title="Alt + колесико мыши — изменение масштаба">
           </div>
-          <button type="button" id="fitWidthBtn" class="icon-btn mode-btn" onclick="toggleFitWidthScale()" disabled title="По ширине страницы (СКМ)" aria-pressed="false" aria-label="По ширине страницы">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <button type="button" id="fitWidthBtn" onclick="toggleFitWidthScale()" disabled title="По ширине страницы (средняя кнопка мыши)" aria-pressed="false" aria-label="По ширине страницы">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <rect x="6" y="3" width="12" height="18" rx="1.5"/>
               <path d="M2 12h4M18 12h4M3.5 9.5 2 12l1.5 2.5M20.5 9.5 22 12l-1.5 2.5"/>
             </svg>
@@ -5992,7 +6010,7 @@
 
     <!--Hint in the lower right corner-->
     <button id="helpToggle" title="Горячие клавиши" onclick="toggleHelpPanel()">?</button>
-    <div id="helpPanel" onclick="toggleHelpPanel()" title="Нажмите для скрытия окна">
+    <div id="helpPanel" onclick="toggleHelpPanel()" oncontextmenu="event.preventDefault(); hideHelpPanel();" title="Нажмите для скрытия окна">
       <div class="help-title">Основные горячие клавиши:</div>
       <div class="help-row"><span class="hk">Q</span> — Повернуть выбранные страницы против часовой стрелки</div>
       <div class="help-row"><span class="hk">W</span> — Повернуть выбранные страницы по часовой стрелке</div>
@@ -6018,7 +6036,7 @@
       <div class="help-row">Удерживайте <span class="hk">Shift</span> — выделить диапазон страниц</div>
       <div class="help-row">Удерживайте <span class="hk">Ctrl</span> — выделить отдельные страницы</div>
       <div class="help-row"><span class="hk">Alt + колесико мыши</span> — изменение масштаба</div>
-      <div class="help-row"><span class="hk">СКМ</span> — по ширине страницы (повтор — вернуть масштаб)</div>
+      <div class="help-row"><span class="hk">Средняя кнопка мыши</span> — по ширине страницы</div>
     </div>
   </div>
 
@@ -8743,9 +8761,17 @@
 
     function updateFitWidthBtnUI() {
       const btn = document.getElementById('fitWidthBtn');
-      if (!btn) return;
-      btn.classList.toggle('active-mode', !!fitWidthToggleOn);
-      btn.setAttribute('aria-pressed', fitWidthToggleOn ? 'true' : 'false');
+      if (btn) {
+        btn.classList.toggle('active-mode', !!fitWidthToggleOn);
+        btn.setAttribute('aria-pressed', fitWidthToggleOn ? 'true' : 'false');
+      }
+      document.querySelectorAll(
+        '#pageCtxMenu button[data-action="fit-width"],' +
+        '#navModeCtxMenu button[data-action="fit-width"],' +
+        '#loupeModeCtxMenu button[data-action="fit-width"]'
+      ).forEach((el) => {
+        el.classList.toggle('active-mode', !!fitWidthToggleOn);
+      });
     }
 
     function computeFitWidthScale() {
@@ -8833,7 +8859,7 @@
       if (Math.abs(target - currentScale) > 0.25) {
         applyFitWidthScaleValue(target);
       }
-      // After reflow, bring the cursor-nearest page into view.
+      // After reflow (or immediately if scale unchanged), bring the cursor-nearest page into view.
       requestAnimationFrame(() => {
         let page = null;
         if (!Number.isNaN(anchorIdx)) {
@@ -9523,6 +9549,10 @@
       // width, the early return will work, and the “Print” button will remain in
       // scale block forever (that block will visually become taller).
       resetPrintButtonHome();
+      // Force layout so scrollWidth below reflects the reset classes (otherwise a
+      // maximize/widen can keep measuring the previous wrapped/icons-mode widths
+      // and never unwrap the top menu).
+      void row.offsetWidth;
 
       const styles   = getComputedStyle(row);
       const padRight = parseFloat(styles.paddingRight) || 0;
@@ -13302,6 +13332,14 @@
     }
 
     // Maximize/collapse windows with hotkeys
+    function hideHelpPanel() {
+      const panel = document.getElementById('helpPanel');
+      const btn = document.getElementById('helpToggle');
+      if (!panel || !btn) return;
+      if (panel.style.display !== 'block') return;
+      panel.style.display = 'none';
+      btn.style.display = 'flex';
+    }
     function toggleHelpPanel() {
       const panel = document.getElementById('helpPanel');
       const btn = document.getElementById('helpToggle');
@@ -13310,6 +13348,8 @@
       panel.style.display = open ? 'none' : 'block';
       btn.style.display = open ? 'flex' : 'none';
     }
+    window.hideHelpPanel = hideHelpPanel;
+    window.toggleHelpPanel = toggleHelpPanel;
 
     async function renderInitialThumbnailsFromOriginalBytes() {
       try {
@@ -25056,6 +25096,7 @@ function editSelectedPage() {
     navMenu.querySelectorAll('button[data-action]').forEach(btn => {
       btn.disabled = baseDisabled;
     });
+    if (typeof updateFitWidthBtnUI === 'function') updateFitWidthBtnUI();
   }
 
   function updateLoupeModeCtxMenuState() {
@@ -25064,6 +25105,7 @@ function editSelectedPage() {
     loupeMenu.querySelectorAll('button[data-action]').forEach(btn => {
       btn.disabled = baseDisabled;
     });
+    if (typeof updateFitWidthBtnUI === 'function') updateFitWidthBtnUI();
   }
 
   function hideTextCopyMenu() {
@@ -25397,6 +25439,7 @@ function editSelectedPage() {
     menu.querySelectorAll('button[data-action]').forEach(btn => {
       btn.disabled = !!states[btn.dataset.action];
     });
+    if (typeof updateFitWidthBtnUI === 'function') updateFitWidthBtnUI();
   }
 
   document.addEventListener('contextmenu', (e) => {
