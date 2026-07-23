@@ -3,7 +3,8 @@
  * Prepares the static UI folder consumed by the Tauri shell:
  * 1) builds PDF_manager_offline.html (all libs inlined)
  * 2) copies it to tauri-ui/index.html
- * 3) appends a small bridge so OS "Open with" / file association can load PDFs
+ * 3) appends a small bridge so OS "Open with" / file association / Explorer
+ *    drag-and-drop can load PDFs
  *
  * Not part of the GitHub Release pipeline yet — local / manual Windows builds only.
  */
@@ -21,7 +22,7 @@ const uiIndex = join(uiDir, 'index.html');
 /** Injected only into the Tauri UI copy — never into the browser HTML releases. */
 const TAURI_OPEN_BRIDGE = `
 <script>
-/* Tauri desktop bridge: open PDFs passed via file association / second instance */
+/* Tauri desktop bridge: Open-with, second instance, Explorer drag-and-drop */
 (function () {
   function waitFor(pred, tries, ms) {
     return new Promise(function (resolve) {
@@ -49,29 +50,67 @@ const TAURI_OPEN_BRIDGE = `
     return parts[parts.length - 1] || 'document.pdf';
   }
 
-  function getLoader() {
-    if (typeof window.loadPDF === 'function') return window.loadPDF;
-    if (typeof loadPDF === 'function') return loadPDF;
+  function getGlobalFn(name) {
+    try {
+      if (typeof window[name] === 'function') return window[name];
+    } catch (_) {}
+    try {
+      // Classic <script> globals (not always mirrored on window in all hosts).
+      // eslint-disable-next-line no-eval
+      var v = (0, eval)('typeof ' + name + ' === "function" ? ' + name + ' : null');
+      if (typeof v === 'function') return v;
+    } catch (_) {}
     return null;
   }
 
-  async function openPaths(paths, invoke) {
-    if (!paths || !paths.length) return;
-    var pdfs = paths.filter(function (p) {
+  function getLoader() {
+    return getGlobalFn('loadPDF');
+  }
+
+  function endOsDragUi() {
+    try {
+      document.body.classList.remove('os-file-dragging', 'os-file-drag-active');
+      var clearIns = getGlobalFn('clearInsertIndicators');
+      var hideIns = getGlobalFn('hideInsertIndicator');
+      var hint = getGlobalFn('pmShowTabDropHint');
+      var ghosts = getGlobalFn('pmClearFileDragGhosts');
+      if (clearIns) clearIns();
+      if (hideIns) hideIns();
+      if (hint) hint(false);
+      if (ghosts) ghosts();
+    } catch (_) {}
+  }
+
+  function onOsDragHover(position) {
+    try {
+      document.body.classList.add('os-file-dragging');
+      var x = position && typeof position.x === 'number' ? position.x : null;
+      var y = position && typeof position.y === 'number' ? position.y : null;
+      if (x == null || y == null) return;
+      var update = getGlobalFn('updateInsertIndicatorsAt');
+      if (typeof pdfDoc !== 'undefined' && pdfDoc && update) {
+        update(x, y);
+        var willInsert = !!(document.getElementById('pagesContainer')
+          && document.querySelector('#pagesContainer .insert-before, #pagesContainer .insert-after'));
+        var hint = getGlobalFn('pmShowTabDropHint');
+        if (hint) hint(!willInsert, x, y, null);
+      } else {
+        var hintEmpty = getGlobalFn('pmShowTabDropHint');
+        if (hintEmpty) hintEmpty(true, x, y, null);
+      }
+    } catch (err) {
+      console.warn('[Tauri] drag hover UI', err);
+    }
+  }
+
+  async function pathsToFiles(paths, invoke) {
+    var pdfs = (paths || []).filter(function (p) {
       return /\\.pdf$/i.test(String(p || ''));
     });
     if (!pdfs.length) {
       console.warn('[Tauri] no .pdf paths in', paths);
-      return;
+      return [];
     }
-
-    var ok = await waitFor(function () { return !!getLoader(); }, 600, 50);
-    if (!ok) {
-      console.error('[Tauri] loadPDF not ready — cannot open associated PDF');
-      alert('Не удалось открыть PDF: редактор ещё не готов.');
-      return;
-    }
-
     var files = [];
     for (var i = 0; i < pdfs.length; i++) {
       var path = pdfs[i];
@@ -85,22 +124,121 @@ const TAURI_OPEN_BRIDGE = `
         alert('Не удалось открыть файл:\\n' + path + '\\n\\n' + (err && err.message ? err.message : err));
       }
     }
-    if (!files.length) return;
+    return files;
+  }
 
+  async function openFiles(files) {
+    if (!files || !files.length) return;
+    var loader = getLoader();
+    var tabsEnabled = getGlobalFn('pmTabsEnabled');
+    var openTabs = getGlobalFn('pmOpenFilesAsTabs');
+    var openMulti = getGlobalFn('openMultipleAsNewDocument');
     try {
-      if (typeof window.pmTabsEnabled === 'function' && window.pmTabsEnabled()
-          && typeof window.pmOpenFilesAsTabs === 'function') {
-        await window.pmOpenFilesAsTabs(files, null);
-      } else if (files.length === 1) {
-        await getLoader()(files[0]);
-      } else if (typeof window.openMultipleAsNewDocument === 'function') {
-        await window.openMultipleAsNewDocument(files);
+      if (tabsEnabled && tabsEnabled() && openTabs) {
+        await openTabs(files, null);
+      } else if (files.length === 1 && loader) {
+        await loader(files[0]);
+      } else if (openMulti) {
+        await openMulti(files);
+      } else if (loader) {
+        await loader(files[0]);
       } else {
-        await getLoader()(files[0]);
+        throw new Error('loadPDF not available');
       }
     } catch (err) {
       console.error('[Tauri] open failed', err);
       alert('Ошибка открытия PDF: ' + (err && err.message ? err.message : err));
+    }
+  }
+
+  async function openPaths(paths, invoke, position) {
+    if (!paths || !paths.length) return;
+    var ok = await waitFor(function () { return !!getLoader(); }, 600, 50);
+    if (!ok) {
+      console.error('[Tauri] loadPDF not ready — cannot open associated PDF');
+      alert('Не удалось открыть PDF: редактор ещё не готов.');
+      endOsDragUi();
+      return;
+    }
+
+    var files = await pathsToFiles(paths, invoke);
+    if (!files.length) {
+      endOsDragUi();
+      return;
+    }
+
+    // Drop onto an open document: prefer insert-at-gap when markers exist.
+    try {
+      var hasDoc = typeof pdfDoc !== 'undefined' && !!pdfDoc;
+      var update = getGlobalFn('updateInsertIndicatorsAt');
+      var insertAt = getGlobalFn('insertFilesAtPosition');
+      var pagesEl = document.getElementById('pagesContainer');
+      if (hasDoc && position && update && insertAt && pagesEl) {
+        update(position.x, position.y);
+        var beforeEl = pagesEl.querySelector('.insert-before');
+        var afterEl = pagesEl.querySelector('.insert-after');
+        var insert = null;
+        if (beforeEl) {
+          insert = { targetIndex: parseInt(beforeEl.dataset.index, 10), insertBefore: true };
+        } else if (afterEl) {
+          insert = { targetIndex: parseInt(afterEl.dataset.index, 10), insertBefore: false };
+        }
+        endOsDragUi();
+        if (insert && !Number.isNaN(insert.targetIndex)) {
+          if (files.length > 1 && typeof showMergeOrderModal === 'function') {
+            showMergeOrderModal(files, async function (ordered) {
+              await insertAt(ordered, insert);
+            });
+          } else {
+            await insertAt(files, insert);
+          }
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('[Tauri] insert-at-drop fallback to open', err);
+    }
+
+    endOsDragUi();
+    await openFiles(files);
+  }
+
+  async function bindDragDrop(invoke) {
+    var tauri = window.__TAURI__;
+    var webviewApi = tauri && tauri.webview;
+    var getCurrent = webviewApi && (
+      webviewApi.getCurrentWebview ||
+      (webviewApi.Webview && webviewApi.Webview.getCurrent)
+    );
+    if (typeof getCurrent !== 'function') {
+      console.warn('[Tauri] getCurrentWebview unavailable — Explorer DnD bridge skipped');
+      return;
+    }
+    try {
+      var webview = getCurrent.call(webviewApi);
+      if (!webview || typeof webview.onDragDropEvent !== 'function') {
+        console.warn('[Tauri] onDragDropEvent unavailable');
+        return;
+      }
+      await webview.onDragDropEvent(function (event) {
+        var payload = event && event.payload;
+        if (!payload || !payload.type) return;
+        if (payload.type === 'enter' || payload.type === 'over') {
+          onOsDragHover(payload.position);
+          return;
+        }
+        if (payload.type === 'leave' || payload.type === 'cancel') {
+          endOsDragUi();
+          return;
+        }
+        if (payload.type === 'drop') {
+          console.log('[Tauri] drag-drop paths:', payload.paths);
+          openPaths(payload.paths, invoke, payload.position);
+        }
+      });
+      console.log('[Tauri] Explorer drag-and-drop bridge ready');
+    } catch (err) {
+      console.error('[Tauri] bindDragDrop', err);
     }
   }
 
@@ -120,7 +258,7 @@ const TAURI_OPEN_BRIDGE = `
     try {
       var pending = await invoke('take_pending_open_files');
       console.log('[Tauri] pending open files:', pending);
-      await openPaths(pending, invoke);
+      await openPaths(pending, invoke, null);
     } catch (err) {
       console.error('[Tauri] take_pending_open_files', err);
     }
@@ -129,12 +267,14 @@ const TAURI_OPEN_BRIDGE = `
       try {
         await tauri.event.listen('open-files', function (event) {
           console.log('[Tauri] open-files event:', event && event.payload);
-          openPaths(event && event.payload, invoke);
+          openPaths(event && event.payload, invoke, null);
         });
       } catch (err) {
         console.error('[Tauri] listen open-files', err);
       }
     }
+
+    await bindDragDrop(invoke);
   }
 
   if (document.readyState === 'loading') {
@@ -177,4 +317,4 @@ if (!html.includes('Tauri desktop bridge')) {
   }
 }
 writeFileSync(uiIndex, html, 'utf8');
-console.log('Wrote', uiIndex, '(with file-association bridge)');
+console.log('Wrote', uiIndex, '(with file-association + Explorer DnD bridge)');
