@@ -2982,21 +2982,26 @@
       align-items: center;
       gap: 8px;
       background: #34495e;
-      padding: 8px 16px;
+      /* Fixed height matches pre–fit-width strip (padding 8+8 + ~20px content).
+         Vertical padding is 0 so a slightly larger fit-width button can sit inside
+         without growing the background. */
+      height: 36px;
+      box-sizing: border-box;
+      padding: 0 16px;
       border-radius: 6px;
       color: white;
       position: relative;
       flex-shrink: 1;
       min-width: 140px; /*can be compressed to this size*/
     }
-    /* Keep compact: must NOT inherit .top-menu button.icon-btn 42×42 sizing
-       (that made the scale strip taller and broke menu unwrap-on-widen). */
+    /* Must NOT inherit .top-menu button 42×42 / height:42px sizing. */
     #fitWidthBtn {
       flex: 0 0 auto;
-      width: 22px;
-      height: 22px;
-      min-width: 22px;
-      min-height: 22px;
+      width: 26px;
+      height: 26px;
+      min-width: 26px;
+      min-height: 26px;
+      max-height: 26px;
       padding: 0;
       margin: 0;
       border: none;
@@ -3014,7 +3019,14 @@
     #fitWidthBtn:hover:not(:disabled) { background: rgba(255,255,255,0.12); }
     #fitWidthBtn.active-mode { background: #3498db; }
     #fitWidthBtn:disabled { opacity: 0.4; cursor: default; }
-    #fitWidthBtn svg { display: block; width: 16px; height: 16px; pointer-events: none; }
+    #fitWidthBtn svg { display: block; width: 18px; height: 18px; pointer-events: none; }
+    /* While measuring wrap breakpoints, kill button transitions so scrollWidth
+       reflects final text/icon sizes — otherwise removing .icons-mode leaves
+       font-size mid-transition (~22px) and the menu re-enters icons-mode forever. */
+    .main-row.pm-measuring,
+    .main-row.pm-measuring * {
+      transition: none !important;
+    }
     .slider-wrapper {
       position: relative;
       flex: 1 1 auto;
@@ -5392,7 +5404,7 @@
             <input type="range" id="scaleSlider" min="0" max="200" value="100" step="1" oninput="changeScale(this.value)" onmouseup="this.blur()" ontouchend="this.blur()" title="Alt + колесико мыши — изменение масштаба">
           </div>
           <button type="button" id="fitWidthBtn" onclick="toggleFitWidthScale()" disabled title="По ширине страницы (средняя кнопка мыши)" aria-pressed="false" aria-label="По ширине страницы">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <rect x="6" y="3" width="12" height="18" rx="1.5"/>
               <path d="M2 12h4M18 12h4M3.5 9.5 2 12l1.5 2.5M20.5 9.5 22 12l-1.5 2.5"/>
             </svg>
@@ -9537,72 +9549,79 @@
       const scale  = document.querySelector('.scale-wrapper');
       if (!row || !left || !center || !right || !scale) return;
 
-      //Complete reset of states before measurement
-      center.classList.remove('wrapped');
-      scale.classList.remove('wrapped');
-      row.classList.remove('icons-mode');
-      //We also return the “Print” button to its original place UNCONDITIONALLY and BEFORE everyone
-      //dimensions below (and not just in relocatePrintIfNeeded at the very end).
-      //Otherwise, if the function returns earlier (for example, step 1: everything fits anyway
-      //in one line) - the measurement will take place without printBtn (it is still in
-      //.scale-control from last time), .centered-actions will be measured LOWER
-      // width, the early return will work, and the “Print” button will remain in
-      // scale block forever (that block will visually become taller).
-      resetPrintButtonHome();
-      // Force layout so scrollWidth below reflects the reset classes (otherwise a
-      // maximize/widen can keep measuring the previous wrapped/icons-mode widths
-      // and never unwrap the top menu).
-      void row.offsetWidth;
+      // Disable .top-menu button { transition: all } for the duration of the
+      // measure — otherwise removing .icons-mode leaves font-size/padding mid-
+      // transition (~22px / wider labels), the sum no longer fits, and icons-mode
+      // is immediately re-applied (menu stuck at compression stage 3 on widen).
+      row.classList.add('pm-measuring');
+      try {
+        //Complete reset of states before measurement
+        center.classList.remove('wrapped');
+        scale.classList.remove('wrapped');
+        row.classList.remove('icons-mode');
+        //We also return the “Print” button to its original place UNCONDITIONALLY and BEFORE everyone
+        //dimensions below (and not just in relocatePrintIfNeeded at the very end).
+        //Otherwise, if the function returns earlier (for example, step 1: everything fits anyway
+        //in one line) - the measurement will take place without printBtn (it is still in
+        //.scale-control from last time), .centered-actions will be measured LOWER
+        // width, the early return will work, and the “Print” button will remain in
+        // scale block forever (that block will visually become taller).
+        resetPrintButtonHome();
+        void row.offsetWidth;
 
-      const styles   = getComputedStyle(row);
-      const padRight = parseFloat(styles.paddingRight) || 0;
-      const padLeft  = parseFloat(styles.paddingLeft)  || 0;
-      const avail    = row.clientWidth - padLeft - padRight;
-      const gap      = parseFloat(styles.columnGap) || 12;
+        const styles   = getComputedStyle(row);
+        const padRight = parseFloat(styles.paddingRight) || 0;
+        const padLeft  = parseFloat(styles.paddingLeft)  || 0;
+        const avail    = row.clientWidth - padLeft - padRight;
+        const gap      = parseFloat(styles.columnGap) || 12;
 
-      // If the line is not yet measurable (for example, the menu has just been expanded and the width is 0) -
-      // do not recalculate the transfer now (otherwise we will mistakenly add wrapped/icons-mode →
-      // the menu will become higher), and we plan to try again on the next frame. Without this
-      // Maximizing a window from a minimized state could “hang” with classes
-      // wrapped/icons-mode set during animation on the intermediate narrow
-      // width - there were no backup recalculations after that same resize event.
-      if (row.clientWidth <= 0) {
-        if (updateCenteredWrapRetries < 20) {
-          updateCenteredWrapRetries++;
-          requestAnimationFrame(updateCenteredWrap);
+        // If the line is not yet measurable (for example, the menu has just been expanded and the width is 0) -
+        // do not recalculate the transfer now (otherwise we will mistakenly add wrapped/icons-mode →
+        // the menu will become higher), and we plan to try again on the next frame. Without this
+        // Maximizing a window from a minimized state could “hang” with classes
+        // wrapped/icons-mode set during animation on the intermediate narrow
+        // width - there were no backup recalculations after that same resize event.
+        if (row.clientWidth <= 0) {
+          if (updateCenteredWrapRetries < 20) {
+            updateCenteredWrapRetries++;
+            requestAnimationFrame(updateCenteredWrap);
+          }
+          return;
         }
-        return;
+        updateCenteredWrapRetries = 0;
+
+        // Row width = blocks + gaps between them
+        const rowWidth = (...ws) =>
+          ws.reduce((a, b) => a + b, 0) + gap * (ws.length - 1);
+
+        // ── Step 1: does everything (text buttons) fit on one line? ──
+        let wL = left.scrollWidth, wC = center.scrollWidth,
+            wR = right.scrollWidth, wS = scale.scrollWidth;
+        if (rowWidth(wL, wC, wR, wS) <= avail) return;
+
+        // ── Step 2: move the central block down ──
+        center.classList.add('wrapped');
+        // Now the top line = left + right + scale (the buttons are still text).
+        // Does it fit? — we leave it as it is (only the center has moved).
+        if (rowWidth(wL, wR, wS) <= avail) return;
+
+        // ── Step 3: “Export” hits “Merge” - turn on icon mode ──
+        row.classList.add('icons-mode');
+        void row.offsetWidth;
+        // Let's measure the widths with icons
+        wL = left.scrollWidth; wR = right.scrollWidth; wS = scale.scrollWidth;
+
+        // ── Step 4: if even with the icons the scale does not fit next to it, move the scale ──
+        if (rowWidth(wL, wR, wS) > avail) {
+          scale.classList.add('wrapped');
+        }
+
+        // ── Step 5: with a very narrow window - if the central block (icons) is not
+        //    placed in the line, move the “Print” button up to the scale slider.
+        relocatePrintIfNeeded(avail);
+      } finally {
+        row.classList.remove('pm-measuring');
       }
-      updateCenteredWrapRetries = 0;
-
-      // Row width = blocks + gaps between them
-      const rowWidth = (...ws) =>
-        ws.reduce((a, b) => a + b, 0) + gap * (ws.length - 1);
-
-      // ── Step 1: does everything (text buttons) fit on one line? ──
-      let wL = left.scrollWidth, wC = center.scrollWidth,
-          wR = right.scrollWidth, wS = scale.scrollWidth;
-      if (rowWidth(wL, wC, wR, wS) <= avail) return;
-
-      // ── Step 2: move the central block down ──
-      center.classList.add('wrapped');
-      // Now the top line = left + right + scale (the buttons are still text).
-      // Does it fit? — we leave it as it is (only the center has moved).
-      if (rowWidth(wL, wR, wS) <= avail) return;
-
-      // ── Step 3: “Export” hits “Merge” - turn on icon mode ──
-      row.classList.add('icons-mode');
-      // Let's measure the widths with icons
-      wL = left.scrollWidth; wR = right.scrollWidth; wS = scale.scrollWidth;
-
-      // ── Step 4: if even with the icons the scale does not fit next to it, move the scale ──
-      if (rowWidth(wL, wR, wS) > avail) {
-        scale.classList.add('wrapped');
-      }
-
-      // ── Step 5: with a very narrow window - if the central block (icons) is not
-      //    placed in the line, move the “Print” button up to the scale slider.
-      relocatePrintIfNeeded(avail);
     }
 
     // Returns the "Print" button from the scale block (if it has moved there) to
