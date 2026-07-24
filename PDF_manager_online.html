@@ -3045,7 +3045,7 @@
       align-items: center;
       gap: 8px;
       background: #34495e;
-      /* Tied to toolbar button height via --pm-menu-ctrl-h (42px; 34px in menu-shrink). */
+      /* Tied to toolbar button height via --pm-menu-ctrl-h (always 42px). */
       height: var(--pm-menu-ctrl-h, 42px);
       min-height: var(--pm-menu-ctrl-h, 42px);
       box-sizing: border-box;
@@ -9692,8 +9692,8 @@
     // 2) file buttons → icons (.icons-mode);
     // 3) scale strip length ×½ (.scale-compact);
     // 4) tool icons (read…print) wrap to row 2, centered (.tools-wrapped);
-    // 5) shrink controls in place (.menu-shrink) — final stage (no print relocate,
-    //    no scale wrap).
+    // 5) horizontal tighten (.menu-shrink) — final stage; height stays 42px
+    //    (no print relocate, no scale wrap).
     // UpdateCenteredWrap retry count for unmeasured (0) line width -
     // reset on the first successful measurement, limits the number of requestAnimationFrames.
     let updateCenteredWrapRetries = 0;
@@ -9767,7 +9767,7 @@
         wL = left.scrollWidth; wR = right.scrollWidth; wS = scale.scrollWidth;
         if (rowWidth(wL, wR, wS) <= avail) return;
 
-        // ── Stage 5 (final): shrink controls in place — no print relocate / scale wrap ──
+        // ── Stage 5 (final): horizontal tighten; height stays 42px ──
         row.classList.add('menu-shrink');
       } finally {
         row.classList.remove('pm-measuring');
