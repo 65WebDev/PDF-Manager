@@ -3991,7 +3991,12 @@
       color: #2c3e50;
       text-align: left;
     }
-    #insertMenu button:hover { background: #eef4fb; }
+    #insertMenu button:hover:not(:disabled) { background: #eef4fb; }
+    #insertMenu button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      color: #8a96a3;
+    }
     #insertMenu .ins-ico { font-size: 17px; width: 20px; text-align: center; }
 
     /*Selection frame (rubber frame)*/
@@ -4361,6 +4366,16 @@
     #pmAutoScrollSpeed.pm-autoscroll-flash-hold {
       box-shadow: 0 3px 10px rgba(0,0,0,0.3), 0 0 0 2px rgba(52,152,219,0.55);
       transition: box-shadow 0.12s ease;
+    }
+    /* Same brief outline flash for Q/W rotate toolbar buttons. */
+    @keyframes pm-toolbar-btn-flash {
+      0% { box-shadow: 0 0 0 0 rgba(52,152,219,0); }
+      35% { box-shadow: 0 0 0 2px rgba(52,152,219,0.55); }
+      100% { box-shadow: 0 0 0 0 rgba(52,152,219,0); }
+    }
+    #rotateLeftBtn.pm-autoscroll-flash,
+    #rotateRightBtn.pm-autoscroll-flash {
+      animation: pm-toolbar-btn-flash 0.4s ease;
     }
 
     /* Mobile: while page-nav auto-scroll runs, fade the nav/speed/pause chrome.
@@ -5652,7 +5667,8 @@
       background: #262b33; border-color: #3a4048; box-shadow: 0 6px 20px rgba(0,0,0,0.5);
     }
     html[data-theme="dark"] #insertMenu button { color: #d7dbe0; }
-    html[data-theme="dark"] #insertMenu button:hover { background: #333a44; }
+    html[data-theme="dark"] #insertMenu button:hover:not(:disabled) { background: #333a44; }
+    html[data-theme="dark"] #insertMenu button:disabled { color: #7a828c; }
 
     html[data-theme="dark"] #pmTabMenu {
       background: #262b33; border-color: #3a4048;
@@ -5880,6 +5896,7 @@
     <hr>
     <button type="button" data-action="cut"><span class="ctx-label">Вырезать (Ctrl+X)</span><span class="ctx-icon">✂️</span></button>
     <button type="button" data-action="copy"><span class="ctx-label">Копировать (Ctrl+C)</span><span class="ctx-icon">📑</span></button>
+    <button type="button" data-action="delete"><span class="ctx-label">Удалить (Del)</span><span class="ctx-icon">🗑</span></button>
     <hr>
     <button type="button" data-action="print"><span class="ctx-label">Печать страниц</span><span class="ctx-icon">🖨️</span></button>
     <hr>
@@ -12950,8 +12967,20 @@
           break;
         case 'KeyC': e.preventDefault(); click(document.getElementById('selectModeBtn')); break;
         case 'KeyH': e.preventDefault(); click(document.getElementById('navModeBtn')); break;
-        case 'KeyQ': e.preventDefault(); click(document.getElementById('rotateLeftBtn')); break;
-        case 'KeyW': e.preventDefault(); click(document.getElementById('rotateRightBtn')); break;
+        case 'KeyQ': {
+          e.preventDefault();
+          const rotL = document.getElementById('rotateLeftBtn');
+          click(rotL);
+          if (typeof pmNavFlashUi === 'function') pmNavFlashUi(rotL);
+          break;
+        }
+        case 'KeyW': {
+          e.preventDefault();
+          const rotR = document.getElementById('rotateRightBtn');
+          click(rotR);
+          if (typeof pmNavFlashUi === 'function') pmNavFlashUi(rotR);
+          break;
+        }
         case 'Delete': e.preventDefault(); click(document.getElementById('deleteBtn')); break;
         case 'KeyP': e.preventDefault(); click(document.getElementById('printBtn')); break;
         case 'KeyF': e.preventDefault(); loadNewPDF(); break;
@@ -17116,6 +17145,9 @@
       });
       document.getElementById('insertFromClipboardBtn').addEventListener('click', async (e) => {
         e.stopPropagation();
+        const btn = e.currentTarget;
+        if (btn && btn.disabled) return;
+        if (!(pmPageClipboard && pmPageClipboard.pdfBytes)) return;
         const pos = pendingInsert;
         closeInsertMenu();
         await insertFromClipboard(pos);
@@ -17152,6 +17184,10 @@
       const menu = document.getElementById('insertMenu');
       const host = scrollContainer;
       const hostRect = host.getBoundingClientRect();
+      const clipBtn = document.getElementById('insertFromClipboardBtn');
+      if (clipBtn) {
+        clipBtn.disabled = !(pmPageClipboard && pmPageClipboard.pdfBytes);
+      }
       insertMenuOpen = true;
       insertMenuOpenedAt = Date.now();  // protection against instant closing with the same tap
       menu.style.display = 'block';
@@ -26515,6 +26551,7 @@ function editSelectedPage() {
       replace: baseDisabled || targets.length === 0 || !ctxMenuTargetsContiguous(targets),
       cut: baseDisabled || targets.length === 0,
       copy: baseDisabled || targets.length === 0,
+      delete: baseDisabled || targets.length === 0,
       print: baseDisabled || targets.length === 0,
       undo: !canUndoDoc(),
       redo: !canRedoDoc()
@@ -26655,7 +26692,7 @@ function editSelectedPage() {
     // Sync selection before hideMenu() clears ctxPageIdx. Undo/redo/read/edit/nav
     // must not change selection (RMB itself also must not).
     let selOk = true;
-    if (action === 'rot-right' || action === 'rot-left' || action === 'replace' || action === 'cut') {
+    if (action === 'rot-right' || action === 'rot-left' || action === 'replace' || action === 'cut' || action === 'delete') {
       selOk = syncSelectionToCtxTargets();
     } else if (action === 'export' || action === 'copy' || action === 'print') {
       selOk = syncSelectionToCtxTargets({ notify: true });
@@ -26712,6 +26749,9 @@ function editSelectedPage() {
         break;
       case 'copy':
         if (selOk) copySelectedPagesToClipboard();
+        break;
+      case 'delete':
+        if (selOk) deleteSelected();
         break;
       case 'print':
         if (selOk) printSelectedPages();
