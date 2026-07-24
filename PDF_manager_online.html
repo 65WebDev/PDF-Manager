@@ -53,6 +53,8 @@
       display: flex;
       flex-direction: column;
       gap: 8px;
+      /* Shared with .main-row controls + corner logo on stage 5 shrink */
+      --pm-menu-ctrl-h: 42px;
       /*We do not animate the dimensions - otherwise the height changes smoothly and the counter
          positioned by an intermediate value. We animate only the background/shadow.*/
       transition: background 0.3s ease, box-shadow 0.3s ease;
@@ -161,14 +163,18 @@
       position: absolute;
       top: 8px;            /*flush with the top edge of the first row buttons (padding menu)*/
       right: 20px;
-      height: 42px;
-      width: 42px;
+      height: var(--pm-menu-ctrl-h, 42px);
+      width: var(--pm-menu-ctrl-h, 42px);
       display: block;
       z-index: 110;
-      border-radius: 10px;
+      border-radius: calc(var(--pm-menu-ctrl-h, 42px) * 0.238);
       transition: filter 0.15s ease, box-shadow 0.15s ease;
     }
-    .app-logo svg { display: block; width: 42px; height: 42px; }
+    .app-logo svg {
+      display: block;
+      width: var(--pm-menu-ctrl-h, 42px);
+      height: var(--pm-menu-ctrl-h, 42px);
+    }
     /* Light highlight while the logo hover-zone (or the logo itself) is hot */
     .app-logo.logo-hot,
     body:has(#logoMenuArea:hover) .app-logo {
@@ -182,21 +188,21 @@
       position: absolute;
       top: 10px;
       right: 20px;
-      width: 42px;
-      height: 42px;
+      width: var(--pm-menu-ctrl-h, 42px);
+      height: var(--pm-menu-ctrl-h, 42px);
       z-index: 111;
     }
     /* While the popup stack is open, stretch the hit-area over all three
        buttons so the menu does not rely on a hide-timeout when moving the
        cursor from the logo down to About. */
     #logoMenuArea.expanded {
-      height: 188px; /* logo slot + hide/theme/about (top 140 + 42 + slack) */
+      height: calc(var(--pm-menu-ctrl-h, 42px) + 146px); /* logo slot + hide/theme/about */
     }
     /*Hide menu button (desktop) - pops up under the logo when hovered over.
        Visibility is controlled by JS (.show class) with a timeout to allow time for hovering.*/
     #desktopMenuToggleBtn {
       position: absolute;
-      top: 44px;            /*just below the logo, without a big gap*/
+      top: calc(var(--pm-menu-ctrl-h, 42px) + 2px); /* just below the logo */
       right: 0;
       width: 42px;
       height: 42px;
@@ -234,7 +240,7 @@
     /*Theme toggle - pops up right under the "Hide menu" button, same hover area/timing.*/
     #themeToggleBtn {
       position: absolute;
-      top: 92px;             /*just below desktopMenuToggleBtn (44 + 42 + 6 gap)*/
+      top: calc(var(--pm-menu-ctrl-h, 42px) + 50px); /* below hide-menu (h+2 + 42 + 6) */
       right: 0;
       width: 42px;
       height: 42px;
@@ -263,7 +269,7 @@
     /*"About" button - pops up right under the theme toggle, same hover area/timing.*/
     #aboutBtn {
       position: absolute;
-      top: 140px;            /*just below themeToggleBtn (92 + 42 + 6 gap)*/
+      top: calc(var(--pm-menu-ctrl-h, 42px) + 98px); /* below theme (h+50 + 42 + 6) */
       right: 0;
       width: 42px;
       height: 42px;
@@ -292,7 +298,7 @@
     /* Restore help («?»): sits above About only while the corner tip is hidden. */
     #restoreHelpBtn {
       position: absolute;
-      top: 140px;
+      top: calc(var(--pm-menu-ctrl-h, 42px) + 98px);
       right: 0;
       width: 42px;
       height: 42px;
@@ -325,10 +331,10 @@
       pointer-events: auto;
     }
     #logoMenuArea.help-restore-on #aboutBtn {
-      top: 188px; /* below restore-help (140 + 42 + 6) */
+      top: calc(var(--pm-menu-ctrl-h, 42px) + 146px); /* below restore-help */
     }
     #logoMenuArea.help-restore-on.expanded {
-      height: 236px; /* logo + hide + theme + restore-help + about */
+      height: calc(var(--pm-menu-ctrl-h, 42px) + 194px); /* logo + hide + theme + restore-help + about */
     }
     /*Menu collapsed: keep only the show/hide toggle in the corner, not the theme/About buttons.*/
     .top-menu.collapsed #themeToggleBtn,
@@ -3045,10 +3051,9 @@
       align-items: center;
       gap: 8px;
       background: #34495e;
-      /* Fixed height matches pre–fit-width strip (padding 8+8 + ~20px content).
-         Vertical padding is 0 so a slightly larger fit-width button can sit inside
-         without growing the background. */
-      height: 36px;
+      /* Tied to toolbar button height via --pm-menu-ctrl-h (always 42px). */
+      height: var(--pm-menu-ctrl-h, 42px);
+      min-height: var(--pm-menu-ctrl-h, 42px);
       box-sizing: border-box;
       padding: 0 16px;
       border-radius: 6px;
@@ -5157,11 +5162,9 @@
         min-width: 0;
       }
     }
-    /*─── Compact mode: window width <= 850px
-       The “Select file”, “Combine”, “Export”, “Save” buttons become
-       square icons without text and lined up along the top left.*/
-    /*Icon mode is enabled dynamically from JS (class .icons-mode on .main-row),
-       when the text buttons no longer fit on the line.*/
+    /*─── Compact file buttons: class .icons-mode on .main-row (stage 2+)
+       “Выбрать файл / Объединить / Заменить / Экспорт / Сохранить” → square icons.
+       Flex order for the wrapped tools row is applied only with .tools-wrapped. */
     .main-row.icons-mode .compact-btn .btn-label { display: none; }
     .main-row.icons-mode .compact-btn {
       width: 42px;
@@ -5174,6 +5177,136 @@
     .main-row.icons-mode .compact-btn .btn-ico { font-size: 22px; }
     .main-row.icons-mode #replaceBtn .btn-ico svg { width: 22px; height: 22px; }
     #replaceBtn .btn-ico { display: inline-flex; align-items: center; }
+
+    /* Stage 3+: scale strip at half length (slider track ~½ of 170px). */
+    .main-row.scale-compact .slider-wrapper {
+      max-width: 85px;
+    }
+    .main-row.scale-compact .scale-control {
+      min-width: 110px;
+      padding: 0 10px;
+      gap: 6px;
+    }
+
+    /* Stage 5: keep stage-4 layout; shrink all toolbar controls until
+       [open/merge | replace…save | scale] fit on row 1 (scale must NOT wrap).
+       --pm-menu-ctrl-h is a length (e.g. 42px). Glyph sizes use
+       calc(var(--pm-menu-ctrl-h) * <unitless>) — never “22px * var(/42)”
+       (px×px is invalid and drops the whole declaration). */
+    .main-row {
+      /* Inherits --pm-menu-ctrl-h from .top-menu; kept here as a local fallback. */
+      --pm-menu-ctrl-h: 42px;
+    }
+    .main-row.menu-shrink {
+      gap: 6px 6px;
+    }
+    .main-row.menu-shrink .left-actions,
+    .main-row.menu-shrink .right-actions,
+    .main-row.menu-shrink .centered-actions {
+      gap: 4px;
+    }
+    /* Beat .top-menu button / .icon-btn / .icons-mode .compact-btn fixed 42px.
+       Ratios = natural size / 42 (22→0.524, 30→0.714, 26→0.619, 18→0.429). */
+    .top-menu .main-row.menu-shrink button:not(#fitWidthBtn):not(.img-save-btn):not(#printSelectedBtn):not(#toggleDeletedBtn):not(.rl-slot-popup),
+    .top-menu .main-row.menu-shrink label.icon-btn,
+    .main-row.menu-shrink .compact-btn,
+    .main-row.menu-shrink button.icon-btn,
+    .main-row.menu-shrink label.icon-btn {
+      width: var(--pm-menu-ctrl-h);
+      min-width: var(--pm-menu-ctrl-h);
+      height: var(--pm-menu-ctrl-h);
+      min-height: var(--pm-menu-ctrl-h);
+      max-height: var(--pm-menu-ctrl-h);
+      padding: 0;
+      font-size: calc(var(--pm-menu-ctrl-h) * 0.524);
+      line-height: 1;
+      box-sizing: border-box;
+      justify-content: center;
+    }
+    .main-row.menu-shrink .compact-btn .btn-ico {
+      font-size: calc(var(--pm-menu-ctrl-h) * 0.524);
+    }
+    .main-row.menu-shrink #replaceBtn .btn-ico svg {
+      width: calc(var(--pm-menu-ctrl-h) * 0.524);
+      height: calc(var(--pm-menu-ctrl-h) * 0.524);
+    }
+    .main-row.menu-shrink button.icon-btn svg,
+    .main-row.menu-shrink label.icon-btn svg {
+      width: calc(var(--pm-menu-ctrl-h) * 0.524);
+      height: calc(var(--pm-menu-ctrl-h) * 0.524);
+    }
+    /* Cursor mode glyph is naturally ~30×30 inside the 42×42 hit target */
+    .main-row.menu-shrink #selectModeBtn svg {
+      width: calc(var(--pm-menu-ctrl-h) * 0.714);
+      height: calc(var(--pm-menu-ctrl-h) * 0.714);
+    }
+    /* Desktop rotate glyph ~22px at full size (same as other tool icons) */
+    .main-row.menu-shrink button#rotateLeftBtn .rotate-glyph,
+    .main-row.menu-shrink button#rotateRightBtn .rotate-glyph {
+      font-size: calc(var(--pm-menu-ctrl-h) * 0.524);
+    }
+    /* Pop-ups under delete/print/save stay matched to the shrunk hit target */
+    .top-menu .main-row.menu-shrink .img-save-btn,
+    .top-menu .main-row.menu-shrink #toggleDeletedBtn,
+    .top-menu .main-row.menu-shrink #printSelectedBtn,
+    .top-menu .main-row.menu-shrink #readModeBtn.rl-slot-popup,
+    .top-menu .main-row.menu-shrink #loupeModeBtn.rl-slot-popup {
+      width: var(--pm-menu-ctrl-h);
+      height: var(--pm-menu-ctrl-h);
+      min-width: var(--pm-menu-ctrl-h);
+    }
+    .main-row.menu-shrink .slider-wrapper {
+      max-width: max(48px, calc(var(--pm-menu-ctrl-h) * 2.024));
+    }
+    .main-row.menu-shrink.scale-compact .slider-wrapper {
+      max-width: max(48px, calc(var(--pm-menu-ctrl-h) * 2.024));
+    }
+    .main-row.menu-shrink .scale-control {
+      /* ~110px at 42px; shrinks with controls so row 1 can fit */
+      min-width: max(72px, calc(var(--pm-menu-ctrl-h) * 2.62));
+      height: var(--pm-menu-ctrl-h);
+      min-height: var(--pm-menu-ctrl-h);
+      max-height: var(--pm-menu-ctrl-h);
+      padding: 0 8px;
+      gap: 4px;
+      box-sizing: border-box;
+      flex-shrink: 0;
+    }
+    /* Fit-width control is naturally 26×26 with 18×18 SVG inside the scale strip */
+    .main-row.menu-shrink #fitWidthBtn {
+      width: calc(var(--pm-menu-ctrl-h) * 0.619);
+      height: calc(var(--pm-menu-ctrl-h) * 0.619);
+      min-width: calc(var(--pm-menu-ctrl-h) * 0.619);
+      min-height: calc(var(--pm-menu-ctrl-h) * 0.619);
+      max-height: calc(var(--pm-menu-ctrl-h) * 0.619);
+    }
+    .main-row.menu-shrink #fitWidthBtn svg {
+      width: calc(var(--pm-menu-ctrl-h) * 0.429);
+      height: calc(var(--pm-menu-ctrl-h) * 0.429);
+    }
+    .main-row.menu-shrink #scaleLabel {
+      font-size: max(10px, calc(var(--pm-menu-ctrl-h) * 0.31));
+    }
+    /* Before menu-shrink applies, prefer compressing the strip over wrapping it */
+    .main-row.tools-wrapped:not(.menu-shrink) .scale-wrapper {
+      flex-shrink: 1;
+      min-width: 0;
+    }
+    .main-row.tools-wrapped:not(.menu-shrink) .scale-control {
+      min-width: 0;
+      flex-shrink: 1;
+    }
+    .main-row.tools-wrapped.menu-shrink .scale-wrapper {
+      flex-shrink: 0;
+    }
+
+    /* Touch: rotate glyphs are naturally ~35px — keep that ratio under menu-shrink */
+    @media (pointer: coarse) {
+      .top-menu .main-row.menu-shrink button#rotateLeftBtn .rotate-glyph,
+      .top-menu .main-row.menu-shrink button#rotateRightBtn .rotate-glyph {
+        font-size: calc(var(--pm-menu-ctrl-h) * 0.833);
+      }
+    }
 
     /*“Print” button moved to the scale slider (narrow window) - shrunk to
        fit the scale panel's own natural height instead of forcing it
@@ -5225,32 +5358,30 @@
       box-sizing: border-box;
     }
 
-    /*File buttons (Export/Save) - immediately behind the left block, top left*/
-    .main-row.icons-mode .right-actions {
+    /* Stage 4+: tools on second row — centered on the viewport.
+       Row 1 keeps [open/merge] on the left and [replace…save + scale] on the right
+       (do not glue replace/export/save to open/merge). */
+    .main-row.tools-wrapped .right-actions {
       order: 2;
-      margin-left: 0 !important;
+      margin-left: auto !important;
     }
-
-    /*The scale when transferred is on a separate line on the left (before the central block)*/
-    .main-row.icons-mode .scale-wrapper { order: 3; }
-    .main-row.icons-mode .scale-wrapper.wrapped {
-      flex-basis: 100%;
-      justify-content: flex-start;
-      margin-left: 0;
-    }
-
-    /*The central block when transferred is below the scale, to the left*/
-    .main-row.icons-mode .centered-actions { order: 4; margin-left: 0; margin-right: 0; }
-    .main-row.icons-mode .centered-actions.wrapped {
-      order: 4;
-      flex-basis: 100%;
-      width: auto;
-      max-width: none;
-      justify-content: flex-start;
+    .main-row.tools-wrapped .scale-wrapper { order: 3; }
+    .main-row.tools-wrapped .centered-actions {
+      order: 5;
       margin-left: 0;
       margin-right: 0;
     }
-
+    .main-row.tools-wrapped .centered-actions.wrapped {
+      order: 5;
+      justify-content: center;
+      /* Span under the logo padding so “center of screen” is true, not center of
+         the padded flex line. */
+      flex-basis: calc(100% + 72px);
+      width: calc(100% + 72px);
+      max-width: calc(100% + 72px);
+      margin-left: 0;
+      margin-right: -72px;
+    }
     /* ═══════════════════════════════════════════════════════════════════
        DARK MODE
        Additive overrides only - the light-mode rules above are untouched.
@@ -9640,13 +9771,83 @@
       }
     }
 
-    //Dynamic cascade of translations when narrowing the window:
-    //1) the central block moves first (rotate → print) onto its line;
-    //2) when “Export” comes up against “Merge” - the buttons turn into icons;
-    //3) when the scale touches the “Save” icon, the scale moves down.
-    //UpdateCenteredWrap retry count for unmeasured (0) line width -
-    //reset on the first successful measurement, limits the number of requestAnimationFrames.
+    // Dynamic cascade when narrowing the window (desktop):
+    // 1) full labels + full scale (stage 1);
+    // 2) file buttons → icons (.icons-mode);
+    // 3) scale strip length ×½ (.scale-compact);
+    // 4–5) tool icons wrap to row 2 (.tools-wrapped) and row-1 controls shrink
+    //    (--pm-menu-ctrl-h) in the same turn so the scale strip never paints
+    //    alone on row 2 (no print relocate, no scale wrap).
+    // UpdateCenteredWrap retry count for unmeasured (0) line width -
+    // reset on the first successful measurement, limits the number of requestAnimationFrames.
     let updateCenteredWrapRetries = 0;
+    // Applying cascade classes changes .main-row size → ResizeObserver →
+    // relayoutTopUI → updateCenteredWrap again. Without a lock + width cache the
+    // cascade resets/reapplies every frame (replace→scale block jitters forever
+    // on the stage-4/5 boundary).
+    let pmMenuWrapLock = false;
+    let pmMenuWrapLastCw = -1;
+    const PM_MENU_CTRL_H_FULL = 42;
+    const PM_MENU_CTRL_H_MIN = 28;
+
+    function invalidateCenteredWrapCache() {
+      pmMenuWrapLastCw = -1;
+    }
+
+    function pmMenuRowWidth(gap, ...ws) {
+      return ws.reduce((a, b) => a + b, 0) + gap * Math.max(0, ws.length - 1);
+    }
+
+    function pmSetMenuCtrlH(row, pxOrNull) {
+      const topMenu = document.getElementById('topMenu');
+      if (pxOrNull == null) {
+        row.style.removeProperty('--pm-menu-ctrl-h');
+        if (topMenu) topMenu.style.removeProperty('--pm-menu-ctrl-h');
+        return;
+      }
+      const v = pxOrNull + 'px';
+      row.style.setProperty('--pm-menu-ctrl-h', v);
+      /* Logo lives under #topMenu, not .main-row — keep both in sync on stage 5. */
+      if (topMenu) topMenu.style.setProperty('--pm-menu-ctrl-h', v);
+    }
+
+    /** Stage 5: binary-search control size so left+right+scale stay on row 1.
+        Always pairs with tools-wrapped — call in the same turn (no layout flush
+        between wrap and shrink) so the scale strip never paints on row 2. */
+    function pmApplyMenuShrinkToFit(row, left, right, scale, avail) {
+      row.classList.add('menu-shrink');
+      pmSetMenuCtrlH(row, PM_MENU_CTRL_H_FULL);
+      const scaleCtl = scale.querySelector('.scale-control');
+      let lo = PM_MENU_CTRL_H_MIN;
+      let hi = PM_MENU_CTRL_H_FULL;
+      let best = PM_MENU_CTRL_H_MIN;
+      while (lo <= hi) {
+        const mid = (lo + hi) >> 1;
+        pmSetMenuCtrlH(row, mid);
+        void row.offsetWidth;
+        const gap5 = parseFloat(getComputedStyle(row).columnGap) || 6;
+        // Prefer scale-control scrollWidth (flex-shrink:0 under menu-shrink) so
+        // measurement is the real strip width, not a flex-compressed leftover.
+        const wS = (scaleCtl && scaleCtl.scrollWidth) || scale.scrollWidth;
+        const need = pmMenuRowWidth(
+          gap5, left.scrollWidth, right.scrollWidth, wS
+        );
+        const dropped = pmScaleDroppedToNextRow(left, right, scale);
+        if (need <= avail && !dropped) {
+          best = mid;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      pmSetMenuCtrlH(row, best);
+      void row.offsetWidth;
+    }
+
+    function pmScaleDroppedToNextRow(left, right, scale) {
+      return scale.offsetTop > left.offsetTop + 2 ||
+        right.offsetTop > left.offsetTop + 2;
+    }
 
     function updateCenteredWrap() {
       const row    = document.querySelector('.main-row');
@@ -9655,24 +9856,39 @@
       const right  = document.querySelector('.right-actions');
       const scale  = document.querySelector('.scale-wrapper');
       if (!row || !left || !center || !right || !scale) return;
+      if (pmMenuWrapLock) return;
 
+      // If the line is not yet measurable (menu just expanded, width 0) —
+      // retry next frame instead of locking wrapped/icons-mode on a bad measure.
+      if (row.clientWidth <= 0) {
+        if (updateCenteredWrapRetries < 20) {
+          updateCenteredWrapRetries++;
+          requestAnimationFrame(updateCenteredWrap);
+        }
+        return;
+      }
+      updateCenteredWrapRetries = 0;
+
+      // Echo from our own class/gap changes: same clientWidth → skip (no DOM thrash).
+      // Still remeasure if scale/right wrongly sat on a new flex line.
+      if (row.clientWidth === pmMenuWrapLastCw &&
+          !(row.classList.contains('tools-wrapped') && pmScaleDroppedToNextRow(left, right, scale))) {
+        return;
+      }
+
+      pmMenuWrapLock = true;
       // Disable .top-menu button { transition: all } for the duration of the
       // measure — otherwise removing .icons-mode leaves font-size/padding mid-
       // transition (~22px / wider labels), the sum no longer fits, and icons-mode
-      // is immediately re-applied (menu stuck at compression stage 3 on widen).
+      // is immediately re-applied (menu stuck at a compression stage on widen).
       row.classList.add('pm-measuring');
       try {
-        //Complete reset of states before measurement
+        // Complete reset of states before measurement
         center.classList.remove('wrapped');
         scale.classList.remove('wrapped');
-        row.classList.remove('icons-mode');
-        //We also return the “Print” button to its original place UNCONDITIONALLY and BEFORE everyone
-        //dimensions below (and not just in relocatePrintIfNeeded at the very end).
-        //Otherwise, if the function returns earlier (for example, step 1: everything fits anyway
-        //in one line) - the measurement will take place without printBtn (it is still in
-        //.scale-control from last time), .centered-actions will be measured LOWER
-        // width, the early return will work, and the “Print” button will remain in
-        // scale block forever (that block will visually become taller).
+        row.classList.remove('icons-mode', 'scale-compact', 'menu-shrink', 'tools-wrapped');
+        pmSetMenuCtrlH(row, null);
+        // Undo any leftover print relocate from older builds before measuring.
         resetPrintButtonHome();
         void row.offsetWidth;
 
@@ -9682,52 +9898,40 @@
         const avail    = row.clientWidth - padLeft - padRight;
         const gap      = parseFloat(styles.columnGap) || 12;
 
-        // If the line is not yet measurable (for example, the menu has just been expanded and the width is 0) -
-        // do not recalculate the transfer now (otherwise we will mistakenly add wrapped/icons-mode →
-        // the menu will become higher), and we plan to try again on the next frame. Without this
-        // Maximizing a window from a minimized state could “hang” with classes
-        // wrapped/icons-mode set during animation on the intermediate narrow
-        // width - there were no backup recalculations after that same resize event.
-        if (row.clientWidth <= 0) {
-          if (updateCenteredWrapRetries < 20) {
-            updateCenteredWrapRetries++;
-            requestAnimationFrame(updateCenteredWrap);
-          }
-          return;
-        }
-        updateCenteredWrapRetries = 0;
-
-        // Row width = blocks + gaps between them
-        const rowWidth = (...ws) =>
-          ws.reduce((a, b) => a + b, 0) + gap * (ws.length - 1);
-
-        // ── Step 1: does everything (text buttons) fit on one line? ──
         let wL = left.scrollWidth, wC = center.scrollWidth,
             wR = right.scrollWidth, wS = scale.scrollWidth;
-        if (rowWidth(wL, wC, wR, wS) <= avail) return;
 
-        // ── Step 2: move the central block down ──
-        center.classList.add('wrapped');
-        // Now the top line = left + right + scale (the buttons are still text).
-        // Does it fit? — we leave it as it is (only the center has moved).
-        if (rowWidth(wL, wR, wS) <= avail) return;
-
-        // ── Step 3: “Export” hits “Merge” - turn on icon mode ──
-        row.classList.add('icons-mode');
-        void row.offsetWidth;
-        // Let's measure the widths with icons
-        wL = left.scrollWidth; wR = right.scrollWidth; wS = scale.scrollWidth;
-
-        // ── Step 4: if even with the icons the scale does not fit next to it, move the scale ──
-        if (rowWidth(wL, wR, wS) > avail) {
-          scale.classList.add('wrapped');
+        // ── Stage 1: full labels + full scale on one row ──
+        if (pmMenuRowWidth(gap, wL, wC, wR, wS) > avail) {
+          // ── Stage 2: file buttons → icons ──
+          row.classList.add('icons-mode');
+          void row.offsetWidth;
+          wL = left.scrollWidth; wC = center.scrollWidth;
+          wR = right.scrollWidth; wS = scale.scrollWidth;
+          if (pmMenuRowWidth(gap, wL, wC, wR, wS) > avail) {
+            // ── Stage 3: scale strip at half length ──
+            row.classList.add('scale-compact');
+            void row.offsetWidth;
+            wL = left.scrollWidth; wC = center.scrollWidth;
+            wR = right.scrollWidth; wS = scale.scrollWidth;
+            if (pmMenuRowWidth(gap, wL, wC, wR, wS) > avail) {
+              // ── Stages 4+5 together: wrap tools, then shrink row-1 controls
+              //     in the same turn (no layout flush between) so the scale
+              //     strip never paints alone on the second row. ──
+              center.classList.add('wrapped');
+              row.classList.add('tools-wrapped');
+              pmApplyMenuShrinkToFit(row, left, right, scale, avail);
+            }
+          }
         }
-
-        // ── Step 5: with a very narrow window - if the central block (icons) is not
-        //    placed in the line, move the “Print” button up to the scale slider.
-        relocatePrintIfNeeded(avail);
+        pmMenuWrapLastCw = row.clientWidth;
       } finally {
         row.classList.remove('pm-measuring');
+        // Absorb ResizeObserver callbacks from the class changes above.
+        requestAnimationFrame(() => {
+          pmMenuWrapLastCw = row.clientWidth;
+          pmMenuWrapLock = false;
+        });
       }
     }
 
@@ -10879,10 +11083,12 @@
       if (mainRowEl) {
         let roPending = false;
         const topUIResizeObserver = new ResizeObserver(() => {
+          if (pmMenuWrapLock) return;
           if (roPending) return;
           roPending = true;
           requestAnimationFrame(() => {
             roPending = false;
+            if (pmMenuWrapLock) return;
             relayoutTopUI();
           });
         });
@@ -13161,12 +13367,16 @@
       const dBtn = document.getElementById('desktopMenuToggleBtn');
       if (dBtn) dBtn.title = collapsed ? 'Показать меню' : 'Скрыть меню';
       // After changing the menu height, we recalculate the positions of the counter/header/bar
+      if (typeof invalidateCenteredWrapCache === 'function') invalidateCenteredWrapCache();
       if (typeof relayoutTopUI === 'function') relayoutTopUI();
       // Additional recalculation after complete restoration of the menu bar layout
       // (when expanded, the line has just become visible and measurable again).
       if (!collapsed) {
         requestAnimationFrame(() => {
-          requestAnimationFrame(() => { if (typeof relayoutTopUI === 'function') relayoutTopUI(); });
+          requestAnimationFrame(() => {
+            if (typeof invalidateCenteredWrapCache === 'function') invalidateCenteredWrapCache();
+            if (typeof relayoutTopUI === 'function') relayoutTopUI();
+          });
         });
       }
       updateStickyFileBar();
