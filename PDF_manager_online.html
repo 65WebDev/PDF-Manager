@@ -6604,8 +6604,53 @@
     const PM_NAV_HOLD_ARM_MS = 300;   // touch-only long-press arm
     const PM_NAV_HOLD_RING_MS = 500;  // touch-only ring fill
     const PM_NAV_RING_LEN = 100; // matches pathLength on the SVG circle
-    const PM_NAV_TITLE_PREV = 'Предыдущая страница (ПКМ - автопрокрутка)';
-    const PM_NAV_TITLE_NEXT = 'Следующая страница (ПКМ - автопрокрутка)';
+    function pmNavTitlePrev() {
+      return isTouchDevice
+        ? 'Предыдущая страница. Удерживание - автопрокрутка'
+        : 'Предыдущая страница (ПКМ - автопрокрутка)';
+    }
+    function pmNavTitleNext() {
+      return isTouchDevice
+        ? 'Следующая страница. Удерживание - автопрокрутка'
+        : 'Следующая страница (ПКМ - автопрокрутка)';
+    }
+    function pmNavTitlePause() {
+      return isTouchDevice
+        ? 'Остановить прокрутку'
+        : 'Остановить прокрутку (ПКМ / Esc)';
+    }
+    function pmNavTitleResume() {
+      return isTouchDevice
+        ? 'Продолжить прокрутку'
+        : 'Продолжить прокрутку (ПКМ); Esc — выход';
+    }
+    function pmNavTitleSpeed() {
+      return isTouchDevice
+        ? 'Скорость прокрутки'
+        : 'Скорость прокрутки (колесико мыши)';
+    }
+    function pmNavApplyStaticTooltips() {
+      const prevBtn = document.getElementById('pmPagePrevBtn');
+      const nextBtn = document.getElementById('pmPageNextBtn');
+      const speedEl = document.getElementById('pmAutoScrollSpeed');
+      const pauseBtn = document.getElementById('pmAutoScrollPauseBtn');
+      if (prevBtn) {
+        prevBtn.title = pmNavTitlePrev();
+        prevBtn.setAttribute('aria-label', prevBtn.title);
+      }
+      if (nextBtn) {
+        nextBtn.title = pmNavTitleNext();
+        nextBtn.setAttribute('aria-label', nextBtn.title);
+      }
+      if (speedEl) {
+        speedEl.title = pmNavTitleSpeed();
+        speedEl.setAttribute('aria-label', speedEl.title);
+      }
+      if (pauseBtn && !pmNavAutoDir) {
+        pauseBtn.title = pmNavTitlePause();
+        pauseBtn.setAttribute('aria-label', pauseBtn.title);
+      }
+    }
     let pmNavAutoDir = 0;              // -1 | 0 | 1
     let pmNavAutoRaf = 0;
     let pmNavAutoLastTs = 0;
@@ -10739,9 +10784,7 @@
       const icon = btn.querySelector('.pm-autoscroll-pause-icon');
       const paused = !!pmNavAutoPaused;
       if (icon) icon.innerHTML = paused ? PM_NAV_PLAY_ICON : PM_NAV_PAUSE_ICON;
-      btn.title = paused
-        ? 'Продолжить прокрутку (ПКМ); Esc — выход'
-        : 'Остановить прокрутку (ПКМ / Esc)';
+      btn.title = paused ? pmNavTitleResume() : pmNavTitlePause();
       btn.setAttribute('aria-label', btn.title);
       btn.setAttribute('aria-pressed', paused ? 'true' : 'false');
     }
@@ -10862,7 +10905,7 @@
         btn.classList.remove('pm-nav-arming', 'pm-nav-autoscroll');
         pmNavResetRing(btn);
         pmNavSetIcon(btn, id === 'pmPagePrevBtn' ? PM_NAV_ICON_PREV : PM_NAV_ICON_NEXT);
-        btn.title = id === 'pmPagePrevBtn' ? PM_NAV_TITLE_PREV : PM_NAV_TITLE_NEXT;
+        btn.title = id === 'pmPagePrevBtn' ? pmNavTitlePrev() : pmNavTitleNext();
         btn.setAttribute('aria-label', btn.title);
       });
       pmNavShowAutoControls(false);
@@ -10882,7 +10925,7 @@
         other.classList.remove('pm-nav-arming', 'pm-nav-autoscroll');
         pmNavResetRing(other);
         pmNavSetIcon(other, dir < 0 ? PM_NAV_ICON_NEXT : PM_NAV_ICON_PREV);
-        other.title = dir < 0 ? PM_NAV_TITLE_NEXT : PM_NAV_TITLE_PREV;
+        other.title = dir < 0 ? pmNavTitleNext() : pmNavTitlePrev();
         other.setAttribute('aria-label', other.title);
       }
 
@@ -10901,7 +10944,7 @@
         prog.style.strokeDashoffset = '0';
       }
       pmNavSetIcon(btn, dir < 0 ? PM_NAV_ICON_AUTO_PREV : PM_NAV_ICON_AUTO_NEXT);
-      btn.title = dir < 0 ? PM_NAV_TITLE_PREV : PM_NAV_TITLE_NEXT;
+      btn.title = dir < 0 ? pmNavTitlePrev() : pmNavTitleNext();
       btn.setAttribute('aria-label', btn.title);
       btn.disabled = false;
 
@@ -11126,6 +11169,7 @@
     }
 
     (function pmInitPageNavAutoScroll() {
+      pmNavApplyStaticTooltips();
       const prevBtn = document.getElementById('pmPagePrevBtn');
       const nextBtn = document.getElementById('pmPageNextBtn');
       [prevBtn, nextBtn].forEach((btn) => {
