@@ -35894,22 +35894,55 @@ function peFlushTouchObjPending(clientX, clientY, reason) {
 }
 
 /** Empty-canvas / text-layer gesture in Object-select: dbl→marquee, else pan. */
-function peStartObjSelectBlankGesture(e) {
+function peRegisterObjSelectTap(clientX, clientY) {
+  const now = Date.now();
+  const tapDist = Math.hypot(clientX - peObjMarqueeTap.x, clientY - peObjMarqueeTap.y);
+  const isDbl = (now - peObjMarqueeTap.t) < 550 && tapDist < 48;
+  peObjMarqueeTap = { t: now, x: clientX, y: clientY };
+  return isDbl;
+}
+
+function peBeginObjSelectMarquee(e) {
   if (!peState || !peState.objSelectMode) return;
   const pt = peStagePoint(e);
-  const now = Date.now();
-  const tapDist = Math.hypot(e.clientX - peObjMarqueeTap.x, e.clientY - peObjMarqueeTap.y);
-  const isDbl = (now - peObjMarqueeTap.t) < 550 && tapDist < 48;
-  peObjMarqueeTap = { t: now, x: e.clientX, y: e.clientY };
+  peCancelTouchObjPending();
+  peClearTextLayerTouchPending();
+  peHideObjCtxMenu();
+  peState.drag = {
+    kind: 'obj-marquee',
+    startX: pt.x, startY: pt.y, curX: pt.x, curY: pt.y,
+    additive: e.shiftKey,
+    baseIds: e.shiftKey ? peGetSelectedObjects().map(o => o.id) : null
+  };
+  peUpdatePanUi();
+}
+
+/**
+ * Touch double-tap on an object or PDF text: start marquee (same as blank stage).
+ * Always registers the tap so a following blank/object/text tap can pair with it.
+ * Returns true when marquee was started.
+ */
+function peTryStartObjSelectMarqueeFromTouch(e) {
+  if (!peState || !peState.objSelectMode) return false;
+  if (!(e.pointerType === 'touch' || e.pointerType === 'pen')) return false;
+  if (pePinchActive || Date.now() < pePinchBlockObjUntil) return false;
+  if (!peRegisterObjSelectTap(e.clientX, e.clientY)) return false;
+  peBeginObjSelectMarquee(e);
+  return true;
+}
+
+function peStartObjSelectBlankGesture(e, opts) {
+  if (!peState || !peState.objSelectMode) return;
+  // forcePan: finger moved on the text layer — pan only; do not treat as dbl-tap
+  // (the pointerdown already registered the first tap).
+  const forcePan = !!(opts && opts.forcePan);
+  const isDbl = forcePan ? false : peRegisterObjSelectTap(e.clientX, e.clientY);
   if (isDbl) {
-    peState.drag = {
-      kind: 'obj-marquee',
-      startX: pt.x, startY: pt.y, curX: pt.x, curY: pt.y,
-      additive: e.shiftKey,
-      baseIds: e.shiftKey ? peGetSelectedObjects().map(o => o.id) : null
-    };
-    peUpdatePanUi();
+    peBeginObjSelectMarquee(e);
   } else {
+    if (forcePan) {
+      peObjMarqueeTap = { t: Date.now(), x: e.clientX, y: e.clientY };
+    }
     peStartPanView(e);
     if (peState.drag && peState.drag.kind === 'pan-view') {
       peState.drag.fromObjSelectTap = true;
@@ -35957,7 +35990,7 @@ function peFlushTextLayerTouchPan(clientX, clientY) {
     preventDefault() {},
     stopPropagation() {}
   };
-  peStartObjSelectBlankGesture(fake);
+  peStartObjSelectBlankGesture(fake, { forcePan: true });
   if (peState.drag && typeof peProcessDrag === 'function') {
     peProcessDrag(clientX, clientY);
   }
@@ -35978,6 +36011,13 @@ function peOnObjSelectTextLayerPointerDown(e) {
   if (peIsEditorPageTextSelection() && peClientNearTextSelHandle(e.clientX, e.clientY)) {
     peBeginTextSelHandleDrag(e.clientX, e.clientY);
     return false;
+  }
+  // Double-tap (incl. on glyphs) → marquee, same as blank stage.
+  if (peTryStartObjSelectMarqueeFromTouch(e)) {
+    if (e.cancelable) e.preventDefault();
+    e.stopPropagation();
+    peCapturePointer(e, document.getElementById('peStage'));
+    return true;
   }
   // Defer pan so a long-press can create a selection. preventDefault here
   // would block that native gesture and force imprecise / jumpy selection.
@@ -36057,6 +36097,13 @@ function peObjMouseDown(e, o) {
     peCancelTouchObjPending();
     // fall through to handle branches below
   } else if (touchLike && !peTouchObjCommit) {
+    // Double-tap on an object → marquee (same as empty stage / PDF text).
+    if (peState?.objSelectMode && peTryStartObjSelectMarqueeFromTouch(e)) {
+      if (e.cancelable) e.preventDefault();
+      e.stopPropagation();
+      peCapturePointer(e, document.getElementById('peStage') || e.currentTarget);
+      return;
+    }
     // Defer touch select/move until we know this is not the first finger of a pinch.
     peSelSnapBeforePinch = peSelectionSnapshot();
     peTouchObjPending = {
