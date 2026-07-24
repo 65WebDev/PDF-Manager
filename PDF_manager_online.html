@@ -9797,6 +9797,7 @@
     function pmApplyMenuShrinkToFit(row, left, right, scale, avail) {
       row.classList.add('menu-shrink');
       row.style.setProperty('--pm-menu-ctrl-h', PM_MENU_CTRL_H_FULL + 'px');
+      const scaleCtl = scale.querySelector('.scale-control');
       let lo = PM_MENU_CTRL_H_MIN;
       let hi = PM_MENU_CTRL_H_FULL;
       let best = PM_MENU_CTRL_H_MIN;
@@ -9805,11 +9806,13 @@
         row.style.setProperty('--pm-menu-ctrl-h', mid + 'px');
         void row.offsetWidth;
         const gap5 = parseFloat(getComputedStyle(row).columnGap) || 6;
+        // Prefer scale-control scrollWidth (flex-shrink:0 under menu-shrink) so
+        // measurement is the real strip width, not a flex-compressed leftover.
+        const wS = (scaleCtl && scaleCtl.scrollWidth) || scale.scrollWidth;
         const need = pmMenuRowWidth(
-          gap5, left.scrollWidth, right.scrollWidth, scale.scrollWidth
+          gap5, left.scrollWidth, right.scrollWidth, wS
         );
-        const dropped = scale.offsetTop > left.offsetTop + 2 ||
-          right.offsetTop > left.offsetTop + 2;
+        const dropped = pmScaleDroppedToNextRow(left, right, scale);
         if (need <= avail && !dropped) {
           best = mid;
           lo = mid + 1;
