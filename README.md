@@ -43,3 +43,51 @@ npm ci
 npm run build:offline
 # Результат: PDF_manager_offline.html
 ```
+
+## Windows-приложение (Tauri, экспериментально)
+
+Оболочка **не** входит в автоматический release-pipeline. Обсуждение и ручная сборка — в ветке `cursor/tauri-windows-shell-1aac` (доработки редактора туда не смешиваем).
+
+**Подробная инструкция (RU):** [docs/windows-tauri-build.md](docs/windows-tauri-build.md)
+
+### Требования (Windows)
+
+- [Node.js](https://nodejs.org/) 20+
+- [Rust](https://rustup.rs/) (stable, **1.85+**)
+- [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) — workload **«Разработка классических приложений на C++»**
+- WebView2 обычно уже есть на Windows 10/11; если нет — установщик подтянет bootstrapper
+
+Проверка окружения после установки:
+
+```bash
+rustc --version   # >= 1.85
+where link        # должен найти link.exe (Windows)
+npm run tauri -- info
+```
+
+### Сборка
+
+```bash
+git clone https://github.com/5451165-bot/PDF-Manager.git
+cd PDF-Manager
+git checkout cursor/tauri-windows-shell-1aac
+npm ci
+
+# Режим разработки (окно + UI из офлайн-HTML):
+npm run tauri:dev
+
+# Релизная сборка (.exe + NSIS) и загрузка на GitHub Releases:
+npm run tauri:build
+# Нужны: GitHub CLI (gh) и `gh auth login`
+# Release tag: windows-v{version} из src-tauri/tauri.conf.json
+# Без загрузки: npm run tauri:build:local
+# или: TAURI_SKIP_UPLOAD=1 npm run tauri:build
+# Повторно залить уже собранный exe: npm run tauri:upload
+```
+
+Готовые файлы появятся в:
+
+- `src-tauri/target/release/PDF Manager.exe` — запуск без установщика
+- `src-tauri/target/release/bundle/nsis/` — установщик `.exe`
+
+`npm run tauri:build` сначала собирает офлайн-HTML (нужен интернет на этом шаге), копирует его в `tauri-ui/index.html` (с мостом открытия PDF), упаковывает в Tauri, затем через `gh` заливает установщик в GitHub Release `windows-v*`. NSIS регистрирует ассоциацию с файлами **`.pdf`**.

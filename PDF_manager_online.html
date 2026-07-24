@@ -5397,16 +5397,16 @@
   </defs>
   <title>Менеджер документов PDF</title>
   <rect width="42" height="42" rx="10" fill="url(#blueGrad)"/>
-  <!--Back page - a hint of depth/stack, suggesting multi-page management-->
-  <rect x="16" y="9" width="15" height="20" rx="1.5" fill="#ffffff" opacity="0.32"/>
-  <!--Front page, folded top-right corner - the universal "document" shape-->
-  <path d="M11 8h12l6 6v18.5A1.5 1.5 0 0 1 27.5 34h-16.5A1.5 1.5 0 0 1 9.5 32.5v-23A1.5 1.5 0 0 1 11 8z" fill="#ffffff"/>
-  <path d="M23 8v5a1 1 0 0 0 1 1h5z" fill="#bcdcff"/>
-  <!--Content lines - reads as "document text" at a glance-->
-  <rect x="13" y="17" width="12" height="1.6" rx="0.8" fill="#9fb8d6"/>
-  <!--PDF badge - instantly recognizable file-type tag-->
-  <rect x="5" y="21" width="24" height="13" rx="2" fill="#e0342b"/>
-  <text x="17" y="31" fill="#ffffff" font-family="Arial, sans-serif" font-size="10.5" font-weight="bold" text-anchor="middle">PDF</text>
+  <!-- Tuner: page x=-0.8 y=0 scale=1.09; text x=-0.6 y=0.8 size=10.7 -->
+  <g transform="translate(21 21) scale(1.09) translate(-21.8 -21)">
+  <rect x="20" y="9" width="12" height="15" rx="1.5" fill="#ffffff" opacity="0.32"/>
+  <!-- Bottom stops inside the red badge so rounded badge corners don't reveal white -->
+  <path d="M15 8h12l6 6v10.5A1.5 1.5 0 0 1 31.5 26h-16.5A1.5 1.5 0 0 1 13.5 24.5v-15A1.5 1.5 0 0 1 15 8z" fill="#ffffff"/>
+  <path d="M27 8v5a1 1 0 0 0 1 1h5z" fill="#bcdcff"/>
+  <rect x="17" y="17" width="12" height="1.6" rx="0.8" fill="#9fb8d6"/>
+  <rect x="9" y="21" width="24" height="13" rx="2" fill="#e0342b"/>
+  </g>
+  <text x="20.4" y="31.8" fill="#ffffff" font-family="Arial, sans-serif" font-size="10.7" font-weight="bold" text-anchor="middle">PDF</text>
 </svg></span>
 
     <!--Menu hide/show button (mobile version only)-->
@@ -17142,6 +17142,11 @@
         left += width + GAP;
       }
     }
+    // Tauri native DnD bridge resolves these via window.*.
+    try {
+      window.pmShowFileDragGhosts = pmShowFileDragGhosts;
+      window.pmClearFileDragGhosts = pmClearFileDragGhosts;
+    } catch (_) {}
 
     // Geometry of the empty space to the right of the last tab (for highlighting).
     function pmNewTabZoneVisualRect() {
@@ -19435,6 +19440,8 @@
         showMergeOrderModal(files, runMerge);
       }
     }
+    // Tauri native DnD bridge (scripts/prepare-tauri-ui.mjs) resolves via window.*.
+    try { window.mergeFilesFlow = mergeFilesFlow; } catch (_) {}
 
     async function mergeAnotherPDF() {
       const handleFiles = mergeFilesFlow;
@@ -19604,10 +19611,6 @@
 
       const listContainer = content.querySelector('#fileList');
       listContainer.style.position = 'relative';
-      // Transparent 1×1 picture - replaces the standard translucent picture
-      // line, which otherwise the browser itself drags behind the cursor during drag&drop.
-      const mergeModalDragGhostImg = new Image();
-      mergeModalDragGhostImg.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
 
       // Build one list entry (page count / Office label) for initial load and OS drops.
       async function buildMergeFileEntry(file) {
@@ -19647,6 +19650,11 @@
       let mergeDragFromIndex = null; // index of the dragged string - needed to
                                       // do not show the insertion indicator next to it
       let mergeOsDropBusy = false;
+      // Pointer-based reorder (not HTML5 DnD): Tauri native file-drop on Windows
+      // disables HTML5 drag events inside the webview, so row.draggable/dragstart
+      // never fires in the desktop shell. Browser builds use the same pointer path.
+      let mergePointerReorder = null; // { fromIndex, startX, startY, active, pointerId, row }
+      const MERGE_REORDER_THRESHOLD_PX = 4;
       const confirmBtn = content.querySelector('#confirmBtn');
 
       function updateConfirmBtn() {
@@ -19670,10 +19678,11 @@
 
           const row = document.createElement('div');
           row.className = 'file-item';
-          row.draggable = true;
+          // No row.draggable — HTML5 DnD is broken under Tauri native file-drop
+          // (Windows WebView2). Reorder uses pointer events (see below).
           row.style.cssText = `
             padding: 12px 16px; border-bottom: 1px solid #eee; display: flex; align-items: center; gap: 12px;
-            background: white; cursor: grab; user-select: none; position: relative;
+            background: white; cursor: grab; user-select: none; position: relative; touch-action: none;
           `;
 
           const ext = file.name.split('.').pop().toLowerCase();
@@ -19700,6 +19709,7 @@
           removeBtn.setAttribute('aria-label', 'Удалить из списка');
           removeBtn.textContent = '×';
           removeBtn.addEventListener('mousedown', (ev) => ev.stopPropagation());
+          removeBtn.addEventListener('pointerdown', (ev) => ev.stopPropagation());
           removeBtn.addEventListener('click', (ev) => {
             ev.stopPropagation();
             currentOrder.splice(index, 1);
@@ -19707,30 +19717,11 @@
           });
           row.appendChild(removeBtn);
 
-          // Drag & Drop logic: the transfer starts on the line (dragstart), but
-          // cursor position tracking and the insertion indicator itself are common to
-          // the entire list (see dragover/drop on listContainer below, after
-          // renderList) - a single indicator, not one per line,
-          // eliminates both blinking at the boundaries between lines and unnecessary
-          // scrollbar (due to pseudo-elements extending beyond the line).
-          row.addEventListener('dragstart', (e) => {
-            e.dataTransfer.setData('text/plain', index);
-            e.dataTransfer.effectAllowed = 'move';
-            mergeDragFromIndex = index;
-            // Without this, the browser itself drags a translucent image behind the cursor
-            // lines (standard behavior of native drag&drop) - it overlapped
-            // to our insertion indicator and looked like a blurry duplicate
-            // line/strip. Transparent 1×1 picture removes this system
-            // “ghost” completely - feedback remains only through
-            // opacity of the source line and our indicator.
-            e.dataTransfer.setDragImage(mergeModalDragGhostImg, 0, 0);
-            row.style.opacity = '0.4';
-          });
-
-          row.addEventListener('dragend', () => {
-            row.style.opacity = '1';
-            mergeDragFromIndex = null;
-            hideInsertLine();
+          // Pointer reorder: press + move past threshold → blue insert line, release → move.
+          row.addEventListener('pointerdown', (e) => {
+            if (e.button !== 0) return;
+            if (e.target && e.target.closest && e.target.closest('.merge-file-remove')) return;
+            startMergePointerReorder(e, index, row);
           });
 
           listContainer.appendChild(row);
@@ -19791,6 +19782,84 @@
 
       function isMergeInsertLineActive() {
         return mergeOrderInsertLine.classList.contains('visible');
+      }
+
+      function clearMergePointerReorderListeners() {
+        document.removeEventListener('pointermove', onMergeReorderPointerMove, true);
+        document.removeEventListener('pointerup', onMergeReorderPointerUp, true);
+        document.removeEventListener('pointercancel', onMergeReorderPointerUp, true);
+      }
+
+      function clearMergePointerReorder() {
+        if (!mergePointerReorder) return;
+        clearMergePointerReorderListeners();
+        if (mergePointerReorder.row) mergePointerReorder.row.style.opacity = '1';
+        mergePointerReorder = null;
+        mergeDragFromIndex = null;
+        try { document.body.style.cursor = ''; } catch (_) {}
+        hideInsertLine();
+      }
+
+      function startMergePointerReorder(e, index, row) {
+        clearMergePointerReorder();
+        mergePointerReorder = {
+          fromIndex: index,
+          startX: e.clientX,
+          startY: e.clientY,
+          active: false,
+          pointerId: e.pointerId,
+          row: row
+        };
+        document.addEventListener('pointermove', onMergeReorderPointerMove, true);
+        document.addEventListener('pointerup', onMergeReorderPointerUp, true);
+        document.addEventListener('pointercancel', onMergeReorderPointerUp, true);
+      }
+
+      function onMergeReorderPointerMove(e) {
+        if (!mergePointerReorder || e.pointerId !== mergePointerReorder.pointerId) return;
+        const dx = e.clientX - mergePointerReorder.startX;
+        const dy = e.clientY - mergePointerReorder.startY;
+        if (!mergePointerReorder.active) {
+          if (dx * dx + dy * dy < MERGE_REORDER_THRESHOLD_PX * MERGE_REORDER_THRESHOLD_PX) return;
+          mergePointerReorder.active = true;
+          mergeDragFromIndex = mergePointerReorder.fromIndex;
+          if (mergePointerReorder.row) mergePointerReorder.row.style.opacity = '0.4';
+          try { document.body.style.cursor = 'grabbing'; } catch (_) {}
+          try { mergePointerReorder.row.setPointerCapture(e.pointerId); } catch (_) {}
+        }
+        e.preventDefault();
+        const idx = computeInsertIndexByY(e.clientY);
+        if (mergeDragFromIndex != null && (idx === mergeDragFromIndex || idx === mergeDragFromIndex + 1)) {
+          hideInsertLine();
+        } else {
+          showInsertLine(idx);
+        }
+      }
+
+      function onMergeReorderPointerUp(e) {
+        if (!mergePointerReorder || e.pointerId !== mergePointerReorder.pointerId) return;
+        const fromIndex = mergePointerReorder.fromIndex;
+        const wasActive = mergePointerReorder.active;
+        const row = mergePointerReorder.row;
+        clearMergePointerReorderListeners();
+        try { if (row) row.releasePointerCapture(e.pointerId); } catch (_) {}
+        if (row) row.style.opacity = '1';
+        try { document.body.style.cursor = ''; } catch (_) {}
+        mergePointerReorder = null;
+        mergeDragFromIndex = null;
+
+        if (!wasActive) {
+          hideInsertLine();
+          return;
+        }
+        e.preventDefault();
+        let toIndex = computeInsertIndexByY(e.clientY);
+        hideInsertLine();
+        if (fromIndex === toIndex || fromIndex === toIndex - 1) return;
+        if (fromIndex < toIndex) toIndex--;
+        const [moved] = currentOrder.splice(fromIndex, 1);
+        currentOrder.splice(toIndex, 0, moved);
+        renderList();
       }
 
       function mergeDropIsOsFiles(e) {
@@ -19953,30 +20022,56 @@
         hideInsertLine();
         hideMergeOrderOsHint();
 
+        // HTML5 OS-file drop (browser). Internal reorder is pointer-based above.
         if (mergeDropIsOsFiles(e) && e.dataTransfer.files && e.dataTransfer.files.length) {
           e._pmOsDropHandled = true;
           if (overList) await insertOsFilesAt(insertIndex, e.dataTransfer.files);
-          return;
         }
-
-        const fromIndex = parseInt(e.dataTransfer.getData('text/plain'), 10);
-        if (Number.isNaN(fromIndex)) return;
-
-        let toIndex = insertIndex;
-        if (fromIndex === toIndex || fromIndex === toIndex - 1) return;
-        if (fromIndex < toIndex) toIndex--;
-
-        const [moved] = currentOrder.splice(fromIndex, 1);
-        currentOrder.splice(toIndex, 0, moved);
-        renderList();
       });
+
+      // Tauri native DnD bridge (prepare-tauri-ui.mjs) cannot use HTML5 drop while
+      // dragDropEnabled is on — expose a hit-test target for OS files into this modal.
+      try {
+        window.__pmMergeOrderOsTarget = {
+          pointOverList: function (x, y) {
+            const r = listContainer.getBoundingClientRect();
+            return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+          },
+          pointOverModal: function (x, y) {
+            const r = modal.getBoundingClientRect();
+            return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
+          },
+          onHover: function (x, y) {
+            clearBackgroundOsDropUi();
+            if (this.pointOverList(x, y)) {
+              showInsertLine(computeInsertIndexByY(y));
+              showMergeOrderOsHint(x, y);
+              return 'list';
+            }
+            disarmOsListInsert();
+            return 'modal';
+          },
+          onDrop: async function (x, y, fileList) {
+            const overList = this.pointOverList(x, y);
+            disarmOsListInsert();
+            if (!overList || !fileList || !fileList.length) return false;
+            await insertOsFilesAt(computeInsertIndexByY(y), fileList);
+            return true;
+          },
+          clear: function () { disarmOsListInsert(); }
+        };
+      } catch (_) {}
 
       renderList();
 
       // Single close function - used both by the “Cancel” button and by clicking on
       // background, and the ESC key, so as not to duplicate the removal of the keyboard handler.
       function closeMergeOrderModal() {
+        clearMergePointerReorder();
         hideMergeOrderOsHint();
+        try {
+          if (window.__pmMergeOrderOsTarget) delete window.__pmMergeOrderOsTarget;
+        } catch (_) {}
         document.removeEventListener('keydown', onMergeModalKeydown);
         document.body.removeChild(modal);
       }
@@ -19998,7 +20093,11 @@
         if (!currentOrder.length) return;
         // Returning only File objects in the required order
         const orderedFiles = currentOrder.map(item => item.file);
+        clearMergePointerReorder();
         hideMergeOrderOsHint();
+        try {
+          if (window.__pmMergeOrderOsTarget) delete window.__pmMergeOrderOsTarget;
+        } catch (_) {}
         document.removeEventListener('keydown', onMergeModalKeydown);
         document.body.removeChild(modal);
         onConfirm(orderedFiles);
