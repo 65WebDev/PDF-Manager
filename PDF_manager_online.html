@@ -3478,7 +3478,8 @@
     /*The “hand” icon in the zoom-pan on mobile devices is hidden by default (styles in @media coarse)*/
     #zoomPanHandBadge { display: none; }
     /*Mobile Undo/Redo - only on touch devices (styles in @media coarse)*/
-    #mobileUndoRedoBar { display: none; }
+    #mobileUndoRedoBar,
+    #peMobileUndoRedoBar { display: none; }
     /*Mobile scroll slider - only on touch devices (styles in @media coarse)*/
     #mobileScrollRail { display: none; }
     /*File name text - normal size and style, without distortion*/
@@ -5100,7 +5101,8 @@
         transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
       }
       /*Undo/Redo - round buttons under the file name (top right)*/
-      #mobileUndoRedoBar.visible {
+      #mobileUndoRedoBar.visible,
+      #peMobileUndoRedoBar.visible {
         display: flex;
         position: fixed;
         left: max(10px, env(safe-area-inset-left, 0px));
@@ -5110,7 +5112,10 @@
         align-items: center;
         pointer-events: auto;
       }
-      #mobileUndoRedoBar button {
+      /* Page editor modal is its own stacking context — keep the bar above stage chrome. */
+      #peMobileUndoRedoBar.visible { z-index: 80; }
+      #mobileUndoRedoBar button,
+      #peMobileUndoRedoBar button {
         position: relative;
         width: 42px;
         height: 42px;
@@ -5130,18 +5135,21 @@
         -webkit-tap-highlight-color: transparent;
         touch-action: manipulation;
       }
-      #mobileUndoRedoBar button:active:not(:disabled) {
+      #mobileUndoRedoBar button:active:not(:disabled),
+      #peMobileUndoRedoBar button:active:not(:disabled) {
         background: #3498db;
         color: #fff;
         border-color: #3498db;
       }
-      #mobileUndoRedoBar button:disabled {
+      #mobileUndoRedoBar button:disabled,
+      #peMobileUndoRedoBar button:disabled {
         opacity: 0.38;
         pointer-events: none;
       }
       /*Tooltips for Undo/Redo - pop up ABOVE the buttons (buttons in the lower left
          corner, the native title is drawn at the bottom and would go off the edge of the screen).*/
-      #mobileUndoRedoBar button[data-tip]::after {
+      #mobileUndoRedoBar button[data-tip]::after,
+      #peMobileUndoRedoBar button[data-tip]::after {
         content: attr(data-tip);
         position: absolute;
         left: 0;
@@ -5162,7 +5170,10 @@
       }
       #mobileUndoRedoBar button[data-tip]:hover::after,
       #mobileUndoRedoBar button[data-tip]:focus-visible::after,
-      #mobileUndoRedoBar button[data-tip]:active::after {
+      #mobileUndoRedoBar button[data-tip]:active::after,
+      #peMobileUndoRedoBar button[data-tip]:hover::after,
+      #peMobileUndoRedoBar button[data-tip]:focus-visible::after,
+      #peMobileUndoRedoBar button[data-tip]:active::after {
         opacity: 1;
         transform: translateY(0);
       }
@@ -6205,6 +6216,11 @@
       <div class="pe-mkb-keys" id="peMobileKbKeys" aria-label="Клавиатура"></div>
     </div>
     <input type="file" id="peImgInput" accept="image/png,image/jpeg" style="display:none">
+    <!-- Mobile Undo/Redo in page editor — same look/placement as preview chrome -->
+    <div id="peMobileUndoRedoBar" aria-hidden="true">
+      <button id="peMobileUndoBtn" type="button" data-tip="Вернуть на шаг назад" aria-label="Вернуть на шаг назад">←</button>
+      <button id="peMobileRedoBtn" type="button" data-tip="Отмена возврата" aria-label="Отмена возврата">→</button>
+    </div>
   </div>
 
   <div id="peCropCtxMenu" aria-hidden="true">
@@ -27525,11 +27541,44 @@ async function peRestoreEditorSnapshot(snap, isUndo) {
   }
 }
 
+function peCanUndoEditor() {
+  return !!(peState && !peState.__historyLock && peState.undoStack && peState.undoStack.length > 1);
+}
+function peCanRedoEditor() {
+  return !!(peState && !peState.__historyLock && peState.redoStack && peState.redoStack.length);
+}
+
+function updatePeUndoRedoUI() {
+  const bar = document.getElementById('peMobileUndoRedoBar');
+  const undoBtn = document.getElementById('peMobileUndoBtn');
+  const redoBtn = document.getElementById('peMobileRedoBtn');
+  if (!bar) return;
+  if (typeof isTouchDevice === 'undefined' || !isTouchDevice || !peState) {
+    bar.classList.remove('visible');
+    bar.setAttribute('aria-hidden', 'true');
+    return;
+  }
+  // While a restore is in flight, leave buttons as-is (same idea as doc undoRedoBusy).
+  if (peState.__historyLock) return;
+  const showBar = peCanUndoEditor() || peCanRedoEditor();
+  bar.classList.toggle('visible', showBar);
+  bar.setAttribute('aria-hidden', showBar ? 'false' : 'true');
+  if (undoBtn) {
+    undoBtn.style.display = '';
+    undoBtn.disabled = !peCanUndoEditor();
+  }
+  if (redoBtn) {
+    redoBtn.style.display = '';
+    redoBtn.disabled = !peCanRedoEditor();
+  }
+}
+
 function peResetEditorHistory() {
   if (!peState) return;
   const first = peCaptureEditorSnapshot();
   peState.undoStack = first ? [first] : [];
   peState.redoStack = [];
+  updatePeUndoRedoUI();
 }
 
 /** Content fingerprint for expanding editor undo into document history steps. */
@@ -27689,6 +27738,7 @@ function peCommitEditorHistory(force) {
   if (undo.length > PE_HISTORY_MAX) undo.shift();
   peState.undoStack = undo;
   peState.redoStack = [];
+  updatePeUndoRedoUI();
 }
 
 async function peUndoEditor() {
@@ -27704,6 +27754,7 @@ async function peUndoEditor() {
   peState.redoStack = peState.redoStack || [];
   peState.redoStack.push(cur);
   await peRestoreEditorSnapshot(undo[undo.length - 1], true);
+  updatePeUndoRedoUI();
 }
 
 async function peRedoEditor() {
@@ -27714,6 +27765,7 @@ async function peRedoEditor() {
   peState.undoStack = peState.undoStack || [];
   peState.undoStack.push(snap);
   await peRestoreEditorSnapshot(snap);
+  updatePeUndoRedoUI();
 }
 
 async function peRevertSessionPdfEdits() {
@@ -27847,6 +27899,7 @@ function peDestroy() {
   if (crop) crop.classList.remove('visible');
   if (peState && peState.doc) { try { peState.doc.destroy(); } catch (_) {} }
   peState = null;
+  updatePeUndoRedoUI();
   peCloseShapeMenu();
   peCloseShapeColorPopup();
   peRestorePageSelectionSnapshot();
@@ -38263,6 +38316,16 @@ function peObjMouseDown(e, o) {
     e.preventDefault();
     e.stopPropagation();
     if (typeof peToggleEditorMenu === 'function') peToggleEditorMenu();
+  });
+  document.getElementById('peMobileUndoBtn')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    void peUndoEditor();
+  });
+  document.getElementById('peMobileRedoBtn')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    void peRedoEditor();
   });
 })();
 
