@@ -191,18 +191,27 @@
       width: var(--pm-menu-ctrl-h, 42px);
       height: var(--pm-menu-ctrl-h, 42px);
       z-index: 111;
+      /* Uniform gap logo↔hide and hide↔theme (and between later popups). */
+      --logo-popup-gap: 6px;
+      --logo-popup-btn: 42px;
     }
     /* While the popup stack is open, stretch the hit-area over all three
        buttons so the menu does not rely on a hide-timeout when moving the
        cursor from the logo down to About. */
     #logoMenuArea.expanded {
-      height: calc(var(--pm-menu-ctrl-h, 42px) + 146px); /* logo slot + hide/theme/about */
+      /* logo + gap + hide + gap + theme + gap + about */
+      height: calc(
+        var(--pm-menu-ctrl-h, 42px)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+      );
     }
     /*Hide menu button (desktop) - pops up under the logo when hovered over.
        Visibility is controlled by JS (.show class) with a timeout to allow time for hovering.*/
     #desktopMenuToggleBtn {
       position: absolute;
-      top: calc(var(--pm-menu-ctrl-h, 42px) + 2px); /* just below the logo */
+      top: calc(var(--pm-menu-ctrl-h, 42px) + var(--logo-popup-gap));
       right: 0;
       width: 42px;
       height: 42px;
@@ -229,7 +238,8 @@
       content: '';
       position: absolute;
       left: 0; right: 0;
-      top: -10px; height: 10px;
+      top: calc(-1 * var(--logo-popup-gap));
+      height: var(--logo-popup-gap);
     }
     /*Shown state (managed from JS)*/
     #desktopMenuToggleBtn.show {
@@ -240,7 +250,11 @@
     /*Theme toggle - pops up right under the "Hide menu" button, same hover area/timing.*/
     #themeToggleBtn {
       position: absolute;
-      top: calc(var(--pm-menu-ctrl-h, 42px) + 50px); /* below hide-menu (h+2 + 42 + 6) */
+      top: calc(
+        var(--pm-menu-ctrl-h, 42px)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+        + var(--logo-popup-gap)
+      );
       right: 0;
       width: 42px;
       height: 42px;
@@ -269,7 +283,12 @@
     /*"About" button - pops up right under the theme toggle, same hover area/timing.*/
     #aboutBtn {
       position: absolute;
-      top: calc(var(--pm-menu-ctrl-h, 42px) + 98px); /* below theme (h+50 + 42 + 6) */
+      top: calc(
+        var(--pm-menu-ctrl-h, 42px)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+        + var(--logo-popup-gap)
+      );
       right: 0;
       width: 42px;
       height: 42px;
@@ -298,7 +317,12 @@
     /* Restore help («?»): sits above About only while the corner tip is hidden. */
     #restoreHelpBtn {
       position: absolute;
-      top: calc(var(--pm-menu-ctrl-h, 42px) + 98px);
+      top: calc(
+        var(--pm-menu-ctrl-h, 42px)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+        + var(--logo-popup-gap)
+      );
       right: 0;
       width: 42px;
       height: 42px;
@@ -331,10 +355,22 @@
       pointer-events: auto;
     }
     #logoMenuArea.help-restore-on #aboutBtn {
-      top: calc(var(--pm-menu-ctrl-h, 42px) + 146px); /* below restore-help */
+      top: calc(
+        var(--pm-menu-ctrl-h, 42px)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+        + var(--logo-popup-gap)
+      );
     }
     #logoMenuArea.help-restore-on.expanded {
-      height: calc(var(--pm-menu-ctrl-h, 42px) + 194px); /* logo + hide + theme + restore-help + about */
+      height: calc(
+        var(--pm-menu-ctrl-h, 42px)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+      );
     }
     /*Menu collapsed: keep only the show/hide toggle in the corner, not the theme/About buttons.*/
     .top-menu.collapsed #themeToggleBtn,
@@ -6445,26 +6481,29 @@
       <div class="help-row"><span class="hk">Del</span> — Удалить выбранные страницы</div>
       <div class="help-row"><span class="hk">P</span> — Печать</div>
       <div class="help-row"><span class="hk">S</span> — Сохранить документ</div>
+      <div class="help-row"><span class="hk">Ctrl + F</span> — поиск по документу</div>
+      <div class="help-row"><span class="hk">Ctrl + Z</span> — вернуть на шаг назад</div>
+      <div class="help-row"><span class="hk">Ctrl + Y</span> — отмена возврата</div>
       <hr>
+      <div class="help-subtitle">Навигация по документу</div>
       <div class="help-row"><span class="hk">C</span> — режим выбора</div>
       <div class="help-row"><span class="hk">H</span> — режим навигации по документу</div>
       <div class="help-row"><span class="hk">R</span> — режим чтения</div>
       <div class="help-row"><span class="hk">Z</span> — режим увеличения</div>
-      <div class="help-row"><span class="hk">Ctrl + Z</span> — вернуть на шаг назад</div>
-      <div class="help-row"><span class="hk">Ctrl + Y</span> — отмена возврата</div>
+      <div class="help-row"><span class="hk">Alt + колесико мыши</span> — изменение масштаба</div>
+      <div class="help-row"><span class="hk">Средняя кнопка мыши</span> — по ширине страницы</div>
       <hr class="help-tabs-sep">
       <div class="help-subtitle">Вкладки:</div>
       <div class="help-row"><span class="hk">Ctrl + стрелка влево</span> — выбрать вкладку слева</div>
       <div class="help-row"><span class="hk">Ctrl + стрелка вправо</span> — выбрать вкладку справа</div>
       <div class="help-row"><span class="hk">Ctrl + Del</span> — закрыть вкладку</div>
+      <hr>
       <div class="help-row"><span class="hk">Ctrl + C</span> — копировать выделенные страницы</div>
       <div class="help-row"><span class="hk">Ctrl + X</span> — вырезать выделенные страницы</div>
       <div class="help-row"><span class="hk">Ctrl + V</span> — вставить страницы из буфера</div>
       <hr>
       <div class="help-row">Удерживайте <span class="hk">Shift</span> — выделить диапазон страниц</div>
       <div class="help-row">Удерживайте <span class="hk">Ctrl</span> — выделить отдельные страницы</div>
-      <div class="help-row"><span class="hk">Alt + колесико мыши</span> — изменение масштаба</div>
-      <div class="help-row"><span class="hk">Средняя кнопка мыши</span> — по ширине страницы</div>
     </div>
   </div>
 
@@ -21955,8 +21994,7 @@
 
     // ─── Desktop: show hide menu button when hovering over logo ───
     // We control visibility via JS so that the user can move the cursor from
-    // the logo onto the popup buttons. The hit-area expands while open, so the
-    // menu stays until the pointer leaves the whole column (no hide-timeout).
+    // the logo onto the popup buttons. Leaving the column hides after 300ms.
     (function initDesktopMenuToggle() {
       if (isTouchDevice) return;
       const area = document.getElementById('logoMenuArea');
@@ -21966,12 +22004,16 @@
       const aboutBtn = document.getElementById('aboutBtn');
       const restoreHelpBtn = document.getElementById('restoreHelpBtn');
       if (!btn || !area) return;
+      const LOGO_MENU_HIDE_MS = 300;
+      let hideTimer = null;
 
       function show() {
         // When collapsed, the button is always visible (via CSS) - no class needed
         // (and the theme/About buttons are hidden entirely while collapsed, see CSS).
         const menu = document.getElementById('topMenu');
         if (menu && menu.classList.contains('collapsed')) return;
+        clearTimeout(hideTimer);
+        hideTimer = null;
         btn.classList.add('show');
         if (themeBtn) themeBtn.classList.add('show');
         if (aboutBtn) aboutBtn.classList.add('show');
@@ -21980,6 +22022,7 @@
         if (logo) logo.classList.add('logo-hot');
       }
       function hide() {
+        hideTimer = null;
         btn.classList.remove('show');
         if (themeBtn) themeBtn.classList.remove('show');
         if (aboutBtn) aboutBtn.classList.remove('show');
@@ -21987,11 +22030,18 @@
         area.classList.remove('expanded');
         if (logo) logo.classList.remove('logo-hot');
       }
+      function scheduleHide() {
+        clearTimeout(hideTimer);
+        hideTimer = setTimeout(hide, LOGO_MENU_HIDE_MS);
+      }
 
       area.addEventListener('mouseenter', show);
-      area.addEventListener('mouseleave', hide);
-      // Logo sits under the area; keep a listener in case hit-testing differs.
-      if (logo) logo.addEventListener('mouseenter', show);
+      area.addEventListener('mouseleave', scheduleHide);
+      // Logo sits under the area; keep listeners in case hit-testing differs.
+      if (logo) {
+        logo.addEventListener('mouseenter', show);
+        logo.addEventListener('mouseleave', scheduleHide);
+      }
     })();
 
     // ─── Mobile: tap app logo → theme + About (no hide-menu / restore-help) ───
