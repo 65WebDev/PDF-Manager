@@ -9449,6 +9449,7 @@
       const n = pdfDoc.getPageCount();
       scaleUserLocked = false;
       autoScaleEnabled = true;
+      const preferFitWidth = isFitWidthDefaultOn();
       if (isTouchDevice) {
         applyScale();
         ensureMobilePagesFill();
@@ -9456,14 +9457,32 @@
         currentScale = scaleForPageCount(n);
         if (scaleSlider) scaleSlider.value = Math.max(0, Math.min(200, scaleToSlider(currentScale)));
         applyScale();
-        ensureThreePagesFit();
+        // When opening fit-width by default, skip ensureThreePagesFit — it would
+        // fight the fit-width target and leave the “general” multi-page scale.
+        if (!preferFitWidth) ensureThreePagesFit();
       }
-      // Preference: open every new document already in fit-width view.
-      if (isFitWidthDefaultOn()) {
-        requestAnimationFrame(() => {
-          if (!pdfDoc || !isFitWidthDefaultOn() || fitWidthToggleOn) return;
-          toggleFitWidthScale({ anchor: 'viewport-center' });
-        });
+      if (preferFitWidth) enableFitWidthForOpen();
+    }
+
+    /**
+     * Force fit-width ON for a newly opened document.
+     * Unlike toggleFitWidthScale, this ignores isLoading (thumbnails still
+     * rendering) so new tabs actually get the default preference.
+     */
+    function enableFitWidthForOpen() {
+      if (!pdfDoc || !isFitWidthDefaultOn()) return;
+      const target = computeFitWidthScale();
+      if (!fitWidthToggleOn) {
+        fitWidthSavedScale = currentScale;
+        fitWidthToggleOn = true;
+        updateFitWidthBtnUI();
+      }
+      if (Math.abs(target - currentScale) > 0.25) {
+        applyFitWidthScaleValue(target);
+      } else {
+        scaleUserLocked = true;
+        autoScaleEnabled = false;
+        updateFitWidthBtnUI();
       }
     }
 
@@ -14243,6 +14262,12 @@
         setTimeout(alignRowNumbers, 120);
       } finally {
         hideLoading();
+        // Re-apply after the loading overlay is gone so avail-width matches the
+        // final workspace (the mid-load pass can run while isLoading / overlay
+        // would have blocked toggleFitWidthScale).
+        if (pdfDoc && isFitWidthDefaultOn()) {
+          requestAnimationFrame(() => enableFitWidthForOpen());
+        }
       }
     }
 
