@@ -191,18 +191,27 @@
       width: var(--pm-menu-ctrl-h, 42px);
       height: var(--pm-menu-ctrl-h, 42px);
       z-index: 111;
+      /* Uniform gap logo↔hide and hide↔theme (and between later popups). */
+      --logo-popup-gap: 6px;
+      --logo-popup-btn: 42px;
     }
     /* While the popup stack is open, stretch the hit-area over all three
        buttons so the menu does not rely on a hide-timeout when moving the
        cursor from the logo down to About. */
     #logoMenuArea.expanded {
-      height: calc(var(--pm-menu-ctrl-h, 42px) + 146px); /* logo slot + hide/theme/about */
+      /* logo + gap + hide + gap + theme + gap + about */
+      height: calc(
+        var(--pm-menu-ctrl-h, 42px)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+      );
     }
     /*Hide menu button (desktop) - pops up under the logo when hovered over.
        Visibility is controlled by JS (.show class) with a timeout to allow time for hovering.*/
     #desktopMenuToggleBtn {
       position: absolute;
-      top: calc(var(--pm-menu-ctrl-h, 42px) + 2px); /* just below the logo */
+      top: calc(var(--pm-menu-ctrl-h, 42px) + var(--logo-popup-gap));
       right: 0;
       width: 42px;
       height: 42px;
@@ -229,7 +238,8 @@
       content: '';
       position: absolute;
       left: 0; right: 0;
-      top: -10px; height: 10px;
+      top: calc(-1 * var(--logo-popup-gap));
+      height: var(--logo-popup-gap);
     }
     /*Shown state (managed from JS)*/
     #desktopMenuToggleBtn.show {
@@ -240,7 +250,11 @@
     /*Theme toggle - pops up right under the "Hide menu" button, same hover area/timing.*/
     #themeToggleBtn {
       position: absolute;
-      top: calc(var(--pm-menu-ctrl-h, 42px) + 50px); /* below hide-menu (h+2 + 42 + 6) */
+      top: calc(
+        var(--pm-menu-ctrl-h, 42px)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+        + var(--logo-popup-gap)
+      );
       right: 0;
       width: 42px;
       height: 42px;
@@ -269,7 +283,12 @@
     /*"About" button - pops up right under the theme toggle, same hover area/timing.*/
     #aboutBtn {
       position: absolute;
-      top: calc(var(--pm-menu-ctrl-h, 42px) + 98px); /* below theme (h+50 + 42 + 6) */
+      top: calc(
+        var(--pm-menu-ctrl-h, 42px)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+        + var(--logo-popup-gap)
+      );
       right: 0;
       width: 42px;
       height: 42px;
@@ -298,7 +317,12 @@
     /* Restore help («?»): sits above About only while the corner tip is hidden. */
     #restoreHelpBtn {
       position: absolute;
-      top: calc(var(--pm-menu-ctrl-h, 42px) + 98px);
+      top: calc(
+        var(--pm-menu-ctrl-h, 42px)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+        + var(--logo-popup-gap)
+      );
       right: 0;
       width: 42px;
       height: 42px;
@@ -331,10 +355,22 @@
       pointer-events: auto;
     }
     #logoMenuArea.help-restore-on #aboutBtn {
-      top: calc(var(--pm-menu-ctrl-h, 42px) + 146px); /* below restore-help */
+      top: calc(
+        var(--pm-menu-ctrl-h, 42px)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+        + var(--logo-popup-gap)
+      );
     }
     #logoMenuArea.help-restore-on.expanded {
-      height: calc(var(--pm-menu-ctrl-h, 42px) + 194px); /* logo + hide + theme + restore-help + about */
+      height: calc(
+        var(--pm-menu-ctrl-h, 42px)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+        + var(--logo-popup-gap) + var(--logo-popup-btn)
+      );
     }
     /*Menu collapsed: keep only the show/hide toggle in the corner, not the theme/About buttons.*/
     .top-menu.collapsed #themeToggleBtn,
@@ -1090,7 +1126,8 @@
     #readModeCtxMenu,
     #navModeCtxMenu,
     #loupeModeCtxMenu,
-    #helpToggleCtxMenu {
+    #helpToggleCtxMenu,
+    #fitWidthCtxMenu {
       position: fixed; z-index: 99998; display: none;
       background: #fff; border: 1px solid #d5d9de; border-radius: 7px;
       box-shadow: 0 6px 22px rgba(0,0,0,.18); padding: 3px; min-width: 196px;
@@ -1099,12 +1136,14 @@
     #readModeCtxMenu.visible,
     #navModeCtxMenu.visible,
     #loupeModeCtxMenu.visible,
-    #helpToggleCtxMenu.visible { display: block; }
+    #helpToggleCtxMenu.visible,
+    #fitWidthCtxMenu.visible { display: block; }
     #pageCtxMenu button,
     #readModeCtxMenu button,
     #navModeCtxMenu button,
     #loupeModeCtxMenu button,
-    #helpToggleCtxMenu button {
+    #helpToggleCtxMenu button,
+    #fitWidthCtxMenu button {
       display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%;
       border: none; background: transparent; padding: 5px 8px;
       font-size: 12.5px; color: #2c3e50; border-radius: 5px; cursor: pointer; text-align: left;
@@ -1141,11 +1180,19 @@
       height: 18px;
       display: block;
     }
+    /* Trash emoji reads smaller than neighboring icons — bump ~30%.
+       Keep the same 20px slot so it stays aligned with icons above/below. */
+    #pageCtxMenu button[data-action="delete"] .ctx-icon {
+      font-size: 16px;
+      transform: scale(1.3);
+      overflow: visible;
+    }
     #pageCtxMenu button:hover:not(:disabled),
     #readModeCtxMenu button:hover:not(:disabled),
     #navModeCtxMenu button:hover:not(:disabled),
     #loupeModeCtxMenu button:hover:not(:disabled),
-    #helpToggleCtxMenu button:hover:not(:disabled) { background: #eef4fa; }
+    #helpToggleCtxMenu button:hover:not(:disabled),
+    #fitWidthCtxMenu button:hover:not(:disabled) { background: #eef4fa; }
     #pageCtxMenu button:disabled,
     #readModeCtxMenu button:disabled,
     #navModeCtxMenu button:disabled,
@@ -3080,14 +3127,15 @@
       flex-shrink: 1;
       min-width: 140px; /*can be compressed to this size*/
     }
-    /* Must NOT inherit .top-menu button 42×42 / height:42px sizing. */
+    /* Must NOT inherit .top-menu button 42×42 / height:42px sizing.
+       +25% vs original 26×26 / 18×18 — uses spare room inside the 42px scale strip. */
     #fitWidthBtn {
       flex: 0 0 auto;
-      width: 26px;
-      height: 26px;
-      min-width: 26px;
-      min-height: 26px;
-      max-height: 26px;
+      width: 32.5px;
+      height: 32.5px;
+      min-width: 32.5px;
+      min-height: 32.5px;
+      max-height: 32.5px;
       padding: 0;
       margin: 0;
       border: none;
@@ -3101,11 +3149,44 @@
       box-sizing: border-box;
       line-height: 1;
       font-size: inherit;
+      position: relative;
     }
     #fitWidthBtn:hover:not(:disabled) { background: rgba(255,255,255,0.12); }
     #fitWidthBtn.active-mode { background: #3498db; }
     #fitWidthBtn:disabled { opacity: 0.4; cursor: default; }
-    #fitWidthBtn svg { display: block; width: 18px; height: 18px; pointer-events: none; }
+    #fitWidthBtn svg { display: block; width: 22.5px; height: 22.5px; pointer-events: none; }
+    /* Default-open preference: filled page + small mark (distinct from active-mode blue). */
+    #fitWidthBtn.fit-width-default-on svg rect {
+      fill: currentColor;
+      fill-opacity: 0.28;
+    }
+    #fitWidthBtn .fit-width-default-mark { display: none; }
+    #fitWidthBtn.fit-width-default-on .fit-width-default-mark { display: block; }
+    #fitWidthBtn.fit-width-default-on::after {
+      content: '';
+      position: absolute;
+      right: 2px;
+      bottom: 2px;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: #f1c40f;
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
+      pointer-events: none;
+    }
+    #fitWidthCtxMenu .ctx-label { flex: 1 1 auto; min-width: 0; }
+    #fitWidthCtxMenu .ctx-check {
+      flex: 0 0 16px;
+      width: 16px;
+      text-align: center;
+      font-size: 13px;
+      line-height: 1;
+      color: #2980b9;
+      font-weight: 700;
+    }
+    #fitWidthCtxMenu button[data-action="toggle-fit-width-default"].pref-on {
+      background: #eaf4fb;
+    }
     /* While measuring wrap breakpoints, kill button transitions so scrollWidth
        reflects final text/icon sizes — otherwise removing .icons-mode leaves
        font-size mid-transition (~22px) and the menu re-enters icons-mode forever. */
@@ -3725,8 +3806,8 @@
     /*Preview sheet: keep the page's true aspect ratio (CropBox may not be A4
        after кадрирование). Fit inside the card slot; do not force √2 letterboxing
        — that showed false white bars top/bottom on tight crops.
-       Long side is capped to the same L for portrait and landscape so rotating
-       an A4 (or any) page keeps the same on-screen sheet size (short side stable).
+       Long side is always --preview-long (same for LQ thumb and HQ raster) so
+       scrolling at high zoom does not jump when HQ replaces the thumbnail.
        --preview-inset — indentation inside --page-inner-h (does not overlap the page number).*/
     .page img { 
       display: block; 
@@ -3735,19 +3816,20 @@
       box-shadow: 0 1px 5px rgba(0,0,0,0.25);
       object-fit: contain;
       --preview-long: calc(var(--page-inner-h) - var(--preview-inset, min(calc(var(--thumb-width) * 0.28), 80px)));
+      /* Size from the layout budget, not naturalWidth — LQ thumbs must upscale
+         to the same box HQ will occupy. */
+      height: var(--preview-long);
+      width: auto;
       max-width: 100%;
       max-height: var(--preview-long);
-      width: auto;
-      height: auto;
     }
     /* Landscape bitmaps are already wider than tall (viewport includes /Rotate).
-       Cap width to the same long-side L as portrait height — not the full card
-       width — so rotate does not enlarge A4 sheets to max card width. */
+       Cap the long side (width) to the same L as portrait height. */
     .page.page-rotated img {
+      width: var(--preview-long);
+      height: auto;
       max-width: var(--preview-long);
       max-height: var(--preview-long);
-      width: auto;
-      height: auto;
     }
 
     /*Smooth preview rotation (JS/rAF + GPU transform)*/
@@ -3916,7 +3998,12 @@
       color: #2c3e50;
       text-align: left;
     }
-    #insertMenu button:hover { background: #eef4fb; }
+    #insertMenu button:hover:not(:disabled) { background: #eef4fb; }
+    #insertMenu button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      color: #8a96a3;
+    }
     #insertMenu .ins-ico { font-size: 17px; width: 20px; text-align: center; }
 
     /*Selection frame (rubber frame)*/
@@ -4287,6 +4374,16 @@
       box-shadow: 0 3px 10px rgba(0,0,0,0.3), 0 0 0 2px rgba(52,152,219,0.55);
       transition: box-shadow 0.12s ease;
     }
+    /* Same brief outline flash for Q/W rotate toolbar buttons. */
+    @keyframes pm-toolbar-btn-flash {
+      0% { box-shadow: 0 0 0 0 rgba(52,152,219,0); }
+      35% { box-shadow: 0 0 0 2px rgba(52,152,219,0.55); }
+      100% { box-shadow: 0 0 0 0 rgba(52,152,219,0); }
+    }
+    #rotateLeftBtn.pm-autoscroll-flash,
+    #rotateRightBtn.pm-autoscroll-flash {
+      animation: pm-toolbar-btn-flash 0.4s ease;
+    }
 
     /* Mobile: while page-nav auto-scroll runs, fade the nav/speed/pause chrome.
        Tap anywhere to bring it back (see pmNavRevealChrome). */
@@ -4380,12 +4477,6 @@
       border: none;
       border-top: 1px solid #41566e;
       margin: 5px 0;
-    }
-    #helpPanel hr.help-tabs-sep {
-      border: none;
-      border-top: 1px solid #9eb4c8;
-      margin: 2px 0 1px;
-      opacity: 1;
     }
     #helpPanel .help-subtitle {
       font-weight: bold;
@@ -5423,17 +5514,17 @@
         box-sizing: border-box;
         flex-shrink: 0;
       }
-      /* Fit-width control is naturally 26×26 with 18×18 SVG inside the scale strip */
+      /* Fit-width control: 32.5×32.5 with 22.5×22.5 SVG (+25% vs original 26/18) */
       .main-row.menu-shrink #fitWidthBtn {
-        width: calc(var(--pm-menu-ctrl-h) * 0.619);
-        height: calc(var(--pm-menu-ctrl-h) * 0.619);
-        min-width: calc(var(--pm-menu-ctrl-h) * 0.619);
-        min-height: calc(var(--pm-menu-ctrl-h) * 0.619);
-        max-height: calc(var(--pm-menu-ctrl-h) * 0.619);
+        width: calc(var(--pm-menu-ctrl-h) * 0.774);
+        height: calc(var(--pm-menu-ctrl-h) * 0.774);
+        min-width: calc(var(--pm-menu-ctrl-h) * 0.774);
+        min-height: calc(var(--pm-menu-ctrl-h) * 0.774);
+        max-height: calc(var(--pm-menu-ctrl-h) * 0.774);
       }
       .main-row.menu-shrink #fitWidthBtn svg {
-        width: calc(var(--pm-menu-ctrl-h) * 0.429);
-        height: calc(var(--pm-menu-ctrl-h) * 0.429);
+        width: calc(var(--pm-menu-ctrl-h) * 0.536);
+        height: calc(var(--pm-menu-ctrl-h) * 0.536);
       }
       .main-row.menu-shrink #scaleLabel {
         font-size: max(10px, calc(var(--pm-menu-ctrl-h) * 0.31));
@@ -5583,7 +5674,8 @@
       background: #262b33; border-color: #3a4048; box-shadow: 0 6px 20px rgba(0,0,0,0.5);
     }
     html[data-theme="dark"] #insertMenu button { color: #d7dbe0; }
-    html[data-theme="dark"] #insertMenu button:hover { background: #333a44; }
+    html[data-theme="dark"] #insertMenu button:hover:not(:disabled) { background: #333a44; }
+    html[data-theme="dark"] #insertMenu button:disabled { color: #7a828c; }
 
     html[data-theme="dark"] #pmTabMenu {
       background: #262b33; border-color: #3a4048;
@@ -5722,7 +5814,7 @@
           <button id="loupeModeBtn" class="icon-btn mode-btn rl-slot-popup" onclick="toggleLoupeMode()" disabled title="Режим увеличения (Z)"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20.5 20.5l-4.8-4.8"/></svg></button>
         </div>
         <button id="selectModeBtn" class="icon-btn mode-btn active-mode" onclick="setMode('select')" disabled title="Режим выбора (C)"><svg viewBox="-1 0 24 24" width="30" height="30" fill="currentColor"><path d="M7 4 L7 19 L11 15.2 L13.7 21.2 L16 20.2 L13.4 14.4 L18 14 Z"/></svg></button>
-        <button id="navModeBtn" class="icon-btn mode-btn mode-sep" onclick="setMode('nav')" disabled title="Режим навигации по документу (H)"><svg viewBox="0 0 69.0645142 89.838707" width="22" height="22" fill="#ffffff" stroke="#000000" stroke-width="0.8" stroke-linejoin="round" aria-hidden="true"><path d="M40.4849663,82.8033905  c-9.1123066,0-16.3754902-5.1455078-19.4277363-13.7636719c-0.1801758-0.5087891-0.3701172-1.015625-0.5893555-1.5087891  c-0.6171875-1.3886719-0.6171875-1.3886719-0.7412109-1.5224609l-0.015625,0.0146484  c-0.7080078-1.3291016-3.1923828-5.6308632-11.9047842-20.7168007c-0.909668-1.5717773-0.3686523-3.5917969,1.2021484-4.5014648  c0.7021484-0.4023438,1.5004883-0.6147461,2.3085938-0.6147461c1.6572266,0,3.1967773,0.8867188,4.0185547,2.315918  l6.8134756,11.7963867c0.2260742,0.3916016,0.6865234,0.5839844,1.125,0.4648438  c0.4370117-0.1171875,0.7407227-0.5136719,0.7407227-0.9658203V16.7179394c0-2.1977549,1.6191406-4.0249033,3.6865234-4.1601572  c1.1650391-0.0810547,2.2583008,0.3310547,3.0761719,1.1494141c0.7470703,0.7475586,1.1586914,1.7426758,1.1586914,2.802247  v24.2529278c0,0.5522461,0.4477558,1,1.0000019,1s1-0.4477539,1-1V10.9962587c0-2.184082,1.7768555-3.960937,3.9604492-3.960937  c1.0600586,0,2.0551758,0.4116211,2.8022461,1.1591792c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v5.5131845  v0.277832v23.9750957c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1V16.7872753v-0.277832  c0-2.184083,1.7773438-3.9609385,3.9609375-3.9609385c1.0595703,0,2.0546875,0.4116211,2.8027344,1.1586914  c0.7470703,0.7475586,1.1582031,1.7426758,1.1582031,2.802247v5.9462891v18.3066387c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1  V22.4557323c0-2.184082,1.7773438-3.9609375,3.9609375-3.9609375c1.0595703,0,2.0546875,0.4116211,2.8017578,1.1591797  c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v37.1074219  C61.69981,72.3776093,52.1832085,82.8033905,40.4849663,82.8033905z"/></svg></button>
+        <button id="navModeBtn" class="icon-btn mode-btn mode-sep" onclick="setMode('nav')" disabled title="Режим навигации (H)"><svg viewBox="0 0 69.0645142 89.838707" width="22" height="22" fill="#ffffff" stroke="#000000" stroke-width="0.8" stroke-linejoin="round" aria-hidden="true"><path d="M40.4849663,82.8033905  c-9.1123066,0-16.3754902-5.1455078-19.4277363-13.7636719c-0.1801758-0.5087891-0.3701172-1.015625-0.5893555-1.5087891  c-0.6171875-1.3886719-0.6171875-1.3886719-0.7412109-1.5224609l-0.015625,0.0146484  c-0.7080078-1.3291016-3.1923828-5.6308632-11.9047842-20.7168007c-0.909668-1.5717773-0.3686523-3.5917969,1.2021484-4.5014648  c0.7021484-0.4023438,1.5004883-0.6147461,2.3085938-0.6147461c1.6572266,0,3.1967773,0.8867188,4.0185547,2.315918  l6.8134756,11.7963867c0.2260742,0.3916016,0.6865234,0.5839844,1.125,0.4648438  c0.4370117-0.1171875,0.7407227-0.5136719,0.7407227-0.9658203V16.7179394c0-2.1977549,1.6191406-4.0249033,3.6865234-4.1601572  c1.1650391-0.0810547,2.2583008,0.3310547,3.0761719,1.1494141c0.7470703,0.7475586,1.1586914,1.7426758,1.1586914,2.802247  v24.2529278c0,0.5522461,0.4477558,1,1.0000019,1s1-0.4477539,1-1V10.9962587c0-2.184082,1.7768555-3.960937,3.9604492-3.960937  c1.0600586,0,2.0551758,0.4116211,2.8022461,1.1591792c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v5.5131845  v0.277832v23.9750957c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1V16.7872753v-0.277832  c0-2.184083,1.7773438-3.9609385,3.9609375-3.9609385c1.0595703,0,2.0546875,0.4116211,2.8027344,1.1586914  c0.7470703,0.7475586,1.1582031,1.7426758,1.1582031,2.802247v5.9462891v18.3066387c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1  V22.4557323c0-2.184082,1.7773438-3.9609375,3.9609375-3.9609375c1.0595703,0,2.0546875,0.4116211,2.8017578,1.1591797  c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v37.1074219  C61.69981,72.3776093,52.1832085,82.8033905,40.4849663,82.8033905z"/></svg></button>
         <button id="rotateLeftBtn" class="icon-btn" onclick="rotateSelected(-90)" disabled title="Повернуть выбранные страницы против часовой стрелки (Q)"><span class="rotate-glyph" aria-hidden="true">↺</span></button>
         <button id="rotateRightBtn" class="icon-btn" onclick="rotateSelected(90)" disabled title="Повернуть выбранные страницы по часовой стрелке (W)"><span class="rotate-glyph" aria-hidden="true">↻</span></button>
         <button id="editPageBtn" class="icon-btn pe-open-btn" onclick="editSelectedPage()" disabled title="Редактировать страницу"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
@@ -5769,10 +5861,11 @@
           <div class="slider-wrapper">
             <input type="range" id="scaleSlider" min="0" max="200" value="100" step="1" oninput="changeScale(this.value)" onmouseup="this.blur()" ontouchend="this.blur()" title="Alt + колесико мыши — изменение масштаба">
           </div>
-          <button type="button" id="fitWidthBtn" onclick="toggleFitWidthScale({ anchor: 'viewport-center' })" disabled title="По ширине страницы (средняя кнопка мыши)" aria-pressed="false" aria-label="По ширине страницы">
+          <button type="button" id="fitWidthBtn" onclick="toggleFitWidthScale({ anchor: 'viewport-center' })" disabled title="По ширине страницы (средняя кнопка мыши)&#10;Правая кнопка мыши - настроить открытие по умолчанию" aria-pressed="false" aria-label="По ширине страницы">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <rect x="6" y="3" width="12" height="18" rx="1.5"/>
               <path d="M2 12h4M18 12h4M3.5 9.5 2 12l1.5 2.5M20.5 9.5 22 12l-1.5 2.5"/>
+              <circle class="fit-width-default-mark" cx="12" cy="15.5" r="1.7" fill="currentColor" stroke="none"/>
             </svg>
           </button>
         </div>
@@ -5785,10 +5878,18 @@
     <div id="pmNewTabDropZone" aria-hidden="true"></div>
   </div>
 
+  <!-- Fit-width toolbar: RMB → open-by-default preference -->
+  <div id="fitWidthCtxMenu" aria-hidden="true">
+    <button type="button" data-action="toggle-fit-width-default" title="Все документы будут открываться по умолчанию по ширине страницы">
+      <span class="ctx-label">Открывать по умолчанию</span>
+      <span class="ctx-check" aria-hidden="true"></span>
+    </button>
+  </div>
+
   <!--"A new document will be created" prompt when moving pages into empty space-->
   <!--Page context menu (desktop): RMB on page card-->
   <div id="pageCtxMenu" aria-hidden="true">
-    <button type="button" data-action="nav"><span class="ctx-label">Режим навигации по документу</span><span class="ctx-icon"><svg viewBox="0 0 69.0645142 89.838707" width="18" height="18" fill="currentColor" stroke="currentColor" stroke-width="0.8" stroke-linejoin="round" aria-hidden="true"><path d="M40.4849663,82.8033905  c-9.1123066,0-16.3754902-5.1455078-19.4277363-13.7636719c-0.1801758-0.5087891-0.3701172-1.015625-0.5893555-1.5087891  c-0.6171875-1.3886719-0.6171875-1.3886719-0.7412109-1.5224609l-0.015625,0.0146484  c-0.7080078-1.3291016-3.1923828-5.6308632-11.9047842-20.7168007c-0.909668-1.5717773-0.3686523-3.5917969,1.2021484-4.5014648  c0.7021484-0.4023438,1.5004883-0.6147461,2.3085938-0.6147461c1.6572266,0,3.1967773,0.8867188,4.0185547,2.315918  l6.8134756,11.7963867c0.2260742,0.3916016,0.6865234,0.5839844,1.125,0.4648438  c0.4370117-0.1171875,0.7407227-0.5136719,0.7407227-0.9658203V16.7179394c0-2.1977549,1.6191406-4.0249033,3.6865234-4.1601572  c1.1650391-0.0810547,2.2583008,0.3310547,3.0761719,1.1494141c0.7470703,0.7475586,1.1586914,1.7426758,1.1586914,2.802247  v24.2529278c0,0.5522461,0.4477558,1,1.0000019,1s1-0.4477539,1-1V10.9962587c0-2.184082,1.7768555-3.960937,3.9604492-3.960937  c1.0600586,0,2.0551758,0.4116211,2.8022461,1.1591792c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v5.5131845  v0.277832v23.9750957c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1V16.7872753v-0.277832  c0-2.184083,1.7773438-3.9609385,3.9609375-3.9609385c1.0595703,0,2.0546875,0.4116211,2.8027344,1.1586914  c0.7470703,0.7475586,1.1582031,1.7426758,1.1582031,2.802247v5.9462891v18.3066387c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1  V22.4557323c0-2.184082,1.7773438-3.9609375,3.9609375-3.9609375c1.0595703,0,2.0546875,0.4116211,2.8017578,1.1591797  c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v37.1074219  C61.69981,72.3776093,52.1832085,82.8033905,40.4849663,82.8033905z"/></svg></span></button>
+    <button type="button" data-action="nav"><span class="ctx-label">Режим навигации</span><span class="ctx-icon"><svg viewBox="0 0 69.0645142 89.838707" width="18" height="18" fill="currentColor" stroke="currentColor" stroke-width="0.8" stroke-linejoin="round" aria-hidden="true"><path d="M40.4849663,82.8033905  c-9.1123066,0-16.3754902-5.1455078-19.4277363-13.7636719c-0.1801758-0.5087891-0.3701172-1.015625-0.5893555-1.5087891  c-0.6171875-1.3886719-0.6171875-1.3886719-0.7412109-1.5224609l-0.015625,0.0146484  c-0.7080078-1.3291016-3.1923828-5.6308632-11.9047842-20.7168007c-0.909668-1.5717773-0.3686523-3.5917969,1.2021484-4.5014648  c0.7021484-0.4023438,1.5004883-0.6147461,2.3085938-0.6147461c1.6572266,0,3.1967773,0.8867188,4.0185547,2.315918  l6.8134756,11.7963867c0.2260742,0.3916016,0.6865234,0.5839844,1.125,0.4648438  c0.4370117-0.1171875,0.7407227-0.5136719,0.7407227-0.9658203V16.7179394c0-2.1977549,1.6191406-4.0249033,3.6865234-4.1601572  c1.1650391-0.0810547,2.2583008,0.3310547,3.0761719,1.1494141c0.7470703,0.7475586,1.1586914,1.7426758,1.1586914,2.802247  v24.2529278c0,0.5522461,0.4477558,1,1.0000019,1s1-0.4477539,1-1V10.9962587c0-2.184082,1.7768555-3.960937,3.9604492-3.960937  c1.0600586,0,2.0551758,0.4116211,2.8022461,1.1591792c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v5.5131845  v0.277832v23.9750957c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1V16.7872753v-0.277832  c0-2.184083,1.7773438-3.9609385,3.9609375-3.9609385c1.0595703,0,2.0546875,0.4116211,2.8027344,1.1586914  c0.7470703,0.7475586,1.1582031,1.7426758,1.1582031,2.802247v5.9462891v18.3066387c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1  V22.4557323c0-2.184082,1.7773438-3.9609375,3.9609375-3.9609375c1.0595703,0,2.0546875,0.4116211,2.8017578,1.1591797  c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v37.1074219  C61.69981,72.3776093,52.1832085,82.8033905,40.4849663,82.8033905z"/></svg></span></button>
     <button type="button" data-action="read"><span class="ctx-label">Режим чтения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span></button>
     <button type="button" data-action="loupe"><span class="ctx-label">Режим увеличения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20.5 20.5l-4.8-4.8"/></svg></span></button>
     <button type="button" data-action="fit-width"><span class="ctx-label">По ширине страницы</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M2 12h4M18 12h4M3.5 9.5 2 12l1.5 2.5M20.5 9.5 22 12l-1.5 2.5"/></svg></span></button>
@@ -5802,6 +5903,7 @@
     <hr>
     <button type="button" data-action="cut"><span class="ctx-label">Вырезать (Ctrl+X)</span><span class="ctx-icon">✂️</span></button>
     <button type="button" data-action="copy"><span class="ctx-label">Копировать (Ctrl+C)</span><span class="ctx-icon">📑</span></button>
+    <button type="button" data-action="delete"><span class="ctx-label">Удалить (Del)</span><span class="ctx-icon">🗑</span></button>
     <hr>
     <button type="button" data-action="print"><span class="ctx-label">Печать страниц</span><span class="ctx-icon">🖨️</span></button>
     <hr>
@@ -5831,7 +5933,7 @@
   <!--RMB menu in page magnification (loupe) mode-->
   <div id="loupeModeCtxMenu" aria-hidden="true">
     <button type="button" data-action="select"><span class="ctx-label">Режим выбора</span><span class="ctx-icon"><svg viewBox="-1 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M7 4 L7 19 L11 15.2 L13.7 21.2 L16 20.2 L13.4 14.4 L18 14 Z"/></svg></span></button>
-    <button type="button" data-action="nav"><span class="ctx-label">Режим навигации по документу</span><span class="ctx-icon"><svg viewBox="0 0 69.0645142 89.838707" width="18" height="18" fill="currentColor" stroke="currentColor" stroke-width="0.8" stroke-linejoin="round" aria-hidden="true"><path d="M40.4849663,82.8033905  c-9.1123066,0-16.3754902-5.1455078-19.4277363-13.7636719c-0.1801758-0.5087891-0.3701172-1.015625-0.5893555-1.5087891  c-0.6171875-1.3886719-0.6171875-1.3886719-0.7412109-1.5224609l-0.015625,0.0146484  c-0.7080078-1.3291016-3.1923828-5.6308632-11.9047842-20.7168007c-0.909668-1.5717773-0.3686523-3.5917969,1.2021484-4.5014648  c0.7021484-0.4023438,1.5004883-0.6147461,2.3085938-0.6147461c1.6572266,0,3.1967773,0.8867188,4.0185547,2.315918  l6.8134756,11.7963867c0.2260742,0.3916016,0.6865234,0.5839844,1.125,0.4648438  c0.4370117-0.1171875,0.7407227-0.5136719,0.7407227-0.9658203V16.7179394c0-2.1977549,1.6191406-4.0249033,3.6865234-4.1601572  c1.1650391-0.0810547,2.2583008,0.3310547,3.0761719,1.1494141c0.7470703,0.7475586,1.1586914,1.7426758,1.1586914,2.802247  v24.2529278c0,0.5522461,0.4477558,1,1.0000019,1s1-0.4477539,1-1V10.9962587c0-2.184082,1.7768555-3.960937,3.9604492-3.960937  c1.0600586,0,2.0551758,0.4116211,2.8022461,1.1591792c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v5.5131845  v0.277832v23.9750957c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1V16.7872753v-0.277832  c0-2.184083,1.7773438-3.9609385,3.9609375-3.9609385c1.0595703,0,2.0546875,0.4116211,2.8027344,1.1586914  c0.7470703,0.7475586,1.1582031,1.7426758,1.1582031,2.802247v5.9462891v18.3066387c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1  V22.4557323c0-2.184082,1.7773438-3.9609375,3.9609375-3.9609375c1.0595703,0,2.0546875,0.4116211,2.8017578,1.1591797  c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v37.1074219  C61.69981,72.3776093,52.1832085,82.8033905,40.4849663,82.8033905z"/></svg></span></button>
+    <button type="button" data-action="nav"><span class="ctx-label">Режим навигации</span><span class="ctx-icon"><svg viewBox="0 0 69.0645142 89.838707" width="18" height="18" fill="currentColor" stroke="currentColor" stroke-width="0.8" stroke-linejoin="round" aria-hidden="true"><path d="M40.4849663,82.8033905  c-9.1123066,0-16.3754902-5.1455078-19.4277363-13.7636719c-0.1801758-0.5087891-0.3701172-1.015625-0.5893555-1.5087891  c-0.6171875-1.3886719-0.6171875-1.3886719-0.7412109-1.5224609l-0.015625,0.0146484  c-0.7080078-1.3291016-3.1923828-5.6308632-11.9047842-20.7168007c-0.909668-1.5717773-0.3686523-3.5917969,1.2021484-4.5014648  c0.7021484-0.4023438,1.5004883-0.6147461,2.3085938-0.6147461c1.6572266,0,3.1967773,0.8867188,4.0185547,2.315918  l6.8134756,11.7963867c0.2260742,0.3916016,0.6865234,0.5839844,1.125,0.4648438  c0.4370117-0.1171875,0.7407227-0.5136719,0.7407227-0.9658203V16.7179394c0-2.1977549,1.6191406-4.0249033,3.6865234-4.1601572  c1.1650391-0.0810547,2.2583008,0.3310547,3.0761719,1.1494141c0.7470703,0.7475586,1.1586914,1.7426758,1.1586914,2.802247  v24.2529278c0,0.5522461,0.4477558,1,1.0000019,1s1-0.4477539,1-1V10.9962587c0-2.184082,1.7768555-3.960937,3.9604492-3.960937  c1.0600586,0,2.0551758,0.4116211,2.8022461,1.1591792c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v5.5131845  v0.277832v23.9750957c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1V16.7872753v-0.277832  c0-2.184083,1.7773438-3.9609385,3.9609375-3.9609385c1.0595703,0,2.0546875,0.4116211,2.8027344,1.1586914  c0.7470703,0.7475586,1.1582031,1.7426758,1.1582031,2.802247v5.9462891v18.3066387c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1  V22.4557323c0-2.184082,1.7773438-3.9609375,3.9609375-3.9609375c1.0595703,0,2.0546875,0.4116211,2.8017578,1.1591797  c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v37.1074219  C61.69981,72.3776093,52.1832085,82.8033905,40.4849663,82.8033905z"/></svg></span></button>
     <button type="button" data-action="read"><span class="ctx-label">Режим чтения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span></button>
     <button type="button" data-action="fit-width"><span class="ctx-label">По ширине страницы</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M2 12h4M18 12h4M3.5 9.5 2 12l1.5 2.5M20.5 9.5 22 12l-1.5 2.5"/></svg></span></button>
   </div>
@@ -6392,32 +6494,37 @@
       <button type="button" data-action="hide-help"><span class="ctx-label">Скрыть подсказку</span></button>
     </div>
     <div id="helpPanel" onclick="toggleHelpPanel()" oncontextmenu="event.preventDefault(); hideHelpPanel();" title="Нажмите для скрытия окна">
-      <div class="help-title">Основные горячие клавиши:</div>
+      <div class="help-title">Основные горячие клавиши</div>
+      <hr>
+      <div class="help-subtitle">Работа со страницами:</div>
       <div class="help-row"><span class="hk">Q</span> — Повернуть выбранные страницы против часовой стрелки</div>
       <div class="help-row"><span class="hk">W</span> — Повернуть выбранные страницы по часовой стрелке</div>
       <div class="help-row"><span class="hk">Del</span> — Удалить выбранные страницы</div>
+      <div class="help-row"><span class="hk">Ctrl + C</span> — копировать выделенные страницы</div>
+      <div class="help-row"><span class="hk">Ctrl + X</span> — вырезать выделенные страницы</div>
+      <div class="help-row"><span class="hk">Ctrl + V</span> — вставить страницы из буфера</div>
+      <div class="help-row">Удерживайте <span class="hk">Shift</span> — выделить диапазон страниц</div>
+      <div class="help-row">Удерживайте <span class="hk">Ctrl</span> — выделить отдельные страницы</div>
+      <hr>
+      <div class="help-subtitle">Общие:</div>
       <div class="help-row"><span class="hk">P</span> — Печать</div>
       <div class="help-row"><span class="hk">S</span> — Сохранить документ</div>
-      <hr>
-      <div class="help-row"><span class="hk">C</span> — режим выбора</div>
-      <div class="help-row"><span class="hk">H</span> — режим навигации по документу</div>
-      <div class="help-row"><span class="hk">R</span> — режим чтения</div>
-      <div class="help-row"><span class="hk">Z</span> — режим увеличения</div>
+      <div class="help-row"><span class="hk">Ctrl + F</span> — поиск по документу</div>
       <div class="help-row"><span class="hk">Ctrl + Z</span> — вернуть на шаг назад</div>
       <div class="help-row"><span class="hk">Ctrl + Y</span> — отмена возврата</div>
-      <hr class="help-tabs-sep">
+      <hr>
+      <div class="help-subtitle">Навигация по документу:</div>
+      <div class="help-row"><span class="hk">C</span> — режим выбора</div>
+      <div class="help-row"><span class="hk">H</span> — режим навигации</div>
+      <div class="help-row"><span class="hk">R</span> — режим чтения</div>
+      <div class="help-row"><span class="hk">Z</span> — режим увеличения</div>
+      <div class="help-row"><span class="hk">Alt + колесико мыши</span> — изменение масштаба</div>
+      <div class="help-row"><span class="hk">Средняя кнопка мыши</span> — по ширине страницы</div>
+      <hr>
       <div class="help-subtitle">Вкладки:</div>
       <div class="help-row"><span class="hk">Ctrl + стрелка влево</span> — выбрать вкладку слева</div>
       <div class="help-row"><span class="hk">Ctrl + стрелка вправо</span> — выбрать вкладку справа</div>
       <div class="help-row"><span class="hk">Ctrl + Del</span> — закрыть вкладку</div>
-      <div class="help-row"><span class="hk">Ctrl + C</span> — копировать выделенные страницы</div>
-      <div class="help-row"><span class="hk">Ctrl + X</span> — вырезать выделенные страницы</div>
-      <div class="help-row"><span class="hk">Ctrl + V</span> — вставить страницы из буфера</div>
-      <hr>
-      <div class="help-row">Удерживайте <span class="hk">Shift</span> — выделить диапазон страниц</div>
-      <div class="help-row">Удерживайте <span class="hk">Ctrl</span> — выделить отдельные страницы</div>
-      <div class="help-row"><span class="hk">Alt + колесико мыши</span> — изменение масштаба</div>
-      <div class="help-row"><span class="hk">Средняя кнопка мыши</span> — по ширине страницы</div>
     </div>
   </div>
 
@@ -9182,6 +9289,48 @@
     let fitWidthToggleOn = false;
     let fitWidthSavedScale = null;
     let fitWidthPointer = { x: null, y: null };
+    const PM_FIT_WIDTH_DEFAULT_KEY = 'pmFitWidthDefaultOpen';
+
+    function isFitWidthDefaultOn() {
+      try { return localStorage.getItem(PM_FIT_WIDTH_DEFAULT_KEY) === '1'; }
+      catch (_) { return false; }
+    }
+
+    function setFitWidthDefaultOn(on) {
+      try {
+        if (on) localStorage.setItem(PM_FIT_WIDTH_DEFAULT_KEY, '1');
+        else localStorage.removeItem(PM_FIT_WIDTH_DEFAULT_KEY);
+      } catch (_) { /* best effort */ }
+      updateFitWidthDefaultUI();
+    }
+
+    function updateFitWidthDefaultUI() {
+      const on = isFitWidthDefaultOn();
+      const btn = document.getElementById('fitWidthBtn');
+      if (btn) {
+        btn.classList.toggle('fit-width-default-on', on);
+        btn.setAttribute('aria-label', on
+          ? 'По ширине страницы (открытие по умолчанию включено)'
+          : 'По ширине страницы');
+      }
+      const menuBtn = document.querySelector('#fitWidthCtxMenu button[data-action="toggle-fit-width-default"]');
+      if (menuBtn) {
+        menuBtn.classList.toggle('pref-on', on);
+        menuBtn.setAttribute('aria-checked', on ? 'true' : 'false');
+        const check = menuBtn.querySelector('.ctx-check');
+        if (check) check.textContent = on ? '✓' : '';
+      }
+    }
+
+    function hideFitWidthCtxMenu() {
+      const menu = document.getElementById('fitWidthCtxMenu');
+      if (!menu) return;
+      if (document.activeElement && menu.contains(document.activeElement)) {
+        document.activeElement.blur();
+      }
+      menu.classList.remove('visible');
+      menu.setAttribute('aria-hidden', 'true');
+    }
 
     function clearFitWidthToggle() {
       if (!fitWidthToggleOn && fitWidthSavedScale == null) return;
@@ -9361,6 +9510,7 @@
       const n = pdfDoc.getPageCount();
       scaleUserLocked = false;
       autoScaleEnabled = true;
+      const preferFitWidth = isFitWidthDefaultOn();
       if (isTouchDevice) {
         applyScale();
         ensureMobilePagesFill();
@@ -9368,9 +9518,80 @@
         currentScale = scaleForPageCount(n);
         if (scaleSlider) scaleSlider.value = Math.max(0, Math.min(200, scaleToSlider(currentScale)));
         applyScale();
-        ensureThreePagesFit();
+        // When opening fit-width by default, skip ensureThreePagesFit — it would
+        // fight the fit-width target and leave the “general” multi-page scale.
+        if (!preferFitWidth) ensureThreePagesFit();
+      }
+      if (preferFitWidth) enableFitWidthForOpen();
+    }
+
+    /**
+     * Force fit-width ON for a newly opened document.
+     * Unlike toggleFitWidthScale, this ignores isLoading (thumbnails still
+     * rendering) so new tabs actually get the default preference.
+     */
+    function enableFitWidthForOpen() {
+      if (!pdfDoc || !isFitWidthDefaultOn()) return;
+      const target = computeFitWidthScale();
+      if (!fitWidthToggleOn) {
+        fitWidthSavedScale = currentScale;
+        fitWidthToggleOn = true;
+        updateFitWidthBtnUI();
+      }
+      if (Math.abs(target - currentScale) > 0.25) {
+        applyFitWidthScaleValue(target);
+      } else {
+        scaleUserLocked = true;
+        autoScaleEnabled = false;
+        updateFitWidthBtnUI();
       }
     }
+
+    (function initFitWidthDefaultPref() {
+      updateFitWidthDefaultUI();
+      if (isTouchDevice) return;
+      const btn = document.getElementById('fitWidthBtn');
+      const menu = document.getElementById('fitWidthCtxMenu');
+      if (!btn || !menu) return;
+
+      function positionMenu(clientX, clientY) {
+        updateFitWidthDefaultUI();
+        menu.classList.add('visible');
+        menu.setAttribute('aria-hidden', 'false');
+        const w = menu.offsetWidth, h = menu.offsetHeight;
+        let x = clientX, y = clientY;
+        if (x + w > window.innerWidth - 6) x = window.innerWidth - w - 6;
+        if (y + h > window.innerHeight - 6) y = window.innerHeight - h - 6;
+        if (x < 6) x = 6;
+        if (y < 6) y = 6;
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
+      }
+
+      btn.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        positionMenu(e.clientX, e.clientY);
+      });
+      menu.addEventListener('click', (e) => {
+        const item = e.target.closest('button[data-action]');
+        if (!item || item.disabled) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (item.getAttribute('data-action') === 'toggle-fit-width-default') {
+          setFitWidthDefaultOn(!isFitWidthDefaultOn());
+          hideFitWidthCtxMenu();
+        }
+      });
+      document.addEventListener('mousedown', (e) => {
+        if (!menu.classList.contains('visible')) return;
+        if (e.target.closest('#fitWidthCtxMenu, #fitWidthBtn')) return;
+        hideFitWidthCtxMenu();
+      }, true);
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && menu.classList.contains('visible')) hideFitWidthCtxMenu();
+      });
+    })();
 
     //Available working area width (without .main horizontal paddings).
     function getScrollAvailWidth() {
@@ -12744,14 +12965,29 @@
             exitReadMode();
           } else if (!isTouchDevice && (loupeModeOn || interactionMode === 'nav')) {
             setMode('select');
+          } else if (fitWidthToggleOn && interactionMode === 'select') {
+            // Same as middle-click / toolbar: leave fit-width while staying in select mode.
+            toggleFitWidthScale({ anchor: 'viewport-center' });
           } else {
             deselectAllPages();
           }
           break;
         case 'KeyC': e.preventDefault(); click(document.getElementById('selectModeBtn')); break;
         case 'KeyH': e.preventDefault(); click(document.getElementById('navModeBtn')); break;
-        case 'KeyQ': e.preventDefault(); click(document.getElementById('rotateLeftBtn')); break;
-        case 'KeyW': e.preventDefault(); click(document.getElementById('rotateRightBtn')); break;
+        case 'KeyQ': {
+          e.preventDefault();
+          const rotL = document.getElementById('rotateLeftBtn');
+          click(rotL);
+          if (typeof pmNavFlashUi === 'function') pmNavFlashUi(rotL);
+          break;
+        }
+        case 'KeyW': {
+          e.preventDefault();
+          const rotR = document.getElementById('rotateRightBtn');
+          click(rotR);
+          if (typeof pmNavFlashUi === 'function') pmNavFlashUi(rotR);
+          break;
+        }
         case 'Delete': e.preventDefault(); click(document.getElementById('deleteBtn')); break;
         case 'KeyP': e.preventDefault(); click(document.getElementById('printBtn')); break;
         case 'KeyF': e.preventDefault(); loadNewPDF(); break;
@@ -14102,6 +14338,9 @@
         setTimeout(alignRowNumbers, 120);
       } finally {
         hideLoading();
+        // Overlay gone — recompute fit-width with final workspace width before
+        // callers (e.g. pmOpenOneFileAsTab → pmCaptureActive) snapshot scale.
+        if (pdfDoc && isFitWidthDefaultOn()) enableFitWidthForOpen();
       }
     }
 
@@ -14957,7 +15196,7 @@
       const navBtn = document.getElementById('navModeBtn');
       if (!navBtn) return;
       navBtn.classList.remove('zoom-pan-hint');
-      const defaultTitle = 'Режим навигации по документу (H)';
+      const defaultTitle = 'Режим навигации (H)';
       navBtn.title = defaultTitle;
     }
 
@@ -16913,6 +17152,9 @@
       });
       document.getElementById('insertFromClipboardBtn').addEventListener('click', async (e) => {
         e.stopPropagation();
+        const btn = e.currentTarget;
+        if (btn && btn.disabled) return;
+        if (!(pmPageClipboard && pmPageClipboard.pdfBytes)) return;
         const pos = pendingInsert;
         closeInsertMenu();
         await insertFromClipboard(pos);
@@ -16949,6 +17191,10 @@
       const menu = document.getElementById('insertMenu');
       const host = scrollContainer;
       const hostRect = host.getBoundingClientRect();
+      const clipBtn = document.getElementById('insertFromClipboardBtn');
+      if (clipBtn) {
+        clipBtn.disabled = !(pmPageClipboard && pmPageClipboard.pdfBytes);
+      }
       insertMenuOpen = true;
       insertMenuOpenedAt = Date.now();  // protection against instant closing with the same tap
       menu.style.display = 'block';
@@ -21788,8 +22034,7 @@
 
     // ─── Desktop: show hide menu button when hovering over logo ───
     // We control visibility via JS so that the user can move the cursor from
-    // the logo onto the popup buttons. The hit-area expands while open, so the
-    // menu stays until the pointer leaves the whole column (no hide-timeout).
+    // the logo onto the popup buttons. Leaving the column hides after 300ms.
     (function initDesktopMenuToggle() {
       if (isTouchDevice) return;
       const area = document.getElementById('logoMenuArea');
@@ -21799,12 +22044,16 @@
       const aboutBtn = document.getElementById('aboutBtn');
       const restoreHelpBtn = document.getElementById('restoreHelpBtn');
       if (!btn || !area) return;
+      const LOGO_MENU_HIDE_MS = 300;
+      let hideTimer = null;
 
       function show() {
         // When collapsed, the button is always visible (via CSS) - no class needed
         // (and the theme/About buttons are hidden entirely while collapsed, see CSS).
         const menu = document.getElementById('topMenu');
         if (menu && menu.classList.contains('collapsed')) return;
+        clearTimeout(hideTimer);
+        hideTimer = null;
         btn.classList.add('show');
         if (themeBtn) themeBtn.classList.add('show');
         if (aboutBtn) aboutBtn.classList.add('show');
@@ -21813,6 +22062,7 @@
         if (logo) logo.classList.add('logo-hot');
       }
       function hide() {
+        hideTimer = null;
         btn.classList.remove('show');
         if (themeBtn) themeBtn.classList.remove('show');
         if (aboutBtn) aboutBtn.classList.remove('show');
@@ -21820,11 +22070,18 @@
         area.classList.remove('expanded');
         if (logo) logo.classList.remove('logo-hot');
       }
+      function scheduleHide() {
+        clearTimeout(hideTimer);
+        hideTimer = setTimeout(hide, LOGO_MENU_HIDE_MS);
+      }
 
       area.addEventListener('mouseenter', show);
-      area.addEventListener('mouseleave', hide);
-      // Logo sits under the area; keep a listener in case hit-testing differs.
-      if (logo) logo.addEventListener('mouseenter', show);
+      area.addEventListener('mouseleave', scheduleHide);
+      // Logo sits under the area; keep listeners in case hit-testing differs.
+      if (logo) {
+        logo.addEventListener('mouseenter', show);
+        logo.addEventListener('mouseleave', scheduleHide);
+      }
     })();
 
     // ─── Mobile: tap app logo → theme + About (no hide-menu / restore-help) ───
@@ -26301,6 +26558,7 @@ function editSelectedPage() {
       replace: baseDisabled || targets.length === 0 || !ctxMenuTargetsContiguous(targets),
       cut: baseDisabled || targets.length === 0,
       copy: baseDisabled || targets.length === 0,
+      delete: baseDisabled || targets.length === 0,
       print: baseDisabled || targets.length === 0,
       undo: !canUndoDoc(),
       redo: !canRedoDoc()
@@ -26441,7 +26699,7 @@ function editSelectedPage() {
     // Sync selection before hideMenu() clears ctxPageIdx. Undo/redo/read/edit/nav
     // must not change selection (RMB itself also must not).
     let selOk = true;
-    if (action === 'rot-right' || action === 'rot-left' || action === 'replace' || action === 'cut') {
+    if (action === 'rot-right' || action === 'rot-left' || action === 'replace' || action === 'cut' || action === 'delete') {
       selOk = syncSelectionToCtxTargets();
     } else if (action === 'export' || action === 'copy' || action === 'print') {
       selOk = syncSelectionToCtxTargets({ notify: true });
@@ -26498,6 +26756,9 @@ function editSelectedPage() {
         break;
       case 'copy':
         if (selOk) copySelectedPagesToClipboard();
+        break;
+      case 'delete':
+        if (selOk) deleteSelected();
         break;
       case 'print':
         if (selOk) printSelectedPages();
