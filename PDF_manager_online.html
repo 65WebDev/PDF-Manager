@@ -53,6 +53,8 @@
       display: flex;
       flex-direction: column;
       gap: 8px;
+      /* Shared with .main-row controls + corner logo on stage 5 shrink */
+      --pm-menu-ctrl-h: 42px;
       /*We do not animate the dimensions - otherwise the height changes smoothly and the counter
          positioned by an intermediate value. We animate only the background/shadow.*/
       transition: background 0.3s ease, box-shadow 0.3s ease;
@@ -161,14 +163,18 @@
       position: absolute;
       top: 8px;            /*flush with the top edge of the first row buttons (padding menu)*/
       right: 20px;
-      height: 42px;
-      width: 42px;
+      height: var(--pm-menu-ctrl-h, 42px);
+      width: var(--pm-menu-ctrl-h, 42px);
       display: block;
       z-index: 110;
-      border-radius: 10px;
+      border-radius: calc(var(--pm-menu-ctrl-h, 42px) * 0.238);
       transition: filter 0.15s ease, box-shadow 0.15s ease;
     }
-    .app-logo svg { display: block; width: 42px; height: 42px; }
+    .app-logo svg {
+      display: block;
+      width: var(--pm-menu-ctrl-h, 42px);
+      height: var(--pm-menu-ctrl-h, 42px);
+    }
     /* Light highlight while the logo hover-zone (or the logo itself) is hot */
     .app-logo.logo-hot,
     body:has(#logoMenuArea:hover) .app-logo {
@@ -182,21 +188,21 @@
       position: absolute;
       top: 10px;
       right: 20px;
-      width: 42px;
-      height: 42px;
+      width: var(--pm-menu-ctrl-h, 42px);
+      height: var(--pm-menu-ctrl-h, 42px);
       z-index: 111;
     }
     /* While the popup stack is open, stretch the hit-area over all three
        buttons so the menu does not rely on a hide-timeout when moving the
        cursor from the logo down to About. */
     #logoMenuArea.expanded {
-      height: 188px; /* logo slot + hide/theme/about (top 140 + 42 + slack) */
+      height: calc(var(--pm-menu-ctrl-h, 42px) + 146px); /* logo slot + hide/theme/about */
     }
     /*Hide menu button (desktop) - pops up under the logo when hovered over.
        Visibility is controlled by JS (.show class) with a timeout to allow time for hovering.*/
     #desktopMenuToggleBtn {
       position: absolute;
-      top: 44px;            /*just below the logo, without a big gap*/
+      top: calc(var(--pm-menu-ctrl-h, 42px) + 2px); /* just below the logo */
       right: 0;
       width: 42px;
       height: 42px;
@@ -234,7 +240,7 @@
     /*Theme toggle - pops up right under the "Hide menu" button, same hover area/timing.*/
     #themeToggleBtn {
       position: absolute;
-      top: 92px;             /*just below desktopMenuToggleBtn (44 + 42 + 6 gap)*/
+      top: calc(var(--pm-menu-ctrl-h, 42px) + 50px); /* below hide-menu (h+2 + 42 + 6) */
       right: 0;
       width: 42px;
       height: 42px;
@@ -263,7 +269,7 @@
     /*"About" button - pops up right under the theme toggle, same hover area/timing.*/
     #aboutBtn {
       position: absolute;
-      top: 140px;            /*just below themeToggleBtn (92 + 42 + 6 gap)*/
+      top: calc(var(--pm-menu-ctrl-h, 42px) + 98px); /* below theme (h+50 + 42 + 6) */
       right: 0;
       width: 42px;
       height: 42px;
@@ -292,7 +298,7 @@
     /* Restore help («?»): sits above About only while the corner tip is hidden. */
     #restoreHelpBtn {
       position: absolute;
-      top: 140px;
+      top: calc(var(--pm-menu-ctrl-h, 42px) + 98px);
       right: 0;
       width: 42px;
       height: 42px;
@@ -325,10 +331,10 @@
       pointer-events: auto;
     }
     #logoMenuArea.help-restore-on #aboutBtn {
-      top: 188px; /* below restore-help (140 + 42 + 6) */
+      top: calc(var(--pm-menu-ctrl-h, 42px) + 146px); /* below restore-help */
     }
     #logoMenuArea.help-restore-on.expanded {
-      height: 236px; /* logo + hide + theme + restore-help + about */
+      height: calc(var(--pm-menu-ctrl-h, 42px) + 194px); /* logo + hide + theme + restore-help + about */
     }
     /*Menu collapsed: keep only the show/hide toggle in the corner, not the theme/About buttons.*/
     .top-menu.collapsed #themeToggleBtn,
@@ -5188,6 +5194,7 @@
        calc(var(--pm-menu-ctrl-h) * <unitless>) — never “22px * var(/42)”
        (px×px is invalid and drops the whole declaration). */
     .main-row {
+      /* Inherits --pm-menu-ctrl-h from .top-menu; kept here as a local fallback. */
       --pm-menu-ctrl-h: 42px;
     }
     .main-row.menu-shrink {
@@ -9791,19 +9798,32 @@
       return ws.reduce((a, b) => a + b, 0) + gap * Math.max(0, ws.length - 1);
     }
 
+    function pmSetMenuCtrlH(row, pxOrNull) {
+      const topMenu = document.getElementById('topMenu');
+      if (pxOrNull == null) {
+        row.style.removeProperty('--pm-menu-ctrl-h');
+        if (topMenu) topMenu.style.removeProperty('--pm-menu-ctrl-h');
+        return;
+      }
+      const v = pxOrNull + 'px';
+      row.style.setProperty('--pm-menu-ctrl-h', v);
+      /* Logo lives under #topMenu, not .main-row — keep both in sync on stage 5. */
+      if (topMenu) topMenu.style.setProperty('--pm-menu-ctrl-h', v);
+    }
+
     /** Stage 5: binary-search control size so left+right+scale stay on row 1.
         Always pairs with tools-wrapped — call in the same turn (no layout flush
         between wrap and shrink) so the scale strip never paints on row 2. */
     function pmApplyMenuShrinkToFit(row, left, right, scale, avail) {
       row.classList.add('menu-shrink');
-      row.style.setProperty('--pm-menu-ctrl-h', PM_MENU_CTRL_H_FULL + 'px');
+      pmSetMenuCtrlH(row, PM_MENU_CTRL_H_FULL);
       const scaleCtl = scale.querySelector('.scale-control');
       let lo = PM_MENU_CTRL_H_MIN;
       let hi = PM_MENU_CTRL_H_FULL;
       let best = PM_MENU_CTRL_H_MIN;
       while (lo <= hi) {
         const mid = (lo + hi) >> 1;
-        row.style.setProperty('--pm-menu-ctrl-h', mid + 'px');
+        pmSetMenuCtrlH(row, mid);
         void row.offsetWidth;
         const gap5 = parseFloat(getComputedStyle(row).columnGap) || 6;
         // Prefer scale-control scrollWidth (flex-shrink:0 under menu-shrink) so
@@ -9820,7 +9840,7 @@
           hi = mid - 1;
         }
       }
-      row.style.setProperty('--pm-menu-ctrl-h', best + 'px');
+      pmSetMenuCtrlH(row, best);
       void row.offsetWidth;
     }
 
@@ -9867,7 +9887,7 @@
         center.classList.remove('wrapped');
         scale.classList.remove('wrapped');
         row.classList.remove('icons-mode', 'scale-compact', 'menu-shrink', 'tools-wrapped');
-        row.style.removeProperty('--pm-menu-ctrl-h');
+        pmSetMenuCtrlH(row, null);
         // Undo any leftover print relocate from older builds before measuring.
         resetPrintButtonHome();
         void row.offsetWidth;
