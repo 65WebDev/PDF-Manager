@@ -1,27 +1,26 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-  Сборка Windows .exe (Tauri) для PDF Manager.
+  Build Windows .exe (Tauri) for PDF Manager.
 
 .DESCRIPTION
-  Проверяет окружение (Node, Rust, MSVC link.exe), при необходимости
-  ставит npm-зависимости и запускает релизную сборку.
+  Checks Node / Rust / MSVC link.exe, runs npm ci if needed, then release build.
 
-  После успеха:
+  Output:
     - portable:  src-tauri\target\release\PDF Manager.exe
-    - установщик: src-tauri\target\release\bundle\nsis\*.exe
+    - installer: src-tauri\target\release\bundle\nsis\*.exe
 
-  Подробности: docs\windows-tauri-build.md
+  Docs: docs\windows-tauri-build.md
 
 .PARAMETER Upload
-  После сборки залить установщик в GitHub Release (нужны gh + auth login).
-  Без этого флага — только локальная сборка (npm run tauri:build:local).
+  Upload installer to GitHub Release after build (needs gh + auth login).
+  Without this flag: local build only (npm run tauri:build:local).
 
 .PARAMETER SkipNpmCi
-  Не запускать npm ci (если node_modules уже установлены).
+  Skip npm ci (use when node_modules already exists).
 
 .PARAMETER Dev
-  Вместо релизной сборки запустить npm run tauri:dev.
+  Run npm run tauri:dev instead of release build.
 
 .EXAMPLE
   .\scripts\build-windows-exe.ps1
@@ -41,166 +40,174 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-try {
-  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-} catch {}
 
 function Write-Step([string] $Message) {
   Write-Host ""
-  Write-Host "==> $Message" -ForegroundColor Cyan
+  Write-Host ("==> " + $Message) -ForegroundColor Cyan
 }
 
 function Write-Ok([string] $Message) {
-  Write-Host "OK  $Message" -ForegroundColor Green
+  Write-Host ("OK  " + $Message) -ForegroundColor Green
 }
 
 function Write-Fail([string] $Message) {
-  Write-Host "ERR $Message" -ForegroundColor Red
+  Write-Host ("ERR " + $Message) -ForegroundColor Red
 }
 
-function Test-Command([string] $Name) {
+function Test-Cmd([string] $Name) {
   return [bool](Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
-function Assert-Command([string] $Name, [string] $Hint) {
-  if (-not (Test-Command $Name)) {
-    Write-Fail "$Name не найден в PATH."
+function Assert-Cmd([string] $Name, [string] $Hint) {
+  if (-not (Test-Cmd $Name)) {
+    Write-Fail ("{0} not found in PATH." -f $Name)
     Write-Host $Hint -ForegroundColor Yellow
     exit 1
   }
-  $ver = & $Name --version 2>$null
-  if (-not $ver) { $ver = & $Name -v 2>$null }
+  $ver = $null
+  try { $ver = & $Name --version 2>$null } catch { }
+  if (-not $ver) {
+    try { $ver = & $Name -v 2>$null } catch { }
+  }
   if ($ver) {
     $first = ($ver | Select-Object -First 1).ToString().Trim()
-    Write-Ok "$Name — $first"
+    Write-Ok ("{0} - {1}" -f $Name, $first)
   } else {
-    Write-Ok "$Name найден"
+    Write-Ok ("{0} found" -f $Name)
   }
 }
 
-# Корень репозитория (скрипт лежит в scripts\)
-$RepoRoot = Resolve-Path (Join-Path $PSScriptRoot '..')
+# Repo root: script may live in scripts\ or in the repo root.
+$here = $PSScriptRoot
+if (-not $here) { $here = Split-Path -Parent $MyInvocation.MyCommand.Path }
+if (Test-Path (Join-Path $here 'package.json')) {
+  $RepoRoot = Resolve-Path $here
+} elseif (Test-Path (Join-Path $here '..\package.json')) {
+  $RepoRoot = Resolve-Path (Join-Path $here '..')
+} else {
+  Write-Fail "Cannot find package.json near the script. Put the script in the repo root or in scripts\."
+  exit 1
+}
+
 Set-Location $RepoRoot
-Write-Host "Репозиторий: $RepoRoot" -ForegroundColor DarkGray
+Write-Host ("Repo: {0}" -f $RepoRoot) -ForegroundColor DarkGray
 
-# --- Проверки окружения -------------------------------------------------
-Write-Step "Проверка окружения"
+Write-Step "Environment check"
 
-Assert-Command 'node' @"
-Установите Node.js 20+ LTS: https://nodejs.org/
-После установки откройте НОВЫЙ PowerShell.
+Assert-Cmd 'node' @"
+Install Node.js 20+ LTS: https://nodejs.org/
+Then open a NEW PowerShell window.
 "@
 
-Assert-Command 'npm' @"
-npm обычно ставится вместе с Node.js. Откройте новый терминал после установки.
+Assert-Cmd 'npm' @"
+npm is installed with Node.js. Open a new terminal after install.
 "@
 
-Assert-Command 'rustc' @"
-Установите Rust (stable): https://rustup.rs/
-Нужен Rust 1.85+. После rustup-init.exe — новый терминал.
+Assert-Cmd 'rustc' @"
+Install Rust (stable): https://rustup.rs/
+Need Rust 1.85+. New terminal after rustup-init.exe.
 "@
 
-Assert-Command 'cargo' @"
-cargo ставится вместе с Rust (rustup). Новый терминал после установки.
+Assert-Cmd 'cargo' @"
+cargo comes with Rust (rustup). New terminal after install.
 "@
 
 $link = Get-Command link.exe -ErrorAction SilentlyContinue
 if (-not $link) {
-  Write-Fail "link.exe не найден (Visual C++ Build Tools)."
+  Write-Fail "link.exe not found (Visual C++ Build Tools)."
   Write-Host @"
-Установите Build Tools:
+Install Build Tools:
   https://visualstudio.microsoft.com/visual-cpp-build-tools/
-Workload: «Разработка классических приложений на C++»
-  (Desktop development with C++)
+Workload: Desktop development with C++
 
-Затем откройте новый терминал или «Developer PowerShell for VS 2022»
-и снова запустите этот скрипт.
+Then open a new terminal or "Developer PowerShell for VS 2022"
+and run this script again.
 "@ -ForegroundColor Yellow
   exit 1
 }
-Write-Ok "link.exe — $($link.Source)"
+Write-Ok ("link.exe - {0}" -f $link.Source)
 
 if ($Upload) {
-  Assert-Command 'gh' @"
-Для -Upload нужен GitHub CLI: https://cli.github.com/
-Затем: gh auth login
-Либо соберите без загрузки: .\scripts\build-windows-exe.ps1
+  Assert-Cmd 'gh' @"
+-Upload needs GitHub CLI: https://cli.github.com/
+Then: gh auth login
+Or build without upload: .\scripts\build-windows-exe.ps1
 "@
+  $login = $null
   try {
     $login = gh api user --jq .login 2>$null
-    if (-not $login) { throw 'not logged in' }
-    Write-Ok "gh — авторизован как $login"
   } catch {
-    Write-Fail "gh не авторизован. Выполните: gh auth login"
+    $login = $null
+  }
+  if (-not $login) {
+    Write-Fail "gh is not logged in. Run: gh auth login"
     exit 1
   }
+  Write-Ok ("gh - logged in as {0}" -f $login)
 }
 
-# --- npm зависимости ----------------------------------------------------
 if (-not $SkipNpmCi) {
   Write-Step "npm ci"
   npm ci
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-  Write-Ok "зависимости установлены"
+  Write-Ok "dependencies installed"
 } else {
-  Write-Step "npm ci пропущен (-SkipNpmCi)"
+  Write-Step "npm ci skipped (-SkipNpmCi)"
   if (-not (Test-Path (Join-Path $RepoRoot 'node_modules'))) {
-    Write-Fail "node_modules нет. Уберите -SkipNpmCi или выполните npm ci."
+    Write-Fail "node_modules missing. Remove -SkipNpmCi or run npm ci."
     exit 1
   }
 }
 
-# --- Сборка / dev -------------------------------------------------------
 if ($Dev) {
-  Write-Step "Режим разработки: npm run tauri:dev"
-  Write-Host "Окно откроется после компиляции. Остановка: Ctrl+C" -ForegroundColor DarkGray
+  Write-Step "Dev mode: npm run tauri:dev"
+  Write-Host "Window opens after compile. Stop: Ctrl+C" -ForegroundColor DarkGray
   npm run tauri:dev
   exit $LASTEXITCODE
 }
 
 if ($Upload) {
-  Write-Step "Релизная сборка + загрузка на GitHub (npm run tauri:build)"
-  Write-Host "Первая сборка может занять 10–20+ минут." -ForegroundColor DarkGray
+  Write-Step "Release build + GitHub upload (npm run tauri:build)"
+  Write-Host "First build may take 10-20+ minutes." -ForegroundColor DarkGray
   npm run tauri:build
 } else {
-  Write-Step "Релизная сборка без upload (npm run tauri:build:local)"
-  Write-Host "Первая сборка может занять 10–20+ минут." -ForegroundColor DarkGray
+  Write-Step "Release build, no upload (npm run tauri:build:local)"
+  Write-Host "First build may take 10-20+ minutes." -ForegroundColor DarkGray
   npm run tauri:build:local
 }
 
 if ($LASTEXITCODE -ne 0) {
-  Write-Fail "Сборка завершилась с кодом $LASTEXITCODE"
-  Write-Host "См. docs\windows-tauri-build.md — раздел «Частые ошибки»." -ForegroundColor Yellow
+  Write-Fail ("Build failed with exit code {0}" -f $LASTEXITCODE)
+  Write-Host "See docs\windows-tauri-build.md section Common errors." -ForegroundColor Yellow
   exit $LASTEXITCODE
 }
 
-# --- Результат ----------------------------------------------------------
-Write-Step "Готово"
+Write-Step "Done"
 
 $portable = Join-Path $RepoRoot 'src-tauri\target\release\PDF Manager.exe'
 $nsisDir = Join-Path $RepoRoot 'src-tauri\target\release\bundle\nsis'
 
-if (Test-Path $portable) {
-  Write-Ok "Portable: $portable"
+if (Test-Path -LiteralPath $portable) {
+  Write-Ok ("Portable: {0}" -f $portable)
 } else {
-  Write-Fail "Не найден: $portable"
+  Write-Fail ("Not found: {0}" -f $portable)
 }
 
-if (Test-Path $nsisDir) {
+if (Test-Path -LiteralPath $nsisDir) {
   $setup = Get-ChildItem -Path $nsisDir -Filter '*.exe' -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1
   if ($setup) {
-    Write-Ok "Установщик: $($setup.FullName)"
+    Write-Ok ("Installer: {0}" -f $setup.FullName)
   } else {
-    Write-Host "Папка NSIS есть, но .exe установщика не найден: $nsisDir" -ForegroundColor Yellow
+    Write-Host ("NSIS folder exists but no .exe: {0}" -f $nsisDir) -ForegroundColor Yellow
   }
 } else {
-  Write-Host "Папка NSIS ещё не создана: $nsisDir" -ForegroundColor Yellow
+  Write-Host ("NSIS folder not created yet: {0}" -f $nsisDir) -ForegroundColor Yellow
 }
 
 Write-Host ""
-Write-Host "Запуск portable:" -ForegroundColor DarkGray
-Write-Host "  & `"$portable`"" -ForegroundColor DarkGray
+Write-Host "Run portable:" -ForegroundColor DarkGray
+Write-Host ('  & "{0}"' -f $portable) -ForegroundColor DarkGray
 Write-Host ""
-Write-Host "Документация: docs\windows-tauri-build.md" -ForegroundColor DarkGray
+Write-Host "Docs: docs\windows-tauri-build.md" -ForegroundColor DarkGray
