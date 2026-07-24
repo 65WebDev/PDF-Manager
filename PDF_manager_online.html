@@ -5371,6 +5371,17 @@
     html[data-theme="dark"] .pm-modal-box .file-item {
       background: #262b33 !important; border-bottom-color: #333a44 !important;
     }
+    /* Remove (×) on merge-order rows: global `.pm-modal-box * { color }` would
+       keep the glyph light on the light hover pad — force a visible red pair. */
+    html[data-theme="dark"] .pm-modal-box .merge-file-remove {
+      color: #9aa3ad !important;
+      background: transparent !important;
+    }
+    html[data-theme="dark"] .pm-modal-box .merge-file-remove:hover,
+    html[data-theme="dark"] .pm-modal-box .merge-file-remove:focus-visible {
+      background: rgba(231, 76, 60, 0.28) !important;
+      color: #ff8b7a !important;
+    }
   </style>
 </head>
 <body>
@@ -10767,10 +10778,12 @@
       }
 
       // Mouse wheel adjusts auto-scroll speed while the mode is active.
-      // Alt+wheel must remain zoom-only.
+      // Alt+wheel must remain zoom-only. While the Z-loupe window is open,
+      // the wheel belongs to loupe magnification — not scroll speed.
       document.addEventListener('wheel', (e) => {
         if (!pmNavAutoDir) return;
         if (e.altKey) return;
+        if (typeof loupeState !== 'undefined' && loupeState) return;
         if (e.target.closest && e.target.closest(
           '.top-menu, #helpToggle, #helpPanel, #pageCountBox, input, textarea, select'
         )) return;
@@ -12541,9 +12554,11 @@
       // Mouse wheel while the magnifying glass is open - adjusting the magnification level
       // inside the window (regardless of the base zoom value). preventDefault
       // so that the page under the magnifying glass does not scroll.
+      // Takes priority over auto-scroll speed adjustment (see pmNav wheel handler).
       document.addEventListener('wheel', (e) => {
         if (!loupeState || !loupeState.ready) return;
         e.preventDefault();
+        e.stopPropagation();
         const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
         const prevMul = loupeState.zoomMul || 1;
         loupeState.zoomMul = Math.max(0.5, Math.min(3, prevMul * factor));
