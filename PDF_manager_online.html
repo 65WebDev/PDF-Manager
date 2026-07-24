@@ -4268,6 +4268,27 @@
       transition: box-shadow 0.12s ease;
     }
 
+    /* Mobile: while page-nav auto-scroll runs, fade the nav/speed/pause chrome.
+       Tap anywhere to bring it back (see pmNavRevealChrome). */
+    @media (pointer: coarse) {
+      .pm-page-nav-btn,
+      #pmAutoScrollSpeed,
+      #pmAutoScrollPauseBtn {
+        transition:
+          top 0.15s ease,
+          background 0.15s,
+          opacity 0.4s ease,
+          visibility 0.4s ease;
+      }
+      body.pm-nav-chrome-hidden .pm-page-nav-btn.visible,
+      body.pm-nav-chrome-hidden #pmAutoScrollSpeed.visible,
+      body.pm-nav-chrome-hidden #pmAutoScrollPauseBtn.visible {
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+      }
+    }
+
     /*=== HINT IN THE BOTTOM RIGHT CORNER ===*/
     /*─── Tooltip with hotkeys (lower right corner) ───*/
     #helpToggle {
@@ -4697,31 +4718,42 @@
       #pageEditModal .pe-handle {
         position: absolute;
       }
-      /* Mobile PE: × on selected objects (redact / text / image / shapes). */
+      /* Mobile PE: × outside selected object (top-right), half of prior 28px.
+         Click was broken by preventDefault on pointerdown suppressing click. */
+      #pageEditModal .pe-obj.sel {
+        overflow: visible;
+      }
       #pageEditModal .pe-obj-mobile-del {
         position: absolute;
-        top: 4px;
-        right: 4px;
-        z-index: 30;
-        width: 28px;
-        height: 28px;
+        /* 14×14 button + 4px gap outside the object's top-right corner */
+        top: -18px;
+        right: -18px;
+        z-index: 40;
+        width: 14px;
+        height: 14px;
         margin: 0;
         padding: 0;
         border: none;
         border-radius: 50%;
         background: rgba(220, 38, 38, 0.92);
         color: #fff;
-        font-size: 20px;
+        font-size: 11px;
         font-weight: 700;
         line-height: 1;
         display: flex;
         align-items: center;
         justify-content: center;
         cursor: pointer;
-        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
         -webkit-tap-highlight-color: transparent;
         touch-action: manipulation;
         pointer-events: auto;
+      }
+      /* Larger tap target without growing the visible glyph */
+      #pageEditModal .pe-obj-mobile-del::after {
+        content: '';
+        position: absolute;
+        inset: -8px;
       }
       #pageEditModal .pe-obj-mobile-del:active {
         background: #b91c1c;
@@ -6572,8 +6604,53 @@
     const PM_NAV_HOLD_ARM_MS = 300;   // touch-only long-press arm
     const PM_NAV_HOLD_RING_MS = 500;  // touch-only ring fill
     const PM_NAV_RING_LEN = 100; // matches pathLength on the SVG circle
-    const PM_NAV_TITLE_PREV = 'Предыдущая страница (ПКМ - автопрокрутка)';
-    const PM_NAV_TITLE_NEXT = 'Следующая страница (ПКМ - автопрокрутка)';
+    function pmNavTitlePrev() {
+      return isTouchDevice
+        ? 'Предыдущая страница. Удерживание - автопрокрутка'
+        : 'Предыдущая страница (ПКМ - автопрокрутка)';
+    }
+    function pmNavTitleNext() {
+      return isTouchDevice
+        ? 'Следующая страница. Удерживание - автопрокрутка'
+        : 'Следующая страница (ПКМ - автопрокрутка)';
+    }
+    function pmNavTitlePause() {
+      return isTouchDevice
+        ? 'Остановить прокрутку'
+        : 'Остановить прокрутку (ПКМ / Esc)';
+    }
+    function pmNavTitleResume() {
+      return isTouchDevice
+        ? 'Продолжить прокрутку'
+        : 'Продолжить прокрутку (ПКМ); Esc — выход';
+    }
+    function pmNavTitleSpeed() {
+      return isTouchDevice
+        ? 'Скорость прокрутки'
+        : 'Скорость прокрутки (колесико мыши)';
+    }
+    function pmNavApplyStaticTooltips() {
+      const prevBtn = document.getElementById('pmPagePrevBtn');
+      const nextBtn = document.getElementById('pmPageNextBtn');
+      const speedEl = document.getElementById('pmAutoScrollSpeed');
+      const pauseBtn = document.getElementById('pmAutoScrollPauseBtn');
+      if (prevBtn) {
+        prevBtn.title = pmNavTitlePrev();
+        prevBtn.setAttribute('aria-label', prevBtn.title);
+      }
+      if (nextBtn) {
+        nextBtn.title = pmNavTitleNext();
+        nextBtn.setAttribute('aria-label', nextBtn.title);
+      }
+      if (speedEl) {
+        speedEl.title = pmNavTitleSpeed();
+        speedEl.setAttribute('aria-label', speedEl.title);
+      }
+      if (pauseBtn && !pmNavAutoDir) {
+        pauseBtn.title = pmNavTitlePause();
+        pauseBtn.setAttribute('aria-label', pauseBtn.title);
+      }
+    }
     let pmNavAutoDir = 0;              // -1 | 0 | 1
     let pmNavAutoRaf = 0;
     let pmNavAutoLastTs = 0;
@@ -10707,9 +10784,7 @@
       const icon = btn.querySelector('.pm-autoscroll-pause-icon');
       const paused = !!pmNavAutoPaused;
       if (icon) icon.innerHTML = paused ? PM_NAV_PLAY_ICON : PM_NAV_PAUSE_ICON;
-      btn.title = paused
-        ? 'Продолжить прокрутку (ПКМ); Esc — выход'
-        : 'Остановить прокрутку (ПКМ / Esc)';
+      btn.title = paused ? pmNavTitleResume() : pmNavTitlePause();
       btn.setAttribute('aria-label', btn.title);
       btn.setAttribute('aria-pressed', paused ? 'true' : 'false');
     }
@@ -10723,6 +10798,48 @@
         pmNavUpdatePauseBtnUI();
         pmPositionPageNavButtons();
       }
+    }
+
+    /** Mobile only: fade page-nav + speed + pause while auto-scroll is running. */
+    let pmNavChromeHideTimer = 0;
+    const PM_NAV_CHROME_HIDE_AFTER_MS = 900;
+    const PM_NAV_CHROME_REHIDE_MS = 2600;
+
+    function pmNavClearChromeHideTimer() {
+      if (pmNavChromeHideTimer) {
+        clearTimeout(pmNavChromeHideTimer);
+        pmNavChromeHideTimer = 0;
+      }
+    }
+
+    function pmNavSetChromeHidden(hidden) {
+      if (!isTouchDevice) {
+        document.body.classList.remove('pm-nav-chrome-hidden');
+        return;
+      }
+      document.body.classList.toggle('pm-nav-chrome-hidden', !!hidden);
+    }
+
+    function pmNavScheduleChromeHide(delayMs) {
+      if (!isTouchDevice || !pmNavAutoDir) return;
+      pmNavClearChromeHideTimer();
+      const ms = delayMs == null ? PM_NAV_CHROME_HIDE_AFTER_MS : delayMs;
+      pmNavChromeHideTimer = setTimeout(() => {
+        pmNavChromeHideTimer = 0;
+        if (pmNavAutoDir) pmNavSetChromeHidden(true);
+      }, ms);
+    }
+
+    /** Show chrome on tap; schedule fade again while auto-scroll continues. */
+    function pmNavRevealChrome() {
+      if (!isTouchDevice || !pmNavAutoDir) return;
+      pmNavSetChromeHidden(false);
+      pmNavScheduleChromeHide(PM_NAV_CHROME_REHIDE_MS);
+    }
+
+    function pmNavResetChromeVisibility() {
+      pmNavClearChromeHideTimer();
+      pmNavSetChromeHidden(false);
     }
 
     let pmNavHqInFlight = false;
@@ -10780,6 +10897,7 @@
       pmNavAutoHqLastAt = 0;
       pmNavAutoScrollAccum = 0;
       pmNavIgnoreClickDir = 0;
+      pmNavResetChromeVisibility();
       pmNavSyncHandCursor();
       ['pmPagePrevBtn', 'pmPageNextBtn'].forEach((id) => {
         const btn = document.getElementById(id);
@@ -10787,7 +10905,7 @@
         btn.classList.remove('pm-nav-arming', 'pm-nav-autoscroll');
         pmNavResetRing(btn);
         pmNavSetIcon(btn, id === 'pmPagePrevBtn' ? PM_NAV_ICON_PREV : PM_NAV_ICON_NEXT);
-        btn.title = id === 'pmPagePrevBtn' ? PM_NAV_TITLE_PREV : PM_NAV_TITLE_NEXT;
+        btn.title = id === 'pmPagePrevBtn' ? pmNavTitlePrev() : pmNavTitleNext();
         btn.setAttribute('aria-label', btn.title);
       });
       pmNavShowAutoControls(false);
@@ -10807,7 +10925,7 @@
         other.classList.remove('pm-nav-arming', 'pm-nav-autoscroll');
         pmNavResetRing(other);
         pmNavSetIcon(other, dir < 0 ? PM_NAV_ICON_NEXT : PM_NAV_ICON_PREV);
-        other.title = dir < 0 ? PM_NAV_TITLE_NEXT : PM_NAV_TITLE_PREV;
+        other.title = dir < 0 ? pmNavTitleNext() : pmNavTitlePrev();
         other.setAttribute('aria-label', other.title);
       }
 
@@ -10826,13 +10944,16 @@
         prog.style.strokeDashoffset = '0';
       }
       pmNavSetIcon(btn, dir < 0 ? PM_NAV_ICON_AUTO_PREV : PM_NAV_ICON_AUTO_NEXT);
-      btn.title = dir < 0 ? PM_NAV_TITLE_PREV : PM_NAV_TITLE_NEXT;
+      btn.title = dir < 0 ? pmNavTitlePrev() : pmNavTitleNext();
       btn.setAttribute('aria-label', btn.title);
       btn.disabled = false;
 
       pmNavShowAutoControls(true);
       pmNavSyncHandCursor();
       pmNavRequestVisibleHQ();
+      // Mobile: briefly show chrome, then fade so the page is less cluttered.
+      pmNavSetChromeHidden(false);
+      pmNavScheduleChromeHide();
 
       if (!pmNavAutoRaf) {
         pmNavAutoLastTs = 0;
@@ -11048,6 +11169,7 @@
     }
 
     (function pmInitPageNavAutoScroll() {
+      pmNavApplyStaticTooltips();
       const prevBtn = document.getElementById('pmPagePrevBtn');
       const nextBtn = document.getElementById('pmPageNextBtn');
       [prevBtn, nextBtn].forEach((btn) => {
@@ -11129,6 +11251,22 @@
         pmNavTogglePause({ flash: true });
       };
       document.addEventListener('contextmenu', onAutoScrollContextMenu, true);
+
+      // Mobile: tap anywhere while auto-scroll is running → show nav/speed/pause chrome.
+      document.addEventListener('pointerdown', (e) => {
+        if (!isTouchDevice || !pmNavAutoDir) return;
+        if (e.pointerType === 'mouse') return;
+        const onChrome = !!(e.target && e.target.closest && e.target.closest(
+          '.pm-page-nav-btn, #pmAutoScrollSpeed, #pmAutoScrollPauseBtn'
+        ));
+        if (document.body.classList.contains('pm-nav-chrome-hidden')) {
+          pmNavRevealChrome();
+          return;
+        }
+        // Chrome already visible: interacting with it (or a screen tap) resets re-hide.
+        if (onChrome) pmNavRevealChrome();
+        else pmNavScheduleChromeHide(PM_NAV_CHROME_REHIDE_MS);
+      }, { capture: true, passive: true });
     })();
 
     scrollContainer.addEventListener('scroll', () => {
@@ -32645,7 +32783,7 @@ function peDeleteSelected() {
   peDeleteObjects(objs);
 }
 
-/** Mobile page editor: × on a selected object — deletes that object (toolbar trash). */
+/** Mobile page editor: × outside a selected object — deletes that object. */
 function peAppendMobileObjDeleteBtn(hostEl, obj) {
   if (!isTouchDevice || !hostEl || !obj) return;
   const btn = document.createElement('button');
@@ -32654,16 +32792,26 @@ function peAppendMobileObjDeleteBtn(hostEl, obj) {
   btn.setAttribute('aria-label', 'Удалить объект');
   btn.title = 'Удалить объект';
   btn.textContent = '×';
-  const stop = (e) => {
+  let armed = false;
+  btn.addEventListener('pointerdown', (e) => {
+    if (e.button != null && e.button !== 0) return;
     e.stopPropagation();
+    // Do not preventDefault here — it suppresses the synthetic click on some
+    // mobile browsers; we delete on pointerup instead.
+    armed = true;
+    try { btn.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+  btn.addEventListener('pointercancel', () => { armed = false; });
+  btn.addEventListener('pointerup', (e) => {
+    e.stopPropagation();
+    if (!armed) return;
+    armed = false;
     e.preventDefault();
-  };
-  btn.addEventListener('pointerdown', stop);
-  btn.addEventListener('touchstart', stop, { passive: false });
+    peDeleteObjects([obj]);
+  });
   btn.addEventListener('click', (e) => {
     e.stopPropagation();
     e.preventDefault();
-    peDeleteObjects([obj]);
   });
   hostEl.appendChild(btn);
 }
