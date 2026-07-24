@@ -3,7 +3,7 @@
  * Small sizes use classic BMP DIBs inside the ICO — Windows Explorer / shortcuts
  * often keep showing a stale or blank icon when the ICO only contains PNG frames.
  *
- * Also writes icons/pdf-manager-icon-v017.ico (versioned sidecar for NSIS cache-bust).
+ * Also writes icons/pdf-manager-icon-v018.ico (versioned sidecar for NSIS cache-bust).
  *
  * Usage: node scripts/rebuild-windows-icon.mjs
  * Requires: system Python with Pillow (`pip install pillow`).
@@ -38,29 +38,53 @@ def draw_master(size=1024):
     img.paste(grad, (0, 0), mask)
     d = ImageDraw.Draw(img)
     s = size / 42.0
-    d.rounded_rectangle([20*s, 9*s, 32*s, 24*s], radius=max(1, int(1.5*s)), fill=(255,255,255,82))
+    # Tuner params baked from tools/app-icon-tuner.html (base 0.1.7 art).
+    PAGE_CX, PAGE_CY = 21.0, 21.0
+    PAGE_X, PAGE_Y, PAGE_S = -0.8, 0.0, 1.09
+    TEXT_X, TEXT_Y, TEXT_FS = 20.4, 31.8, 10.7
+
+    def P(x, y):
+      # translate(CX,CY) scale(S) translate(-CX+pageX, -CY+pageY)
+      x1 = x + (-PAGE_CX + PAGE_X)
+      y1 = y + (-PAGE_CY + PAGE_Y)
+      return (PAGE_CX + PAGE_S * x1) * s, (PAGE_CY + PAGE_S * y1) * s
+
+    def box(x0, y0, x1, y1):
+      pts = [P(x0, y0), P(x1, y0), P(x0, y1), P(x1, y1)]
+      xs = [p[0] for p in pts]
+      ys = [p[1] for p in pts]
+      return [min(xs), min(ys), max(xs), max(ys)]
+
+    def rad(r_vb):
+      return max(1, int(r_vb * s * PAGE_S))
+
+    d.rounded_rectangle(box(20, 9, 32, 24), radius=rad(1.5), fill=(255,255,255,82))
     # Bottom ends inside the red badge so rx corners don't reveal white fringe
-    d.rounded_rectangle([13.5*s, 8*s, 31.5*s, 26*s], radius=max(1, int(1.5*s)), fill=(255,255,255,255))
-    d.polygon([(27*s, 8*s), (33*s, 14*s), (27*s, 14*s)], fill=(188, 220, 255, 255))
-    d.rounded_rectangle([17*s, 17*s, 29*s, 18.6*s], radius=max(1, int(0.8*s)), fill=(159, 184, 214, 255))
+    d.rounded_rectangle(box(13.5, 8, 31.5, 26), radius=rad(1.5), fill=(255,255,255,255))
+    d.polygon([P(27, 8), P(33, 14), P(27, 14)], fill=(188, 220, 255, 255))
+    d.rounded_rectangle(box(17, 17, 29, 18.6), radius=rad(0.8), fill=(159, 184, 214, 255))
     # Re-paint blue under the badge box BEFORE red, so rounded-corner AA
     # blends with blue (not leftover white page pixels → white fringe).
-    badge = [9*s, 21*s, 33*s, 34*s]
-    pad = max(2, int(0.6 * s))
+    badge = box(9, 21, 33, 34)
+    pad = max(2, int(0.6 * s * PAGE_S))
     # Expand left/right/bottom only — keep white page intact above the badge.
     scrub = [badge[0]-pad, badge[1], badge[2]+pad, badge[3]+pad]
     sx0, sy0 = max(0, int(scrub[0])), max(0, int(scrub[1]))
     sx1, sy1 = min(size, int(scrub[2])+1), min(size, int(scrub[3])+1)
     region = grad.crop((sx0, sy0, sx1, sy1))
     img.paste(region, (sx0, sy0))
-    d.rounded_rectangle(badge, radius=max(2, int(2*s)), fill=(224, 52, 43, 255))
+    d.rounded_rectangle(badge, radius=rad(2), fill=(224, 52, 43, 255))
     try:
-        font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', max(10, int(10.5*s)))
+        font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', max(10, int(TEXT_FS * s)))
     except Exception:
         font = ImageFont.load_default()
     bbox = d.textbbox((0, 0), 'PDF', font=font)
     tw, th = bbox[2]-bbox[0], bbox[3]-bbox[1]
-    d.text(((9*s+33*s)/2 - tw/2, (21*s+34*s)/2 - th/2), 'PDF', fill=(255,255,255,255), font=font)
+    tx, ty = TEXT_X * s, TEXT_Y * s
+    try:
+        d.text((tx, ty), 'PDF', fill=(255,255,255,255), font=font, anchor='ms')
+    except TypeError:
+        d.text((tx - tw/2, ty - th * 0.82), 'PDF', fill=(255,255,255,255), font=font)
     return img
 
 def sharpen_resize(src, size):
@@ -104,7 +128,7 @@ for s, payload in entries:
     blobs += payload; offset += len(payload)
 ico = header + dir_entries + blobs
 (root / 'icon.ico').write_bytes(ico)
-(root / 'pdf-manager-icon-v017.ico').write_bytes(ico)
+(root / 'pdf-manager-icon-v018.ico').write_bytes(ico)
 print('ok', root / 'icon.ico', len(ico))
 `;
 
