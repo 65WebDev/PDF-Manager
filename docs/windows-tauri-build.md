@@ -130,7 +130,34 @@ npm run tauri -- info
 
 Нужен **интернет** (скачивание CDN‑библиотек для офлайн‑HTML + crates Rust).
 
-Также нужен [GitHub CLI](https://cli.github.com/) и авторизация (`gh auth login`) — после сборки установщик **автоматически** заливается в GitHub Release.
+### Быстрый способ (PowerShell)
+
+Из корня репозитория:
+
+```powershell
+# Локальная сборка (.exe + NSIS), без загрузки на GitHub:
+.\scripts\build-windows-exe.ps1
+
+# С загрузкой в GitHub Release (нужны gh + gh auth login):
+.\scripts\build-windows-exe.ps1 -Upload
+
+# Только проверка окружения уже сделана, зависимости стоят:
+.\scripts\build-windows-exe.ps1 -SkipNpmCi
+
+# Режим разработки:
+.\scripts\build-windows-exe.ps1 -Dev
+```
+
+Если PowerShell блокирует скрипт:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\build-windows-exe.ps1
+```
+
+### Вручную через npm
+
+Также нужен [GitHub CLI](https://cli.github.com/) и авторизация (`gh auth login`) — после сборки установщик **автоматически** заливается в GitHub Release (только для `tauri:build`, не для `tauri:build:local`).
 
 ```powershell
 npm run tauri:build
@@ -224,12 +251,11 @@ NSIS‑установщик регистрирует приложение как
 ## 7. Краткий чеклист
 
 1. Node 20+, Git, Rust 1.85+, Build Tools (**C++**)  
-2. `git checkout cursor/tauri-windows-shell-1aac`  
-3. `npm ci`  
-4. `where.exe link` — команда что‑то находит  
-5. `npm run tauri:build`  
-6. Запустить `src-tauri\target\release\PDF Manager.exe`  
-7. Установить NSIS‑сборку и проверить «Открыть с помощью» для PDF  
+2. `git checkout` нужной ветки / `main`  
+3. `.\scripts\build-windows-exe.ps1` (или `npm ci` + `npm run tauri:build:local`)  
+4. `where.exe link` — команда что‑то находит (скрипт проверяет сам)  
+5. Запустить `src-tauri\target\release\PDF Manager.exe`  
+6. Установить NSIS‑сборку и проверить «Открыть с помощью» для PDF  
 
 ---
 
