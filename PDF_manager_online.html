@@ -5275,10 +5275,19 @@
     .main-row.menu-shrink #scaleLabel {
       font-size: max(10px, calc(var(--pm-menu-ctrl-h) * 0.32));
     }
-    /* Keep open/merge + replace…save + scale on row 1 while tools are on row 2 */
-    .main-row.tools-wrapped.menu-shrink .scale-wrapper {
+    /* Keep open/merge + replace…save + scale on row 1 while tools are on row 2.
+       Prefer compressing the scale strip over wrapping it (avoids a 1-frame
+       flash onto row 2 between tools-wrapped and menu-shrink). */
+    .main-row.tools-wrapped .scale-wrapper {
       flex-shrink: 1;
       min-width: 0;
+    }
+    .main-row.tools-wrapped .scale-control {
+      min-width: 0;
+      flex-shrink: 1;
+    }
+    .main-row.tools-wrapped.menu-shrink .scale-control {
+      min-width: max(84px, calc(var(--pm-menu-ctrl-h) * 2.3));
     }
 
     /*“Print” button moved to the scale slider (narrow window) - shrunk to
@@ -9749,8 +9758,8 @@
     // 2) file buttons → icons (.icons-mode);
     // 3) scale strip length ×½ (.scale-compact);
     // 4) tool icons (read…print) wrap to row 2, centered (.tools-wrapped);
-    // 5) shrink all controls until row-1 (left+right+scale) fits — final stage;
-    //    height tracks --pm-menu-ctrl-h (no print relocate, no scale wrap).
+    // 5) shrink all controls (--pm-menu-ctrl-h) until left+right+scale fit on
+    //    row 1 — final stage (no print relocate, no scale wrap).
     // UpdateCenteredWrap retry count for unmeasured (0) line width -
     // reset on the first successful measurement, limits the number of requestAnimationFrames.
     let updateCenteredWrapRetries = 0;
@@ -9771,9 +9780,12 @@
       return ws.reduce((a, b) => a + b, 0) + gap * Math.max(0, ws.length - 1);
     }
 
-    /** Stage 5: binary-search control size so left+right+scale stay on row 1. */
+    /** Stage 5: binary-search control size so left+right+scale stay on row 1.
+        Always pairs with tools-wrapped — call in the same turn (no layout flush
+        between wrap and shrink) so the scale strip never paints on row 2. */
     function pmApplyMenuShrinkToFit(row, left, right, scale, avail) {
       row.classList.add('menu-shrink');
+      row.style.setProperty('--pm-menu-ctrl-h', PM_MENU_CTRL_H_FULL + 'px');
       let lo = PM_MENU_CTRL_H_MIN;
       let hi = PM_MENU_CTRL_H_FULL;
       let best = PM_MENU_CTRL_H_MIN;
@@ -9785,7 +9797,9 @@
         const need = pmMenuRowWidth(
           gap5, left.scrollWidth, right.scrollWidth, scale.scrollWidth
         );
-        if (need <= avail) {
+        const dropped = scale.offsetTop > left.offsetTop + 2 ||
+          right.offsetTop > left.offsetTop + 2;
+        if (need <= avail && !dropped) {
           best = mid;
           lo = mid + 1;
         } else {
@@ -9794,6 +9808,11 @@
       }
       row.style.setProperty('--pm-menu-ctrl-h', best + 'px');
       void row.offsetWidth;
+    }
+
+    function pmScaleDroppedToNextRow(left, right, scale) {
+      return scale.offsetTop > left.offsetTop + 2 ||
+        right.offsetTop > left.offsetTop + 2;
     }
 
     function updateCenteredWrap() {
@@ -9817,7 +9836,11 @@
       updateCenteredWrapRetries = 0;
 
       // Echo from our own class/gap changes: same clientWidth → skip (no DOM thrash).
-      if (row.clientWidth === pmMenuWrapLastCw) return;
+      // Still remeasure if scale/right wrongly sat on a new flex line.
+      if (row.clientWidth === pmMenuWrapLastCw &&
+          !(row.classList.contains('tools-wrapped') && pmScaleDroppedToNextRow(left, right, scale))) {
+        return;
+      }
 
       pmMenuWrapLock = true;
       // Disable .top-menu button { transition: all } for the duration of the
@@ -9858,15 +9881,12 @@
             wL = left.scrollWidth; wC = center.scrollWidth;
             wR = right.scrollWidth; wS = scale.scrollWidth;
             if (pmMenuRowWidth(gap, wL, wC, wR, wS) > avail) {
-              // ── Stage 4: tool icons wrap to second row (centered); scale stays compact ──
+              // ── Stages 4+5 together: wrap tools, then shrink row-1 controls
+              //     in the same turn (no layout flush between) so the scale
+              //     strip never paints alone on the second row. ──
               center.classList.add('wrapped');
               row.classList.add('tools-wrapped');
-              void row.offsetWidth;
-              wL = left.scrollWidth; wR = right.scrollWidth; wS = scale.scrollWidth;
-              if (pmMenuRowWidth(gap, wL, wR, wS) > avail) {
-                // ── Stage 5: shrink all controls until row 1 fits (no scale wrap) ──
-                pmApplyMenuShrinkToFit(row, left, right, scale, avail);
-              }
+              pmApplyMenuShrinkToFit(row, left, right, scale, avail);
             }
           }
         }
