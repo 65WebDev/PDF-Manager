@@ -4697,6 +4697,35 @@
       #pageEditModal .pe-handle {
         position: absolute;
       }
+      /* Mobile PE: × on selected objects (redact / text / image / shapes). */
+      #pageEditModal .pe-obj-mobile-del {
+        position: absolute;
+        top: 4px;
+        right: 4px;
+        z-index: 30;
+        width: 28px;
+        height: 28px;
+        margin: 0;
+        padding: 0;
+        border: none;
+        border-radius: 50%;
+        background: rgba(220, 38, 38, 0.92);
+        color: #fff;
+        font-size: 20px;
+        font-weight: 700;
+        line-height: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+        -webkit-tap-highlight-color: transparent;
+        touch-action: manipulation;
+        pointer-events: auto;
+      }
+      #pageEditModal .pe-obj-mobile-del:active {
+        background: #b91c1c;
+      }
       #pageEditModal .pe-text-corner-handle::after,
       #pageEditModal .pe-handle::after {
         content: '';
@@ -5086,29 +5115,39 @@
         text-align: center;
         /*remains absolutely centered horizontally (left:50% of the basic rule)*/
       }
-      /*Logo in PORTRAIT: align with tool-row buttons (print/edit, multi-select, …).
-         Row 2 starts at padding 8 + 42 + gap 8 ≈ 58px; nudge up a touch for optical center.*/
-      .app-logo { top: 54px; right: 20px; }
+      /*Logo in PORTRAIT: flush with tool-row buttons (row 2 = pad 8 + 42 + gap 8).
+         Exact 42×42 — same outer box as neighboring .icon-btn / .compact-btn.*/
+      .app-logo {
+        top: 58px;
+        right: 20px;
+        width: 42px !important;
+        height: 42px !important;
+        border-radius: 10px;
+      }
+      .app-logo svg {
+        width: 42px !important;
+        height: 42px !important;
+      }
       #logoMenuArea {
         display: block;
-        top: 54px;
+        top: 58px;
         right: 20px;
         width: 42px;
         height: 42px;
         z-index: 111;
       }
       #logoMenuArea.expanded {
-        /* logo slot + theme + about (no hide-menu / restore-help on mobile) */
-        height: calc(42px + 2px + 42px + 6px + 42px);
+        /* logo + 6px gap + theme + 6px gap + about */
+        height: calc(42px + 6px + 42px + 6px + 42px);
       }
       #themeToggleBtn {
         display: flex;
-        top: 44px; /* first popup under the logo */
+        top: 48px; /* 42 logo + 6 gap (same as theme ↔ about) */
         right: 0;
       }
       #aboutBtn {
         display: flex;
-        top: 92px; /* below theme (44 + 42 + 6) */
+        top: 96px; /* 48 + 42 + 6 */
         right: 0;
       }
 
@@ -5166,7 +5205,17 @@
     }
 
     @media (pointer: coarse) and (orientation: landscape) {
-      .app-logo { top: 8px; right: 72px; }   /*flush with menu buttons*/
+      .app-logo {
+        top: 8px;
+        right: 72px; /* flush with menu buttons */
+        width: 42px !important;
+        height: 42px !important;
+        border-radius: 10px;
+      }
+      .app-logo svg {
+        width: 42px !important;
+        height: 42px !important;
+      }
       #logoMenuArea {
         display: block;
         top: 8px;
@@ -5176,16 +5225,16 @@
         z-index: 111;
       }
       #logoMenuArea.expanded {
-        height: calc(42px + 2px + 42px + 6px + 42px);
+        height: calc(42px + 6px + 42px + 6px + 42px);
       }
       #themeToggleBtn {
         display: flex;
-        top: 44px;
+        top: 48px; /* 42 logo + 6 gap */
         right: 0;
       }
       #aboutBtn {
         display: flex;
-        top: 92px;
+        top: 96px; /* 48 + 42 + 6 */
         right: 0;
       }
       /*The menu is collapsed: the file name is centered and at the same vertical level,
@@ -27855,6 +27904,11 @@ function peRedrawObjects() {
         rotH.contentEditable = 'false';
         el.appendChild(rotH);
       }
+      // Mobile: × in the object's top-right — same action as toolbar trash.
+      if (isTouchDevice && (o.type === 'redact' || o.type === 'text'
+          || o.type === 'shape' || o.type === 'image')) {
+        peAppendMobileObjDeleteBtn(el, o);
+      }
     }
     peBindPointerDown(el, (e) => peObjMouseDown(e, o));
     layer.appendChild(el);
@@ -28835,7 +28889,8 @@ function peEditablePlainText(el) {
     if (node.nodeType !== 1) return;
     // Corner anchors/contentEditable service children do not apply here.
     if (node.classList && (node.classList.contains('pe-text-corner-handle') ||
-        node.classList.contains('pe-text-rotate-handle'))) return;
+        node.classList.contains('pe-text-rotate-handle') ||
+        node.classList.contains('pe-obj-mobile-del'))) return;
     for (let i = 0; i < node.childNodes.length; i++) walk(node.childNodes[i]);
   };
   walk(el);
@@ -29151,11 +29206,11 @@ function peUsesMobileEditOverlay() {
   return typeof isTouchDevice !== 'undefined' && isTouchDevice;
 }
 
-/** Landscape mobile: in-app keyboard window instead of system OSK. */
+/** Landscape used an oversized in-app keyboard window; Android floating OSK
+ *  cannot be requested from the web. Always use the system keyboard via
+ *  #peOskProxy (same path as portrait). */
 function peUsesMobileKbWindow() {
-  return peUsesMobileEditOverlay()
-    && typeof window.matchMedia === 'function'
-    && window.matchMedia('(orientation: landscape)').matches;
+  return false;
 }
 
 function peOskEl() {
@@ -32590,6 +32645,29 @@ function peDeleteSelected() {
   peDeleteObjects(objs);
 }
 
+/** Mobile page editor: × on a selected object — deletes that object (toolbar trash). */
+function peAppendMobileObjDeleteBtn(hostEl, obj) {
+  if (!isTouchDevice || !hostEl || !obj) return;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'pe-obj-mobile-del';
+  btn.setAttribute('aria-label', 'Удалить объект');
+  btn.title = 'Удалить объект';
+  btn.textContent = '×';
+  const stop = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+  };
+  btn.addEventListener('pointerdown', stop);
+  btn.addEventListener('touchstart', stop, { passive: false });
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    peDeleteObjects([obj]);
+  });
+  hostEl.appendChild(btn);
+}
+
 // ── Clipboard editor objects (copy/cut/paste) ──
 let peObjClipboard = null;   // { objects: [...], mode: 'copy'|'cut', sourceAnchor?: {x,y} }
 let peObjCtxPastePos = { x: 0, y: 0 };  // insertion coordinates (stage, px)
@@ -35312,6 +35390,8 @@ function peOnObjSelectTextLayerPointerDown(e) {
 
 function peObjMouseDown(e, o) {
   if (!peIsPrimaryPointer(e)) return;
+  // Mobile × delete control — handled by its own listeners.
+  if (e.target && e.target.closest && e.target.closest('.pe-obj-mobile-del')) return;
   const touchLike = e.pointerType === 'touch' || e.pointerType === 'pen';
   // Pinch in progress / just started: never treat as object select/move.
   if (pePinchActive || (touchLike && Date.now() < pePinchBlockObjUntil)) {
