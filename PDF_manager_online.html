@@ -28982,6 +28982,37 @@ function peAppendCalloutBox(layer, o, W, H) {
   layer.appendChild(box);
 }
 
+/** Keep shape-comment yellow box + leader locked to stage size during live zoom. */
+function peSyncShapeCommentLayout(o, W, H) {
+  if (!peState || !peShapeHasComment(o)) return false;
+  const layer = document.getElementById('peObjLayer');
+  if (!layer) return false;
+  peEnsureShapeCommentBox(o);
+  const c = peShapeCommentData(o);
+  if (!c) return false;
+  const bx = c.boxX * W, by = c.boxY * H;
+  const bw = (c.boxW || 0) * W, bh = (c.boxH || 0) * H;
+  const box = layer.querySelector('.pe-obj-shape-comment-box[data-pe-id="' + o.id + '"]');
+  const svg = layer.querySelector('svg.pe-shape-comment-leader[data-pe-id="' + o.id + '"]');
+  if (!box || !svg) return false;
+  box.style.left = bx + 'px';
+  box.style.top = by + 'px';
+  box.style.width = bw + 'px';
+  box.style.height = bh + 'px';
+  const textEl = box.querySelector('.pe-callout-text');
+  if (textEl) textEl.style.fontSize = ((c.fontPt || 12) * (peState.scale || 1)) + 'px';
+  svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+  const line = svg.querySelector('line');
+  if (line) {
+    const pts = peShapeCommentLeaderEndpoints(o, W, H, bx, by, bw, bh);
+    line.setAttribute('x1', String(pts.x1));
+    line.setAttribute('y1', String(pts.y1));
+    line.setAttribute('x2', String(pts.x2));
+    line.setAttribute('y2', String(pts.y2));
+  }
+  return true;
+}
+
 /** Yellow comment bubble for a shape; leader to arrow tail or short path to other shapes. */
 function peAppendShapeCommentBox(layer, o, W, H) {
   if (!peShapeHasComment(o)) return;
@@ -31418,7 +31449,15 @@ function peUpdateObjectsLayout() {
                || o.type === 'strikeout' || o.type === 'underline' || o.type === 'callout') {
       el.style.width = (o.w * W) + 'px';
       el.style.height = (o.h * H) + 'px';
-      if (o.type === 'shape') el.style.transform = o.rot ? 'rotate(' + o.rot + 'deg)' : '';
+      if (o.type === 'shape') {
+        el.style.transform = o.rot ? 'rotate(' + o.rot + 'deg)' : '';
+        // Shape host is updated above; the yellow comment box is a sibling
+        // pe-obj with the same data-pe-id and was left at stale CSS px during
+        // live zoom — re-layout it with the new stage size.
+        if (peShapeHasComment(o) && !peSyncShapeCommentLayout(o, W, H)) {
+          missing = true;
+        }
+      }
       if (o.type === 'callout') {
         // Full redraw keeps frame pieces + comment box + leader in sync.
         missing = true;
