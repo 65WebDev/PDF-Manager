@@ -4,7 +4,7 @@
 
 !macro NSIS_HOOK_POSTINSTALL
   ; Sidecar icon shipped via bundle.resources (cache-busting filename).
-  StrCpy $R9 "$INSTDIR\icons\pdf-manager-icon-v012.ico"
+  StrCpy $R9 "$INSTDIR\icons\pdf-manager-icon-v017.ico"
 
   ${If} ${FileExists} "$R9"
     ; Uninstall / ARP list icon

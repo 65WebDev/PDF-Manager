@@ -3,7 +3,7 @@
  * Small sizes use classic BMP DIBs inside the ICO — Windows Explorer / shortcuts
  * often keep showing a stale or blank icon when the ICO only contains PNG frames.
  *
- * Also writes icons/pdf-manager-icon-v012.ico (versioned sidecar for NSIS cache-bust).
+ * Also writes icons/pdf-manager-icon-v017.ico (versioned sidecar for NSIS cache-bust).
  *
  * Usage: node scripts/rebuild-windows-icon.mjs
  * Requires: system Python with Pillow (`pip install pillow`).
@@ -38,18 +38,18 @@ def draw_master(size=1024):
     img.paste(grad, (0, 0), mask)
     d = ImageDraw.Draw(img)
     s = size / 42.0
-    d.rounded_rectangle([16*s, 9*s, 31*s, 29*s], radius=max(1, int(1.5*s)), fill=(255,255,255,82))
-    d.rounded_rectangle([9.5*s, 8*s, 27.5*s, 34*s], radius=max(1, int(1.5*s)), fill=(255,255,255,255))
-    d.polygon([(23*s, 8*s), (29*s, 14*s), (23*s, 14*s)], fill=(188, 220, 255, 255))
-    d.rounded_rectangle([13*s, 17*s, 25*s, 18.6*s], radius=max(1, int(0.8*s)), fill=(159, 184, 214, 255))
-    d.rounded_rectangle([5*s, 21*s, 29*s, 34*s], radius=max(2, int(2*s)), fill=(224, 52, 43, 255))
+    d.rounded_rectangle([20*s, 9*s, 35*s, 29*s], radius=max(1, int(1.5*s)), fill=(255,255,255,82))
+    d.rounded_rectangle([13.5*s, 8*s, 31.5*s, 34*s], radius=max(1, int(1.5*s)), fill=(255,255,255,255))
+    d.polygon([(27*s, 8*s), (33*s, 14*s), (27*s, 14*s)], fill=(188, 220, 255, 255))
+    d.rounded_rectangle([17*s, 17*s, 29*s, 18.6*s], radius=max(1, int(0.8*s)), fill=(159, 184, 214, 255))
+    d.rounded_rectangle([9*s, 21*s, 33*s, 34*s], radius=max(2, int(2*s)), fill=(224, 52, 43, 255))
     try:
         font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', max(10, int(10.5*s)))
     except Exception:
         font = ImageFont.load_default()
     bbox = d.textbbox((0, 0), 'PDF', font=font)
     tw, th = bbox[2]-bbox[0], bbox[3]-bbox[1]
-    d.text(((5*s+29*s)/2 - tw/2, (21*s+34*s)/2 - th/2), 'PDF', fill=(255,255,255,255), font=font)
+    d.text(((9*s+33*s)/2 - tw/2, (21*s+34*s)/2 - th/2), 'PDF', fill=(255,255,255,255), font=font)
     return img
 
 def sharpen_resize(src, size):
@@ -93,7 +93,7 @@ for s, payload in entries:
     blobs += payload; offset += len(payload)
 ico = header + dir_entries + blobs
 (root / 'icon.ico').write_bytes(ico)
-(root / 'pdf-manager-icon-v012.ico').write_bytes(ico)
+(root / 'pdf-manager-icon-v017.ico').write_bytes(ico)
 print('ok', root / 'icon.ico', len(ico))
 `;
 
