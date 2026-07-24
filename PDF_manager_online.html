@@ -5157,11 +5157,9 @@
         min-width: 0;
       }
     }
-    /*─── Compact mode: window width <= 850px
-       The “Select file”, “Combine”, “Export”, “Save” buttons become
-       square icons without text and lined up along the top left.*/
-    /*Icon mode is enabled dynamically from JS (class .icons-mode on .main-row),
-       when the text buttons no longer fit on the line.*/
+    /*─── Compact file buttons: class .icons-mode on .main-row (stage 2+)
+       “Выбрать файл / Объединить / Заменить / Экспорт / Сохранить” → square icons.
+       Flex order for the wrapped tools row is applied only with .tools-wrapped. */
     .main-row.icons-mode .compact-btn .btn-label { display: none; }
     .main-row.icons-mode .compact-btn {
       width: 42px;
@@ -5174,6 +5172,56 @@
     .main-row.icons-mode .compact-btn .btn-ico { font-size: 22px; }
     .main-row.icons-mode #replaceBtn .btn-ico svg { width: 22px; height: 22px; }
     #replaceBtn .btn-ico { display: inline-flex; align-items: center; }
+
+    /* Stage 3+: scale strip at half length (slider track ~½ of 170px). */
+    .main-row.scale-compact .slider-wrapper {
+      max-width: 85px;
+    }
+    .main-row.scale-compact .scale-control {
+      min-width: 110px;
+      padding: 0 10px;
+      gap: 6px;
+    }
+
+    /* Stage 5: keep the stage-4 layout, shrink controls in place. */
+    .main-row.menu-shrink {
+      gap: 6px 6px;
+      padding-right: 56px;
+    }
+    .main-row.menu-shrink .left-actions,
+    .main-row.menu-shrink .right-actions,
+    .main-row.menu-shrink .centered-actions {
+      gap: 4px;
+    }
+    .main-row.menu-shrink .compact-btn,
+    .main-row.menu-shrink button.icon-btn,
+    .main-row.menu-shrink label.icon-btn {
+      width: 34px;
+      height: 34px;
+      min-height: 34px;
+      padding: 5px;
+      font-size: 18px;
+      box-sizing: border-box;
+    }
+    .main-row.menu-shrink .compact-btn .btn-ico { font-size: 18px; }
+    .main-row.menu-shrink #replaceBtn .btn-ico svg { width: 18px; height: 18px; }
+    .main-row.menu-shrink button#rotateLeftBtn .rotate-glyph,
+    .main-row.menu-shrink button#rotateRightBtn .rotate-glyph {
+      font-size: 28px;
+    }
+    .main-row.menu-shrink .slider-wrapper { max-width: 64px; }
+    .main-row.menu-shrink.scale-compact .slider-wrapper { max-width: 64px; }
+    .main-row.menu-shrink .scale-control {
+      min-width: 96px;
+      height: 30px;
+      padding: 0 8px;
+      gap: 4px;
+    }
+    .main-row.menu-shrink #fitWidthBtn {
+      width: 22px; height: 22px; min-width: 22px; min-height: 22px; max-height: 22px;
+    }
+    .main-row.menu-shrink #fitWidthBtn svg { width: 15px; height: 15px; }
+    .main-row.menu-shrink #scaleLabel { font-size: 12px; }
 
     /*“Print” button moved to the scale slider (narrow window) - shrunk to
        fit the scale panel's own natural height instead of forcing it
@@ -5225,23 +5273,24 @@
       box-sizing: border-box;
     }
 
-    /*File buttons (Export/Save) - immediately behind the left block, top left*/
-    .main-row.icons-mode .right-actions {
+    /* Stage 4+: tools on second row — file buttons stay on the first row left,
+       scale stays on the first row, tools left-aligned below. */
+    .main-row.tools-wrapped .right-actions {
       order: 2;
       margin-left: 0 !important;
     }
-
-    /*The scale when transferred is on a separate line on the left (before the central block)*/
-    .main-row.icons-mode .scale-wrapper { order: 3; }
-    .main-row.icons-mode .scale-wrapper.wrapped {
+    .main-row.tools-wrapped .scale-wrapper { order: 3; }
+    .main-row.tools-wrapped .scale-wrapper.wrapped {
       flex-basis: 100%;
       justify-content: flex-start;
       margin-left: 0;
     }
-
-    /*The central block when transferred is below the scale, to the left*/
-    .main-row.icons-mode .centered-actions { order: 4; margin-left: 0; margin-right: 0; }
-    .main-row.icons-mode .centered-actions.wrapped {
+    .main-row.tools-wrapped .centered-actions {
+      order: 4;
+      margin-left: 0;
+      margin-right: 0;
+    }
+    .main-row.tools-wrapped .centered-actions.wrapped {
       order: 4;
       flex-basis: 100%;
       width: auto;
@@ -9640,12 +9689,14 @@
       }
     }
 
-    //Dynamic cascade of translations when narrowing the window:
-    //1) the central block moves first (rotate → print) onto its line;
-    //2) when “Export” comes up against “Merge” - the buttons turn into icons;
-    //3) when the scale touches the “Save” icon, the scale moves down.
-    //UpdateCenteredWrap retry count for unmeasured (0) line width -
-    //reset on the first successful measurement, limits the number of requestAnimationFrames.
+    // Dynamic cascade when narrowing the window (desktop):
+    // 1) full labels + full scale (stage 1);
+    // 2) file buttons → icons (.icons-mode);
+    // 3) scale strip length ×½ (.scale-compact);
+    // 4) tool icons (read…print) wrap to row 2 (.wrapped + .tools-wrapped);
+    // 5) shrink controls in place (.menu-shrink); scale wrap only as last resort.
+    // UpdateCenteredWrap retry count for unmeasured (0) line width -
+    // reset on the first successful measurement, limits the number of requestAnimationFrames.
     let updateCenteredWrapRetries = 0;
 
     function updateCenteredWrap() {
@@ -9659,20 +9710,14 @@
       // Disable .top-menu button { transition: all } for the duration of the
       // measure — otherwise removing .icons-mode leaves font-size/padding mid-
       // transition (~22px / wider labels), the sum no longer fits, and icons-mode
-      // is immediately re-applied (menu stuck at compression stage 3 on widen).
+      // is immediately re-applied (menu stuck at a compression stage on widen).
       row.classList.add('pm-measuring');
       try {
-        //Complete reset of states before measurement
+        // Complete reset of states before measurement
         center.classList.remove('wrapped');
         scale.classList.remove('wrapped');
-        row.classList.remove('icons-mode');
-        //We also return the “Print” button to its original place UNCONDITIONALLY and BEFORE everyone
-        //dimensions below (and not just in relocatePrintIfNeeded at the very end).
-        //Otherwise, if the function returns earlier (for example, step 1: everything fits anyway
-        //in one line) - the measurement will take place without printBtn (it is still in
-        //.scale-control from last time), .centered-actions will be measured LOWER
-        // width, the early return will work, and the “Print” button will remain in
-        // scale block forever (that block will visually become taller).
+        row.classList.remove('icons-mode', 'scale-compact', 'menu-shrink', 'tools-wrapped');
+        // Return “Print” home UNCONDITIONALLY before measuring (see comment below).
         resetPrintButtonHome();
         void row.offsetWidth;
 
@@ -9682,12 +9727,8 @@
         const avail    = row.clientWidth - padLeft - padRight;
         const gap      = parseFloat(styles.columnGap) || 12;
 
-        // If the line is not yet measurable (for example, the menu has just been expanded and the width is 0) -
-        // do not recalculate the transfer now (otherwise we will mistakenly add wrapped/icons-mode →
-        // the menu will become higher), and we plan to try again on the next frame. Without this
-        // Maximizing a window from a minimized state could “hang” with classes
-        // wrapped/icons-mode set during animation on the intermediate narrow
-        // width - there were no backup recalculations after that same resize event.
+        // If the line is not yet measurable (menu just expanded, width 0) —
+        // retry next frame instead of locking wrapped/icons-mode on a bad measure.
         if (row.clientWidth <= 0) {
           if (updateCenteredWrapRetries < 20) {
             updateCenteredWrapRetries++;
@@ -9697,35 +9738,46 @@
         }
         updateCenteredWrapRetries = 0;
 
-        // Row width = blocks + gaps between them
         const rowWidth = (...ws) =>
           ws.reduce((a, b) => a + b, 0) + gap * (ws.length - 1);
 
-        // ── Step 1: does everything (text buttons) fit on one line? ──
         let wL = left.scrollWidth, wC = center.scrollWidth,
             wR = right.scrollWidth, wS = scale.scrollWidth;
+
+        // ── Stage 1: full labels + full scale on one row ──
         if (rowWidth(wL, wC, wR, wS) <= avail) return;
 
-        // ── Step 2: move the central block down ──
-        center.classList.add('wrapped');
-        // Now the top line = left + right + scale (the buttons are still text).
-        // Does it fit? — we leave it as it is (only the center has moved).
-        if (rowWidth(wL, wR, wS) <= avail) return;
-
-        // ── Step 3: “Export” hits “Merge” - turn on icon mode ──
+        // ── Stage 2: file buttons → icons ──
         row.classList.add('icons-mode');
         void row.offsetWidth;
-        // Let's measure the widths with icons
-        wL = left.scrollWidth; wR = right.scrollWidth; wS = scale.scrollWidth;
+        wL = left.scrollWidth; wC = center.scrollWidth;
+        wR = right.scrollWidth; wS = scale.scrollWidth;
+        if (rowWidth(wL, wC, wR, wS) <= avail) return;
 
-        // ── Step 4: if even with the icons the scale does not fit next to it, move the scale ──
+        // ── Stage 3: scale strip at half length ──
+        row.classList.add('scale-compact');
+        void row.offsetWidth;
+        wL = left.scrollWidth; wC = center.scrollWidth;
+        wR = right.scrollWidth; wS = scale.scrollWidth;
+        if (rowWidth(wL, wC, wR, wS) <= avail) return;
+
+        // ── Stage 4: tool icons wrap to second row (scale stays compact) ──
+        center.classList.add('wrapped');
+        row.classList.add('tools-wrapped');
+        void row.offsetWidth;
+        wL = left.scrollWidth; wR = right.scrollWidth; wS = scale.scrollWidth;
+        relocatePrintIfNeeded(avail);
+        if (rowWidth(wL, wR, wS) <= avail) return;
+
+        // ── Stage 5: shrink controls in place ──
+        row.classList.add('menu-shrink');
+        void row.offsetWidth;
+        wL = left.scrollWidth; wR = right.scrollWidth; wS = scale.scrollWidth;
+        relocatePrintIfNeeded(avail);
         if (rowWidth(wL, wR, wS) > avail) {
+          // Last resort: park the scale on its own row.
           scale.classList.add('wrapped');
         }
-
-        // ── Step 5: with a very narrow window - if the central block (icons) is not
-        //    placed in the line, move the “Print” button up to the scale slider.
-        relocatePrintIfNeeded(avail);
       } finally {
         row.classList.remove('pm-measuring');
       }
