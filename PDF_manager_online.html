@@ -5178,133 +5178,153 @@
     .main-row.icons-mode #replaceBtn .btn-ico svg { width: 22px; height: 22px; }
     #replaceBtn .btn-ico { display: inline-flex; align-items: center; }
 
-    /* Stage 3+: scale strip at half length (slider track ~½ of 170px). */
-    .main-row.scale-compact .slider-wrapper {
-      max-width: 85px;
-    }
-    .main-row.scale-compact .scale-control {
-      min-width: 110px;
-      padding: 0 10px;
-      gap: 6px;
-    }
+    /* Stage 3–5 desktop-only: do not affect the touch portrait/landscape menu. */
+    @media (pointer: fine) {
+      /* Stage 3+: scale strip at half length (slider track ~½ of 170px). */
+      .main-row.scale-compact .slider-wrapper {
+        max-width: 85px;
+      }
+      .main-row.scale-compact .scale-control {
+        min-width: 110px;
+        padding: 0 10px;
+        gap: 6px;
+      }
 
-    /* Stage 5: keep stage-4 layout; shrink all toolbar controls until
-       [open/merge | replace…save | scale] fit on row 1 (scale must NOT wrap).
-       --pm-menu-ctrl-h is a length (e.g. 42px). Glyph sizes use
-       calc(var(--pm-menu-ctrl-h) * <unitless>) — never “22px * var(/42)”
-       (px×px is invalid and drops the whole declaration). */
-    .main-row {
-      /* Inherits --pm-menu-ctrl-h from .top-menu; kept here as a local fallback. */
-      --pm-menu-ctrl-h: 42px;
-    }
-    .main-row.menu-shrink {
-      gap: 6px 6px;
-    }
-    .main-row.menu-shrink .left-actions,
-    .main-row.menu-shrink .right-actions,
-    .main-row.menu-shrink .centered-actions {
-      gap: 4px;
-    }
-    /* Beat .top-menu button / .icon-btn / .icons-mode .compact-btn fixed 42px.
-       Ratios = natural size / 42 (22→0.524, 30→0.714, 26→0.619, 18→0.429). */
-    .top-menu .main-row.menu-shrink button:not(#fitWidthBtn):not(.img-save-btn):not(#printSelectedBtn):not(#toggleDeletedBtn):not(.rl-slot-popup),
-    .top-menu .main-row.menu-shrink label.icon-btn,
-    .main-row.menu-shrink .compact-btn,
-    .main-row.menu-shrink button.icon-btn,
-    .main-row.menu-shrink label.icon-btn {
-      width: var(--pm-menu-ctrl-h);
-      min-width: var(--pm-menu-ctrl-h);
-      height: var(--pm-menu-ctrl-h);
-      min-height: var(--pm-menu-ctrl-h);
-      max-height: var(--pm-menu-ctrl-h);
-      padding: 0;
-      font-size: calc(var(--pm-menu-ctrl-h) * 0.524);
-      line-height: 1;
-      box-sizing: border-box;
-      justify-content: center;
-    }
-    .main-row.menu-shrink .compact-btn .btn-ico {
-      font-size: calc(var(--pm-menu-ctrl-h) * 0.524);
-    }
-    .main-row.menu-shrink #replaceBtn .btn-ico svg {
-      width: calc(var(--pm-menu-ctrl-h) * 0.524);
-      height: calc(var(--pm-menu-ctrl-h) * 0.524);
-    }
-    .main-row.menu-shrink button.icon-btn svg,
-    .main-row.menu-shrink label.icon-btn svg {
-      width: calc(var(--pm-menu-ctrl-h) * 0.524);
-      height: calc(var(--pm-menu-ctrl-h) * 0.524);
-    }
-    /* Cursor mode glyph is naturally ~30×30 inside the 42×42 hit target */
-    .main-row.menu-shrink #selectModeBtn svg {
-      width: calc(var(--pm-menu-ctrl-h) * 0.714);
-      height: calc(var(--pm-menu-ctrl-h) * 0.714);
-    }
-    /* Desktop rotate glyph ~22px at full size (same as other tool icons) */
-    .main-row.menu-shrink button#rotateLeftBtn .rotate-glyph,
-    .main-row.menu-shrink button#rotateRightBtn .rotate-glyph {
-      font-size: calc(var(--pm-menu-ctrl-h) * 0.524);
-    }
-    /* Pop-ups under delete/print/save stay matched to the shrunk hit target */
-    .top-menu .main-row.menu-shrink .img-save-btn,
-    .top-menu .main-row.menu-shrink #toggleDeletedBtn,
-    .top-menu .main-row.menu-shrink #printSelectedBtn,
-    .top-menu .main-row.menu-shrink #readModeBtn.rl-slot-popup,
-    .top-menu .main-row.menu-shrink #loupeModeBtn.rl-slot-popup {
-      width: var(--pm-menu-ctrl-h);
-      height: var(--pm-menu-ctrl-h);
-      min-width: var(--pm-menu-ctrl-h);
-    }
-    .main-row.menu-shrink .slider-wrapper {
-      max-width: max(48px, calc(var(--pm-menu-ctrl-h) * 2.024));
-    }
-    .main-row.menu-shrink.scale-compact .slider-wrapper {
-      max-width: max(48px, calc(var(--pm-menu-ctrl-h) * 2.024));
-    }
-    .main-row.menu-shrink .scale-control {
-      /* ~110px at 42px; shrinks with controls so row 1 can fit */
-      min-width: max(72px, calc(var(--pm-menu-ctrl-h) * 2.62));
-      height: var(--pm-menu-ctrl-h);
-      min-height: var(--pm-menu-ctrl-h);
-      max-height: var(--pm-menu-ctrl-h);
-      padding: 0 8px;
-      gap: 4px;
-      box-sizing: border-box;
-      flex-shrink: 0;
-    }
-    /* Fit-width control is naturally 26×26 with 18×18 SVG inside the scale strip */
-    .main-row.menu-shrink #fitWidthBtn {
-      width: calc(var(--pm-menu-ctrl-h) * 0.619);
-      height: calc(var(--pm-menu-ctrl-h) * 0.619);
-      min-width: calc(var(--pm-menu-ctrl-h) * 0.619);
-      min-height: calc(var(--pm-menu-ctrl-h) * 0.619);
-      max-height: calc(var(--pm-menu-ctrl-h) * 0.619);
-    }
-    .main-row.menu-shrink #fitWidthBtn svg {
-      width: calc(var(--pm-menu-ctrl-h) * 0.429);
-      height: calc(var(--pm-menu-ctrl-h) * 0.429);
-    }
-    .main-row.menu-shrink #scaleLabel {
-      font-size: max(10px, calc(var(--pm-menu-ctrl-h) * 0.31));
-    }
-    /* Before menu-shrink applies, prefer compressing the strip over wrapping it */
-    .main-row.tools-wrapped:not(.menu-shrink) .scale-wrapper {
-      flex-shrink: 1;
-      min-width: 0;
-    }
-    .main-row.tools-wrapped:not(.menu-shrink) .scale-control {
-      min-width: 0;
-      flex-shrink: 1;
-    }
-    .main-row.tools-wrapped.menu-shrink .scale-wrapper {
-      flex-shrink: 0;
-    }
+      /* Stage 5: keep stage-4 layout; shrink all toolbar controls until
+         [open/merge | replace…save | scale] fit on row 1 (scale must NOT wrap).
+         --pm-menu-ctrl-h is a length (e.g. 42px). Glyph sizes use
+         calc(var(--pm-menu-ctrl-h) * <unitless>) — never “22px * var(/42)”
+         (px×px is invalid and drops the whole declaration). */
+      .main-row {
+        /* Inherits --pm-menu-ctrl-h from .top-menu; kept here as a local fallback. */
+        --pm-menu-ctrl-h: 42px;
+      }
+      .main-row.menu-shrink {
+        gap: 6px 6px;
+      }
+      .main-row.menu-shrink .left-actions,
+      .main-row.menu-shrink .right-actions,
+      .main-row.menu-shrink .centered-actions {
+        gap: 4px;
+      }
+      /* Beat .top-menu button / .icon-btn / .icons-mode .compact-btn fixed 42px.
+         Ratios = natural size / 42 (22→0.524, 30→0.714, 26→0.619, 18→0.429). */
+      .top-menu .main-row.menu-shrink button:not(#fitWidthBtn):not(.img-save-btn):not(#printSelectedBtn):not(#toggleDeletedBtn):not(.rl-slot-popup),
+      .top-menu .main-row.menu-shrink label.icon-btn,
+      .main-row.menu-shrink .compact-btn,
+      .main-row.menu-shrink button.icon-btn,
+      .main-row.menu-shrink label.icon-btn {
+        width: var(--pm-menu-ctrl-h);
+        min-width: var(--pm-menu-ctrl-h);
+        height: var(--pm-menu-ctrl-h);
+        min-height: var(--pm-menu-ctrl-h);
+        max-height: var(--pm-menu-ctrl-h);
+        padding: 0;
+        font-size: calc(var(--pm-menu-ctrl-h) * 0.524);
+        line-height: 1;
+        box-sizing: border-box;
+        justify-content: center;
+      }
+      .main-row.menu-shrink .compact-btn .btn-ico {
+        font-size: calc(var(--pm-menu-ctrl-h) * 0.524);
+      }
+      .main-row.menu-shrink #replaceBtn .btn-ico svg {
+        width: calc(var(--pm-menu-ctrl-h) * 0.524);
+        height: calc(var(--pm-menu-ctrl-h) * 0.524);
+      }
+      .main-row.menu-shrink button.icon-btn svg,
+      .main-row.menu-shrink label.icon-btn svg {
+        width: calc(var(--pm-menu-ctrl-h) * 0.524);
+        height: calc(var(--pm-menu-ctrl-h) * 0.524);
+      }
+      /* Cursor mode glyph is naturally ~30×30 inside the 42×42 hit target */
+      .main-row.menu-shrink #selectModeBtn svg {
+        width: calc(var(--pm-menu-ctrl-h) * 0.714);
+        height: calc(var(--pm-menu-ctrl-h) * 0.714);
+      }
+      /* Desktop rotate glyph ~22px at full size (same as other tool icons) */
+      .main-row.menu-shrink button#rotateLeftBtn .rotate-glyph,
+      .main-row.menu-shrink button#rotateRightBtn .rotate-glyph {
+        font-size: calc(var(--pm-menu-ctrl-h) * 0.524);
+      }
+      /* Pop-ups under delete/print/save stay matched to the shrunk hit target */
+      .top-menu .main-row.menu-shrink .img-save-btn,
+      .top-menu .main-row.menu-shrink #toggleDeletedBtn,
+      .top-menu .main-row.menu-shrink #printSelectedBtn,
+      .top-menu .main-row.menu-shrink #readModeBtn.rl-slot-popup,
+      .top-menu .main-row.menu-shrink #loupeModeBtn.rl-slot-popup {
+        width: var(--pm-menu-ctrl-h);
+        height: var(--pm-menu-ctrl-h);
+        min-width: var(--pm-menu-ctrl-h);
+      }
+      .main-row.menu-shrink .slider-wrapper {
+        max-width: max(48px, calc(var(--pm-menu-ctrl-h) * 2.024));
+      }
+      .main-row.menu-shrink.scale-compact .slider-wrapper {
+        max-width: max(48px, calc(var(--pm-menu-ctrl-h) * 2.024));
+      }
+      .main-row.menu-shrink .scale-control {
+        /* ~110px at 42px; shrinks with controls so row 1 can fit */
+        min-width: max(72px, calc(var(--pm-menu-ctrl-h) * 2.62));
+        height: var(--pm-menu-ctrl-h);
+        min-height: var(--pm-menu-ctrl-h);
+        max-height: var(--pm-menu-ctrl-h);
+        padding: 0 8px;
+        gap: 4px;
+        box-sizing: border-box;
+        flex-shrink: 0;
+      }
+      /* Fit-width control is naturally 26×26 with 18×18 SVG inside the scale strip */
+      .main-row.menu-shrink #fitWidthBtn {
+        width: calc(var(--pm-menu-ctrl-h) * 0.619);
+        height: calc(var(--pm-menu-ctrl-h) * 0.619);
+        min-width: calc(var(--pm-menu-ctrl-h) * 0.619);
+        min-height: calc(var(--pm-menu-ctrl-h) * 0.619);
+        max-height: calc(var(--pm-menu-ctrl-h) * 0.619);
+      }
+      .main-row.menu-shrink #fitWidthBtn svg {
+        width: calc(var(--pm-menu-ctrl-h) * 0.429);
+        height: calc(var(--pm-menu-ctrl-h) * 0.429);
+      }
+      .main-row.menu-shrink #scaleLabel {
+        font-size: max(10px, calc(var(--pm-menu-ctrl-h) * 0.31));
+      }
+      /* Before menu-shrink applies, prefer compressing the strip over wrapping it */
+      .main-row.tools-wrapped:not(.menu-shrink) .scale-wrapper {
+        flex-shrink: 1;
+        min-width: 0;
+      }
+      .main-row.tools-wrapped:not(.menu-shrink) .scale-control {
+        min-width: 0;
+        flex-shrink: 1;
+      }
+      .main-row.tools-wrapped.menu-shrink .scale-wrapper {
+        flex-shrink: 0;
+      }
 
-    /* Touch: rotate glyphs are naturally ~35px — keep that ratio under menu-shrink */
-    @media (pointer: coarse) {
-      .top-menu .main-row.menu-shrink button#rotateLeftBtn .rotate-glyph,
-      .top-menu .main-row.menu-shrink button#rotateRightBtn .rotate-glyph {
-        font-size: calc(var(--pm-menu-ctrl-h) * 0.833);
+      /* Stage 4+: tools on second row — centered on the viewport.
+         Row 1 keeps [open/merge] on the left and [replace…save + scale] on the right
+         (do not glue replace/export/save to open/merge). */
+      .main-row.tools-wrapped .right-actions {
+        order: 2;
+        margin-left: auto !important;
+      }
+      .main-row.tools-wrapped .scale-wrapper { order: 3; }
+      .main-row.tools-wrapped .centered-actions {
+        order: 5;
+        margin-left: 0;
+        margin-right: 0;
+      }
+      .main-row.tools-wrapped .centered-actions.wrapped {
+        order: 5;
+        justify-content: center;
+        /* Span under the logo padding so “center of screen” is true, not center of
+           the padded flex line. */
+        flex-basis: calc(100% + 72px);
+        width: calc(100% + 72px);
+        max-width: calc(100% + 72px);
+        margin-left: 0;
+        margin-right: -72px;
       }
     }
 
@@ -5358,30 +5378,6 @@
       box-sizing: border-box;
     }
 
-    /* Stage 4+: tools on second row — centered on the viewport.
-       Row 1 keeps [open/merge] on the left and [replace…save + scale] on the right
-       (do not glue replace/export/save to open/merge). */
-    .main-row.tools-wrapped .right-actions {
-      order: 2;
-      margin-left: auto !important;
-    }
-    .main-row.tools-wrapped .scale-wrapper { order: 3; }
-    .main-row.tools-wrapped .centered-actions {
-      order: 5;
-      margin-left: 0;
-      margin-right: 0;
-    }
-    .main-row.tools-wrapped .centered-actions.wrapped {
-      order: 5;
-      justify-content: center;
-      /* Span under the logo padding so “center of screen” is true, not center of
-         the padded flex line. */
-      flex-basis: calc(100% + 72px);
-      width: calc(100% + 72px);
-      max-width: calc(100% + 72px);
-      margin-left: 0;
-      margin-right: -72px;
-    }
     /* ═══════════════════════════════════════════════════════════════════
        DARK MODE
        Additive overrides only - the light-mode rules above are untouched.
@@ -9857,6 +9853,19 @@
       const scale  = document.querySelector('.scale-wrapper');
       if (!row || !left || !center || !right || !scale) return;
       if (pmMenuWrapLock) return;
+
+      // Touch/mobile already has a fixed portrait/landscape menu layout in CSS
+      // (left+right on row 1, tools then scale on following rows). Never apply
+      // the desktop compression cascade there — tools-wrapped/menu-shrink
+      // scramble button alignment (margin-left:auto, 4px gaps, shrink sizes).
+      if (isTouchDevice) {
+        center.classList.remove('wrapped');
+        scale.classList.remove('wrapped');
+        row.classList.remove('icons-mode', 'scale-compact', 'menu-shrink', 'tools-wrapped');
+        pmSetMenuCtrlH(row, null);
+        pmMenuWrapLastCw = row.clientWidth > 0 ? row.clientWidth : -1;
+        return;
+      }
 
       // If the line is not yet measurable (menu just expanded, width 0) —
       // retry next frame instead of locking wrapped/icons-mode on a bad measure.
