@@ -5184,13 +5184,14 @@
 
     /* Stage 5: keep the stage-4 layout; compress horizontally only.
        Do not reduce control height — the scale strip background must stay
-       the same 42px as the toolbar buttons (stages 1–4). */
+       the same 42px as the toolbar buttons (stages 1–4).
+       Keep padding-right at 72px (same as base .main-row): changing it here
+       shifted replace→scale on every remeasure and fought ResizeObserver. */
     .main-row {
       --pm-menu-ctrl-h: 42px;
     }
     .main-row.menu-shrink {
       gap: 6px 6px;
-      padding-right: 56px;
     }
     .main-row.menu-shrink .left-actions,
     .main-row.menu-shrink .right-actions,
@@ -5291,13 +5292,6 @@
       margin-left: 0;
       margin-right: -72px;
     }
-    .main-row.tools-wrapped.menu-shrink .centered-actions.wrapped {
-      flex-basis: calc(100% + 56px);
-      width: calc(100% + 56px);
-      max-width: calc(100% + 56px);
-      margin-right: -56px;
-    }
-
     /* ═══════════════════════════════════════════════════════════════════
        DARK MODE
        Additive overrides only - the light-mode rules above are untouched.
@@ -9697,6 +9691,16 @@
     // UpdateCenteredWrap retry count for unmeasured (0) line width -
     // reset on the first successful measurement, limits the number of requestAnimationFrames.
     let updateCenteredWrapRetries = 0;
+    // Applying cascade classes changes .main-row size → ResizeObserver →
+    // relayoutTopUI → updateCenteredWrap again. Without a lock + width cache the
+    // cascade resets/reapplies every frame (replace→scale block jitters forever
+    // on the stage-4/5 boundary).
+    let pmMenuWrapLock = false;
+    let pmMenuWrapLastCw = -1;
+
+    function invalidateCenteredWrapCache() {
+      pmMenuWrapLastCw = -1;
+    }
 
     function updateCenteredWrap() {
       const row    = document.querySelector('.main-row');
@@ -9705,7 +9709,23 @@
       const right  = document.querySelector('.right-actions');
       const scale  = document.querySelector('.scale-wrapper');
       if (!row || !left || !center || !right || !scale) return;
+      if (pmMenuWrapLock) return;
 
+      // If the line is not yet measurable (menu just expanded, width 0) —
+      // retry next frame instead of locking wrapped/icons-mode on a bad measure.
+      if (row.clientWidth <= 0) {
+        if (updateCenteredWrapRetries < 20) {
+          updateCenteredWrapRetries++;
+          requestAnimationFrame(updateCenteredWrap);
+        }
+        return;
+      }
+      updateCenteredWrapRetries = 0;
+
+      // Echo from our own class/gap changes: same clientWidth → skip (no DOM thrash).
+      if (row.clientWidth === pmMenuWrapLastCw) return;
+
+      pmMenuWrapLock = true;
       // Disable .top-menu button { transition: all } for the duration of the
       // measure — otherwise removing .icons-mode leaves font-size/padding mid-
       // transition (~22px / wider labels), the sum no longer fits, and icons-mode
@@ -9726,17 +9746,6 @@
         const avail    = row.clientWidth - padLeft - padRight;
         const gap      = parseFloat(styles.columnGap) || 12;
 
-        // If the line is not yet measurable (menu just expanded, width 0) —
-        // retry next frame instead of locking wrapped/icons-mode on a bad measure.
-        if (row.clientWidth <= 0) {
-          if (updateCenteredWrapRetries < 20) {
-            updateCenteredWrapRetries++;
-            requestAnimationFrame(updateCenteredWrap);
-          }
-          return;
-        }
-        updateCenteredWrapRetries = 0;
-
         const rowWidth = (...ws) =>
           ws.reduce((a, b) => a + b, 0) + gap * (ws.length - 1);
 
@@ -9744,33 +9753,39 @@
             wR = right.scrollWidth, wS = scale.scrollWidth;
 
         // ── Stage 1: full labels + full scale on one row ──
-        if (rowWidth(wL, wC, wR, wS) <= avail) return;
-
-        // ── Stage 2: file buttons → icons ──
-        row.classList.add('icons-mode');
-        void row.offsetWidth;
-        wL = left.scrollWidth; wC = center.scrollWidth;
-        wR = right.scrollWidth; wS = scale.scrollWidth;
-        if (rowWidth(wL, wC, wR, wS) <= avail) return;
-
-        // ── Stage 3: scale strip at half length ──
-        row.classList.add('scale-compact');
-        void row.offsetWidth;
-        wL = left.scrollWidth; wC = center.scrollWidth;
-        wR = right.scrollWidth; wS = scale.scrollWidth;
-        if (rowWidth(wL, wC, wR, wS) <= avail) return;
-
-        // ── Stage 4: tool icons wrap to second row (centered); scale stays compact ──
-        center.classList.add('wrapped');
-        row.classList.add('tools-wrapped');
-        void row.offsetWidth;
-        wL = left.scrollWidth; wR = right.scrollWidth; wS = scale.scrollWidth;
-        if (rowWidth(wL, wR, wS) <= avail) return;
-
-        // ── Stage 5 (final): horizontal tighten; height stays 42px ──
-        row.classList.add('menu-shrink');
+        if (rowWidth(wL, wC, wR, wS) > avail) {
+          // ── Stage 2: file buttons → icons ──
+          row.classList.add('icons-mode');
+          void row.offsetWidth;
+          wL = left.scrollWidth; wC = center.scrollWidth;
+          wR = right.scrollWidth; wS = scale.scrollWidth;
+          if (rowWidth(wL, wC, wR, wS) > avail) {
+            // ── Stage 3: scale strip at half length ──
+            row.classList.add('scale-compact');
+            void row.offsetWidth;
+            wL = left.scrollWidth; wC = center.scrollWidth;
+            wR = right.scrollWidth; wS = scale.scrollWidth;
+            if (rowWidth(wL, wC, wR, wS) > avail) {
+              // ── Stage 4: tool icons wrap to second row (centered); scale stays compact ──
+              center.classList.add('wrapped');
+              row.classList.add('tools-wrapped');
+              void row.offsetWidth;
+              wL = left.scrollWidth; wR = right.scrollWidth; wS = scale.scrollWidth;
+              if (rowWidth(wL, wR, wS) > avail) {
+                // ── Stage 5 (final): horizontal tighten; height stays 42px ──
+                row.classList.add('menu-shrink');
+              }
+            }
+          }
+        }
+        pmMenuWrapLastCw = row.clientWidth;
       } finally {
         row.classList.remove('pm-measuring');
+        // Absorb ResizeObserver callbacks from the class changes above.
+        requestAnimationFrame(() => {
+          pmMenuWrapLastCw = row.clientWidth;
+          pmMenuWrapLock = false;
+        });
       }
     }
 
@@ -10922,10 +10937,12 @@
       if (mainRowEl) {
         let roPending = false;
         const topUIResizeObserver = new ResizeObserver(() => {
+          if (pmMenuWrapLock) return;
           if (roPending) return;
           roPending = true;
           requestAnimationFrame(() => {
             roPending = false;
+            if (pmMenuWrapLock) return;
             relayoutTopUI();
           });
         });
@@ -13204,12 +13221,16 @@
       const dBtn = document.getElementById('desktopMenuToggleBtn');
       if (dBtn) dBtn.title = collapsed ? 'Показать меню' : 'Скрыть меню';
       // After changing the menu height, we recalculate the positions of the counter/header/bar
+      if (typeof invalidateCenteredWrapCache === 'function') invalidateCenteredWrapCache();
       if (typeof relayoutTopUI === 'function') relayoutTopUI();
       // Additional recalculation after complete restoration of the menu bar layout
       // (when expanded, the line has just become visible and measurable again).
       if (!collapsed) {
         requestAnimationFrame(() => {
-          requestAnimationFrame(() => { if (typeof relayoutTopUI === 'function') relayoutTopUI(); });
+          requestAnimationFrame(() => {
+            if (typeof invalidateCenteredWrapCache === 'function') invalidateCenteredWrapCache();
+            if (typeof relayoutTopUI === 'function') relayoutTopUI();
+          });
         });
       }
       updateStickyFileBar();
