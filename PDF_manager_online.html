@@ -2437,6 +2437,20 @@
     }
     .pe-text-corner-handle.pe-vector-start:active,
     .pe-text-corner-handle.pe-vector-end:active { cursor: grabbing; }
+    /* Line/arrow bend handle — placed at curve midpoint (center when straight). */
+    .pe-text-corner-handle.pe-vector-bend {
+      left: 50%;
+      top: 50%;
+      right: auto;
+      bottom: auto;
+      margin-left: -5px;
+      margin-top: -5px;
+      background: #f1c40f;
+      border-color: #fff;
+      cursor: grab;
+      z-index: 6;
+    }
+    .pe-text-corner-handle.pe-vector-bend:active { cursor: grabbing; }
     /*The rotation anchor is above the center of the text block; rod line to the block.*/
     .pe-text-rotate-handle {
       position: absolute; left: 50%; top: -22px; width: 10px; height: 10px;
@@ -25685,7 +25699,7 @@ function peCheckEdgeAutoScroll(clientX, clientY, opts) {
       'obj-marquee', 'obj-select-gesture',
       'move', 'move-pending', 'move-multi', 'move-pending-multi',
       'callout-box-move', 'resize', 'resize-text', 'resize-shape',
-      'resize-callout-box', 'resize-redact', 'resize-hl', 'resize-vector',
+      'resize-callout-box', 'resize-redact', 'resize-hl', 'resize-vector', 'bend-vector',
       /* Create / stretch shapes & marks near the stage edge. */
       'shape-draw', 'freehand-draw', 'redact-draw', 'highlight-draw'
     ];
@@ -25703,6 +25717,7 @@ function peCheckEdgeAutoScroll(clientX, clientY, opts) {
     peState.drag.kind === 'shape-draw' || peState.drag.kind === 'freehand-draw'
     || peState.drag.kind === 'redact-draw' || peState.drag.kind === 'highlight-draw'
     || peState.drag.kind === 'resize-shape' || peState.drag.kind === 'resize-vector'
+    || peState.drag.kind === 'bend-vector'
     || peState.drag.kind === 'resize-redact'
   ));
   const TH = textSelDrag ? 44 : (shapeEdge ? 44 : 26);
@@ -27952,8 +27967,8 @@ function peRedrawObjects() {
         svg.setAttribute('viewBox', '0 0 ' + pw + ' ' + ph);
         svg.setAttribute('preserveAspectRatio', 'none');
         svg.innerHTML = kind === 'arrow'
-          ? peShapeArrowMarkup(o.color || peShapePresetColor('arrow'), pw, ph, sw)
-          : peShapeLineMarkup(o.color || peShapePresetColor('line'), pw, ph, sw);
+          ? peShapeArrowMarkup(o.color || peShapePresetColor('arrow'), pw, ph, sw, o)
+          : peShapeLineMarkup(o.color || peShapePresetColor('line'), pw, ph, sw, o);
       } else if (kind === 'freehand') {
         svg.setAttribute('viewBox', '0 0 ' + pw + ' ' + ph);
         svg.setAttribute('preserveAspectRatio', 'none');
@@ -28016,6 +28031,17 @@ function peRedrawObjects() {
             // No title tooltips on vector endpoints — not useful on touch / clutter.
             el.appendChild(h);
           });
+          const bendH = document.createElement('div');
+          bendH.className = 'pe-text-corner-handle pe-vector-bend';
+          bendH.dataset.bend = '1';
+          bendH.title = 'Изгиб';
+          const bendPw = Math.max(1, o.w * W);
+          const bendPh = Math.max(1, o.h * H);
+          const bendSw = peShapeStrokeRenderPx(o);
+          const geom = peVectorLocalGeometry(o, bendPw, bendPh, bendSw);
+          bendH.style.left = geom.hx + 'px';
+          bendH.style.top = geom.hy + 'px';
+          el.appendChild(bendH);
         } else {
           ['nw', 'ne', 'sw', 'se'].forEach(corner => {
             const h = document.createElement('div');
@@ -28312,8 +28338,13 @@ function peShapeContourPointLocal(o, W, H, lx, ly) {
   }
   if (kind === 'star') return peStarContourToward(w, h, lx, ly);
   if (kind === 'plus') return pePlusNearestLocal(w, h, lx, ly);
-  if (kind === 'line') {
-    return peNearestPointOnSeg(0, h / 2, w, h / 2, lx, ly);
+  if (kind === 'line' || kind === 'arrow') {
+    const sw = peShapeStrokeRenderPx(o);
+    const g = peVectorLocalGeometry(o, w, h, sw);
+    if (Math.abs(peVectorBend(o)) < 1e-4 && Math.abs(peVectorBendAlong(o)) < 1e-4) {
+      return peNearestPointOnSeg(g.x1, g.y1, g.x2, g.y2, lx, ly);
+    }
+    return peNearestPointOnQuad(g.x1, g.y1, g.ctrlX, g.ctrlY, g.x2, g.y2, lx, ly);
   }
   if (kind === 'freehand') return peFreehandNearestLocal(o, W, H, lx, ly);
   // rect / default — edge of the local box (= drawn rect for rect)
@@ -31426,6 +31457,45 @@ function peRefreshVectorShapeThickness(obj) {
   peLayoutVectorShape(obj, ep.x1, ep.y1, ep.x2, ep.y2, W, H, null);
 }
 
+/** Signed bend offsets (fractions of chord length). bend > 0 curves “up” in local SVG. */
+function peVectorBendAlong(obj) {
+  const v = Number(obj && obj.bendAlong);
+  return Number.isFinite(v) ? v : 0;
+}
+function peVectorBend(obj) {
+  const v = Number(obj && obj.bend);
+  return Number.isFinite(v) ? v : 0;
+}
+
+/** Peak |offset| of the curve midpoint from the chord, in stage px. */
+function peVectorBendDeviationPx(obj, chordLen) {
+  const len = Math.max(1, Number(chordLen) || 1);
+  return Math.hypot(peVectorBendAlong(obj) * len, peVectorBend(obj) * len);
+}
+
+/**
+ * Local (unrotated box) geometry for line/arrow: endpoints, curve midpoint handle,
+ * and quadratic control point (curve passes through handle at t=0.5).
+ */
+function peVectorLocalGeometry(obj, wPx, hPx, strokePx) {
+  const sw = Math.max(0.5, Number(strokePx) || 2);
+  const w = Math.max(1, Number(wPx) || 1);
+  const h = Math.max(1, Number(hPx) || 1);
+  const cy = h / 2;
+  const x1 = 1;
+  const y1 = cy;
+  const x2 = Math.max(2, w - 1);
+  const y2 = cy;
+  const chord = Math.max(1, x2 - x1);
+  const midX = (x1 + x2) / 2;
+  const midY = cy;
+  const hx = midX + peVectorBendAlong(obj) * chord;
+  const hy = midY - peVectorBend(obj) * chord;
+  const ctrlX = midX + 2 * (hx - midX);
+  const ctrlY = midY + 2 * (hy - midY);
+  return { x1, y1, x2, y2, hx, hy, ctrlX, ctrlY, sw, chord, midX, midY };
+}
+
 /** Lay out a horizontal line/arrow box, then rotate it so it runs from (x1,y1) to (x2,y2). */
 function peLayoutVectorShape(obj, x1, y1, x2, y2, W, H, opts) {
   if (!obj) return;
@@ -31443,10 +31513,10 @@ function peLayoutVectorShape(obj, x1, y1, x2, y2, W, H, opts) {
     y2 = y1 + dy;
     len = keep;
   }
-  const kind = obj.shape || 'line';
   const thick = peVectorShapeThicknessPx(obj);
+  const bendDev = peVectorBendDeviationPx(obj, len);
   const wPx = Math.max(len, 1);
-  const hPx = thick;
+  const hPx = Math.max(thick, bendDev * 2 + thick);
   const midX = (x1 + x2) / 2;
   const midY = (y1 + y2) / 2;
   obj.w = wPx / Math.max(1, W);
@@ -31489,6 +31559,37 @@ function peStartVectorEndpointResize(e, o, which) {
     shiftKey: !!e.shiftKey
   };
   peUpdatePanUi();
+}
+
+/** Drag the center bend handle of a line/arrow. */
+function peStartVectorBend(e, o) {
+  const { w: W, h: H } = peStageSize();
+  const ep = peVectorShapeEndpoints(o, W, H);
+  peState.drag = {
+    kind: 'bend-vector',
+    obj: o,
+    x1: ep.x1,
+    y1: ep.y1,
+    x2: ep.x2,
+    y2: ep.y2,
+    shiftKey: !!e.shiftKey
+  };
+  peUpdatePanUi();
+}
+
+/** Sample nearest point on a quadratic Bezier (local px). */
+function peNearestPointOnQuad(x0, y0, cx, cy, x1, y1, px, py) {
+  let bestX = x0, bestY = y0, bestD = Infinity;
+  const n = 32;
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const mt = 1 - t;
+    const x = mt * mt * x0 + 2 * mt * t * cx + t * t * x1;
+    const y = mt * mt * y0 + 2 * mt * t * cy + t * t * y1;
+    const d = (x - px) * (x - px) + (y - py) * (y - py);
+    if (d < bestD) { bestD = d; bestX = x; bestY = y; }
+  }
+  return { x: bestX, y: bestY };
 }
 
 function peGetBoxOuterEl(o) {
@@ -35191,6 +35292,25 @@ function peProcessDrag(clientX, clientY) {
       peLayoutVectorShape(d.obj, d.fixedX, d.fixedY, mx, my, WW, HH, null);
     }
     peRedrawObjects();
+  } else if (d.kind === 'bend-vector') {
+    // Keep the handle on the perpendicular through the chord midpoint (“center”).
+    const { w: WW, h: HH } = peStageSize();
+    const x1 = d.x1, y1 = d.y1, x2 = d.x2, y2 = d.y2;
+    const dx = x2 - x1, dy = y2 - y1;
+    const len = Math.max(1, Math.hypot(dx, dy));
+    const ux = dx / len, uy = dy / len;
+    // Local −Y (positive bend) in stage = (uy, −ux).
+    const px = uy, py = -ux;
+    const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
+    const vx = pt.x - mx, vy = pt.y - my;
+    let bend = (vx * px + vy * py) / len;
+    if (d.shiftKey && Math.abs(bend) < 0.04) bend = 0;
+    bend = Math.max(-0.85, Math.min(0.85, bend));
+    if (Math.abs(bend) < 0.004) bend = 0;
+    d.obj.bend = bend;
+    d.obj.bendAlong = 0;
+    peLayoutVectorShape(d.obj, x1, y1, x2, y2, WW, HH, null);
+    peRedrawObjects();
   } else if (d.kind === 'resize-text') {
     const dist = Math.max(1, Math.hypot(pt.x - d.anchorX, pt.y - d.anchorY));
     const scale = dist / d.startDist;
@@ -35699,6 +35819,8 @@ function peObjMouseDown(e, o) {
     peCloseShapeColorPopup();
     if (e.target.dataset.endpoint && peShapeIsVectorStroke(o.shape)) {
       peStartVectorEndpointResize(e, o, e.target.dataset.endpoint);
+    } else if (e.target.dataset.bend && peShapeIsVectorStroke(o.shape)) {
+      peStartVectorBend(e, o);
     } else {
       peStartShapeCornerResize(e, o, e.target.dataset.corner);
     }
@@ -36660,7 +36782,7 @@ function peObjMouseDown(e, o) {
     }
     peUpdatePanUi();
     peUpdateCropActionsUi();
-    if (['move', 'move-multi', 'resize', 'resize-hl', 'resize-callout-box', 'callout-box-move', 'resize-redact', 'resize-text', 'resize-shape', 'resize-vector', 'rotate-text', 'rotate-shape', 'highlight-draw', 'redact-draw', 'shape-draw', 'freehand-draw', 'crop-draw', 'crop-move', 'crop-resize', 'hl-comment-move'].includes(d.kind)) {
+    if (['move', 'move-multi', 'resize', 'resize-hl', 'resize-callout-box', 'callout-box-move', 'resize-redact', 'resize-text', 'resize-shape', 'resize-vector', 'bend-vector', 'rotate-text', 'rotate-shape', 'highlight-draw', 'redact-draw', 'shape-draw', 'freehand-draw', 'crop-draw', 'crop-move', 'crop-resize', 'hl-comment-move'].includes(d.kind)) {
       peCommitEditorHistory();
     }
   });
@@ -37893,28 +38015,60 @@ function peArrowTipSizePx(hPx, strokePx) {
   };
 }
 
-function peShapeLineMarkup(color, wPx, hPx, strokePx) {
+function peShapeLineMarkup(color, wPx, hPx, strokePx, obj) {
   const c = color || PE_SHAPE_PRESET_DEFAULTS.color;
-  const cy = Math.max(1, hPx) / 2;
-  const sw = Math.max(0.5, Number(strokePx) || 2);
-  const x2 = Math.max(2, wPx - 1);
-  return '<line x1="1" y1="' + cy + '" x2="' + x2 + '" y2="' + cy + '" fill="none" stroke="' + c +
-    '" stroke-width="' + sw + '" stroke-linecap="round"/>';
+  const g = peVectorLocalGeometry(obj || {}, wPx, hPx, strokePx);
+  const sw = g.sw;
+  if (Math.abs(peVectorBend(obj)) < 1e-4 && Math.abs(peVectorBendAlong(obj)) < 1e-4) {
+    return '<line x1="' + g.x1 + '" y1="' + g.y1 + '" x2="' + g.x2 + '" y2="' + g.y2 +
+      '" fill="none" stroke="' + c + '" stroke-width="' + sw + '" stroke-linecap="round"/>';
+  }
+  return '<path d="M ' + g.x1 + ' ' + g.y1 + ' Q ' + g.ctrlX + ' ' + g.ctrlY + ' ' +
+    g.x2 + ' ' + g.y2 + '" fill="none" stroke="' + c + '" stroke-width="' + sw +
+    '" stroke-linecap="round"/>';
 }
 
-function peShapeArrowMarkup(color, wPx, hPx, strokePx) {
+function peShapeArrowMarkup(color, wPx, hPx, strokePx, obj) {
   const c = color || PE_SHAPE_PRESET_DEFAULTS.color;
-  const cy = Math.max(1, hPx) / 2;
-  const sw = Math.max(0.5, Number(strokePx) || 2);
-  const tip = peArrowTipSizePx(hPx, sw);
-  const tipX = Math.max(2, wPx - 1);
-  const shaftEnd = Math.max(2, tipX - tip.len);
-  const tipFill = 'fill="' + c + '" stroke="' + c + '" stroke-width="' + Math.max(0.5, sw * 0.35) + '" stroke-linejoin="round"';
-  let markup = '<line x1="1" y1="' + cy + '" x2="' + shaftEnd + '" y2="' + cy +
-    '" fill="none" stroke="' + c + '" stroke-width="' + sw +
-    '" stroke-linecap="round"/>';
-  markup += '<polygon points="' + tipX + ',' + cy + ' ' + shaftEnd + ',' + (cy - tip.half) +
-    ' ' + shaftEnd + ',' + (cy + tip.half) + '" ' + tipFill + '/>';
+  const g = peVectorLocalGeometry(obj || {}, wPx, hPx, strokePx);
+  const sw = g.sw;
+  // Tip size follows stroke thickness, not bend-inflated bbox height.
+  const tipH = peVectorShapeThicknessPx(obj && obj.shape ? obj : { shape: 'arrow', strokePx: obj && obj.strokePx });
+  const tip = peArrowTipSizePx(tipH, sw);
+  const tipFill = 'fill="' + c + '" stroke="' + c + '" stroke-width="' + Math.max(0.5, sw * 0.35) +
+    '" stroke-linejoin="round"';
+  const bent = Math.abs(peVectorBend(obj)) >= 1e-4 || Math.abs(peVectorBendAlong(obj)) >= 1e-4;
+  // End tangent of Q(P0,C,P1) is P1−C — rotate the tip with the curve.
+  let tux = 1, tuy = 0;
+  if (bent) {
+    const tx = g.x2 - g.ctrlX;
+    const ty = g.y2 - g.ctrlY;
+    const tlen = Math.hypot(tx, ty) || 1;
+    tux = tx / tlen;
+    tuy = ty / tlen;
+  }
+  const tipX = g.x2;
+  const tipY = g.y2;
+  const baseX = tipX - tux * tip.len;
+  const baseY = tipY - tuy * tip.len;
+  const pux = -tuy;
+  const puy = tux;
+  const w1x = baseX + pux * tip.half;
+  const w1y = baseY + puy * tip.half;
+  const w2x = baseX - pux * tip.half;
+  const w2y = baseY - puy * tip.half;
+  let markup;
+  if (!bent) {
+    markup = '<line x1="' + g.x1 + '" y1="' + g.y1 + '" x2="' + baseX + '" y2="' + baseY +
+      '" fill="none" stroke="' + c + '" stroke-width="' + sw + '" stroke-linecap="round"/>';
+  } else {
+    // Shaft follows the same quadratic; tip polygon covers the tip end.
+    markup = '<path d="M ' + g.x1 + ' ' + g.y1 + ' Q ' + g.ctrlX + ' ' + g.ctrlY + ' ' +
+      tipX + ' ' + tipY + '" fill="none" stroke="' + c + '" stroke-width="' + sw +
+      '" stroke-linecap="butt"/>';
+  }
+  markup += '<polygon points="' + tipX + ',' + tipY + ' ' + w1x + ',' + w1y + ' ' +
+    w2x + ',' + w2y + '" ' + tipFill + '/>';
   return markup;
 }
 
@@ -38377,25 +38531,45 @@ function peBakeDrawShape(ctx, o, canvas, renderScale) {
     if (filled) ctx.fill();
     ctx.stroke();
   } else if (kind === 'line') {
+    const g = peVectorLocalGeometry(o, w, h, strokeW);
     ctx.beginPath();
-    ctx.moveTo(x + 1 * S, y + h / 2);
-    ctx.lineTo(x + Math.max(2 * S, w - 1 * S), y + h / 2);
+    ctx.moveTo(x + g.x1, y + g.y1);
+    if (Math.abs(peVectorBend(o)) < 1e-4 && Math.abs(peVectorBendAlong(o)) < 1e-4) {
+      ctx.lineTo(x + g.x2, y + g.y2);
+    } else {
+      ctx.quadraticCurveTo(x + g.ctrlX, y + g.ctrlY, x + g.x2, y + g.y2);
+    }
     ctx.stroke();
   } else if (kind === 'arrow') {
-    const y0 = y + h / 2;
-    const tip = peArrowTipSizePx(h / Math.max(S, 1e-6), peShapeStrokePx(o));
-    const tipLen = tip.len * S;
-    const tipHalf = tip.half * S;
-    const tipX = x + Math.max(2 * S, w - 1 * S);
-    const shaftEnd = Math.max(x + 2 * S, tipX - tipLen);
+    const g = peVectorLocalGeometry(o, w, h, strokeW);
+    const tip = peArrowTipSizePx(Math.max(22 * S, strokeW * 5), strokeW);
+    const bent = Math.abs(peVectorBend(o)) >= 1e-4 || Math.abs(peVectorBendAlong(o)) >= 1e-4;
+    let tux = 1, tuy = 0;
+    if (bent) {
+      const tx = g.x2 - g.ctrlX;
+      const ty = g.y2 - g.ctrlY;
+      const tlen = Math.hypot(tx, ty) || 1;
+      tux = tx / tlen;
+      tuy = ty / tlen;
+    }
+    const tipX = x + g.x2;
+    const tipY = y + g.y2;
+    const baseX = tipX - tux * tip.len;
+    const baseY = tipY - tuy * tip.len;
+    const pux = -tuy;
+    const puy = tux;
     ctx.beginPath();
-    ctx.moveTo(x + 1 * S, y0);
-    ctx.lineTo(shaftEnd, y0);
+    ctx.moveTo(x + g.x1, y + g.y1);
+    if (!bent) {
+      ctx.lineTo(baseX, baseY);
+    } else {
+      ctx.quadraticCurveTo(x + g.ctrlX, y + g.ctrlY, tipX, tipY);
+    }
     ctx.stroke();
     ctx.beginPath();
-    ctx.moveTo(tipX, y0);
-    ctx.lineTo(shaftEnd, y0 - tipHalf);
-    ctx.lineTo(shaftEnd, y0 + tipHalf);
+    ctx.moveTo(tipX, tipY);
+    ctx.lineTo(baseX + pux * tip.half, baseY + puy * tip.half);
+    ctx.lineTo(baseX - pux * tip.half, baseY - puy * tip.half);
     ctx.closePath();
     ctx.fill();
   } else if (kind === 'plus') {
