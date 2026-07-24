@@ -3799,8 +3799,8 @@
     /*Preview sheet: keep the page's true aspect ratio (CropBox may not be A4
        after кадрирование). Fit inside the card slot; do not force √2 letterboxing
        — that showed false white bars top/bottom on tight crops.
-       Long side is capped to the same L for portrait and landscape so rotating
-       an A4 (or any) page keeps the same on-screen sheet size (short side stable).
+       Long side is always --preview-long (same for LQ thumb and HQ raster) so
+       scrolling at high zoom does not jump when HQ replaces the thumbnail.
        --preview-inset — indentation inside --page-inner-h (does not overlap the page number).*/
     .page img { 
       display: block; 
@@ -3809,19 +3809,20 @@
       box-shadow: 0 1px 5px rgba(0,0,0,0.25);
       object-fit: contain;
       --preview-long: calc(var(--page-inner-h) - var(--preview-inset, min(calc(var(--thumb-width) * 0.28), 80px)));
+      /* Size from the layout budget, not naturalWidth — LQ thumbs must upscale
+         to the same box HQ will occupy. */
+      height: var(--preview-long);
+      width: auto;
       max-width: 100%;
       max-height: var(--preview-long);
-      width: auto;
-      height: auto;
     }
     /* Landscape bitmaps are already wider than tall (viewport includes /Rotate).
-       Cap width to the same long-side L as portrait height — not the full card
-       width — so rotate does not enlarge A4 sheets to max card width. */
+       Cap the long side (width) to the same L as portrait height. */
     .page.page-rotated img {
+      width: var(--preview-long);
+      height: auto;
       max-width: var(--preview-long);
       max-height: var(--preview-long);
-      width: auto;
-      height: auto;
     }
 
     /*Smooth preview rotation (JS/rAF + GPU transform)*/
