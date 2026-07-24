@@ -5184,8 +5184,9 @@
 
     /* Stage 5: keep stage-4 layout; shrink all toolbar controls until
        [open/merge | replace…save | scale] fit on row 1 (scale must NOT wrap).
-       --pm-menu-ctrl-h is set by JS (42px → ~28px). Height of scale strip
-       always matches the buttons. padding-right stays 72px. */
+       --pm-menu-ctrl-h is a length (e.g. 42px). Glyph sizes use
+       calc(var(--pm-menu-ctrl-h) * <unitless>) — never “22px * var(/42)”
+       (px×px is invalid and drops the whole declaration). */
     .main-row {
       --pm-menu-ctrl-h: 42px;
     }
@@ -5198,8 +5199,7 @@
       gap: 4px;
     }
     /* Beat .top-menu button / .icon-btn / .icons-mode .compact-btn fixed 42px.
-       Glyph sizes stay proportional to their natural size at 42px (× h/42),
-       so stage 4 (h=42, tighter gaps only) does not distort icons. */
+       Ratios = natural size / 42 (22→0.524, 30→0.714, 26→0.619, 18→0.429). */
     .top-menu .main-row.menu-shrink button:not(#fitWidthBtn):not(.img-save-btn):not(#printSelectedBtn):not(#toggleDeletedBtn):not(.rl-slot-popup),
     .top-menu .main-row.menu-shrink label.icon-btn,
     .main-row.menu-shrink .compact-btn,
@@ -5211,32 +5211,32 @@
       min-height: var(--pm-menu-ctrl-h);
       max-height: var(--pm-menu-ctrl-h);
       padding: 0;
-      font-size: calc(22px * var(--pm-menu-ctrl-h) / 42);
+      font-size: calc(var(--pm-menu-ctrl-h) * 0.524);
       line-height: 1;
       box-sizing: border-box;
       justify-content: center;
     }
     .main-row.menu-shrink .compact-btn .btn-ico {
-      font-size: calc(22px * var(--pm-menu-ctrl-h) / 42);
+      font-size: calc(var(--pm-menu-ctrl-h) * 0.524);
     }
     .main-row.menu-shrink #replaceBtn .btn-ico svg {
-      width: calc(22px * var(--pm-menu-ctrl-h) / 42);
-      height: calc(22px * var(--pm-menu-ctrl-h) / 42);
+      width: calc(var(--pm-menu-ctrl-h) * 0.524);
+      height: calc(var(--pm-menu-ctrl-h) * 0.524);
     }
     .main-row.menu-shrink button.icon-btn svg,
     .main-row.menu-shrink label.icon-btn svg {
-      width: calc(22px * var(--pm-menu-ctrl-h) / 42);
-      height: calc(22px * var(--pm-menu-ctrl-h) / 42);
+      width: calc(var(--pm-menu-ctrl-h) * 0.524);
+      height: calc(var(--pm-menu-ctrl-h) * 0.524);
     }
     /* Cursor mode glyph is naturally ~30×30 inside the 42×42 hit target */
     .main-row.menu-shrink #selectModeBtn svg {
-      width: calc(30px * var(--pm-menu-ctrl-h) / 42);
-      height: calc(30px * var(--pm-menu-ctrl-h) / 42);
+      width: calc(var(--pm-menu-ctrl-h) * 0.714);
+      height: calc(var(--pm-menu-ctrl-h) * 0.714);
     }
-    /* Desktop rotate glyph follows button font-size (~22px at full size) */
+    /* Desktop rotate glyph ~22px at full size (same as other tool icons) */
     .main-row.menu-shrink button#rotateLeftBtn .rotate-glyph,
     .main-row.menu-shrink button#rotateRightBtn .rotate-glyph {
-      font-size: calc(22px * var(--pm-menu-ctrl-h) / 42);
+      font-size: calc(var(--pm-menu-ctrl-h) * 0.524);
     }
     /* Pop-ups under delete/print/save stay matched to the shrunk hit target */
     .top-menu .main-row.menu-shrink .img-save-btn,
@@ -5249,49 +5249,56 @@
       min-width: var(--pm-menu-ctrl-h);
     }
     .main-row.menu-shrink .slider-wrapper {
-      max-width: max(48px, calc(85px * var(--pm-menu-ctrl-h) / 42));
+      max-width: max(48px, calc(var(--pm-menu-ctrl-h) * 2.024));
     }
     .main-row.menu-shrink.scale-compact .slider-wrapper {
-      max-width: max(48px, calc(85px * var(--pm-menu-ctrl-h) / 42));
+      max-width: max(48px, calc(var(--pm-menu-ctrl-h) * 2.024));
     }
     .main-row.menu-shrink .scale-control {
-      min-width: max(84px, calc(110px * var(--pm-menu-ctrl-h) / 42));
+      /* ~110px at 42px; shrinks with controls so row 1 can fit */
+      min-width: max(72px, calc(var(--pm-menu-ctrl-h) * 2.62));
       height: var(--pm-menu-ctrl-h);
       min-height: var(--pm-menu-ctrl-h);
       max-height: var(--pm-menu-ctrl-h);
       padding: 0 8px;
       gap: 4px;
       box-sizing: border-box;
-      flex-shrink: 1;
+      flex-shrink: 0;
     }
     /* Fit-width control is naturally 26×26 with 18×18 SVG inside the scale strip */
     .main-row.menu-shrink #fitWidthBtn {
-      width: calc(26px * var(--pm-menu-ctrl-h) / 42);
-      height: calc(26px * var(--pm-menu-ctrl-h) / 42);
-      min-width: calc(26px * var(--pm-menu-ctrl-h) / 42);
-      min-height: calc(26px * var(--pm-menu-ctrl-h) / 42);
-      max-height: calc(26px * var(--pm-menu-ctrl-h) / 42);
+      width: calc(var(--pm-menu-ctrl-h) * 0.619);
+      height: calc(var(--pm-menu-ctrl-h) * 0.619);
+      min-width: calc(var(--pm-menu-ctrl-h) * 0.619);
+      min-height: calc(var(--pm-menu-ctrl-h) * 0.619);
+      max-height: calc(var(--pm-menu-ctrl-h) * 0.619);
     }
     .main-row.menu-shrink #fitWidthBtn svg {
-      width: calc(18px * var(--pm-menu-ctrl-h) / 42);
-      height: calc(18px * var(--pm-menu-ctrl-h) / 42);
+      width: calc(var(--pm-menu-ctrl-h) * 0.429);
+      height: calc(var(--pm-menu-ctrl-h) * 0.429);
     }
     .main-row.menu-shrink #scaleLabel {
-      font-size: max(10px, calc(13px * var(--pm-menu-ctrl-h) / 42));
+      font-size: max(10px, calc(var(--pm-menu-ctrl-h) * 0.31));
     }
-    /* Keep open/merge + replace…save + scale on row 1 while tools are on row 2.
-       Prefer compressing the scale strip over wrapping it (avoids a 1-frame
-       flash onto row 2 between tools-wrapped and menu-shrink). */
-    .main-row.tools-wrapped .scale-wrapper {
+    /* Before menu-shrink applies, prefer compressing the strip over wrapping it */
+    .main-row.tools-wrapped:not(.menu-shrink) .scale-wrapper {
       flex-shrink: 1;
       min-width: 0;
     }
-    .main-row.tools-wrapped .scale-control {
+    .main-row.tools-wrapped:not(.menu-shrink) .scale-control {
       min-width: 0;
       flex-shrink: 1;
     }
-    .main-row.tools-wrapped.menu-shrink .scale-control {
-      min-width: max(84px, calc(var(--pm-menu-ctrl-h) * 2.3));
+    .main-row.tools-wrapped.menu-shrink .scale-wrapper {
+      flex-shrink: 0;
+    }
+
+    /* Touch: rotate glyphs are naturally ~35px — keep that ratio under menu-shrink */
+    @media (pointer: coarse) {
+      .top-menu .main-row.menu-shrink button#rotateLeftBtn .rotate-glyph,
+      .top-menu .main-row.menu-shrink button#rotateRightBtn .rotate-glyph {
+        font-size: calc(var(--pm-menu-ctrl-h) * 0.833);
+      }
     }
 
     /*“Print” button moved to the scale slider (narrow window) - shrunk to
