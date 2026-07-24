@@ -28038,13 +28038,22 @@ function peRedrawObjects() {
           const bendH = document.createElement('div');
           bendH.className = 'pe-text-corner-handle pe-vector-bend';
           bendH.dataset.bend = '1';
-          bendH.title = 'Изгиб';
+          bendH.title = 'Изгиб (двойной клик — сброс)';
           const bendPw = Math.max(1, o.w * W);
           const bendPh = Math.max(1, o.h * H);
           const bendSw = peShapeStrokeRenderPx(o);
           const geom = peVectorLocalGeometry(o, bendPw, bendPh, bendSw);
           bendH.style.left = geom.hx + 'px';
           bendH.style.top = geom.hy + 'px';
+          bendH.addEventListener('dblclick', (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+            if (peState.drag && peState.drag.kind === 'bend-vector' && peState.drag.obj === o) {
+              peState.drag = null;
+              peUpdatePanUi();
+            }
+            peResetVectorBend(o);
+          });
           el.appendChild(bendH);
         } else {
           ['nw', 'ne', 'sw', 'se'].forEach(corner => {
@@ -31579,6 +31588,21 @@ function peStartVectorBend(e, o) {
     shiftKey: !!e.shiftKey
   };
   peUpdatePanUi();
+}
+
+/** Straighten a line/arrow (bend handle back to the chord midpoint). */
+function peResetVectorBend(o) {
+  if (!o || !peShapeIsVectorStroke(o.shape)) return;
+  const hadBend = Math.abs(peVectorBend(o)) >= 1e-4 || Math.abs(peVectorBendAlong(o)) >= 1e-4;
+  o.bend = 0;
+  o.bendAlong = 0;
+  if (hadBend) {
+    const { w: W, h: H } = peStageSize();
+    const ep = peVectorShapeEndpoints(o, W, H);
+    peLayoutVectorShape(o, ep.x1, ep.y1, ep.x2, ep.y2, W, H, null);
+  }
+  peRedrawObjects();
+  if (hadBend) peCommitEditorHistory();
 }
 
 /** Sample nearest point on a quadratic Bezier (local px). */
@@ -35824,6 +35848,8 @@ function peObjMouseDown(e, o) {
     if (e.target.dataset.endpoint && peShapeIsVectorStroke(o.shape)) {
       peStartVectorEndpointResize(e, o, e.target.dataset.endpoint);
     } else if (e.target.dataset.bend && peShapeIsVectorStroke(o.shape)) {
+      // Second click of a double-click resets bend via dblclick — don't start a drag.
+      if (e.detail >= 2) return;
       peStartVectorBend(e, o);
     } else {
       peStartShapeCornerResize(e, o, e.target.dataset.corner);
