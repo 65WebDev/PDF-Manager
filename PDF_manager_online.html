@@ -340,9 +340,10 @@
     .top-menu.collapsed #themeToggleBtn,
     .top-menu.collapsed #aboutBtn,
     .top-menu.collapsed #restoreHelpBtn { display: none !important; }
-    /*We don’t use this desktop button/zone on mobile devices.*/
+    /*We don’t use the desktop hide-menu / restore-help controls on mobile.
+       Theme + About stay available under the app logo (tap to expand).*/
     @media (pointer: coarse) {
-      #logoMenuArea, #desktopMenuToggleBtn, #themeToggleBtn, #aboutBtn, #restoreHelpBtn { display: none !important; }
+      #desktopMenuToggleBtn, #restoreHelpBtn { display: none !important; }
     }
     /*When the menu is collapsed (desktop) - the button is fixed in the upper right corner
        on top of the work area and is always visible (as in the mobile version).*/
@@ -953,8 +954,11 @@
     }
     body.read-mode-active #readModeScaleOverlay { display: flex; }
     @media (pointer: coarse) { #readModeScaleOverlay { display: none !important; } }
-    /*The page editor is currently implemented only for desktop*/
-    @media (pointer: coarse) { #editPageBtn { display: none !important; } }
+    /* Mobile: Edit Page replaces Print in the tool row (editor already supports touch). */
+    @media (pointer: coarse) {
+      .print-wrapper { display: none !important; }
+      #editPageBtn { display: inline-flex !important; }
+    }
     #readModeScaleOverlay input[type=range] {
       width: 110px;
       accent-color: #3498db;
@@ -5082,8 +5086,31 @@
         text-align: center;
         /*remains absolutely centered horizontally (left:50% of the basic rule)*/
       }
-      /*Logo in PORTRAIT orientation - below the button*/
-      .app-logo { top: 60px; right: 20px; }
+      /*Logo in PORTRAIT: align with tool-row buttons (print/edit, multi-select, …).
+         Row 2 starts at padding 8 + 42 + gap 8 ≈ 58px; nudge up a touch for optical center.*/
+      .app-logo { top: 54px; right: 20px; }
+      #logoMenuArea {
+        display: block;
+        top: 54px;
+        right: 20px;
+        width: 42px;
+        height: 42px;
+        z-index: 111;
+      }
+      #logoMenuArea.expanded {
+        /* logo slot + theme + about (no hide-menu / restore-help on mobile) */
+        height: calc(42px + 2px + 42px + 6px + 42px);
+      }
+      #themeToggleBtn {
+        display: flex;
+        top: 44px; /* first popup under the logo */
+        right: 0;
+      }
+      #aboutBtn {
+        display: flex;
+        top: 92px; /* below theme (44 + 42 + 6) */
+        right: 0;
+      }
 
       /*When the menu is collapsed, it disappears completely (zero height),
          the work area takes up the free space, and the button becomes
@@ -5096,6 +5123,7 @@
         box-shadow: none;
       }
       .top-menu.collapsed .app-logo { display: none; }
+      .top-menu.collapsed #logoMenuArea { display: none !important; }
       .top-menu.collapsed #menuToggleBtn {
         display: flex;
         position: fixed;         /*on top of the workspace, like #pageCountBox*/
@@ -5137,9 +5165,29 @@
       }
     }
 
-    /*Hide menu button in LANDSCAPE orientation - logo to the left of the button*/
     @media (pointer: coarse) and (orientation: landscape) {
       .app-logo { top: 8px; right: 72px; }   /*flush with menu buttons*/
+      #logoMenuArea {
+        display: block;
+        top: 8px;
+        right: 72px;
+        width: 42px;
+        height: 42px;
+        z-index: 111;
+      }
+      #logoMenuArea.expanded {
+        height: calc(42px + 2px + 42px + 6px + 42px);
+      }
+      #themeToggleBtn {
+        display: flex;
+        top: 44px;
+        right: 0;
+      }
+      #aboutBtn {
+        display: flex;
+        top: 92px;
+        right: 0;
+      }
       /*The menu is collapsed: the file name is centered and at the same vertical level,
          that the hide button and the counter (at the top, does not go down, no transfer).*/
       .content-header.menu-hidden {
@@ -7086,9 +7134,9 @@
       }
       rotateLeftBtn.disabled = baseDisabled || selectedNonDeleted.length === 0;
       rotateRightBtn.disabled = baseDisabled || selectedNonDeleted.length === 0;
-      //“Edit Page” - only for ONE selected page, desktop only.
+      // “Edit Page” — one selected (non-deleted) page; available on desktop and mobile.
       if (editPageBtn) {
-        editPageBtn.disabled = baseDisabled || isTouchDevice || selectedNonDeleted.length !== 1;
+        editPageBtn.disabled = baseDisabled || selectedNonDeleted.length !== 1;
       }
       saveBtn.disabled = baseDisabled;
       scaleSlider.disabled = baseDisabled;
@@ -21569,6 +21617,53 @@
       area.addEventListener('mouseleave', hide);
       // Logo sits under the area; keep a listener in case hit-testing differs.
       if (logo) logo.addEventListener('mouseenter', show);
+    })();
+
+    // ─── Mobile: tap app logo → theme + About (no hide-menu / restore-help) ───
+    (function initMobileLogoMenu() {
+      if (!isTouchDevice) return;
+      const area = document.getElementById('logoMenuArea');
+      const logo = document.querySelector('.app-logo');
+      const themeBtn = document.getElementById('themeToggleBtn');
+      const aboutBtn = document.getElementById('aboutBtn');
+      if (!area || !logo) return;
+
+      function close() {
+        if (themeBtn) themeBtn.classList.remove('show');
+        if (aboutBtn) aboutBtn.classList.remove('show');
+        area.classList.remove('expanded');
+        logo.classList.remove('logo-hot');
+      }
+      function open() {
+        const menu = document.getElementById('topMenu');
+        if (menu && menu.classList.contains('collapsed')) return;
+        if (themeBtn) themeBtn.classList.add('show');
+        if (aboutBtn) aboutBtn.classList.add('show');
+        area.classList.add('expanded');
+        logo.classList.add('logo-hot');
+      }
+      function toggle() {
+        if (area.classList.contains('expanded')) close();
+        else open();
+      }
+
+      area.addEventListener('click', (e) => {
+        // Let theme / About handle their own clicks; tap on the logo slot toggles.
+        if (e.target.closest('button')) return;
+        e.preventDefault();
+        e.stopPropagation();
+        toggle();
+      });
+      document.addEventListener('click', (e) => {
+        if (!area.classList.contains('expanded')) return;
+        if (area.contains(e.target) || logo.contains(e.target)) return;
+        close();
+      }, true);
+      document.addEventListener('touchstart', (e) => {
+        if (!area.classList.contains('expanded')) return;
+        if (area.contains(e.target) || logo.contains(e.target)) return;
+        close();
+      }, { passive: true, capture: true });
     })();
 
     // Show "save/export as images" buttons on hover (with timeout,
