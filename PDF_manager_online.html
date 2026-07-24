@@ -3045,8 +3045,9 @@
       align-items: center;
       gap: 8px;
       background: #34495e;
-      /* Same height as .top-menu buttons (42px) so the strip aligns with Save etc. */
-      height: 42px;
+      /* Tied to toolbar button height via --pm-menu-ctrl-h (42px; 34px in menu-shrink). */
+      height: var(--pm-menu-ctrl-h, 42px);
+      min-height: var(--pm-menu-ctrl-h, 42px);
       box-sizing: border-box;
       padding: 0 16px;
       border-radius: 6px;
@@ -5181,7 +5182,12 @@
       gap: 6px;
     }
 
-    /* Stage 5: keep the stage-4 layout, shrink controls in place. */
+    /* Stage 5: keep the stage-4 layout; compress horizontally only.
+       Do not reduce control height — the scale strip background must stay
+       the same 42px as the toolbar buttons (stages 1–4). */
+    .main-row {
+      --pm-menu-ctrl-h: 42px;
+    }
     .main-row.menu-shrink {
       gap: 6px 6px;
       padding-right: 56px;
@@ -5191,29 +5197,19 @@
     .main-row.menu-shrink .centered-actions {
       gap: 4px;
     }
-    .main-row.menu-shrink .compact-btn,
-    .main-row.menu-shrink button.icon-btn,
-    .main-row.menu-shrink label.icon-btn {
-      width: 34px;
-      height: 34px;
-      min-height: 34px;
-      padding: 5px;
-      font-size: 18px;
-      box-sizing: border-box;
-    }
-    .main-row.menu-shrink .compact-btn .btn-ico { font-size: 18px; }
-    .main-row.menu-shrink #replaceBtn .btn-ico svg { width: 18px; height: 18px; }
-    .main-row.menu-shrink button#rotateLeftBtn .rotate-glyph,
-    .main-row.menu-shrink button#rotateRightBtn .rotate-glyph {
-      font-size: 28px;
-    }
+    /* Keep 42×42 hit targets; only tighten icon glyph size slightly */
+    .main-row.menu-shrink .compact-btn .btn-ico { font-size: 20px; }
+    .main-row.menu-shrink #replaceBtn .btn-ico svg { width: 20px; height: 20px; }
     .main-row.menu-shrink .slider-wrapper { max-width: 64px; }
     .main-row.menu-shrink.scale-compact .slider-wrapper { max-width: 64px; }
     .main-row.menu-shrink .scale-control {
       min-width: 96px;
-      height: 34px; /* match shrunk toolbar buttons */
+      height: var(--pm-menu-ctrl-h);
+      min-height: var(--pm-menu-ctrl-h);
+      max-height: var(--pm-menu-ctrl-h);
       padding: 0 8px;
       gap: 4px;
+      box-sizing: border-box;
     }
     .main-row.menu-shrink #fitWidthBtn {
       width: 22px; height: 22px; min-width: 22px; min-height: 22px; max-height: 22px;
