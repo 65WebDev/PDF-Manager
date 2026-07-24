@@ -155,6 +155,10 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\build-windows-exe.ps1
 ```
 
+Скрипт можно положить и в **корень** репозитория (`.\build-windows-exe.ps1`) — корень ищется по `package.json`.
+
+> Windows PowerShell 5.1: файл должен быть в **UTF-8 с BOM** (так и сохранён в репозитории). Если копируете текст вручную в Блокнот — «Сохранить как» → кодировка **UTF-8**.
+
 ### Вручную через npm
 
 Также нужен [GitHub CLI](https://cli.github.com/) и авторизация (`gh auth login`) — после сборки установщик **автоматически** заливается в GitHub Release (только для `tauri:build`, не для `tauri:build:local`).
