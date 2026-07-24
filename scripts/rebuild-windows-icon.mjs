@@ -38,11 +38,22 @@ def draw_master(size=1024):
     img.paste(grad, (0, 0), mask)
     d = ImageDraw.Draw(img)
     s = size / 42.0
-    d.rounded_rectangle([20*s, 9*s, 35*s, 29*s], radius=max(1, int(1.5*s)), fill=(255,255,255,82))
-    d.rounded_rectangle([13.5*s, 8*s, 31.5*s, 34*s], radius=max(1, int(1.5*s)), fill=(255,255,255,255))
+    d.rounded_rectangle([20*s, 9*s, 32*s, 24*s], radius=max(1, int(1.5*s)), fill=(255,255,255,82))
+    # Bottom ends inside the red badge so rx corners don't reveal white fringe
+    d.rounded_rectangle([13.5*s, 8*s, 31.5*s, 26*s], radius=max(1, int(1.5*s)), fill=(255,255,255,255))
     d.polygon([(27*s, 8*s), (33*s, 14*s), (27*s, 14*s)], fill=(188, 220, 255, 255))
     d.rounded_rectangle([17*s, 17*s, 29*s, 18.6*s], radius=max(1, int(0.8*s)), fill=(159, 184, 214, 255))
-    d.rounded_rectangle([9*s, 21*s, 33*s, 34*s], radius=max(2, int(2*s)), fill=(224, 52, 43, 255))
+    # Re-paint blue under the badge box BEFORE red, so rounded-corner AA
+    # blends with blue (not leftover white page pixels → white fringe).
+    badge = [9*s, 21*s, 33*s, 34*s]
+    pad = max(2, int(0.6 * s))
+    # Expand left/right/bottom only — keep white page intact above the badge.
+    scrub = [badge[0]-pad, badge[1], badge[2]+pad, badge[3]+pad]
+    sx0, sy0 = max(0, int(scrub[0])), max(0, int(scrub[1]))
+    sx1, sy1 = min(size, int(scrub[2])+1), min(size, int(scrub[3])+1)
+    region = grad.crop((sx0, sy0, sx1, sy1))
+    img.paste(region, (sx0, sy0))
+    d.rounded_rectangle(badge, radius=max(2, int(2*s)), fill=(224, 52, 43, 255))
     try:
         font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf', max(10, int(10.5*s)))
     except Exception:
