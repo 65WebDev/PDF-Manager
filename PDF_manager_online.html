@@ -6664,6 +6664,11 @@
     let pmNavAutoPointerPaused = false; // LMB held on a page
     let pmNavAutoHqLastAt = 0;
     let pmNavAutoScrollAccum = 0;      // sub-pixel scroll residue
+    // Declared with other pmNav state: updateUIState() → pmUpdatePageNavButtons →
+    // pmStopPageNavAutoScroll can run before the later chrome-helper block.
+    let pmNavChromeHideTimer = 0;
+    const PM_NAV_CHROME_HIDE_AFTER_MS = 900;
+    const PM_NAV_CHROME_REHIDE_MS = 2600;
 
     const CONCURRENCY_LIMIT = 6;
     const THUMBNAIL_SCALE = 0.75;
@@ -10801,10 +10806,6 @@
     }
 
     /** Mobile only: fade page-nav + speed + pause while auto-scroll is running. */
-    let pmNavChromeHideTimer = 0;
-    const PM_NAV_CHROME_HIDE_AFTER_MS = 900;
-    const PM_NAV_CHROME_REHIDE_MS = 2600;
-
     function pmNavClearChromeHideTimer() {
       if (pmNavChromeHideTimer) {
         clearTimeout(pmNavChromeHideTimer);
