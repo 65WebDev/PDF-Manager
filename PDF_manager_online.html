@@ -14262,12 +14262,9 @@
         setTimeout(alignRowNumbers, 120);
       } finally {
         hideLoading();
-        // Re-apply after the loading overlay is gone so avail-width matches the
-        // final workspace (the mid-load pass can run while isLoading / overlay
-        // would have blocked toggleFitWidthScale).
-        if (pdfDoc && isFitWidthDefaultOn()) {
-          requestAnimationFrame(() => enableFitWidthForOpen());
-        }
+        // Overlay gone — recompute fit-width with final workspace width before
+        // callers (e.g. pmOpenOneFileAsTab → pmCaptureActive) snapshot scale.
+        if (pdfDoc && isFitWidthDefaultOn()) enableFitWidthForOpen();
       }
     }
 
