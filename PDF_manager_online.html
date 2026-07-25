@@ -27940,16 +27940,11 @@ function peEditorContentSig(snap) {
 }
 
 /**
- * Materialize one editor-history snapshot into PDF bytes for the document
- * undo stack (rotation/crop + page editor objects metadata).
- * `carryBytes` is the previous step’s PDF — so redacts / crops already
- * applied in earlier steps are preserved when the current snap has no pdfBytes.
+ * Apply one editor-history snapshot onto an open pdf-lib document
+ * (rotation/crop + page editor objects metadata). Does not save().
  */
-async function peMaterializeEditorHistorySnap(carryBytes, pageIdx, baseRot, snap) {
-  const source = (snap.pdfBytes && snap.pdfBytes.length)
-    ? snap.pdfBytes
-    : carryBytes;
-  const doc = await PDFLib.PDFDocument.load(source.slice());
+function peApplyEditorHistorySnapToDoc(doc, pageIdx, baseRot, snap) {
+  if (!doc || !snap) return;
   const page = doc.getPage(pageIdx);
   if (snap.pageCropBox) {
     page.setCropBox(snap.pageCropBox.x, snap.pageCropBox.y, snap.pageCropBox.w, snap.pageCropBox.h);
@@ -27961,19 +27956,36 @@ async function peMaterializeEditorHistorySnap(carryBytes, pageIdx, baseRot, snap
   try {
     const objs = (snap.objects || []).filter(o => o.type !== 'redact');
     peSavePageEditorObjects(pageIdx, objs);
-    return new Uint8Array(await pdfDoc.save());
   } finally {
     pdfDoc = prev;
   }
 }
 
+/**
+ * Materialize one editor-history snapshot into PDF bytes for the document
+ * undo stack (rotation/crop + page editor objects metadata).
+ * `carryBytes` is the previous step’s PDF — so redacts / crops already
+ * applied in earlier steps are preserved when the current snap has no pdfBytes.
+ */
+async function peMaterializeEditorHistorySnap(carryBytes, pageIdx, baseRot, snap) {
+  const source = (snap.pdfBytes && snap.pdfBytes.length)
+    ? snap.pdfBytes
+    : carryBytes;
+  const doc = await PDFLib.PDFDocument.load(source.slice());
+  peApplyEditorHistorySnapToDoc(doc, pageIdx, baseRot, snap);
+  return new Uint8Array(await doc.save({ useObjectStreams: false }));
+}
+
 /** Push PDF bytes as a document-history step (thumbnail of pageIdx pending fill). */
-function pePushPageEditHistoryBytes(pdfBytes, pageIdx) {
+function pePushPageEditHistoryBytes(pdfBytes, pageIdx, opts) {
   if (!pdfBytes || !pdfDoc) return;
   const marked = [...markedForDeletion].sort((x, y) => x - y);
   const sel = captureSelectionState();
   const cur = docHistoryIndex >= 0 ? docHistory[docHistoryIndex] : null;
-  if (cur && pdfBytesEqual(cur.pdfBytes, pdfBytes) && markedArraysEqual(cur.marked, marked)) return;
+  // skipEqualCheck: expand already deduped content steps; full-byte compare
+  // of multi‑MB PDFs on every push was wasting seconds during Save.
+  if (!(opts && opts.skipEqualCheck) &&
+      cur && pdfBytesEqual(cur.pdfBytes, pdfBytes) && markedArraysEqual(cur.marked, marked)) return;
   let pages = null;
   let pendingIdx = null;
   if (cur && cur.pages && cur.pages.length) {
@@ -27994,7 +28006,10 @@ function pePushPageEditHistoryBytes(pdfBytes, pageIdx) {
   });
   if (docHistory.length > DOC_HISTORY_MAX) docHistory.shift();
   docHistoryIndex = docHistory.length - 1;
-  if (pendingIdx && pendingIdx.length && typeof scheduleSnapshotFill === 'function') {
+  // During editor-history expand we defer fills — awaiting a full pdf.js thumb
+  // per undo step is what made Save take minutes with images/shapes.
+  if (!(opts && opts.deferThumbFill) &&
+      pendingIdx && pendingIdx.length && typeof scheduleSnapshotFill === 'function') {
     scheduleSnapshotFill();
   }
 }
@@ -28015,6 +28030,10 @@ async function peFillCurrentHistoryPageThumb(pageIdx, pdfBytes) {
 /**
  * After page-edit save: turn the in-editor undo queue into document history
  * steps so Ctrl+Z outside the editor undoes one edit at a time.
+ *
+ * Hot path: reuse one pdf-lib document across object-only steps, skip
+ * per-step thumbnail renders (fill tip once; intermediates via
+ * scheduleSnapshotFill), and avoid re-chunking unchanged image data.
  */
 async function peExpandPageEditHistoryIntoDoc(pageIdx, baseRot, baselineBytes, undoStack) {
   // Keep chronological order; only collapse consecutive identical content
@@ -28044,24 +28063,62 @@ async function peExpandPageEditHistoryIntoDoc(pageIdx, baseRot, baselineBytes, u
       ? peState.objects.filter(o => o.type !== 'redact')
       : [];
     peSavePageEditorObjects(pageIdx, objs);
-    const bytes = new Uint8Array(await pdfDoc.save());
-    pePushPageEditHistoryBytes(bytes, pageIdx);
-    await peFillCurrentHistoryPageThumb(pageIdx, bytes);
+    const bytes = new Uint8Array(await pdfDoc.save({ useObjectStreams: false }));
+    pePushPageEditHistoryBytes(bytes, pageIdx, { deferThumbFill: true });
     return bytes;
   }
 
-  let carryBytes = baselineBytes.slice();
+  let doc = await PDFLib.PDFDocument.load(baselineBytes.slice());
   let lastBytes = null;
-  for (let i = 1; i < steps.length; i++) {
-    lastBytes = await peMaterializeEditorHistorySnap(carryBytes, pageIdx, baseRot, steps[i]);
-    carryBytes = lastBytes;
-    pdfDoc = await PDFLib.PDFDocument.load(lastBytes.slice());
-    if (typeof originalFileBytes !== 'undefined') originalFileBytes = lastBytes.slice();
-    pePushPageEditHistoryBytes(lastBytes.slice(), pageIdx);
-    // Bake this step’s grid preview now (objects included) so Ctrl+Z shows
-    // the matching state immediately, not a bare PDF without overlays.
-    await peFillCurrentHistoryPageThumb(pageIdx, lastBytes);
+  const saveOpts = { useObjectStreams: false };
+
+  // Object-only sessions (shapes/images/text — no redact/crop page rewrite):
+  // one document-history tip with the final state. Expanding every in-editor
+  // nudge into a full pdfDoc.save() was O(undoSteps × PDF size) and made
+  // Save take minutes with a hi-res image. Granular undo remains inside the
+  // editor; after Save, Ctrl+Z reverts the whole page-edit session.
+  const anyPageRewrite = steps.some(s =>
+    (s.pdfBytes && s.pdfBytes.length) || s.cropApplied || s.pdfContentMutated);
+
+  const materializeIdxs = [];
+  if (!anyPageRewrite) {
+    materializeIdxs.push(steps.length - 1);
+  } else {
+    // Keep one Ctrl+Z per content step, but reuse one pdf-lib document when
+    // a snap has no private pdfBytes; never await per-step thumbnails.
+    for (let i = 1; i < steps.length; i++) materializeIdxs.push(i);
   }
+
+  for (let k = 0; k < materializeIdxs.length; k++) {
+    const snap = steps[materializeIdxs[k]];
+    if (snap.pdfBytes && snap.pdfBytes.length) {
+      doc = await PDFLib.PDFDocument.load(snap.pdfBytes.slice());
+    }
+    peApplyEditorHistorySnapToDoc(doc, pageIdx, baseRot, snap);
+    // Keep global pdfDoc on the working doc so image-catalog cache and the
+    // pePush guard stay valid across the loop.
+    pdfDoc = doc;
+    lastBytes = new Uint8Array(await doc.save(saveOpts));
+    if (typeof originalFileBytes !== 'undefined') originalFileBytes = lastBytes;
+    pePushPageEditHistoryBytes(lastBytes, pageIdx, { deferThumbFill: true, skipEqualCheck: true });
+
+    if ((k & 3) === 3) {
+      await new Promise(r => setTimeout(r, 0));
+    }
+  }
+
+  if (!lastBytes) {
+    const snap = steps[steps.length - 1];
+    peApplyEditorHistorySnapToDoc(doc, pageIdx, baseRot, snap || { objects: [], delta: 0 });
+    pdfDoc = doc;
+    lastBytes = new Uint8Array(await doc.save(saveOpts));
+    if (typeof originalFileBytes !== 'undefined') originalFileBytes = lastBytes;
+    pePushPageEditHistoryBytes(lastBytes, pageIdx, { deferThumbFill: true, skipEqualCheck: true });
+  }
+
+  // Tip thumb is filled by pageEditSave’s live grid render + patchHistoryPending.
+  // Older pending steps (rewrite sessions) fill in the background after Save.
+  if (typeof scheduleSnapshotFill === 'function') scheduleSnapshotFill();
   return lastBytes;
 }
 
@@ -39768,9 +39825,22 @@ function peCatalogGetChunked(doc, prefix) {
   }
 }
 
+// Avoid re-chunking the same image dataUrl into the catalog on every
+// editor-history materialize step (dominant cost when an image + many
+// shape moves are saved).
+const peImageCatalogWriteCache = new WeakMap(); // PDFDocument -> Map(prefix -> dataUrl)
+
 function peSaveEditorImageData(pageIdx, objId, dataUrl) {
-  if (!dataUrl) return;
-  peCatalogSetChunked(pdfDoc, peEditorImageCatalogPrefix(pageIdx, objId), dataUrl);
+  if (!dataUrl || !pdfDoc) return;
+  const prefix = peEditorImageCatalogPrefix(pageIdx, objId);
+  let cache = peImageCatalogWriteCache.get(pdfDoc);
+  if (!cache) {
+    cache = new Map();
+    peImageCatalogWriteCache.set(pdfDoc, cache);
+  }
+  if (cache.get(prefix) === dataUrl) return;
+  peCatalogSetChunked(pdfDoc, prefix, dataUrl);
+  cache.set(prefix, dataUrl);
 }
 
 function peLoadEditorImageData(pageIdx, objId) {
@@ -43608,17 +43678,18 @@ async function pageEditSave(options) {
     const lastBytes = await peExpandPageEditHistoryIntoDoc(idx, baseRot, baselineBytes, stack);
     historyPushSuspended = false;
 
+    // Expand leaves pdfDoc on the working document that produced lastBytes.
     if (lastBytes) {
-      pdfDoc = await PDFLib.PDFDocument.load(lastBytes.slice());
-      if (typeof originalFileBytes !== 'undefined') originalFileBytes = lastBytes.slice();
+      if (typeof originalFileBytes !== 'undefined') originalFileBytes = lastBytes;
     } else {
       peSavePageEditorObjects(idx, persistObjs);
     }
 
     invalidateHQ();
 
-    // Update the thumbnail of the edited page
-    const bytes = lastBytes || new Uint8Array(await pdfDoc.save());
+    // Update the thumbnail of the edited page (also patches the history tip
+    // via patchHistoryPending — intermediate undo thumbs fill in background).
+    const bytes = lastBytes || new Uint8Array(await pdfDoc.save({ useObjectStreams: false }));
     const pj = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
     const div = pagesContainer.querySelector('.page[data-index="' + idx + '"]');
     const im = div ? div.querySelector('img') : null;
@@ -43635,6 +43706,7 @@ async function pageEditSave(options) {
       }
     }
     try { pj.destroy && pj.destroy(); } catch (_) {}
+    if (typeof scheduleSnapshotFill === 'function') scheduleSnapshotFill();
 
     syncDirtyFromHistory();
     updateUndoRedoUI();
