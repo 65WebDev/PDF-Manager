@@ -70,8 +70,12 @@ npm run tauri -- info
 ```bash
 git clone https://github.com/5451165-bot/PDF-Manager.git
 cd PDF-Manager
-git checkout cursor/tauri-windows-shell-1aac
 npm ci
+
+# PowerShell (Windows) — проверка окружения + сборка + upload на GitHub:
+#   .\scripts\build-windows-exe.ps1
+#   .\scripts\build-windows-exe.ps1 -Local   # без загрузки
+#   .\scripts\build-windows-exe.ps1 -Dev
 
 # Режим разработки (окно + UI из офлайн-HTML):
 npm run tauri:dev

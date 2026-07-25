@@ -93,7 +93,18 @@ where.exe link
 
 Должен появиться путь к `link.exe` внутри `Microsoft Visual Studio\...\MSVC\...\link.exe`.
 
-Если пусто — открыть из меню Пуск **«x64 Native Tools Command Prompt for VS 2022»** или **«Developer PowerShell for VS 2022»** и собирать уже оттуда.
+Если пусто — не обязательно сразу переустанавливать. Часто Build Tools уже стоят, но **не в PATH** обычного PowerShell:
+
+1. Запустите из меню Пуск **«Developer PowerShell for VS 2022»** (или **«x64 Native Tools Command Prompt for VS 2022»**) и соберите оттуда; **или**
+2. Обновите `scripts\build-windows-exe.ps1` — скрипт сам подхватывает окружение через `vswhere` + `VsDevCmd.bat`.
+
+Быстрая установка через winget (workload C++):
+
+```powershell
+winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+```
+
+После установки — **новый** терминал.
 
 ### 1.5. WebView2
 На Windows 10/11 обычно уже есть. Если приложение не стартует из‑за WebView2:  
@@ -130,7 +141,41 @@ npm run tauri -- info
 
 Нужен **интернет** (скачивание CDN‑библиотек для офлайн‑HTML + crates Rust).
 
-Также нужен [GitHub CLI](https://cli.github.com/) и авторизация (`gh auth login`) — после сборки установщик **автоматически** заливается в GitHub Release.
+### Быстрый способ (PowerShell)
+
+Из корня репозитория:
+
+```powershell
+# Сборка + загрузка установщика/portable в GitHub Release (по умолчанию):
+# Нужны: gh (GitHub CLI) и `gh auth login`
+.\scripts\build-windows-exe.ps1
+
+# Только локальная сборка, без GitHub:
+.\scripts\build-windows-exe.ps1 -Local
+
+# Зависимости уже стоят:
+.\scripts\build-windows-exe.ps1 -SkipNpmCi
+
+# Режим разработки:
+.\scripts\build-windows-exe.ps1 -Dev
+```
+
+Если PowerShell блокирует скрипт:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\build-windows-exe.ps1
+```
+
+Скрипт можно положить и в **корень** репозитория (`.\build-windows-exe.ps1`) — корень ищется по `package.json`.
+
+> Windows PowerShell 5.1: файл должен быть в **UTF-8 с BOM** (так и сохранён в репозитории). Если копируете текст вручную в Блокнот — «Сохранить как» → кодировка **UTF-8**.
+
+Release tag: `windows-v{version}` из `src-tauri/tauri.conf.json` (сейчас, например, `windows-v0.1.8`).
+
+### Вручную через npm
+
+Также нужен [GitHub CLI](https://cli.github.com/) и авторизация (`gh auth login`) — после сборки установщик **автоматически** заливается в GitHub Release (только для `tauri:build`, не для `tauri:build:local`).
 
 ```powershell
 npm run tauri:build
@@ -224,12 +269,11 @@ NSIS‑установщик регистрирует приложение как
 ## 7. Краткий чеклист
 
 1. Node 20+, Git, Rust 1.85+, Build Tools (**C++**)  
-2. `git checkout cursor/tauri-windows-shell-1aac`  
-3. `npm ci`  
-4. `where.exe link` — команда что‑то находит  
-5. `npm run tauri:build`  
-6. Запустить `src-tauri\target\release\PDF Manager.exe`  
-7. Установить NSIS‑сборку и проверить «Открыть с помощью» для PDF  
+2. `git checkout` нужной ветки / `main`  
+3. `.\scripts\build-windows-exe.ps1` (или `npm ci` + `npm run tauri:build:local`)  
+4. `where.exe link` — команда что‑то находит (скрипт проверяет сам)  
+5. Запустить `src-tauri\target\release\PDF Manager.exe`  
+6. Установить NSIS‑сборку и проверить «Открыть с помощью» для PDF  
 
 ---
 
