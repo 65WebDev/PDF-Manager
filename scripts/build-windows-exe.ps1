@@ -1,22 +1,24 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-  Build Windows .exe (Tauri) for PDF Manager.
+  Build Windows .exe (Tauri) for PDF Manager and upload to GitHub Releases.
 
 .DESCRIPTION
   Checks Node / Rust / MSVC link.exe, runs npm ci if needed, then release build.
-  If link.exe is not in PATH, the script tries to load the Visual Studio /
-  Build Tools developer environment automatically (vswhere + VsDevCmd.bat).
+  By default ALSO uploads the installer/portable exe to GitHub Release
+  windows-v{version} (needs gh + gh auth login).
+
+  If link.exe is not in PATH, loads VS / Build Tools via vswhere + VsDevCmd.bat.
 
   Output:
     - portable:  src-tauri\target\release\PDF Manager.exe
     - installer: src-tauri\target\release\bundle\nsis\*.exe
+    - GitHub:    release tag windows-v{version}
 
   Docs: docs\windows-tauri-build.md
 
-.PARAMETER Upload
-  Upload installer to GitHub Release after build (needs gh + auth login).
-  Without this flag: local build only (npm run tauri:build:local).
+.PARAMETER Local
+  Build only — do NOT upload to GitHub (npm run tauri:build:local).
 
 .PARAMETER SkipNpmCi
   Skip npm ci (use when node_modules already exists).
@@ -28,17 +30,21 @@
   .\scripts\build-windows-exe.ps1
 
 .EXAMPLE
-  .\scripts\build-windows-exe.ps1 -Upload
+  .\scripts\build-windows-exe.ps1 -Local
+
+.EXAMPLE
+  .\scripts\build-windows-exe.ps1 -SkipNpmCi
 #>
 
 [CmdletBinding()]
 param(
-  [switch] $Upload,
+  [switch] $Local,
   [switch] $SkipNpmCi,
   [switch] $Dev
 )
 
 $ErrorActionPreference = 'Stop'
+$doUpload = -not $Local
 
 function Write-Step([string] $Message) {
   Write-Host ""
@@ -76,6 +82,17 @@ function Assert-Cmd([string] $Name, [string] $Hint) {
   }
 }
 
+function Get-AppVersion {
+  $conf = Join-Path $RepoRoot 'src-tauri\tauri.conf.json'
+  if (-not (Test-Path -LiteralPath $conf)) { return $null }
+  try {
+    $json = Get-Content -LiteralPath $conf -Raw -Encoding UTF8 | ConvertFrom-Json
+    return [string]$json.version
+  } catch {
+    return $null
+  }
+}
+
 function Get-VsInstallPath {
   $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
   if (-not (Test-Path -LiteralPath $vswhere)) {
@@ -83,7 +100,6 @@ function Get-VsInstallPath {
     if (Test-Path -LiteralPath $alt) { $vswhere = $alt } else { return $null }
   }
 
-  # Prefer an install that has the MSVC x64 toolchain.
   $path = & $vswhere -latest -products * `
     -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
     -property installationPath 2>$null
@@ -95,7 +111,6 @@ function Get-VsInstallPath {
 }
 
 function Import-VsDevEnvironment {
-  # Import env vars from VsDevCmd.bat into THIS PowerShell process.
   $installPath = Get-VsInstallPath
   if (-not $installPath) { return $false }
 
@@ -112,7 +127,6 @@ function Import-VsDevEnvironment {
     if ($line -match '^([^=]+)=(.*)$') {
       $name = $Matches[1]
       $value = $Matches[2]
-      # Skip pseudo-vars that break SetEnvironmentVariable
       if ($name -match '^[^=]+$') {
         [Environment]::SetEnvironmentVariable($name, $value, 'Process')
       }
@@ -144,22 +158,46 @@ MSVC linker is required for Tauri/Rust on Windows.
 
 Option A - install Build Tools (recommended):
   1. Download: https://visualstudio.microsoft.com/visual-cpp-build-tools/
-  2. In the installer, select workload:
-       "Desktop development with C++"
-  3. Finish install, then OPEN A NEW PowerShell and run this script again.
+  2. Select workload: "Desktop development with C++"
+  3. Open a NEW PowerShell and run this script again.
 
   Or via winget:
     winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
 
 Option B - if Build Tools are already installed:
-  Open Start menu -> "Developer PowerShell for VS 2022" (or "x64 Native Tools Command Prompt")
+  Open Start menu -> "Developer PowerShell for VS 2022"
   and run this script from THAT window.
-
-Option C - check install:
-  Test-Path "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 
 "@ -ForegroundColor Yellow
   return $false
+}
+
+function Ensure-GhAuth {
+  Assert-Cmd 'gh' @"
+GitHub upload needs GitHub CLI: https://cli.github.com/
+Then run: gh auth login
+
+Build without upload:
+  .\scripts\build-windows-exe.ps1 -Local
+"@
+  $login = $null
+  try {
+    $login = gh api user --jq .login 2>$null
+  } catch {
+    $login = $null
+  }
+  if (-not $login) {
+    Write-Fail "gh is not logged in."
+    Write-Host @"
+Run in this terminal:
+  gh auth login
+
+Then rerun this script. Or build without upload:
+  .\scripts\build-windows-exe.ps1 -Local
+"@ -ForegroundColor Yellow
+    exit 1
+  }
+  Write-Ok ("gh - logged in as {0}" -f $login)
 }
 
 # Repo root: script may live in scripts\ or in the repo root.
@@ -199,23 +237,14 @@ cargo comes with Rust (rustup). New terminal after install.
 
 if (-not (Ensure-LinkExe)) { exit 1 }
 
-if ($Upload) {
-  Assert-Cmd 'gh' @"
--Upload needs GitHub CLI: https://cli.github.com/
-Then: gh auth login
-Or build without upload: .\scripts\build-windows-exe.ps1
-"@
-  $login = $null
-  try {
-    $login = gh api user --jq .login 2>$null
-  } catch {
-    $login = $null
+if ($doUpload) {
+  Ensure-GhAuth
+  $ver = Get-AppVersion
+  if ($ver) {
+    Write-Host ("Will upload to GitHub Release tag: windows-v{0}" -f $ver) -ForegroundColor DarkGray
   }
-  if (-not $login) {
-    Write-Fail "gh is not logged in. Run: gh auth login"
-    exit 1
-  }
-  Write-Ok ("gh - logged in as {0}" -f $login)
+} else {
+  Write-Host "Local build only (-Local): GitHub upload skipped." -ForegroundColor DarkGray
 }
 
 if (-not $SkipNpmCi) {
@@ -238,9 +267,11 @@ if ($Dev) {
   exit $LASTEXITCODE
 }
 
-if ($Upload) {
+if ($doUpload) {
   Write-Step "Release build + GitHub upload (npm run tauri:build)"
-  Write-Host "First build may take 10-20+ minutes." -ForegroundColor DarkGray
+  Write-Host "First build may take 10-20+ minutes. Then gh uploads the .exe." -ForegroundColor DarkGray
+  # Ensure upload script is not skipped by a leftover env var
+  Remove-Item Env:TAURI_SKIP_UPLOAD -ErrorAction SilentlyContinue
   npm run tauri:build
 } else {
   Write-Step "Release build, no upload (npm run tauri:build:local)"
@@ -276,6 +307,19 @@ if (Test-Path -LiteralPath $nsisDir) {
   }
 } else {
   Write-Host ("NSIS folder not created yet: {0}" -f $nsisDir) -ForegroundColor Yellow
+}
+
+if ($doUpload) {
+  $ver = Get-AppVersion
+  if ($ver) {
+    $tag = "windows-v$ver"
+    Write-Host ""
+    Write-Ok ("GitHub Release tag: {0}" -f $tag)
+    try {
+      $url = gh release view $tag --json url --jq .url 2>$null
+      if ($url) { Write-Ok ("Release URL: {0}" -f $url) }
+    } catch { }
+  }
 }
 
 Write-Host ""
