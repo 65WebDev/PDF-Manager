@@ -72,9 +72,10 @@ git clone https://github.com/5451165-bot/PDF-Manager.git
 cd PDF-Manager
 npm ci
 
-# PowerShell (Windows) — проверка окружения + сборка:
+# PowerShell (Windows) — проверка окружения + сборка + upload на GitHub:
 #   .\scripts\build-windows-exe.ps1
-#   .\scripts\build-windows-exe.ps1 -Upload
+#   .\scripts\build-windows-exe.ps1 -Local   # без загрузки
+#   .\scripts\build-windows-exe.ps1 -Dev
 
 # Режим разработки (окно + UI из офлайн-HTML):
 npm run tauri:dev

@@ -146,13 +146,14 @@ npm run tauri -- info
 Из корня репозитория:
 
 ```powershell
-# Локальная сборка (.exe + NSIS), без загрузки на GitHub:
+# Сборка + загрузка установщика/portable в GitHub Release (по умолчанию):
+# Нужны: gh (GitHub CLI) и `gh auth login`
 .\scripts\build-windows-exe.ps1
 
-# С загрузкой в GitHub Release (нужны gh + gh auth login):
-.\scripts\build-windows-exe.ps1 -Upload
+# Только локальная сборка, без GitHub:
+.\scripts\build-windows-exe.ps1 -Local
 
-# Только проверка окружения уже сделана, зависимости стоят:
+# Зависимости уже стоят:
 .\scripts\build-windows-exe.ps1 -SkipNpmCi
 
 # Режим разработки:
@@ -169,6 +170,8 @@ Set-ExecutionPolicy -Scope Process Bypass
 Скрипт можно положить и в **корень** репозитория (`.\build-windows-exe.ps1`) — корень ищется по `package.json`.
 
 > Windows PowerShell 5.1: файл должен быть в **UTF-8 с BOM** (так и сохранён в репозитории). Если копируете текст вручную в Блокнот — «Сохранить как» → кодировка **UTF-8**.
+
+Release tag: `windows-v{version}` из `src-tauri/tauri.conf.json` (сейчас, например, `windows-v0.1.8`).
 
 ### Вручную через npm
 
