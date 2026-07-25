@@ -93,7 +93,18 @@ where.exe link
 
 Должен появиться путь к `link.exe` внутри `Microsoft Visual Studio\...\MSVC\...\link.exe`.
 
-Если пусто — открыть из меню Пуск **«x64 Native Tools Command Prompt for VS 2022»** или **«Developer PowerShell for VS 2022»** и собирать уже оттуда.
+Если пусто — не обязательно сразу переустанавливать. Часто Build Tools уже стоят, но **не в PATH** обычного PowerShell:
+
+1. Запустите из меню Пуск **«Developer PowerShell for VS 2022»** (или **«x64 Native Tools Command Prompt for VS 2022»**) и соберите оттуда; **или**
+2. Обновите `scripts\build-windows-exe.ps1` — скрипт сам подхватывает окружение через `vswhere` + `VsDevCmd.bat`.
+
+Быстрая установка через winget (workload C++):
+
+```powershell
+winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+```
+
+После установки — **новый** терминал.
 
 ### 1.5. WebView2
 На Windows 10/11 обычно уже есть. Если приложение не стартует из‑за WebView2:  
