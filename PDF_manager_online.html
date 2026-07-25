@@ -16926,6 +16926,198 @@
       return false;
     }
 
+    // Keep a locked gap while the pointer stays near it / over the indicator,
+    // so we don't flicker between neighboring gaps (or clear) when the
+    // clickable hit box overlaps the page card.
+    const HOVER_INSERT_HYST_PX = 10;
+
+    function isPointOverInsertIndicator(clientX, clientY) {
+      const ind = document.getElementById('insertIndicator');
+      if (!ind || !ind.classList.contains('insert-clickable')) return false;
+      if (ind.style.display === 'none') return false;
+      const r = ind.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) return false;
+      // Match the mobile ::before hit pad (52px) and a small desktop pad.
+      const vertical = ind.classList.contains('insert-ind-vertical');
+      let padX = 4, padY = 4;
+      if (typeof isTouchDevice !== 'undefined' && isTouchDevice) {
+        if (vertical) { padX = 4; padY = 26; }
+        else { padX = 26; padY = 4; }
+      }
+      return clientX >= r.left - padX && clientX <= r.right + padX &&
+             clientY >= r.top - padY && clientY <= r.bottom + padY;
+    }
+
+    /** Prefer insertBefore on the later page so the same gap always canonicalizes. */
+    function canonicalizeHoverInsertBest(best, pages) {
+      if (!best || !best.targetPage || best.insertBefore) return best;
+      const idx = pages.indexOf(best.targetPage);
+      if (idx < 0 || idx >= pages.length - 1) return best;
+      const cur = best.targetPage;
+      const next = pages[idx + 1];
+      const r = cur.getBoundingClientRect();
+      const rN = next.getBoundingClientRect();
+      const vertical = useVerticalInsertIndicator();
+      if (vertical) {
+        if (pagesShareColumn(r, rN)) return { targetPage: next, insertBefore: true };
+      } else {
+        const cy = (r.top + r.bottom) / 2;
+        if (Math.abs((rN.top + rN.bottom) / 2 - cy) <= r.height * 0.5 &&
+            rN.left >= r.right - 1) {
+          return { targetPage: next, insertBefore: true };
+        }
+      }
+      return best;
+    }
+
+    function pointInHoverInsertGap(clientX, clientY, targetPage, insertBefore, pages, pad) {
+      if (!targetPage) return false;
+      const vertical = useVerticalInsertIndicator();
+      const r = targetPage.getBoundingClientRect();
+      const p = Math.max(0, pad || 0);
+
+      if (vertical) {
+        if (clientX < r.left - p || clientX > r.right + p) return false;
+        if (insertBefore) {
+          let prev = null, prevGap = Infinity;
+          for (const pg of pages) {
+            if (pg === targetPage) continue;
+            const rr = pg.getBoundingClientRect();
+            if (!pagesShareColumn(r, rr)) continue;
+            if (rr.bottom <= r.top + 1) {
+              const g = r.top - rr.bottom;
+              if (g < prevGap) { prevGap = g; prev = rr; }
+            }
+          }
+          const gapTop = prev ? prev.bottom : (r.top - 40);
+          const gapBottom = r.top;
+          return clientY >= gapTop - p && clientY <= gapBottom + p;
+        }
+        let next = null, nextGap = Infinity;
+        for (const pg of pages) {
+          if (pg === targetPage) continue;
+          const rr = pg.getBoundingClientRect();
+          if (!pagesShareColumn(r, rr)) continue;
+          if (rr.top >= r.bottom - 1) {
+            const g = rr.top - r.bottom;
+            if (g < nextGap) { nextGap = g; next = rr; }
+          }
+        }
+        const gapTop = r.bottom;
+        const gapBottom = next ? next.top : (r.bottom + 40);
+        return clientY >= gapTop - p && clientY <= gapBottom + p;
+      }
+
+      // Horizontal (multi-column): gap to the left/right of the card.
+      if (clientY < r.top - p || clientY > r.bottom + p) return false;
+      const cy = (r.top + r.bottom) / 2;
+      let leftNb = null, rightNb = null;
+      for (const p2 of pages) {
+        if (p2 === targetPage) continue;
+        const r2 = p2.getBoundingClientRect();
+        if (Math.abs((r2.top + r2.bottom) / 2 - cy) > r.height * 0.5) continue;
+        if (r2.right <= r.left + 1) { if (!leftNb || r2.right > leftNb.right) leftNb = r2; }
+        if (r2.left >= r.right - 1) { if (!rightNb || r2.left < rightNb.left) rightNb = r2; }
+      }
+      if (insertBefore) {
+        const leftGapStart = leftNb ? leftNb.right : (r.left - 40);
+        return clientX >= leftGapStart - p && clientX <= r.left + p;
+      }
+      const rightGapEnd = rightNb ? rightNb.left : (r.right + 40);
+      return clientX >= r.right - p && clientX <= rightGapEnd + p;
+    }
+
+    function findHoverInsertBest(clientX, clientY, pages) {
+      const vertical = useVerticalInsertIndicator();
+      let best = null;
+
+      if (vertical) {
+        // Mid-gap exclusive zones (same idea as horizontal) so the upper and
+        // lower cards don't both claim the gutter and flip every frame.
+        for (const page of pages) {
+          const r = page.getBoundingClientRect();
+          if (clientX < r.left || clientX > r.right) continue;
+
+          let prev = null, next = null, prevGap = Infinity, nextGap = Infinity;
+          for (const p2 of pages) {
+            if (p2 === page) continue;
+            const r2 = p2.getBoundingClientRect();
+            if (!pagesShareColumn(r, r2)) continue;
+            if (r2.bottom <= r.top + 1) {
+              const g = r.top - r2.bottom;
+              if (g < prevGap) { prevGap = g; prev = r2; }
+            }
+            if (r2.top >= r.bottom - 1) {
+              const g = r2.top - r.bottom;
+              if (g < nextGap) { nextGap = g; next = r2; }
+            }
+          }
+
+          if (prev) {
+            const mid = (prev.bottom + r.top) / 2;
+            if (clientY >= mid && clientY <= r.top) {
+              best = { targetPage: page, insertBefore: true };
+              break;
+            }
+          } else if (clientY >= r.top - 40 && clientY <= r.top) {
+            best = { targetPage: page, insertBefore: true };
+            break;
+          }
+
+          if (next) {
+            const mid = (r.bottom + next.top) / 2;
+            if (clientY >= r.bottom && clientY < mid) {
+              best = { targetPage: page, insertBefore: false };
+              break;
+            }
+          } else if (clientY >= r.bottom && clientY <= r.bottom + 40) {
+            best = { targetPage: page, insertBefore: false };
+            break;
+          }
+        }
+      } else {
+        // Mid-gap exclusive zones so left/right cards don't both claim the
+        // whole gutter (avoids alternating targetPage for the same slot).
+        for (const page of pages) {
+          const r = page.getBoundingClientRect();
+          if (clientY < r.top || clientY > r.bottom) continue;
+
+          const cy = (r.top + r.bottom) / 2;
+          let leftNb = null, rightNb = null;
+          for (const p2 of pages) {
+            if (p2 === page) continue;
+            const r2 = p2.getBoundingClientRect();
+            if (Math.abs((r2.top + r2.bottom) / 2 - cy) > r.height * 0.5) continue;
+            if (r2.right <= r.left + 1) { if (!leftNb || r2.right > leftNb.right) leftNb = r2; }
+            if (r2.left >= r.right - 1) { if (!rightNb || r2.left < rightNb.left) rightNb = r2; }
+          }
+
+          if (leftNb) {
+            const mid = (leftNb.right + r.left) / 2;
+            if (clientX >= mid && clientX <= r.left) {
+              best = { targetPage: page, insertBefore: true };
+              break;
+            }
+          } else if (clientX >= r.left - 40 && clientX <= r.left) {
+            best = { targetPage: page, insertBefore: true };
+            break;
+          }
+
+          if (rightNb) {
+            const mid = (r.right + rightNb.left) / 2;
+            if (clientX >= r.right && clientX < mid) {
+              best = { targetPage: page, insertBefore: false };
+              break;
+            }
+          } else if (clientX >= r.right && clientX <= r.right + 40) {
+            best = { targetPage: page, insertBefore: false };
+            break;
+          }
+        }
+      }
+      return canonicalizeHoverInsertBest(best, pages);
+    }
+
     function updateHoverInsertIndicator(clientX, clientY) {
       const ind = document.getElementById('insertIndicator');
       if (!ind || !pdfDoc) return;
@@ -16958,66 +17150,28 @@
       const pages = getVisiblePages();
       if (!pages.length) { clearHoverInsert(); return; }
 
-      const vertical = useVerticalInsertIndicator();
-      let best = null;
-
-      if (vertical) {
-        for (let i = 0; i < pages.length; i++) {
-          const r = pages[i].getBoundingClientRect();
-          if (clientX < r.left || clientX > r.right) continue;
-
-          if (i > 0) {
-            const rPrev = pages[i - 1].getBoundingClientRect();
-            if (pagesShareColumn(rPrev, r)) {
-              const gapTop = rPrev.bottom;
-              const gapBottom = r.top;
-              if (clientY >= gapTop && clientY <= gapBottom) {
-                best = { targetPage: pages[i], insertBefore: true };
-                break;
-              }
-            }
-          }
-          if (i < pages.length - 1) {
-            const rNext = pages[i + 1].getBoundingClientRect();
-            if (pagesShareColumn(r, rNext)) {
-              const gapTop = r.bottom;
-              const gapBottom = rNext.top;
-              if (clientY >= gapTop && clientY <= gapBottom) {
-                best = { targetPage: pages[i], insertBefore: false };
-                break;
-              }
-            }
-          }
+      // Sticky: pointer over the indicator (incl. mobile hit pad that overlaps
+      // the page card) must keep the current gap — otherwise we clear and the
+      // bar jumps to a neighboring row/gap on the next frame.
+      if (hoverInsert && isPointOverInsertIndicator(clientX, clientY)) {
+        const stickyPage = pages.find(p => parseInt(p.dataset.index, 10) === hoverInsert.targetIndex);
+        if (stickyPage) {
+          positionInsertIndicator(stickyPage, hoverInsert.insertBefore, pages);
+          ind.classList.add('insert-clickable');
+          return;
         }
-      } else {
-        // We are looking for the gap between two pages in one line where the cursor is located.
-        for (const page of pages) {
-          const r = page.getBoundingClientRect();
-          if (clientY < r.top || clientY > r.bottom) continue;
-
-          const cy = (r.top + r.bottom) / 2;
-          let leftNb = null, rightNb = null;
-          for (const p2 of pages) {
-            if (p2 === page) continue;
-            const r2 = p2.getBoundingClientRect();
-            if (Math.abs((r2.top + r2.bottom) / 2 - cy) > r.height * 0.5) continue;
-            if (r2.right <= r.left + 1) { if (!leftNb || r2.right > leftNb.right) leftNb = r2; }
-            if (r2.left >= r.right - 1) { if (!rightNb || r2.left < rightNb.left) rightNb = r2; }
-          }
-
-          const leftGapStart = leftNb ? leftNb.right : (r.left - 40);
-          if (clientX >= leftGapStart && clientX <= r.left) {
-            best = { targetPage: page, insertBefore: true };
-            break;
-          }
-          const rightGapEnd = rightNb ? rightNb.left : (r.right + 40);
-          if (clientX >= r.right && clientX <= rightGapEnd) {
-            best = { targetPage: page, insertBefore: false };
-            break;
-          }
+      }
+      if (hoverInsert) {
+        const stickyPage = pages.find(p => parseInt(p.dataset.index, 10) === hoverInsert.targetIndex);
+        if (stickyPage && pointInHoverInsertGap(
+              clientX, clientY, stickyPage, hoverInsert.insertBefore, pages, HOVER_INSERT_HYST_PX)) {
+          positionInsertIndicator(stickyPage, hoverInsert.insertBefore, pages);
+          ind.classList.add('insert-clickable');
+          return;
         }
       }
 
+      const best = findHoverInsertBest(clientX, clientY, pages);
       if (!best) { clearHoverInsert(); return; }
 
       // Do not show if it is a redundant position (next to itself is not relevant for insertion)
