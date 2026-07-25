@@ -1916,6 +1916,58 @@
       box-sizing: border-box;
       position: relative;
     }
+    /* Mobile page-change swipe hint (fit zoom only). Hidden on desktop. */
+    #pePageSwipeHint {
+      display: none;
+      position: absolute;
+      z-index: 88;
+      pointer-events: none;
+      overflow: hidden;
+    }
+    @media (pointer: coarse) {
+      #pePageSwipeHint.visible { display: block; }
+      #pePageSwipeHint .pe-page-swipe-edge {
+        position: absolute;
+        left: 0;
+        right: 0;
+        height: calc(var(--pe-swipe-p, 0) * 22%);
+        max-height: 140px;
+        opacity: calc(0.22 + 0.78 * var(--pe-swipe-p, 0));
+        box-sizing: border-box;
+        transition: none;
+      }
+      #pePageSwipeHint .pe-page-swipe-top {
+        top: 0;
+        background: linear-gradient(
+          to bottom,
+          rgba(52, 152, 219, 0.7) 0%,
+          rgba(52, 152, 219, 0.22) 55%,
+          transparent 100%
+        );
+        border-top: 3px solid rgba(52, 152, 219, calc(0.35 + 0.65 * var(--pe-swipe-p, 0)));
+      }
+      #pePageSwipeHint .pe-page-swipe-bottom {
+        bottom: 0;
+        background: linear-gradient(
+          to top,
+          rgba(52, 152, 219, 0.7) 0%,
+          rgba(52, 152, 219, 0.22) 55%,
+          transparent 100%
+        );
+        border-bottom: 3px solid rgba(52, 152, 219, calc(0.35 + 0.65 * var(--pe-swipe-p, 0)));
+      }
+      #pePageSwipeHint .pe-page-swipe-edge.ready {
+        opacity: 1;
+      }
+      #pePageSwipeHint .pe-page-swipe-top.ready {
+        border-top-color: #3498db;
+        box-shadow: inset 0 10px 28px rgba(52, 152, 219, 0.28);
+      }
+      #pePageSwipeHint .pe-page-swipe-bottom.ready {
+        border-bottom-color: #3498db;
+        box-shadow: inset 0 -10px 28px rgba(52, 152, 219, 0.28);
+      }
+    }
     /*Scrollable area: min 100% + flex center on fit; when zooming - scroll to all edges of the sheet*/
     .pe-stage-pad {
       position: relative;
@@ -6221,6 +6273,11 @@
     <div id="peMobileUndoRedoBar" aria-hidden="true">
       <button id="peMobileUndoBtn" type="button" data-tip="Вернуть на шаг назад" aria-label="Вернуть на шаг назад">←</button>
       <button id="peMobileRedoBtn" type="button" data-tip="Отмена возврата" aria-label="Отмена возврата">→</button>
+    </div>
+    <!-- Fit-zoom page swipe hint (mobile): top/bottom edge fill to 30% threshold -->
+    <div id="pePageSwipeHint" aria-hidden="true">
+      <div class="pe-page-swipe-edge pe-page-swipe-top"></div>
+      <div class="pe-page-swipe-edge pe-page-swipe-bottom"></div>
     </div>
   </div>
 
@@ -25200,6 +25257,84 @@ async function peNavigateEditorPage(dir) {
   await pageEditSave({ openIdx: nextIdx });
 }
 
+/** True when the page is fully visible (max zoom-out / fit) — no pan scroll. */
+function peIsEditorPageFitView() {
+  if (!peState || peState.tool === 'crop') return false;
+  const sl = document.getElementById('peScaleSlider');
+  const minSl = sl ? parseInt(sl.min, 10) : 100;
+  const z = peState.zoomSlider != null ? peState.zoomSlider : 100;
+  if (z > minSl + 0.5) return false;
+  if (peState._liveZoomMul != null) {
+    const minMul = peSliderToZoomMul(minSl);
+    if (peState._liveZoomMul > minMul + 0.02) return false;
+  }
+  return !peCanPan();
+}
+
+let pePageSwipe = null;
+let pePageSwipeBusy = false;
+
+function pePageSwipeClearHint() {
+  const hint = document.getElementById('pePageSwipeHint');
+  if (!hint) return;
+  hint.classList.remove('visible');
+  hint.setAttribute('aria-hidden', 'true');
+  hint.querySelectorAll('.pe-page-swipe-edge').forEach(el => {
+    el.style.setProperty('--pe-swipe-p', '0');
+    el.classList.remove('ready');
+  });
+}
+
+function pePageSwipeSyncHintGeom() {
+  const hint = document.getElementById('pePageSwipeHint');
+  const wrap = document.getElementById('peStageWrap');
+  const modal = document.getElementById('pageEditModal');
+  if (!hint || !wrap || !modal) return;
+  const mr = modal.getBoundingClientRect();
+  const wr = wrap.getBoundingClientRect();
+  hint.style.top = Math.round(wr.top - mr.top) + 'px';
+  hint.style.left = Math.round(wr.left - mr.left) + 'px';
+  hint.style.width = Math.round(wr.width) + 'px';
+  hint.style.height = Math.round(wr.height) + 'px';
+}
+
+function pePageSwipeUpdateHint(dir, progress) {
+  const hint = document.getElementById('pePageSwipeHint');
+  if (!hint) return;
+  pePageSwipeSyncHintGeom();
+  hint.classList.add('visible');
+  hint.setAttribute('aria-hidden', 'false');
+  const p = Math.max(0, Math.min(1, progress));
+  const top = hint.querySelector('.pe-page-swipe-top');
+  const bot = hint.querySelector('.pe-page-swipe-bottom');
+  if (dir < 0) {
+    // Finger moves down → previous page → top edge
+    if (top) {
+      top.style.setProperty('--pe-swipe-p', String(p));
+      top.classList.toggle('ready', p >= 1);
+    }
+    if (bot) {
+      bot.style.setProperty('--pe-swipe-p', '0');
+      bot.classList.remove('ready');
+    }
+  } else {
+    // Finger moves up → next page → bottom edge
+    if (bot) {
+      bot.style.setProperty('--pe-swipe-p', String(p));
+      bot.classList.toggle('ready', p >= 1);
+    }
+    if (top) {
+      top.style.setProperty('--pe-swipe-p', '0');
+      top.classList.remove('ready');
+    }
+  }
+}
+
+function pePageSwipeCancel() {
+  pePageSwipe = null;
+  pePageSwipeClearHint();
+}
+
 function peUpdateCropActionsUi() {
   const modal = document.getElementById('pageEditModal');
   if (!modal || !peState) return;
@@ -27892,6 +28027,8 @@ function peDestroy() {
   pePinchPending = null;
   pePinchLastAppliedMidX = null;
   pePinchLastAppliedMidY = null;
+  pePageSwipeBusy = false;
+  if (typeof pePageSwipeCancel === 'function') pePageSwipeCancel();
   if (peState) peState._liveZoomMul = null;
   document.getElementById('pageEditModal')?.classList.remove('pe-alt-highlight');
   const layer = document.getElementById('peObjLayer');
@@ -36654,6 +36791,7 @@ function peObjMouseDown(e, o) {
     pePinchStartDist = peTouchDist(e.touches[0], e.touches[1]);
     pePinchStartSlider = peState.zoomSlider || 100;
     peState._liveZoomMul = peSliderToZoomMul(pePinchStartSlider);
+    pePageSwipeCancel();
     pePinchLastMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
     pePinchLastMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
     pePinchLastAppliedMidX = pePinchLastMidX;
@@ -36679,6 +36817,109 @@ function peObjMouseDown(e, o) {
   }, { passive: false });
   wrap.addEventListener('touchend', peEndEditorPinch);
   wrap.addEventListener('touchcancel', peEndEditorPinch);
+
+  // Mobile fit-zoom: vertical swipe → save + prev/next page (edge fill to 30%).
+  (function initPePageSwipeNav() {
+    const THRESH_ARM = 18;
+    const THRESH_RATIO = 0.3;
+
+    function workH() {
+      const w = document.getElementById('peStageWrap');
+      return (w && w.clientHeight) ? w.clientHeight : window.innerHeight;
+    }
+
+    function onStart(e) {
+      if (typeof isTouchDevice === 'undefined' || !isTouchDevice) return;
+      if (!peState || pePageSwipeBusy || pePinchActive) return;
+      if (!e.touches || e.touches.length !== 1) return;
+      if (!peIsEditorPageFitView()) return;
+      if (peState.inlineEditId) return;
+      const t = e.touches[0];
+      pePageSwipe = {
+        id: t.identifier,
+        x0: t.clientX,
+        y0: t.clientY,
+        dir: 0,
+        active: false,
+        progress: 0
+      };
+    }
+
+    function onMove(e) {
+      if (!pePageSwipe || !peState || pePinchActive) return;
+      if (!e.touches || e.touches.length !== 1) {
+        pePageSwipeCancel();
+        return;
+      }
+      const t = e.touches[0];
+      if (t.identifier !== pePageSwipe.id) return;
+      if (!peIsEditorPageFitView()) {
+        pePageSwipeCancel();
+        return;
+      }
+      const dx = t.clientX - pePageSwipe.x0;
+      const dy = t.clientY - pePageSwipe.y0;
+      const absX = Math.abs(dx);
+      const absY = Math.abs(dy);
+
+      if (!pePageSwipe.active) {
+        if (absY < THRESH_ARM) return;
+        if (absY < absX * 1.15) {
+          // Horizontal-dominant — leave to other gestures.
+          pePageSwipeCancel();
+          return;
+        }
+        // dy > 0 = finger down = previous; dy < 0 = finger up = next
+        const dir = dy > 0 ? -1 : 1;
+        if (peFindNeighborEditablePage(peState.idx, dir) < 0) {
+          pePageSwipeCancel();
+          return;
+        }
+        pePageSwipe.active = true;
+        pePageSwipe.dir = dir;
+        // Do not let object/pan/marquee steal this gesture.
+        peCancelTouchObjPending();
+        if (typeof peClearTextLayerTouchPending === 'function') peClearTextLayerTouchPending();
+        if (peState.drag && (peState.drag.kind === 'pan-view'
+            || peState.drag.kind === 'obj-select-gesture'
+            || peState.drag.kind === 'obj-marquee')) {
+          peState.drag = null;
+          document.getElementById('pageEditModal')?.classList.remove(
+            'pe-panning', 'pe-crop-panning', 'pe-obj-marquee-active'
+          );
+        }
+      }
+
+      if (!pePageSwipe.active) return;
+      // Keep direction consistent with the armed swipe.
+      const signed = pePageSwipe.dir < 0 ? Math.max(0, dy) : Math.max(0, -dy);
+      const progress = signed / Math.max(1, workH() * THRESH_RATIO);
+      pePageSwipe.progress = Math.max(0, Math.min(1, progress));
+      pePageSwipeUpdateHint(pePageSwipe.dir, pePageSwipe.progress);
+      if (e.cancelable) e.preventDefault();
+    }
+
+    async function onEnd(e) {
+      if (!pePageSwipe) return;
+      const sw = pePageSwipe;
+      pePageSwipe = null;
+      const ready = sw.active && sw.progress >= 1 && sw.dir;
+      pePageSwipeClearHint();
+      if (!ready || !peState || pePageSwipeBusy) return;
+      if (peFindNeighborEditablePage(peState.idx, sw.dir) < 0) return;
+      pePageSwipeBusy = true;
+      try {
+        await peNavigateEditorPage(sw.dir);
+      } finally {
+        pePageSwipeBusy = false;
+      }
+    }
+
+    wrap.addEventListener('touchstart', onStart, { passive: true });
+    wrap.addEventListener('touchmove', onMove, { passive: false, capture: true });
+    wrap.addEventListener('touchend', onEnd, { passive: true, capture: true });
+    wrap.addEventListener('touchcancel', () => { pePageSwipeCancel(); }, { passive: true, capture: true });
+  })();
 
   function peSliderPickAnchor() {
     const r = wrap.getBoundingClientRect();
