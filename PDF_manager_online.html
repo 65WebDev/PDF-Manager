@@ -4922,9 +4922,10 @@
       }
       #pageEditModal .pe-obj-mobile-del {
         position: absolute;
-        /* 14×14 button + 4px gap outside the object's top-right corner */
-        top: -18px;
-        right: -18px;
+        /* Sit above the object so the tap pad does not overlap the NE
+           resize handle (handle ≈ top/right -8.5…+6.5px). */
+        top: -40px;
+        right: -8px;
         z-index: 40;
         width: 14px;
         height: 14px;
@@ -4946,11 +4947,12 @@
         touch-action: manipulation;
         pointer-events: auto;
       }
-      /* Larger tap target without growing the visible glyph */
+      /* Larger tap target without growing the visible glyph.
+         Keep the pad above the NE handle (pad bottom ≈ -18px). */
       #pageEditModal .pe-obj-mobile-del::after {
         content: '';
         position: absolute;
-        inset: -8px;
+        inset: -10px -8px -4px -8px;
       }
       #pageEditModal .pe-obj-mobile-del:active {
         background: #b91c1c;
@@ -28101,6 +28103,22 @@ async function peExpandPageEditHistoryIntoDoc(pageIdx, baseRot, baselineBytes, u
     pePushPageEditHistoryBytes(lastBytes, pageIdx, { deferThumbFill: true, skipEqualCheck: true });
   }
 
+  // Expand loads baseline catalog bytes and would otherwise drop the session’s
+  // pageNorm (pdf.js viewport size). Re-stamp it onto the tip document so
+  // later composites / undos use the same coordinate space as object x/y.
+  if (lastBytes && peState && peState.page && doc) {
+    try {
+      const rot = ((baseRot + (Number((steps[steps.length - 1] || {}).delta) || 0)) % 360 + 360) % 360;
+      const vp1 = peState.page.getViewport({ scale: 1, rotation: rot });
+      pdfDoc = doc;
+      peSetPageNormSize(pageIdx, rot, { W: vp1.width, H: vp1.height });
+      lastBytes = new Uint8Array(await doc.save(saveOpts));
+      if (typeof originalFileBytes !== 'undefined') originalFileBytes = lastBytes;
+      const tip = (docHistoryIndex >= 0) ? docHistory[docHistoryIndex] : null;
+      if (tip) tip.pdfBytes = lastBytes;
+    } catch (_) { /* pageNorm best-effort */ }
+  }
+
   // Tip thumb is filled by pageEditSave’s live grid render + patchHistoryPending.
   // Older pending steps (rewrite sessions) fill in the background after Save.
   if (typeof scheduleSnapshotFill === 'function') scheduleSnapshotFill();
@@ -40109,13 +40127,31 @@ function peTextBoxPx(o, stageW, stageH) {
 
 function peSnapTextBoxSize(o) {
   if (!o || o.type !== 'text') return;
+  const prevW = Number(o.boxW) || 0;
+  const prevH = Number(o.boxH) || 0;
   if (peState) {
     const sc = Math.max(1e-6, peState.scale || 1);
-    const outer = peGetTextOuterEl(o);
-    const el = outer || peGetInlineTextEl(o);
+    // Prefer the inner text node — outer may host handles / mobile × whose
+    // layout quirks must not inflate the rotation box.
+    const inner = peGetInlineTextEl(o);
+    const el = inner || peGetTextOuterEl(o);
     if (el) {
-      o.boxW = el.offsetWidth / sc;
-      o.boxH = el.offsetHeight / sc;
+      const newW = el.offsetWidth / sc;
+      const newH = el.offsetHeight / sc;
+      // Keep the unrotated-box center stable when the measured size changes
+      // (reflow after page rotate). Otherwise o.x/o.y (computed with the old
+      // box) + a new boxW/boxH shift the CSS/canvas rotation pivot.
+      if (peNormRot(o.rot || 0) && prevW > 0.5 && prevH > 0.5 && peState.page &&
+          (Math.abs(newW - prevW) > 0.05 || Math.abs(newH - prevH) > 0.05)) {
+        const vp1 = peState.page.getViewport({ scale: 1, rotation: peFinalRotation() });
+        const W = Math.max(1, vp1.width), H = Math.max(1, vp1.height);
+        const cx = (Number(o.x) || 0) * W + prevW / 2;
+        const cy = (Number(o.y) || 0) * H + prevH / 2;
+        o.x = peRoundNorm((cx - newW / 2) / W);
+        o.y = peRoundNorm((cy - newH / 2) / H);
+      }
+      o.boxW = newW;
+      o.boxH = newH;
       if (peState.page) {
         const vp1 = peState.page.getViewport({ scale: 1, rotation: peFinalRotation() });
         o.boxWFrac = o.boxW / Math.max(1, vp1.width);
@@ -40524,9 +40560,25 @@ function peDrawEditorObjects(ctx, canvasW, canvasH, objects, stageW, stageH) {
       ctx.save();
       const el = peState ? peGetInlineTextEl(o) : null;
       const est = peTextBoxPx(o, sw, sh);
+      // Box size must be in PDF points. Live DOM offsetWidth is CSS px and
+      // must be divided by peState.scale — otherwise (edit zoom ≠ 1) the
+      // rotation pivot is wrong and the preview text drifts after Save.
+      let boxWpt = est.w;
+      let boxHpt = est.h;
+      if (peState && el) {
+        const sc = Math.max(1e-6, peState.scale || 1);
+        boxWpt = el.offsetWidth / sc;
+        boxHpt = el.offsetHeight / sc;
+        // Prefer saved/estimated size when DOM measure is wildly off.
+        if (!(boxWpt > 0.5) || !(boxHpt > 0.5)) {
+          boxWpt = est.w;
+          boxHpt = est.h;
+        }
+      }
       const scaleX = canvasW / Math.max(1, sw);
-      const blockW = el ? peTextBlockSizePx(o, el, sw).w * scaleX : est.w * scaleX;
-      const blockH = el ? peTextBlockSizePx(o, el, sw).h * (canvasH / Math.max(1, sh)) : est.h * (canvasH / Math.max(1, sh));
+      const scaleY = canvasH / Math.max(1, sh);
+      const blockW = boxWpt * scaleX;
+      const blockH = boxHpt * scaleY;
       const tx = o.x * canvasW;
       const ty = o.y * canvasH;
       const rot = peNormRot(o.rot || 0);
