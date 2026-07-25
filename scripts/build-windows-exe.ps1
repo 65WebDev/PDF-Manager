@@ -5,6 +5,8 @@
 
 .DESCRIPTION
   Checks Node / Rust / MSVC link.exe, runs npm ci if needed, then release build.
+  If link.exe is not in PATH, the script tries to load the Visual Studio /
+  Build Tools developer environment automatically (vswhere + VsDevCmd.bat).
 
   Output:
     - portable:  src-tauri\target\release\PDF Manager.exe
@@ -27,9 +29,6 @@
 
 .EXAMPLE
   .\scripts\build-windows-exe.ps1 -Upload
-
-.EXAMPLE
-  .\scripts\build-windows-exe.ps1 -SkipNpmCi
 #>
 
 [CmdletBinding()]
@@ -77,6 +76,92 @@ function Assert-Cmd([string] $Name, [string] $Hint) {
   }
 }
 
+function Get-VsInstallPath {
+  $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+  if (-not (Test-Path -LiteralPath $vswhere)) {
+    $alt = Join-Path $env:ProgramFiles 'Microsoft Visual Studio\Installer\vswhere.exe'
+    if (Test-Path -LiteralPath $alt) { $vswhere = $alt } else { return $null }
+  }
+
+  # Prefer an install that has the MSVC x64 toolchain.
+  $path = & $vswhere -latest -products * `
+    -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+    -property installationPath 2>$null
+  if ($path) { return ($path | Select-Object -First 1).ToString().Trim() }
+
+  $path = & $vswhere -latest -products * -property installationPath 2>$null
+  if ($path) { return ($path | Select-Object -First 1).ToString().Trim() }
+  return $null
+}
+
+function Import-VsDevEnvironment {
+  # Import env vars from VsDevCmd.bat into THIS PowerShell process.
+  $installPath = Get-VsInstallPath
+  if (-not $installPath) { return $false }
+
+  $vsDevCmd = Join-Path $installPath 'Common7\Tools\VsDevCmd.bat'
+  if (-not (Test-Path -LiteralPath $vsDevCmd)) { return $false }
+
+  Write-Host ("Loading MSVC env from: {0}" -f $installPath) -ForegroundColor DarkGray
+
+  $cmdLine = 'call "' + $vsDevCmd + '" -arch=x64 -host_arch=x64 >nul && set'
+  $output = & cmd.exe /c $cmdLine 2>$null
+  if (-not $output) { return $false }
+
+  foreach ($line in $output) {
+    if ($line -match '^([^=]+)=(.*)$') {
+      $name = $Matches[1]
+      $value = $Matches[2]
+      # Skip pseudo-vars that break SetEnvironmentVariable
+      if ($name -match '^[^=]+$') {
+        [Environment]::SetEnvironmentVariable($name, $value, 'Process')
+      }
+    }
+  }
+  return [bool](Get-Command link.exe -ErrorAction SilentlyContinue)
+}
+
+function Ensure-LinkExe {
+  if (Get-Command link.exe -ErrorAction SilentlyContinue) {
+    $link = Get-Command link.exe
+    Write-Ok ("link.exe - {0}" -f $link.Source)
+    return $true
+  }
+
+  Write-Host "link.exe not in PATH - trying Visual Studio / Build Tools..." -ForegroundColor DarkGray
+  if (Import-VsDevEnvironment) {
+    $link = Get-Command link.exe -ErrorAction SilentlyContinue
+    if ($link) {
+      Write-Ok ("link.exe - {0}" -f $link.Source)
+      return $true
+    }
+  }
+
+  Write-Fail "link.exe not found (Visual C++ Build Tools / MSVC)."
+  Write-Host @"
+
+MSVC linker is required for Tauri/Rust on Windows.
+
+Option A - install Build Tools (recommended):
+  1. Download: https://visualstudio.microsoft.com/visual-cpp-build-tools/
+  2. In the installer, select workload:
+       "Desktop development with C++"
+  3. Finish install, then OPEN A NEW PowerShell and run this script again.
+
+  Or via winget:
+    winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+
+Option B - if Build Tools are already installed:
+  Open Start menu -> "Developer PowerShell for VS 2022" (or "x64 Native Tools Command Prompt")
+  and run this script from THAT window.
+
+Option C - check install:
+  Test-Path "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+
+"@ -ForegroundColor Yellow
+  return $false
+}
+
 # Repo root: script may live in scripts\ or in the repo root.
 $here = $PSScriptRoot
 if (-not $here) { $here = Split-Path -Parent $MyInvocation.MyCommand.Path }
@@ -112,20 +197,7 @@ Assert-Cmd 'cargo' @"
 cargo comes with Rust (rustup). New terminal after install.
 "@
 
-$link = Get-Command link.exe -ErrorAction SilentlyContinue
-if (-not $link) {
-  Write-Fail "link.exe not found (Visual C++ Build Tools)."
-  Write-Host @"
-Install Build Tools:
-  https://visualstudio.microsoft.com/visual-cpp-build-tools/
-Workload: Desktop development with C++
-
-Then open a new terminal or "Developer PowerShell for VS 2022"
-and run this script again.
-"@ -ForegroundColor Yellow
-  exit 1
-}
-Write-Ok ("link.exe - {0}" -f $link.Source)
+if (-not (Ensure-LinkExe)) { exit 1 }
 
 if ($Upload) {
   Assert-Cmd 'gh' @"
