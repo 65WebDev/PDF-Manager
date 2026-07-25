@@ -25461,6 +25461,18 @@ function peIsEditorPageFitView() {
   return !peCanPan();
 }
 
+/** Page swipe nav: Hand or Cursor (object-select) only — not draw/crop/text tools. */
+function peIsPageSwipeNavMode() {
+  return !!(peState && peState.tool === 'select');
+}
+
+/** Double-tap marquee in Cursor mode must own the gesture — do not steal it. */
+function peIsObjSelectMarqueeActive() {
+  if (!peState) return false;
+  if (peState.drag && peState.drag.kind === 'obj-marquee') return true;
+  return !!document.getElementById('pageEditModal')?.classList.contains('pe-obj-marquee-active');
+}
+
 let pePageSwipe = null;
 let pePageSwipeBusy = false;
 
@@ -37022,7 +37034,8 @@ function peObjMouseDown(e, o) {
       if (typeof isTouchDevice === 'undefined' || !isTouchDevice) return;
       if (!peState || pePageSwipeBusy || pePinchActive) return;
       if (!e.touches || e.touches.length !== 1) return;
-      if (!peIsEditorPageFitView()) return;
+      if (!peIsPageSwipeNavMode() || !peIsEditorPageFitView()) return;
+      if (peIsObjSelectMarqueeActive()) return;
       if (peState.inlineEditId) return;
       const t = e.touches[0];
       pePageSwipe = {
@@ -37043,7 +37056,12 @@ function peObjMouseDown(e, o) {
       }
       const t = e.touches[0];
       if (t.identifier !== pePageSwipe.id) return;
-      if (!peIsEditorPageFitView()) {
+      // Cursor double-tap marquee owns the finger — never arm / continue swipe.
+      if (peIsObjSelectMarqueeActive()) {
+        pePageSwipeCancel();
+        return;
+      }
+      if (!peIsPageSwipeNavMode() || !peIsEditorPageFitView()) {
         pePageSwipeCancel();
         return;
       }
@@ -37067,15 +37085,14 @@ function peObjMouseDown(e, o) {
         }
         pePageSwipe.active = true;
         pePageSwipe.dir = dir;
-        // Do not let object/pan/marquee steal this gesture.
+        // Steal pending pan / blank-canvas gesture, but never a marquee.
         peCancelTouchObjPending();
         if (typeof peClearTextLayerTouchPending === 'function') peClearTextLayerTouchPending();
         if (peState.drag && (peState.drag.kind === 'pan-view'
-            || peState.drag.kind === 'obj-select-gesture'
-            || peState.drag.kind === 'obj-marquee')) {
+            || peState.drag.kind === 'obj-select-gesture')) {
           peState.drag = null;
           document.getElementById('pageEditModal')?.classList.remove(
-            'pe-panning', 'pe-crop-panning', 'pe-obj-marquee-active'
+            'pe-panning', 'pe-crop-panning'
           );
         }
       }
@@ -37096,6 +37113,7 @@ function peObjMouseDown(e, o) {
       const ready = sw.active && sw.progress >= 1 && sw.dir;
       pePageSwipeClearHint();
       if (!ready || !peState || pePageSwipeBusy) return;
+      if (!peIsPageSwipeNavMode() || peIsObjSelectMarqueeActive()) return;
       if (peFindNeighborEditablePage(peState.idx, sw.dir) < 0) return;
       pePageSwipeBusy = true;
       try {
