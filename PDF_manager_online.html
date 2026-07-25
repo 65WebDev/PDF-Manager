@@ -27961,21 +27961,6 @@ function peApplyEditorHistorySnapToDoc(doc, pageIdx, baseRot, snap) {
   }
 }
 
-/**
- * Materialize one editor-history snapshot into PDF bytes for the document
- * undo stack (rotation/crop + page editor objects metadata).
- * `carryBytes` is the previous step’s PDF — so redacts / crops already
- * applied in earlier steps are preserved when the current snap has no pdfBytes.
- */
-async function peMaterializeEditorHistorySnap(carryBytes, pageIdx, baseRot, snap) {
-  const source = (snap.pdfBytes && snap.pdfBytes.length)
-    ? snap.pdfBytes
-    : carryBytes;
-  const doc = await PDFLib.PDFDocument.load(source.slice());
-  peApplyEditorHistorySnapToDoc(doc, pageIdx, baseRot, snap);
-  return new Uint8Array(await doc.save({ useObjectStreams: false }));
-}
-
 /** Push PDF bytes as a document-history step (thumbnail of pageIdx pending fill). */
 function pePushPageEditHistoryBytes(pdfBytes, pageIdx, opts) {
   if (!pdfBytes || !pdfDoc) return;
