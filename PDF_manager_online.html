@@ -2601,6 +2601,14 @@
       background: rgba(34, 48, 61, .96); color: #fff; pointer-events: none;
       box-shadow: 0 2px 8px rgba(0, 0, 0, .35); white-space: nowrap;
     }
+    .pe-aspect-snap-label {
+      position: fixed; z-index: 99991; display: none;
+      font-size: 13px; line-height: 1.25; padding: 4px 10px; border-radius: 8px;
+      font-weight: 600;
+      background: rgba(34, 48, 61, .96); color: #fff; pointer-events: none;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, .35); white-space: nowrap;
+      transform: translate(-50%, -100%);
+    }
     #peCrop {
       position: absolute; border: 1.5px dashed #ff8c00;
       box-shadow: 0 0 0 100000px rgba(0,0,0,.45);
@@ -6411,6 +6419,7 @@
     </div>
   </div>
   <div id="peRotateAngleLabel" class="pe-rotate-angle-label" aria-hidden="true"></div>
+  <div id="peAspectSnapLabel" class="pe-aspect-snap-label" aria-hidden="true">Оригинальное соотношение</div>
   <div id="peShapeColorPopup" class="pe-shape-color-popup" aria-hidden="true"></div>
   <div id="peCalloutBgPopup" class="pe-callout-bg-popup" aria-hidden="true"></div>
   <div id="peRedactColorPopup" class="pe-redact-color-popup" aria-hidden="true"></div>
@@ -32765,6 +32774,35 @@ function peHideRotateLabel() {
   if (lbl) lbl.style.display = 'none';
 }
 
+function peHideAspectSnapLabel() {
+  const lbl = document.getElementById('peAspectSnapLabel');
+  if (!lbl) return;
+  lbl.style.display = 'none';
+  lbl.setAttribute('aria-hidden', 'true');
+}
+
+/** Floating tip above a shape while its aspect magnet is engaged. */
+function peUpdateAspectSnapLabel(o, snapped) {
+  const lbl = document.getElementById('peAspectSnapLabel');
+  if (!lbl) return;
+  if (!snapped || !o) {
+    peHideAspectSnapLabel();
+    return;
+  }
+  lbl.textContent = 'Оригинальное соотношение';
+  const el = (typeof peGetBoxOuterEl === 'function' ? peGetBoxOuterEl(o) : null)
+    || document.querySelector('#peObjLayer .pe-obj[data-pe-id="' + o.id + '"]');
+  if (!el) {
+    peHideAspectSnapLabel();
+    return;
+  }
+  const r = el.getBoundingClientRect();
+  lbl.style.left = Math.round(r.left + r.width / 2) + 'px';
+  lbl.style.top = Math.round(r.top - 8) + 'px';
+  lbl.style.display = 'block';
+  lbl.setAttribute('aria-hidden', 'false');
+}
+
 function peUpdateRotateLabel(o, clientX, clientY) {
   const lbl = document.getElementById('peRotateAngleLabel');
   if (!lbl) return;
@@ -35712,28 +35750,38 @@ function peStartShapeCornerResize(e, o, corner) {
   const anchorPt = peShapeRotatedLocalPoint(o, opp.x, opp.y, W, H);
   const dragged = peTextCornerLocalXY(corner, wPx, hPx);
   const draggedPt = peShapeRotatedLocalPoint(o, dragged.x, dragged.y, W, H);
+  // Freehand: magnet back to the aspect locked when drawing finished.
+  // Other shapes/images: light snap to the aspect at this resize start.
+  let magnetAspect = Math.max(0.01, wPx / hPx);
+  if (o && o.type === 'shape' && o.shape === 'freehand' && Number(o.origAspect) > 0.01) {
+    magnetAspect = Number(o.origAspect);
+  }
   peState.drag = {
     kind: 'resize-shape', obj: o, corner,
     anchorX: anchorPt.x, anchorY: anchorPt.y,
     oppCorner,
     startW: o.w || 0, startH: o.h || 0,
-    startAspect: Math.max(0.01, wPx / hPx),
+    startAspect: magnetAspect,
     startVecX: draggedPt.x - anchorPt.x,
     startVecY: draggedPt.y - anchorPt.y,
     shiftKey: e.shiftKey,
     aspectSnapped: false
   };
+  peHideAspectSnapLabel();
   peUpdatePanUi();
 }
 
 /**
  * Mobile soft aspect magnet for corner-resize of images / box shapes.
- * Snaps only when the free aspect is already close to the start ratio
+ * Snaps only when the free aspect is already close to the target ratio
  * (enter ≈3.5°, leave ≈6°); preserves diagonal length from the anchor.
+ * Target is d.startAspect (freehand: draw-time origAspect).
  */
 function peSoftSnapAspectPx(d, wPx, hPx) {
   const startAspect = d && d.startAspect;
-  if (!(startAspect > 0) || !(wPx > 0) || !(hPx > 0)) return { w: wPx, h: hPx };
+  if (!(startAspect > 0) || !(wPx > 0) || !(hPx > 0)) {
+    return { w: wPx, h: hPx, snapped: false };
+  }
   const curAng = Math.atan2(hPx, wPx) * 180 / Math.PI;
   const tgtAng = Math.atan2(1, startAspect) * 180 / Math.PI;
   const dAng = Math.abs(curAng - tgtAng);
@@ -35742,17 +35790,26 @@ function peSoftSnapAspectPx(d, wPx, hPx) {
   if (d.aspectSnapped) {
     if (dAng > leaveDeg) {
       d.aspectSnapped = false;
-      return { w: wPx, h: hPx };
+      return { w: wPx, h: hPx, snapped: false };
     }
   } else if (dAng > enterDeg) {
-    return { w: wPx, h: hPx };
+    return { w: wPx, h: hPx, snapped: false };
   } else {
     d.aspectSnapped = true;
   }
   const dist = Math.hypot(wPx, hPx);
   const h = dist / Math.sqrt(startAspect * startAspect + 1);
   const w = h * startAspect;
-  return { w: Math.max(1, w), h: Math.max(1, h) };
+  return { w: Math.max(1, w), h: Math.max(1, h), snapped: true };
+}
+
+/** Remember freehand pixel aspect after the stroke is finalized. */
+function peRememberFreehandOrigAspect(obj) {
+  if (!obj || obj.type !== 'shape' || obj.shape !== 'freehand') return;
+  const stage = peStageSize();
+  const wPx = Math.max(1, (Number(obj.w) || 0) * stage.w);
+  const hPx = Math.max(1, (Number(obj.h) || 0) * stage.h);
+  obj.origAspect = Math.max(0.01, wPx / hPx);
 }
 
 function peStartHlCornerResize(e, o, corner) {
@@ -36074,6 +36131,7 @@ function peProcessDrag(clientX, clientY) {
       d.obj.w = Math.max(0.01, d.startW * scale);
       d.obj.h = Math.max(0.01, d.startH * scale);
       d.aspectSnapped = false;
+      peHideAspectSnapLabel();
     } else {
       const rot = -((d.obj.rot || 0) * Math.PI / 180);
       const vx = pt.x - d.anchorX, vy = pt.y - d.anchorY;
@@ -36081,15 +36139,22 @@ function peProcessDrag(clientX, clientY) {
       const localDy = vx * Math.sin(rot) + vy * Math.cos(rot);
       let wPx = Math.max(1, Math.abs(localDx));
       let hPx = Math.max(1, Math.abs(localDy));
-      // Mobile: light snap to the aspect at resize start (images + box shapes;
-      // line/arrow use resize-vector and stay free).
+      let snapped = false;
+      // Mobile: light snap to target aspect (freehand → draw-time origAspect;
+      // other box shapes/images → aspect at resize start). Line/arrow use
+      // resize-vector and stay free.
       if (typeof isTouchDevice !== 'undefined' && isTouchDevice) {
         const sn = peSoftSnapAspectPx(d, wPx, hPx);
         wPx = sn.w;
         hPx = sn.h;
+        snapped = !!sn.snapped;
       }
       d.obj.w = Math.max(0.01, wPx / WW);
       d.obj.h = Math.max(0.01, hPx / HH);
+      peShapeSetPosFromFixedCorner(d.obj, d.oppCorner, d.anchorX, d.anchorY, WW, HH);
+      peRedrawObjects();
+      peUpdateAspectSnapLabel(d.obj, snapped);
+      return;
     }
     peShapeSetPosFromFixedCorner(d.obj, d.oppCorner, d.anchorX, d.anchorY, WW, HH);
     peRedrawObjects();
@@ -37606,6 +37671,7 @@ function peObjMouseDown(e, o) {
     if (!peState || !peState.drag) return;
     const d = peState.drag;
     const wasRotate = d.kind === 'rotate-text' || d.kind === 'rotate-shape';
+    const wasAspectResize = d.kind === 'resize-shape';
     peState.drag = null;
     peStopAutoScroll();
     document.getElementById('pageEditModal')?.classList.remove('pe-panning', 'pe-crop-panning');
@@ -37616,6 +37682,7 @@ function peObjMouseDown(e, o) {
       peRedrawObjects();
       peUpdateProps();
     }
+    if (wasAspectResize) peHideAspectSnapLabel();
     if ((d.inlineTextMove || d.inlineTextResize || d.inlineTextRotate) && peState?.inlineEditId) {
       const movedObj = d.obj;
       requestAnimationFrame(() => peResumeInlineTextEditAfterMove(movedObj));
@@ -37738,6 +37805,7 @@ function peObjMouseDown(e, o) {
         peState.objects = peState.objects.filter(o => o !== d.obj);
         peSelect(null, { keepTool: true });
       } else {
+        peRememberFreehandOrigAspect(d.obj);
         peSelect(d.obj, { keepTool: true });
         peSaveShapePresetFromObject(d.obj);
       }
