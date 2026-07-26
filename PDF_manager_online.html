@@ -35720,9 +35720,39 @@ function peStartShapeCornerResize(e, o, corner) {
     startAspect: Math.max(0.01, wPx / hPx),
     startVecX: draggedPt.x - anchorPt.x,
     startVecY: draggedPt.y - anchorPt.y,
-    shiftKey: e.shiftKey
+    shiftKey: e.shiftKey,
+    aspectSnapped: false
   };
   peUpdatePanUi();
+}
+
+/**
+ * Mobile soft aspect magnet for corner-resize of images / box shapes.
+ * Snaps only when the free aspect is already close to the start ratio
+ * (enter ≈3.5°, leave ≈6°); preserves diagonal length from the anchor.
+ */
+function peSoftSnapAspectPx(d, wPx, hPx) {
+  const startAspect = d && d.startAspect;
+  if (!(startAspect > 0) || !(wPx > 0) || !(hPx > 0)) return { w: wPx, h: hPx };
+  const curAng = Math.atan2(hPx, wPx) * 180 / Math.PI;
+  const tgtAng = Math.atan2(1, startAspect) * 180 / Math.PI;
+  const dAng = Math.abs(curAng - tgtAng);
+  const enterDeg = 3.5;
+  const leaveDeg = 6;
+  if (d.aspectSnapped) {
+    if (dAng > leaveDeg) {
+      d.aspectSnapped = false;
+      return { w: wPx, h: hPx };
+    }
+  } else if (dAng > enterDeg) {
+    return { w: wPx, h: hPx };
+  } else {
+    d.aspectSnapped = true;
+  }
+  const dist = Math.hypot(wPx, hPx);
+  const h = dist / Math.sqrt(startAspect * startAspect + 1);
+  const w = h * startAspect;
+  return { w: Math.max(1, w), h: Math.max(1, h) };
 }
 
 function peStartHlCornerResize(e, o, corner) {
@@ -36043,13 +36073,23 @@ function peProcessDrag(clientX, clientY) {
       const scale = dist / startDist;
       d.obj.w = Math.max(0.01, d.startW * scale);
       d.obj.h = Math.max(0.01, d.startH * scale);
+      d.aspectSnapped = false;
     } else {
       const rot = -((d.obj.rot || 0) * Math.PI / 180);
       const vx = pt.x - d.anchorX, vy = pt.y - d.anchorY;
       const localDx = vx * Math.cos(rot) - vy * Math.sin(rot);
       const localDy = vx * Math.sin(rot) + vy * Math.cos(rot);
-      d.obj.w = Math.max(0.01, Math.abs(localDx) / WW);
-      d.obj.h = Math.max(0.01, Math.abs(localDy) / HH);
+      let wPx = Math.max(1, Math.abs(localDx));
+      let hPx = Math.max(1, Math.abs(localDy));
+      // Mobile: light snap to the aspect at resize start (images + box shapes;
+      // line/arrow use resize-vector and stay free).
+      if (typeof isTouchDevice !== 'undefined' && isTouchDevice) {
+        const sn = peSoftSnapAspectPx(d, wPx, hPx);
+        wPx = sn.w;
+        hPx = sn.h;
+      }
+      d.obj.w = Math.max(0.01, wPx / WW);
+      d.obj.h = Math.max(0.01, hPx / HH);
     }
     peShapeSetPosFromFixedCorner(d.obj, d.oppCorner, d.anchorX, d.anchorY, WW, HH);
     peRedrawObjects();
