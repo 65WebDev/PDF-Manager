@@ -2608,6 +2608,15 @@
       background: rgba(34, 48, 61, .96); color: #fff; pointer-events: none;
       box-shadow: 0 2px 8px rgba(0, 0, 0, .35); white-space: nowrap;
       transform: translate(-50%, -100%);
+      opacity: 0;
+      transition: opacity 0.35s ease;
+    }
+    .pe-aspect-snap-label.show {
+      display: block;
+      opacity: 1;
+    }
+    .pe-aspect-snap-label.show.fade-out {
+      opacity: 0;
     }
     #peCrop {
       position: absolute; border: 1.5px dashed #ff8c00;
@@ -32774,33 +32783,51 @@ function peHideRotateLabel() {
   if (lbl) lbl.style.display = 'none';
 }
 
+let peAspectSnapTipTimer = null;
+let peAspectSnapTipFadeTimer = null;
+
 function peHideAspectSnapLabel() {
   const lbl = document.getElementById('peAspectSnapLabel');
+  if (peAspectSnapTipTimer) { clearTimeout(peAspectSnapTipTimer); peAspectSnapTipTimer = null; }
+  if (peAspectSnapTipFadeTimer) { clearTimeout(peAspectSnapTipFadeTimer); peAspectSnapTipFadeTimer = null; }
   if (!lbl) return;
+  lbl.classList.remove('show', 'fade-out');
   lbl.style.display = 'none';
   lbl.setAttribute('aria-hidden', 'true');
 }
 
-/** Floating tip above a shape while its aspect magnet is engaged. */
-function peUpdateAspectSnapLabel(o, snapped) {
+/**
+ * Toast above the shape when the user left the original aspect and then
+ * restored it via the magnet. Stays ~2s, then fades out.
+ */
+function peShowAspectSnapRestoreTip(o) {
   const lbl = document.getElementById('peAspectSnapLabel');
-  if (!lbl) return;
-  if (!snapped || !o) {
-    peHideAspectSnapLabel();
-    return;
-  }
-  lbl.textContent = 'Оригинальное соотношение';
+  if (!lbl || !o) return;
   const el = (typeof peGetBoxOuterEl === 'function' ? peGetBoxOuterEl(o) : null)
     || document.querySelector('#peObjLayer .pe-obj[data-pe-id="' + o.id + '"]');
-  if (!el) {
-    peHideAspectSnapLabel();
-    return;
-  }
+  if (!el) return;
   const r = el.getBoundingClientRect();
+  lbl.textContent = 'Оригинальное соотношение';
   lbl.style.left = Math.round(r.left + r.width / 2) + 'px';
   lbl.style.top = Math.round(r.top - 8) + 'px';
+  if (peAspectSnapTipTimer) { clearTimeout(peAspectSnapTipTimer); peAspectSnapTipTimer = null; }
+  if (peAspectSnapTipFadeTimer) { clearTimeout(peAspectSnapTipFadeTimer); peAspectSnapTipFadeTimer = null; }
+  lbl.classList.remove('fade-out');
   lbl.style.display = 'block';
+  // Force reflow so opacity transition runs even if already shown.
+  void lbl.offsetWidth;
+  lbl.classList.add('show');
   lbl.setAttribute('aria-hidden', 'false');
+  peAspectSnapTipTimer = setTimeout(() => {
+    peAspectSnapTipTimer = null;
+    lbl.classList.add('fade-out');
+    peAspectSnapTipFadeTimer = setTimeout(() => {
+      peAspectSnapTipFadeTimer = null;
+      lbl.classList.remove('show', 'fade-out');
+      lbl.style.display = 'none';
+      lbl.setAttribute('aria-hidden', 'true');
+    }, 360);
+  }, 2000);
 }
 
 function peUpdateRotateLabel(o, clientX, clientY) {
@@ -35765,9 +35792,11 @@ function peStartShapeCornerResize(e, o, corner) {
     startVecX: draggedPt.x - anchorPt.x,
     startVecY: draggedPt.y - anchorPt.y,
     shiftKey: e.shiftKey,
-    aspectSnapped: false
+    aspectSnapped: false,
+    // Tip only after the user left the original aspect and snapped back.
+    aspectLeftOriginal: false,
+    aspectTipArmed: false
   };
-  peHideAspectSnapLabel();
   peUpdatePanUi();
 }
 
@@ -35776,31 +35805,42 @@ function peStartShapeCornerResize(e, o, corner) {
  * Snaps only when the free aspect is already close to the target ratio
  * (enter ≈3.5°, leave ≈6°); preserves diagonal length from the anchor.
  * Target is d.startAspect (freehand: draw-time origAspect).
+ * Returns justRestored when snap engages after the user had left original.
  */
 function peSoftSnapAspectPx(d, wPx, hPx) {
   const startAspect = d && d.startAspect;
   if (!(startAspect > 0) || !(wPx > 0) || !(hPx > 0)) {
-    return { w: wPx, h: hPx, snapped: false };
+    return { w: wPx, h: hPx, snapped: false, justRestored: false };
   }
   const curAng = Math.atan2(hPx, wPx) * 180 / Math.PI;
   const tgtAng = Math.atan2(1, startAspect) * 180 / Math.PI;
   const dAng = Math.abs(curAng - tgtAng);
   const enterDeg = 3.5;
   const leaveDeg = 6;
+  let justRestored = false;
+
+  if (dAng > leaveDeg) {
+    d.aspectLeftOriginal = true;
+    d.aspectTipArmed = true;
+  }
+
   if (d.aspectSnapped) {
     if (dAng > leaveDeg) {
       d.aspectSnapped = false;
-      return { w: wPx, h: hPx, snapped: false };
+      return { w: wPx, h: hPx, snapped: false, justRestored: false };
     }
   } else if (dAng > enterDeg) {
-    return { w: wPx, h: hPx, snapped: false };
+    return { w: wPx, h: hPx, snapped: false, justRestored: false };
   } else {
+    // Entering the magnet zone.
+    justRestored = !!(d.aspectLeftOriginal && d.aspectTipArmed);
+    if (justRestored) d.aspectTipArmed = false;
     d.aspectSnapped = true;
   }
   const dist = Math.hypot(wPx, hPx);
   const h = dist / Math.sqrt(startAspect * startAspect + 1);
   const w = h * startAspect;
-  return { w: Math.max(1, w), h: Math.max(1, h), snapped: true };
+  return { w: Math.max(1, w), h: Math.max(1, h), snapped: true, justRestored };
 }
 
 /** Remember freehand pixel aspect after the stroke is finalized. */
@@ -36131,7 +36171,6 @@ function peProcessDrag(clientX, clientY) {
       d.obj.w = Math.max(0.01, d.startW * scale);
       d.obj.h = Math.max(0.01, d.startH * scale);
       d.aspectSnapped = false;
-      peHideAspectSnapLabel();
     } else {
       const rot = -((d.obj.rot || 0) * Math.PI / 180);
       const vx = pt.x - d.anchorX, vy = pt.y - d.anchorY;
@@ -36139,7 +36178,6 @@ function peProcessDrag(clientX, clientY) {
       const localDy = vx * Math.sin(rot) + vy * Math.cos(rot);
       let wPx = Math.max(1, Math.abs(localDx));
       let hPx = Math.max(1, Math.abs(localDy));
-      let snapped = false;
       // Mobile: light snap to target aspect (freehand → draw-time origAspect;
       // other box shapes/images → aspect at resize start). Line/arrow use
       // resize-vector and stay free.
@@ -36147,13 +36185,18 @@ function peProcessDrag(clientX, clientY) {
         const sn = peSoftSnapAspectPx(d, wPx, hPx);
         wPx = sn.w;
         hPx = sn.h;
-        snapped = !!sn.snapped;
+        d.obj.w = Math.max(0.01, wPx / WW);
+        d.obj.h = Math.max(0.01, hPx / HH);
+        peShapeSetPosFromFixedCorner(d.obj, d.oppCorner, d.anchorX, d.anchorY, WW, HH);
+        peRedrawObjects();
+        // Tip only when restoring after leaving the original aspect.
+        if (sn.justRestored) peShowAspectSnapRestoreTip(d.obj);
+        return;
       }
       d.obj.w = Math.max(0.01, wPx / WW);
       d.obj.h = Math.max(0.01, hPx / HH);
       peShapeSetPosFromFixedCorner(d.obj, d.oppCorner, d.anchorX, d.anchorY, WW, HH);
       peRedrawObjects();
-      peUpdateAspectSnapLabel(d.obj, snapped);
       return;
     }
     peShapeSetPosFromFixedCorner(d.obj, d.oppCorner, d.anchorX, d.anchorY, WW, HH);
@@ -37671,7 +37714,6 @@ function peObjMouseDown(e, o) {
     if (!peState || !peState.drag) return;
     const d = peState.drag;
     const wasRotate = d.kind === 'rotate-text' || d.kind === 'rotate-shape';
-    const wasAspectResize = d.kind === 'resize-shape';
     peState.drag = null;
     peStopAutoScroll();
     document.getElementById('pageEditModal')?.classList.remove('pe-panning', 'pe-crop-panning');
@@ -37682,7 +37724,7 @@ function peObjMouseDown(e, o) {
       peRedrawObjects();
       peUpdateProps();
     }
-    if (wasAspectResize) peHideAspectSnapLabel();
+    // Aspect tip keeps its own 2s fade timer — do not clear on pointerup.
     if ((d.inlineTextMove || d.inlineTextResize || d.inlineTextRotate) && peState?.inlineEditId) {
       const movedObj = d.obj;
       requestAnimationFrame(() => peResumeInlineTextEditAfterMove(movedObj));
