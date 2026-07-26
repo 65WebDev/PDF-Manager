@@ -4922,10 +4922,10 @@
       }
       #pageEditModal .pe-obj-mobile-del {
         position: absolute;
-        /* Sit above the object so the tap pad does not overlap the NE
-           resize handle (handle ≈ top/right -8.5…+6.5px). */
-        top: -40px;
-        right: -8px;
+        /* Close above the top-right corner; stay clear of the NE resize
+           handle hit box (≈ top/right -8.5…+6.5px). */
+        top: -28px;
+        right: -10px;
         z-index: 40;
         width: 14px;
         height: 14px;
@@ -4948,11 +4948,11 @@
         pointer-events: auto;
       }
       /* Larger tap target without growing the visible glyph.
-         Keep the pad above the NE handle (pad bottom ≈ -18px). */
+         Pad bottom ≈ -14px — above the NE handle (~-8.5px). */
       #pageEditModal .pe-obj-mobile-del::after {
         content: '';
         position: absolute;
-        inset: -10px -8px -4px -8px;
+        inset: -8px -6px -2px -6px;
       }
       #pageEditModal .pe-obj-mobile-del:active {
         background: #b91c1c;
@@ -28798,8 +28798,8 @@ function peRedrawObjects() {
         rotH.contentEditable = 'false';
         el.appendChild(rotH);
       }
-      // Mobile: × in the object's top-right — same action as toolbar trash.
-      if (isTouchDevice && (o.type === 'redact' || o.type === 'text'
+      // Mobile: × only for a sole selection — multi-select uses toolbar trash.
+      if (isSole && isTouchDevice && (o.type === 'redact' || o.type === 'text'
           || o.type === 'shape' || o.type === 'image')) {
         peAppendMobileObjDeleteBtn(el, o);
       }
