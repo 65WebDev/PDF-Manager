@@ -32796,8 +32796,24 @@ function peHideAspectSnapLabel() {
   lbl.setAttribute('aria-hidden', 'true');
 }
 
+/** Aspect-magnet mode for corner resize: 'square' | 'original' | null (off). */
+function peShapeAspectMagnetMode(o) {
+  if (!o) return null;
+  if (o.type === 'image') return 'original';
+  if (o.type !== 'shape') return null;
+  if (o.shape === 'star') return null;
+  if (o.shape === 'freehand') return 'original';
+  if (o.shape === 'rect' || o.shape === 'ellipse' || o.shape === 'plus') return 'square';
+  return null;
+}
+
+function peAspectSnapTipText(o) {
+  if (peShapeAspectMagnetMode(o) === 'square') return 'Соотношение 1:1';
+  return 'Оригинальное соотношение';
+}
+
 /**
- * Toast above the shape when the user left the original aspect and then
+ * Toast above the shape when the user left the target aspect and then
  * restored it via the magnet. Stays ~2s, then fades out.
  */
 function peShowAspectSnapRestoreTip(o) {
@@ -32807,7 +32823,7 @@ function peShowAspectSnapRestoreTip(o) {
     || document.querySelector('#peObjLayer .pe-obj[data-pe-id="' + o.id + '"]');
   if (!el) return;
   const r = el.getBoundingClientRect();
-  lbl.textContent = 'Оригинальное соотношение';
+  lbl.textContent = peAspectSnapTipText(o);
   lbl.style.left = Math.round(r.left + r.width / 2) + 'px';
   lbl.style.top = Math.round(r.top - 8) + 'px';
   if (peAspectSnapTipTimer) { clearTimeout(peAspectSnapTipTimer); peAspectSnapTipTimer = null; }
@@ -35777,11 +35793,20 @@ function peStartShapeCornerResize(e, o, corner) {
   const anchorPt = peShapeRotatedLocalPoint(o, opp.x, opp.y, W, H);
   const dragged = peTextCornerLocalXY(corner, wPx, hPx);
   const draggedPt = peShapeRotatedLocalPoint(o, dragged.x, dragged.y, W, H);
-  // Freehand: magnet back to the aspect locked when drawing finished.
-  // Other shapes/images: light snap to the aspect at this resize start.
-  let magnetAspect = Math.max(0.01, wPx / hPx);
-  if (o && o.type === 'shape' && o.shape === 'freehand' && Number(o.origAspect) > 0.01) {
-    magnetAspect = Number(o.origAspect);
+  // Magnet target by kind:
+  // - rect / ellipse / plus → 1:1
+  // - freehand → draw-time origAspect; image → aspect at resize start
+  // - star → none
+  const magnetMode = peShapeAspectMagnetMode(o);
+  let magnetAspect = null;
+  if (magnetMode === 'square') {
+    magnetAspect = 1;
+  } else if (magnetMode === 'original') {
+    if (o && o.type === 'shape' && o.shape === 'freehand' && Number(o.origAspect) > 0.01) {
+      magnetAspect = Number(o.origAspect);
+    } else {
+      magnetAspect = Math.max(0.01, wPx / hPx);
+    }
   }
   peState.drag = {
     kind: 'resize-shape', obj: o, corner,
@@ -35789,11 +35814,12 @@ function peStartShapeCornerResize(e, o, corner) {
     oppCorner,
     startW: o.w || 0, startH: o.h || 0,
     startAspect: magnetAspect,
+    aspectMagnetMode: magnetMode,
     startVecX: draggedPt.x - anchorPt.x,
     startVecY: draggedPt.y - anchorPt.y,
     shiftKey: e.shiftKey,
     aspectSnapped: false,
-    // Tip only after the user left the original aspect and snapped back.
+    // Tip only after the user left the target aspect and snapped back.
     aspectLeftOriginal: false,
     aspectTipArmed: false
   };
@@ -35804,8 +35830,9 @@ function peStartShapeCornerResize(e, o, corner) {
  * Mobile soft aspect magnet for corner-resize of images / box shapes.
  * Snaps only when the free aspect is already close to the target ratio
  * (enter ≈3.5°, leave ≈6°); preserves diagonal length from the anchor.
- * Target is d.startAspect (freehand: draw-time origAspect).
- * Returns justRestored when snap engages after the user had left original.
+ * Target is d.startAspect (1 for rect/ellipse/plus; freehand origAspect;
+ * image start aspect). Star has startAspect=null → no magnet.
+ * Returns justRestored when snap engages after the user had left target.
  */
 function peSoftSnapAspectPx(d, wPx, hPx) {
   const startAspect = d && d.startAspect;
@@ -36178,10 +36205,9 @@ function peProcessDrag(clientX, clientY) {
       const localDy = vx * Math.sin(rot) + vy * Math.cos(rot);
       let wPx = Math.max(1, Math.abs(localDx));
       let hPx = Math.max(1, Math.abs(localDy));
-      // Mobile: light snap to target aspect (freehand → draw-time origAspect;
-      // other box shapes/images → aspect at resize start). Line/arrow use
-      // resize-vector and stay free.
-      if (typeof isTouchDevice !== 'undefined' && isTouchDevice) {
+      // Mobile: light snap by kind (rect/ellipse/plus → 1:1; freehand/image →
+      // original; star → none). Line/arrow use resize-vector and stay free.
+      if (typeof isTouchDevice !== 'undefined' && isTouchDevice && d.startAspect > 0) {
         const sn = peSoftSnapAspectPx(d, wPx, hPx);
         wPx = sn.w;
         hPx = sn.h;
@@ -36189,7 +36215,7 @@ function peProcessDrag(clientX, clientY) {
         d.obj.h = Math.max(0.01, hPx / HH);
         peShapeSetPosFromFixedCorner(d.obj, d.oppCorner, d.anchorX, d.anchorY, WW, HH);
         peRedrawObjects();
-        // Tip only when restoring after leaving the original aspect.
+        // Tip only when restoring after leaving the target aspect.
         if (sn.justRestored) peShowAspectSnapRestoreTip(d.obj);
         return;
       }
