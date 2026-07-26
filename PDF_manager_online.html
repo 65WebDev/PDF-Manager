@@ -19320,12 +19320,14 @@
     // Set only in the Tauri UI copy (scripts/prepare-tauri-ui.mjs).
     const PDF_MANAGER_WINDOWS_VERSION = '';
 
-    // Stable URLs for the About update check (version-feed.js, no CORS needed
-    // when loaded as <script>). Floating release tag `version-feed` is updated
-    // by scripts/publish-version-feed.mjs on every HTML / Windows publish.
+    // Stable URLs for the About update check. Prefer the public GitHub Pages
+    // mirror — private release assets return 404 in the browser without auth,
+    // and GitHub session cookies are not sent for <script> from file://.
+    // Pages deploy: .github/workflows/deploy-version-feed-pages.yml
     const PDF_MANAGER_VERSION_FEED_URLS = [
-      'https://github.com/5451165-bot/PDF-Manager/releases/download/version-feed/version-feed.js',
       'https://5451165-bot.github.io/PDF-Manager/version-feed.js',
+      'https://5451165-bot.github.io/PDF-Manager/version.json',
+      'https://github.com/5451165-bot/PDF-Manager/releases/download/version-feed/version-feed.js',
       'https://cdn.jsdelivr.net/gh/5451165-bot/PDF-Manager@main/version-feed.js'
     ];
 
@@ -19420,20 +19422,29 @@
 
     async function pdfManagerFetchLatestVersionFeed() {
       const urls = PDF_MANAGER_VERSION_FEED_URLS.slice();
-      // Prefer .js via <script>, then .json / native fetch fallbacks.
+      // 1) .js via <script> — works cross-origin even without CORS headers.
       for (let i = 0; i < urls.length; i++) {
         const url = urls[i];
+        if (!/\.js(\?|$)/i.test(url)) continue;
         try {
-          if (/\.js(\?|$)/i.test(url)) {
-            return await pdfManagerLoadVersionFeedScript(url, 8000);
-          }
+          return await pdfManagerLoadVersionFeedScript(url, 8000);
         } catch (_) { /* try next */ }
       }
-      const jsonUrls = urls.map((u) => u.replace(/version-feed\.js(\?.*)?$/i, 'version.json'))
-        .filter((u, idx, arr) => arr.indexOf(u) === idx);
-      for (let i = 0; i < jsonUrls.length; i++) {
+      // 2) fetch text (.js / .json) — needs CORS or Tauri native HTTP.
+      const fetchUrls = [];
+      for (let i = 0; i < urls.length; i++) {
+        fetchUrls.push(urls[i]);
+        if (/\.js(\?|$)/i.test(urls[i])) {
+          fetchUrls.push(urls[i].replace(/\.js(\?|$)/i, '.json$1'));
+        }
+      }
+      const seen = {};
+      for (let i = 0; i < fetchUrls.length; i++) {
+        const url = fetchUrls[i];
+        if (seen[url]) continue;
+        seen[url] = true;
         try {
-          const text = await pdfManagerFetchVersionFeedText(jsonUrls[i]);
+          const text = await pdfManagerFetchVersionFeedText(url);
           const feed = pdfManagerParseVersionFeedText(text);
           if (feed) return feed;
         } catch (_) { /* try next */ }
@@ -19539,10 +19550,25 @@
 
       pdfManagerCheckForUpdates().then((result) => {
         const el = document.getElementById('aboutUpdateLine');
-        if (!el || !result || !result.outdated || !result.messages || !result.messages.length) return;
-        el.style.display = 'block';
-        el.textContent = result.messages.join(' ');
-      }).catch(() => { /* ignore: feed unreachable */ });
+        if (!el) return;
+        if (result && result.outdated && result.messages && result.messages.length) {
+          el.style.display = 'block';
+          el.style.background = '#fff6e5';
+          el.style.borderColor = '#f0c36d';
+          el.style.color = '#7a4b00';
+          el.textContent = result.messages.join(' ');
+          return;
+        }
+        if (!result) {
+          // Feed unreachable (typical for private GitHub assets from file://).
+          el.style.display = 'block';
+          el.style.background = '#f4f6f8';
+          el.style.borderColor = '#d0d7de';
+          el.style.color = '#57606a';
+          el.style.fontWeight = '500';
+          el.textContent = 'Не удалось проверить обновления (нет доступа к списку версий).';
+        }
+      }).catch(() => { /* ignore */ });
     }
 
     // ─── Hidden provenance check (Ctrl+Alt+Shift+P) ───
