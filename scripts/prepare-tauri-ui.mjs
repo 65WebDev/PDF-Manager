@@ -607,6 +607,53 @@ if (!existsSync(offlineHtml)) {
 
 mkdirSync(uiDir, { recursive: true });
 let html = readFileSync(offlineHtml, 'utf8');
+
+// Stamp Windows shell version into About (empty in browser builds).
+let windowsVersion = '';
+try {
+  const conf = JSON.parse(
+    readFileSync(join(root, 'src-tauri', 'tauri.conf.json'), 'utf8'),
+  );
+  windowsVersion = String(conf.version || '').trim();
+} catch (_) { /* ignore */ }
+if (windowsVersion) {
+  html = html.replace(
+    /const PDF_MANAGER_WINDOWS_VERSION = '';/,
+    `const PDF_MANAGER_WINDOWS_VERSION = ${JSON.stringify(windowsVersion)};`,
+  );
+}
+
+// If HTML build placeholders were not stamped by CI, copy numbers from the
+// local version feed so About can compare against newer releases.
+try {
+  const feedPath = join(root, 'version-feed.js');
+  if (
+    existsSync(feedPath) &&
+    html.includes("const PDF_MANAGER_BUILD_VERSION = '__PDF_MANAGER_BUILD__'")
+  ) {
+    const feedText = readFileSync(feedPath, 'utf8');
+    const m = feedText.match(
+      /window\.__PDF_MANAGER_VERSION_FEED__\s*=\s*(\{[\s\S]*?\})\s*;/,
+    );
+    if (m) {
+      const feed = JSON.parse(m[1]);
+      if (feed.build) {
+        html = html.replace(
+          /const PDF_MANAGER_BUILD_VERSION = '__PDF_MANAGER_BUILD__';/,
+          `const PDF_MANAGER_BUILD_VERSION = ${JSON.stringify(String(feed.build))};`,
+        );
+      }
+      if (feed.date) {
+        const dateOnly = String(feed.date).slice(0, 10);
+        html = html.replace(
+          /const PDF_MANAGER_BUILD_DATE = '__PDF_MANAGER_DATE__';/,
+          `const PDF_MANAGER_BUILD_DATE = ${JSON.stringify(dateOnly)};`,
+        );
+      }
+    }
+  }
+} catch (_) { /* ignore */ }
+
 if (!html.includes('Tauri desktop bridge')) {
   // Insert before the document's final </html>. Never use a global
   // String.replace(/<\/body>/) — inlined libs (SheetJS) embed that text.
@@ -621,4 +668,10 @@ if (!html.includes('Tauri desktop bridge')) {
   }
 }
 writeFileSync(uiIndex, html, 'utf8');
-console.log('Wrote', uiIndex, '(with file-association + Explorer DnD bridge)');
+console.log(
+  'Wrote',
+  uiIndex,
+  windowsVersion
+    ? `(Windows ${windowsVersion}, file-association + Explorer DnD bridge)`
+    : '(with file-association + Explorer DnD bridge)',
+);

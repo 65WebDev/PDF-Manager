@@ -103,6 +103,29 @@ fn read_local_file(path: String) -> Result<Vec<u8>, String> {
   std::fs::read(&path).map_err(|e| format!("Не удалось прочитать файл: {e}"))
 }
 
+/// Fetch a small text URL for the About update check (bypasses WebView CORS).
+#[tauri::command]
+async fn fetch_url_text(url: String) -> Result<String, String> {
+  let url = url.trim().to_string();
+  if !(url.starts_with("https://") || url.starts_with("http://")) {
+    return Err("Разрешены только HTTP(S) URL".into());
+  }
+  let client = reqwest::Client::builder()
+    .timeout(std::time::Duration::from_secs(12))
+    .build()
+    .map_err(|e| format!("HTTP-клиент: {e}"))?;
+  let resp = client
+    .get(&url)
+    .header(reqwest::header::USER_AGENT, "PDF-Manager-Desktop")
+    .send()
+    .await
+    .map_err(|e| format!("Сеть: {e}"))?;
+  if !resp.status().is_success() {
+    return Err(format!("HTTP {}", resp.status()));
+  }
+  resp.text().await.map_err(|e| format!("Чтение ответа: {e}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   // argv[0] is the executable; the rest may include PDF paths from the shell.
@@ -120,7 +143,8 @@ pub fn run() {
     }))
     .invoke_handler(tauri::generate_handler![
       take_pending_open_files,
-      read_local_file
+      read_local_file,
+      fetch_url_text
     ])
     .setup(|app| {
       if cfg!(debug_assertions) {

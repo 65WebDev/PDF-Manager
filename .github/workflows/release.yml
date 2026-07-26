@@ -37,17 +37,8 @@ jobs:
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           echo "BUILD=${BUILD}" >> "$GITHUB_ENV"
           echo "DATE_ONLY=${DATE_ONLY}" >> "$GITHUB_ENV"
-          cat > version.json <<EOF
-          {
-            "build": "${BUILD}",
-            "number": ${{ github.run_number }},
-            "commit": "${{ github.sha }}",
-            "shortCommit": "${SHORT_SHA}",
-            "date": "${DATE}",
-            "downloadUrl": "https://github.com/${{ github.repository }}/releases/latest/download/PDF_manager_online.html",
-            "offlineDownloadUrl": "https://github.com/${{ github.repository }}/releases/latest/download/PDF_manager_offline.html"
-          }
-          EOF
+          echo "DATE=${DATE}" >> "$GITHUB_ENV"
+          echo "SHORT_SHA=${SHORT_SHA}" >> "$GITHUB_ENV"
           cat > release-notes.md <<EOF
           Автоматическая сборка менеджера PDF.
 
@@ -59,6 +50,19 @@ jobs:
           - **Онлайн-версия** (\`PDF_manager_online.html\`) — компактный файл, библиотеки подгружаются из CDN при первом запуске. [Прямая ссылка](https://github.com/${{ github.repository }}/releases/latest/download/PDF_manager_online.html)
           - **Офлайн-версия** (\`PDF_manager_offline.html\`) — все библиотеки встроены в файл, интернет не нужен. [Прямая ссылка](https://github.com/${{ github.repository }}/releases/latest/download/PDF_manager_offline.html)
           EOF
+
+      - name: Write version feed files
+        env:
+          BUILD: build-${{ github.run_number }}
+          NUMBER: ${{ github.run_number }}
+          COMMIT: ${{ github.sha }}
+          DOWNLOAD_URL: https://github.com/${{ github.repository }}/releases/latest/download/PDF_manager_online.html
+          OFFLINE_DOWNLOAD_URL: https://github.com/${{ github.repository }}/releases/latest/download/PDF_manager_offline.html
+          SKIP_GH: '1'
+        run: |
+          export DATE="${DATE}"
+          export SHORT_COMMIT="${SHORT_SHA}"
+          node scripts/publish-version-feed.mjs
 
       - name: Stamp version into PDF_manager_online.html
         # Runner-local edit only - never committed back to the repo, so the
@@ -87,4 +91,19 @@ jobs:
             PDF_manager_online.html
             PDF_manager_offline.html
             version.json
+            version-feed.js
           generate_release_notes: true
+
+      - name: Publish floating version-feed release
+        env:
+          BUILD: build-${{ github.run_number }}
+          NUMBER: ${{ github.run_number }}
+          COMMIT: ${{ github.sha }}
+          DOWNLOAD_URL: https://github.com/${{ github.repository }}/releases/latest/download/PDF_manager_online.html
+          OFFLINE_DOWNLOAD_URL: https://github.com/${{ github.repository }}/releases/latest/download/PDF_manager_offline.html
+          # version-feed.js / version.json are outside workflow paths: — no loop.
+          SKIP_COMMIT: '0'
+        run: |
+          export DATE="${DATE}"
+          export SHORT_COMMIT="${SHORT_SHA}"
+          node scripts/publish-version-feed.mjs

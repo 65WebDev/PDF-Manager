@@ -183,15 +183,40 @@ function main() {
   }
 
   const view = runGh(ghBin, ['release', 'view', tag, '--json', 'url']);
+  let releaseUrl = `https://github.com/5451165-bot/PDF-Manager/releases/tag/${tag}`;
   if (view.status === 0 && view.stdout) {
     try {
       const { url } = JSON.parse(view.stdout);
+      if (url) releaseUrl = url;
       console.log('\nГотово:', url);
     } catch {
       console.log('\nГотово. Тег release:', tag);
     }
   } else {
     console.log('\nГотово. Тег release:', tag);
+  }
+
+  // Refresh About update-check feed with the new Windows version.
+  // Do not auto-commit from a local machine (SKIP_COMMIT=1).
+  console.log('Обновляю version-feed (Windows)…');
+  const feed = spawnSync(
+    process.platform === 'win32' ? 'node.exe' : 'node',
+    [join(root, 'scripts', 'publish-version-feed.mjs')],
+    {
+      cwd: root,
+      encoding: 'utf8',
+      windowsHide: true,
+      env: {
+        ...process.env,
+        WINDOWS_VERSION: version,
+        WINDOWS_DOWNLOAD_URL: releaseUrl,
+        SKIP_COMMIT: '1',
+      },
+      stdio: 'inherit',
+    },
+  );
+  if (feed.status !== 0) {
+    console.warn('version-feed обновить не удалось (установщик уже загружен).');
   }
 }
 

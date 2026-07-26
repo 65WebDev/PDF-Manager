@@ -19317,6 +19317,17 @@
     // Flipped to true only in PDF_manager_offline.html, where every library
     // below is actually inlined into the file (see scripts/build-offline.mjs).
     const PDF_MANAGER_OFFLINE_BUILD = false;
+    // Set only in the Tauri UI copy (scripts/prepare-tauri-ui.mjs).
+    const PDF_MANAGER_WINDOWS_VERSION = '';
+
+    // Stable URLs for the About update check (version-feed.js, no CORS needed
+    // when loaded as <script>). Floating release tag `version-feed` is updated
+    // by scripts/publish-version-feed.mjs on every HTML / Windows publish.
+    const PDF_MANAGER_VERSION_FEED_URLS = [
+      'https://github.com/5451165-bot/PDF-Manager/releases/download/version-feed/version-feed.js',
+      'https://5451165-bot.github.io/PDF-Manager/version-feed.js',
+      'https://cdn.jsdelivr.net/gh/5451165-bot/PDF-Manager@main/version-feed.js'
+    ];
 
     const PDF_MANAGER_LIBRARIES = [
       ['pdf-lib', '1.17.1'],
@@ -19329,6 +19340,130 @@
       ['ExcelJS', '4.4.0'],
       ['@cantoo/pdf-lib', '2.7.4']
     ];
+
+    function pdfManagerIsDesktopShell() {
+      return !!(window.__TAURI_INTERNALS__ || window.__TAURI__ || PDF_MANAGER_WINDOWS_VERSION);
+    }
+
+    function pdfManagerLocalBuildNumber() {
+      const m = /^build-(\d+)$/i.exec(String(PDF_MANAGER_BUILD_VERSION || '').trim());
+      return m ? parseInt(m[1], 10) : 0;
+    }
+
+    function pdfManagerCompareSemver(a, b) {
+      const pa = String(a || '').replace(/^v/i, '').split('.').map((x) => parseInt(x, 10) || 0);
+      const pb = String(b || '').replace(/^v/i, '').split('.').map((x) => parseInt(x, 10) || 0);
+      const n = Math.max(pa.length, pb.length);
+      for (let i = 0; i < n; i++) {
+        const da = pa[i] || 0, db = pb[i] || 0;
+        if (da > db) return 1;
+        if (da < db) return -1;
+      }
+      return 0;
+    }
+
+    /** Load version-feed.js via <script> (works cross-origin; no CORS headers needed). */
+    function pdfManagerLoadVersionFeedScript(url, timeoutMs) {
+      return new Promise((resolve, reject) => {
+        const prev = window.__PDF_MANAGER_VERSION_FEED__;
+        try { delete window.__PDF_MANAGER_VERSION_FEED__; } catch (_) { window.__PDF_MANAGER_VERSION_FEED__ = undefined; }
+        const s = document.createElement('script');
+        let done = false;
+        const finish = (err, data) => {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          s.onload = s.onerror = null;
+          if (s.parentNode) s.parentNode.removeChild(s);
+          if (err) {
+            if (prev !== undefined) window.__PDF_MANAGER_VERSION_FEED__ = prev;
+            reject(err);
+          } else resolve(data);
+        };
+        const timer = setTimeout(() => finish(new Error('timeout')), timeoutMs || 8000);
+        s.async = true;
+        s.src = url + (url.includes('?') ? '&' : '?') + 't=' + Date.now();
+        s.onload = () => {
+          const feed = window.__PDF_MANAGER_VERSION_FEED__;
+          if (feed && typeof feed === 'object') finish(null, feed);
+          else finish(new Error('empty feed'));
+        };
+        s.onerror = () => finish(new Error('load failed'));
+        document.head.appendChild(s);
+      });
+    }
+
+    async function pdfManagerFetchVersionFeedText(url) {
+      // Desktop shell: native HTTP bypasses WebView CORS.
+      try {
+        const invoke = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
+        if (typeof invoke === 'function') {
+          const text = await invoke('fetch_url_text', { url });
+          if (text) return String(text);
+        }
+      } catch (_) { /* fall through */ }
+      const res = await fetch(url, { cache: 'no-store' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return await res.text();
+    }
+
+    function pdfManagerParseVersionFeedText(text) {
+      if (!text) return null;
+      const trimmed = String(text).trim();
+      if (trimmed.charAt(0) === '{') {
+        try { return JSON.parse(trimmed); } catch (_) { return null; }
+      }
+      const m = trimmed.match(/__PDF_MANAGER_VERSION_FEED__\s*=\s*(\{[\s\S]*?\})\s*;/);
+      if (!m) return null;
+      try { return JSON.parse(m[1]); } catch (_) { return null; }
+    }
+
+    async function pdfManagerFetchLatestVersionFeed() {
+      const urls = PDF_MANAGER_VERSION_FEED_URLS.slice();
+      // Prefer .js via <script>, then .json / native fetch fallbacks.
+      for (let i = 0; i < urls.length; i++) {
+        const url = urls[i];
+        try {
+          if (/\.js(\?|$)/i.test(url)) {
+            return await pdfManagerLoadVersionFeedScript(url, 8000);
+          }
+        } catch (_) { /* try next */ }
+      }
+      const jsonUrls = urls.map((u) => u.replace(/version-feed\.js(\?.*)?$/i, 'version.json'))
+        .filter((u, idx, arr) => arr.indexOf(u) === idx);
+      for (let i = 0; i < jsonUrls.length; i++) {
+        try {
+          const text = await pdfManagerFetchVersionFeedText(jsonUrls[i]);
+          const feed = pdfManagerParseVersionFeedText(text);
+          if (feed) return feed;
+        } catch (_) { /* try next */ }
+      }
+      return null;
+    }
+
+    /**
+     * Compare local build / Windows shell version with the published feed.
+     * Returns { outdated, messages[] } or null when the feed is unreachable.
+     */
+    async function pdfManagerCheckForUpdates() {
+      const feed = await pdfManagerFetchLatestVersionFeed();
+      if (!feed) return null;
+      const messages = [];
+      const localNum = pdfManagerLocalBuildNumber();
+      const remoteNum = Number(feed.number) || 0;
+      const remoteBuild = String(feed.build || (remoteNum ? ('build-' + remoteNum) : '')).trim();
+      if (remoteNum > 0 && localNum > 0 && remoteNum > localNum) {
+        messages.push('Вышла обновлённая версия ' + remoteBuild);
+      }
+      const localWin = String(PDF_MANAGER_WINDOWS_VERSION || '').trim();
+      const remoteWin = String(feed.windowsVersion || '').trim();
+      if (localWin && remoteWin && pdfManagerCompareSemver(remoteWin, localWin) > 0) {
+        messages.push('Вышла обновлённая версия Windows ' + remoteWin);
+      }
+      // Unstamped local HTML (dev / Pages source): still hint if a release exists
+      // and we are clearly behind is unknown — skip to avoid false alarms.
+      return { outdated: messages.length > 0, messages, feed };
+    }
 
     function showAboutModal() {
       if (document.querySelector('.modal-overlay-active')) return;
@@ -19344,15 +19479,22 @@
         box-shadow: 0 10px 30px rgba(0,0,0,0.3); text-align: center; box-sizing: border-box;`;
 
       const isStamped = !PDF_MANAGER_BUILD_VERSION.startsWith('__');
-      const versionLine = isStamped
+      const winVer = String(PDF_MANAGER_WINDOWS_VERSION || '').trim();
+      let versionLine = isStamped
         ? `Версия ${escapeHtml(PDF_MANAGER_BUILD_VERSION)} от ${escapeHtml(PDF_MANAGER_BUILD_DATE)}`
         : 'Версия неизвестна (сборка не через релизный пайплайн)';
+      if (winVer) {
+        versionLine += `<br>Windows-приложение: ${escapeHtml(winVer)}`;
+      }
       const networkLine = PDF_MANAGER_OFFLINE_BUILD
-        ? 'Все библиотеки встроены в код веб-приложения. Обращение к сети отсутствует.'
+        ? 'Все библиотеки встроены в код веб-приложения. Обращение к сети отсутствует (кроме проверки обновлений в «О программе»).'
         : 'Библиотеки подгружаются из CDN при первом запуске. Офлайн-версия содержит их прямо в файле, без обращений к сети.';
       const libsHtml = PDF_MANAGER_LIBRARIES
         .map(([name, ver]) => `${escapeHtml(name)} ${escapeHtml(ver)}`)
         .join(' &nbsp;·&nbsp; ');
+      const aboutKind = pdfManagerIsDesktopShell()
+        ? 'Десктопное приложение для работы с PDF-документами.'
+        : 'Веб-приложение для работы с PDF-документами. Вся обработка выполняется в браузере.';
 
       box.innerHTML = `
         <div style="display:flex; align-items:center; justify-content:center; gap:8px; margin-bottom:8px;">
@@ -19360,8 +19502,10 @@
           <div style="font-size:17px; font-weight:700; color:#2c3e50;">PDF Document Manager</div>
         </div>
         <div style="font-size:13.5px; color:#333; line-height:1.25;">
-          <p style="margin:0 0 6px;">Веб-приложение для работы с PDF-документами. Вся обработка выполняется в браузере.</p>
+          <p style="margin:0 0 6px;">${aboutKind}</p>
           <p style="margin:0 0 6px; color:#666; font-size:12px;">${versionLine}</p>
+          <p id="aboutUpdateLine" style="display:none; margin:0 0 8px; padding:8px 10px; border-radius:8px;
+            background:#fff6e5; border:1px solid #f0c36d; color:#7a4b00; font-size:12.5px; font-weight:600; line-height:1.35;"></p>
           <p style="margin:0 0 6px; color:#555; font-size:12px;"><b>Библиотеки:</b> ${libsHtml}</p>
           <p style="margin:0 0 6px;">${networkLine}</p>
           <p style="margin:0 0 6px;">Значительная часть кода написана с использованием искусственного интеллекта по техническому заданию и под контролем разработчика.</p>
@@ -19392,6 +19536,13 @@
         const el = document.getElementById('aboutHashLine');
         if (el) el.textContent = hash ? ('SHA-256: ' + hash) : 'SHA-256: недоступно в этом контексте';
       });
+
+      pdfManagerCheckForUpdates().then((result) => {
+        const el = document.getElementById('aboutUpdateLine');
+        if (!el || !result || !result.outdated || !result.messages || !result.messages.length) return;
+        el.style.display = 'block';
+        el.textContent = result.messages.join(' ');
+      }).catch(() => { /* ignore: feed unreachable */ });
     }
 
     // ─── Hidden provenance check (Ctrl+Alt+Shift+P) ───
