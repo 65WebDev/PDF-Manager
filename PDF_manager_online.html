@@ -32814,7 +32814,7 @@ function peAspectSnapTipText(o) {
 
 /**
  * Toast above the shape when the user left the target aspect and then
- * restored it via the magnet. Stays ~2s, then fades out.
+ * restored it via the magnet (resize or create). Stays ~1.4s, then fades out.
  */
 function peShowAspectSnapRestoreTip(o) {
   const lbl = document.getElementById('peAspectSnapLabel');
@@ -32843,7 +32843,7 @@ function peShowAspectSnapRestoreTip(o) {
       lbl.style.display = 'none';
       lbl.setAttribute('aria-hidden', 'true');
     }, 360);
-  }, 2000);
+  }, 1400);
 }
 
 function peUpdateRotateLabel(o, clientX, clientY) {
@@ -36317,6 +36317,25 @@ function peProcessDrag(clientX, clientY) {
         const aspect = peShapeDefaultAspect(d.obj.shape);
         if (wPx / Math.max(hPx, 0.001) > aspect) wPx = hPx * aspect;
         else hPx = wPx / aspect;
+      } else if (
+        d.kind === 'shape-draw'
+        && typeof isTouchDevice !== 'undefined' && isTouchDevice
+        && d.startAspect > 0
+        && peShapeAspectMagnetMode(d.obj) === 'square'
+      ) {
+        // Mobile create: soft-snap rect/ellipse/plus to 1:1 (same tip as resize).
+        const sn = peSoftSnapAspectPx(d, wPx, hPx);
+        wPx = sn.w;
+        hPx = sn.h;
+        const left = x2 >= x1 ? x1 : x1 - wPx;
+        const top = y2 >= y1 ? y1 : y1 - hPx;
+        d.obj.x = left / W;
+        d.obj.y = top / H;
+        d.obj.w = wPx / W;
+        d.obj.h = hPx / H;
+        peRedrawObjects();
+        if (sn.justRestored) peShowAspectSnapRestoreTip(d.obj);
+        return;
       }
       const left = x2 >= x1 ? x1 : x1 - wPx;
       const top = y2 >= y1 ? y1 : y1 - hPx;
@@ -37661,6 +37680,13 @@ function peObjMouseDown(e, o) {
       peState.objects.push(o);
       peState.draftShapeId = o.id;
       peState.drag.obj = o;
+      // Mobile create magnet for rect/ellipse/plus → 1:1 (+ tip on restore).
+      if (peShapeAspectMagnetMode(o) === 'square') {
+        peState.drag.startAspect = 1;
+        peState.drag.aspectSnapped = false;
+        peState.drag.aspectLeftOriginal = false;
+        peState.drag.aspectTipArmed = false;
+      }
       peRedrawObjects();
       peUpdatePanUi();
       return;
