@@ -35960,8 +35960,17 @@ function peOnObjContextMenu(e) {
   const objEl = e.target.closest && e.target.closest('.pe-obj');
   if (!objEl || !document.getElementById('peObjLayer')?.contains(objEl)) return;
   const id = parseInt(objEl.dataset.peId, 10);
-  const o = peState.objects.find(x => x.id === id);
+  let o = peState.objects.find(x => x.id === id);
   if (!o) return;
+  // Overlap: if the current selection is under the pointer, keep the RMB on
+  // that object (do not steal selection to the topmost covering shape/image).
+  if (!e.shiftKey && peState.sel && peObjOverlapPickType(peState.sel)
+      && !(peState.multiSel && peState.multiSel.length)) {
+    const stack = peObjectsAtClientPoint(e.clientX, e.clientY);
+    if (stack.length >= 2 && stack.includes(peState.sel)) {
+      o = peState.sel;
+    }
+  }
   e.preventDefault();
   e.stopPropagation();
   peHideCropCtxMenu();
@@ -41399,10 +41408,15 @@ function peDrawEditorObjects(ctx, canvasW, canvasH, objects, stageW, stageH) {
         ctx.translate(-cx, -cy);
       }
       const paragraphs = peTextParagraphsForBake(o);
-      let ly = ty + 1 * S;
+      // CSS .pe-obj-text uses padding: 1px 2px — content box inset from (tx,ty).
+      const padX = 2 * S;
+      const padY = 1 * S;
+      let ly = ty + padY;
       ctx.textBaseline = 'top';
       const align = (o.textAlign || 'left') === 'justify' ? 'left' : (o.textAlign || 'left');
-      const blockLeft = tx + 2 * S;
+      // Content width excludes horizontal padding; centering/right must use that
+      // box or text drifts right of the editor (blockLeft + full blockW was wrong).
+      const contentW = Math.max(0, blockW - 2 * padX);
       // Editor uses width:max-content + white-space:pre-wrap — only explicit
       // Enter/<br> breaks lines. Do NOT soft-wrap to boxW (that reflowed text
       // near the page edge onto a second line on preview/print).
@@ -41413,9 +41427,9 @@ function peDrawEditorObjects(ctx, canvasW, canvasH, objects, stageW, stageH) {
         const lineH = Math.max(o.fontPt * 1.25, maxRunPt * 1.25) * S;
         if (!blank) {
           const lineW = peBakeMeasureRunsWidth(ctx, runs, o, S);
-          let lx = blockLeft;
-          if (align === 'center') lx = blockLeft + (blockW - lineW) / 2;
-          else if (align === 'right') lx = blockLeft + blockW - lineW;
+          let lx = tx + padX;
+          if (align === 'center') lx = tx + padX + (contentW - lineW) / 2;
+          else if (align === 'right') lx = tx + padX + contentW - lineW;
           peBakeDrawRunsLine(ctx, runs, lx, ly, lineH, o, S, 0);
         }
         ly += lineH;
@@ -41907,12 +41921,15 @@ function peBakeDrawToken(ctx, run, text, lx, ly, lineH, o, S) {
     ctx.restore();
   }
   ctx.fillStyle = run.color || o.color;
-  ctx.fillText(text, lx, ly);
+  // CSS line-height centers the content area in the line box (half-leading).
+  // Canvas textBaseline=top without that offset paints glyphs too high vs editor.
+  const textY = ly + Math.max(0, (lineH - fpx) / 2);
+  ctx.fillText(text, lx, textY);
   if (run.underline) {
     ctx.save();
     ctx.strokeStyle = run.color || o.color;
     ctx.lineWidth = Math.max(1, fpx * 0.06);
-    const uy = ly + fpx * 1.05;
+    const uy = textY + fpx * 1.05;
     ctx.beginPath(); ctx.moveTo(lx, uy); ctx.lineTo(lx + w, uy); ctx.stroke();
     ctx.restore();
   }
