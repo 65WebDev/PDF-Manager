@@ -5887,6 +5887,18 @@
       box-shadow: 0 10px 40px rgba(0,0,0,0.6) !important;
     }
     html[data-theme="dark"] .pm-modal-box * { color: #e2e6ea !important; }
+    /* About update banner: light inline backgrounds + global light text = unreadable.
+       Override both for dark theme (warn = outdated, fail = feed unreachable). */
+    html[data-theme="dark"] .pm-modal-box #aboutUpdateLine.pm-about-update-warn {
+      background: #3d3424 !important;
+      border-color: #a67c32 !important;
+      color: #f3d79a !important;
+    }
+    html[data-theme="dark"] .pm-modal-box #aboutUpdateLine.pm-about-update-fail {
+      background: #2c323a !important;
+      border-color: #5a6572 !important;
+      color: #c8d0d8 !important;
+    }
     html[data-theme="dark"] .pm-modal-box #cfmNo,
     html[data-theme="dark"] .pm-modal-box #jpegCancel,
     html[data-theme="dark"] .pm-modal-box #pdfPwdCancel,
@@ -19618,6 +19630,8 @@
           if (!el) return;
           if (result && result.outdated && result.messages && result.messages.length) {
             el.style.display = 'block';
+            el.classList.remove('pm-about-update-fail');
+            el.classList.add('pm-about-update-warn');
             el.style.background = '#fff6e5';
             el.style.borderColor = '#f0c36d';
             el.style.color = '#7a4b00';
@@ -19627,6 +19641,8 @@
           if (!result) {
             // Feed unreachable (typical for private GitHub assets from file://).
             el.style.display = 'block';
+            el.classList.remove('pm-about-update-warn');
+            el.classList.add('pm-about-update-fail');
             el.style.background = '#f4f6f8';
             el.style.borderColor = '#d0d7de';
             el.style.color = '#57606a';
@@ -29107,6 +29123,10 @@ function peRedrawObjects() {
     el.style.left = (o.x * W) + 'px';
     el.style.top = (o.y * H) + 'px';
     const isMultiSelMember = peState.multiSel && peState.multiSel.includes(o);
+    // Editing text sits above overlapping shapes so caret clicks hit the
+    // editor, not a cover drawn later in the object list.
+    if (peState.inlineEditId === o.id) el.style.zIndex = '50';
+    else if (peState.sel === o || isMultiSelMember) el.style.zIndex = '10';
     const isDraftShape = o.type === 'shape' && peState.draftShapeId === o.id;
     if (isDraftShape) el.classList.add('pe-shape-drawing');
     if ((peState.sel === o || isMultiSelMember) && !isDraftShape) {
@@ -37318,7 +37338,54 @@ function peObjMouseDown(e, o) {
   // used to leave inlineEditId stuck — the next click on the text then looked
   // like "already editing" / false double-click, and the previous object stayed
   // selected alongside the text editor.
+  // Exception: LMB lands inside the editing text's screen box while another
+  // object covers the same area — keep editing and place the caret instead of
+  // selecting the cover (z-index boost usually prevents this; this is the net).
   if (peState.inlineEditId && o && peState.inlineEditId !== o.id) {
+    if (e.button === 0 && !onHandle) {
+      const editTextEl = peInlineTextEl();
+      const editOuter = editTextEl && editTextEl.closest
+        ? editTextEl.closest('.pe-obj')
+        : null;
+      const editBox = (editOuter || editTextEl)
+        ? (editOuter || editTextEl).getBoundingClientRect()
+        : null;
+      const clickInEditingText = !!(
+        editBox &&
+        e.clientX >= editBox.left &&
+        e.clientX <= editBox.right &&
+        e.clientY >= editBox.top &&
+        e.clientY <= editBox.bottom
+      );
+      if (clickInEditingText && editTextEl) {
+        e.preventDefault();
+        e.stopPropagation();
+        try {
+          editTextEl.focus({ preventScroll: true });
+        } catch (_) {
+          try { editTextEl.focus(); } catch (__) {}
+        }
+        try {
+          let caretRange = null;
+          if (document.caretRangeFromPoint) {
+            caretRange = document.caretRangeFromPoint(e.clientX, e.clientY);
+          } else if (document.caretPositionFromPoint) {
+            const caretPos = document.caretPositionFromPoint(e.clientX, e.clientY);
+            if (caretPos) {
+              caretRange = document.createRange();
+              caretRange.setStart(caretPos.offsetNode, caretPos.offset);
+              caretRange.collapse(true);
+            }
+          }
+          if (caretRange && editTextEl.contains(caretRange.startContainer)) {
+            const sel = window.getSelection();
+            sel.removeAllRanges();
+            sel.addRange(caretRange);
+          }
+        } catch (caretErr) {}
+        return;
+      }
+    }
     peTextClickSeq = { id: null, t: 0 };
     peHideObjCtxMenu();
     peCloseShapeColorPopup();
