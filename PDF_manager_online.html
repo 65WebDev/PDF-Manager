@@ -1293,6 +1293,15 @@
       background: #e8f4fc;
     }
     #peObjCtxMenu button.pe-ctx-checkable.active .ctx-check { visibility: visible; }
+    #peObjCtxMenu hr {
+      border: none; border-top: 1px solid #e2e6ea; margin: 3px 0;
+    }
+    #peObjCtxMenu #peObjCtxOverlapList button {
+      display: block; width: 100%; white-space: nowrap;
+      border: none; background: transparent; padding: 8px 14px;
+      font-size: 13.5px; color: #2c3e50; border-radius: 6px; cursor: pointer; text-align: left;
+    }
+    #peObjCtxMenu #peObjCtxOverlapList button:hover { background: #eef4fa; }
 
     /* Page-editor blank-area RMB: compact tools menu (mirrors top toolbar) */
     #pePageToolsCtxMenu {
@@ -2255,6 +2264,31 @@
     #pageEditModal.pe-hand-mode .pe-obj:hover:not(.sel),
     #pageEditModal.pe-hand-mode .pe-obj-callout-box:hover:not(.sel) {
       outline: none !important;
+    }
+    /* Crop tool: placed objects must not intercept hits or show hover. */
+    #pageEditModal.pe-crop-mode #peObjLayer {
+      pointer-events: none !important;
+    }
+    #pageEditModal.pe-crop-mode #peObjLayer .pe-obj,
+    #pageEditModal.pe-crop-mode #peObjLayer .pe-obj-callout-box {
+      pointer-events: none !important;
+    }
+    #pageEditModal.pe-crop-mode .pe-obj:hover:not(.sel),
+    #pageEditModal.pe-crop-mode .pe-obj-callout-box:hover:not(.sel) {
+      outline: none !important;
+    }
+    /* Redact draw: only existing redact areas are hittable. */
+    #pageEditModal.pe-redact-draw-mode #peObjLayer {
+      pointer-events: none;
+    }
+    #pageEditModal.pe-redact-draw-mode #peObjLayer .pe-obj.pe-obj-redact {
+      pointer-events: auto;
+    }
+    /* Shift during placement: ignore object hits (draw through stacked objects). */
+    #pageEditModal.pe-draw-shift-passthrough #peObjLayer,
+    #pageEditModal.pe-draw-shift-passthrough #peObjLayer .pe-obj,
+    #pageEditModal.pe-draw-shift-passthrough #peObjLayer .pe-obj-callout-box {
+      pointer-events: none !important;
     }
     /*#peObjLayer normally covers the whole stage with pointer-events:auto
        (its default), which is what lets a mousedown on blank canvas still
@@ -6356,12 +6390,15 @@
     <button type="button" data-action="copy">Скопировать</button>
     <button type="button" data-action="cut">Вырезать</button>
     <button type="button" data-action="paste">Вставить</button>
+    <button type="button" data-action="edit-text" hidden style="display:none">Редактировать</button>
     <button type="button" data-action="shape-comment" class="pe-ctx-checkable" hidden style="display:none">
       <span class="ctx-label">Комментарий</span>
       <span class="ctx-check" aria-hidden="true">✓</span>
     </button>
     <button type="button" data-action="hl-comment" hidden style="display:none">Комментарий</button>
     <button type="button" data-action="delete">Удалить</button>
+    <hr id="peObjCtxOverlapSep" hidden>
+    <div id="peObjCtxOverlapList" hidden></div>
   </div>
   <div id="pePageToolsCtxMenu" aria-hidden="true">
     <button type="button" data-action="obj-select"><span class="ctx-label">Выбор объектов</span><span class="ctx-icon"><svg viewBox="-1 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M7 4 L7 19 L11 15.2 L13.7 21.2 L16 20.2 L13.4 14.4 L18 14 Z"/></svg></span></button>
@@ -25622,6 +25659,7 @@ function peUpdateToolbarLock() {
   if (!modal || !peState) return;
   const cropMode = peState.tool === 'crop';
   modal.classList.toggle('pe-crop-mode', cropMode);
+  modal.classList.toggle('pe-redact-draw-mode', peState.tool === 'redact');
   const lockIds = [
     'peToolObjSelect', 'peToolHand', 'peToolText', 'peToolImage', 'peToolHl', 'peToolRedact', 'peToolShape',
     'peRotL', 'peRotR', 'peDeleteObj', 'peSaveBtn', 'peCancelBtn'
@@ -25638,6 +25676,116 @@ function peUpdateToolbarLock() {
   peUpdateCropActionsUi();
   peUpdateRedactActionsUi();
   peUpdatePageNavButtons();
+}
+
+/** True while a draw-placement tool is active (Shift ignores object hits). */
+function peDrawPlacementIgnoresObjects() {
+  if (!peState) return false;
+  const t = peState.tool;
+  return t === 'text' || t === 'shape' || t === 'redact';
+}
+
+function peUpdateDrawShiftPassthrough(shiftDown) {
+  const modal = document.getElementById('pageEditModal');
+  if (!modal) return;
+  modal.classList.toggle('pe-draw-shift-passthrough', !!shiftDown && peDrawPlacementIgnoresObjects());
+}
+
+const PE_SHAPE_OVERLAP_LABELS = {
+  rect: 'Прямоугольник',
+  ellipse: 'Круг / овал',
+  arrow: 'Стрелка',
+  line: 'Линия',
+  plus: 'Плюс',
+  freehand: 'Свободная форма',
+  star: 'Звезда'
+};
+
+function peObjOverlapPickType(o) {
+  return !!(o && (o.type === 'redact' || o.type === 'text' || o.type === 'image' || o.type === 'shape'));
+}
+
+function peObjOverlapLabel(o) {
+  if (!o) return '';
+  if (o.type === 'redact') return 'Область затирания';
+  if (o.type === 'text') return 'Текст';
+  if (o.type === 'image') return 'Изображение';
+  if (o.type === 'shape') return PE_SHAPE_OVERLAP_LABELS[o.shape] || 'Фигура';
+  return '';
+}
+
+/** Per-type ordinal within the page (shapes count per shape kind). */
+function peObjOverlapOrdinal(o) {
+  if (!peState || !o) return 1;
+  let n = 0;
+  for (const x of peState.objects) {
+    if (o.type === 'shape') {
+      if (x.type !== 'shape' || x.shape !== o.shape) continue;
+    } else if (x.type !== o.type) continue;
+    n++;
+    if (x.id === o.id) return n;
+  }
+  return 1;
+}
+
+function peObjectsAtClientPoint(clientX, clientY) {
+  if (!peState) return [];
+  const layer = document.getElementById('peObjLayer');
+  if (!layer) return [];
+  let nodes = [];
+  try {
+    nodes = document.elementsFromPoint(clientX, clientY) || [];
+  } catch (_) {
+    const el = document.elementFromPoint(clientX, clientY);
+    if (el) nodes = [el];
+  }
+  const seen = new Set();
+  const hits = [];
+  for (const node of nodes) {
+    const objEl = node.closest && node.closest('.pe-obj');
+    if (!objEl || !layer.contains(objEl)) continue;
+    const id = parseInt(objEl.dataset.peId, 10);
+    if (!id || seen.has(id)) continue;
+    const o = peState.objects.find(x => x.id === id);
+    if (!o || !peObjOverlapPickType(o)) continue;
+    seen.add(id);
+    hits.push(o);
+  }
+  return hits;
+}
+
+/**
+ * Overlap click: if the current selection is under the pointer among 2+
+ * stacked objects, keep it as the drag target (hold = move without switch).
+ * A plain click (no drag) then cycles to the next object in the stack.
+ * Returns { obj, cycleIds } where cycleIds is set only when a click should cycle.
+ */
+function peResolveOverlapPointerTarget(hitObj, clientX, clientY) {
+  if (!peState || !peObjOverlapPickType(hitObj)) {
+    return { obj: hitObj, cycleIds: null };
+  }
+  const stack = peObjectsAtClientPoint(clientX, clientY);
+  if (stack.length < 2) return { obj: hitObj, cycleIds: null };
+  const sel = peState.sel;
+  if (sel && peObjOverlapPickType(sel) && stack.includes(sel)
+      && !(peState.multiSel && peState.multiSel.length)) {
+    return { obj: sel, cycleIds: stack.map(x => x.id) };
+  }
+  return { obj: stack[0], cycleIds: null };
+}
+
+/** Advance selection to the next overlapping object (wraps). */
+function peCycleOverlapSelection(cycleIds, current) {
+  if (!peState || !cycleIds || cycleIds.length < 2) return;
+  const curId = current && current.id != null
+    ? current.id
+    : (peState.sel && peState.sel.id);
+  let idx = cycleIds.indexOf(curId);
+  if (idx < 0) idx = 0;
+  const nextId = cycleIds[(idx + 1) % cycleIds.length];
+  if (nextId === curId) return;
+  const next = peState.objects.find(x => x.id === nextId);
+  if (next) peSelect(next);
 }
 
 /** Nearest non-deleted page index in direction dir (+1 / -1), or -1. */
@@ -28493,7 +28641,7 @@ function peDestroy() {
   peUpdateCropHint();
   const modal = document.getElementById('pageEditModal');
   if (modal) {
-    modal.classList.remove('open', 'modal-overlay-active', 'pe-pan-ready', 'pe-panning', 'pe-hand-mode', 'pe-crop-mode', 'pe-crop-pan-ready', 'pe-crop-panning', 'pe-redact-has-selection', 'pe-menu-collapsed');
+    modal.classList.remove('open', 'modal-overlay-active', 'pe-pan-ready', 'pe-panning', 'pe-hand-mode', 'pe-crop-mode', 'pe-crop-pan-ready', 'pe-crop-panning', 'pe-redact-has-selection', 'pe-redact-draw-mode', 'pe-draw-shift-passthrough', 'pe-menu-collapsed');
     modal.setAttribute('aria-hidden', 'true');
   }
   window.removeEventListener('resize', peOnWinResize);
@@ -28555,7 +28703,10 @@ function peOnWinResize() {
 
 function peOnKeyDown(e) {
   if (!peState) return;
-  if (e.key === 'Shift') peSyncActiveDragShift(e);
+  if (e.key === 'Shift') {
+    peSyncActiveDragShift(e);
+    peUpdateDrawShiftPassthrough(true);
+  }
   // Hold Alt - highlight all added objects with a frame (text,
   // comment, marker) so that you can see what exactly has been added to the page.
   if (e.key === 'Alt') {
@@ -28697,6 +28848,23 @@ function peOnKeyDown(e) {
   if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && peState.sel) {
     e.preventDefault(); e.stopPropagation(); peDeleteSelected();
   }
+  if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey
+      && (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+    // Arrow keys move selected objects; caret navigation wins while editing text.
+    if (!peState.inlineEditId) {
+      const step = e.shiftKey ? 10 : 1;
+      let dx = 0, dy = 0;
+      if (e.key === 'ArrowLeft') dx = -step;
+      else if (e.key === 'ArrowRight') dx = step;
+      else if (e.key === 'ArrowUp') dy = -step;
+      else if (e.key === 'ArrowDown') dy = step;
+      if (peNudgeSelectedObjects(dx, dy)) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+    }
+  }
   if (e.key === 'F2' && !peState.inlineEditId) {
     const o = peState.sel;
     if (o && (o.type === 'text' || o.type === 'callout')) {
@@ -28721,13 +28889,21 @@ function peOnKeyUp(e) {
   if (e.key === 'Alt') {
     document.getElementById('pageEditModal')?.classList.remove('pe-alt-highlight');
   }
-  if (e.key === 'Shift') peSyncActiveDragShift(e);
+  if (e.key === 'Shift') {
+    peSyncActiveDragShift(e);
+    peUpdateDrawShiftPassthrough(false);
+  }
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    peFlushNudgeHistory();
+  }
 }
 
 // If the window loses focus while holding Alt (switching applications, etc.) -
 // keyup may not reach; We remove the backlight and blur just in case.
 function peOnWinBlurAlt() {
   document.getElementById('pageEditModal')?.classList.remove('pe-alt-highlight');
+  document.getElementById('pageEditModal')?.classList.remove('pe-draw-shift-passthrough');
+  peFlushNudgeHistory();
 }
 
 // While the color/background picker is open, clicking outside the palette only closes it.
@@ -32232,6 +32408,7 @@ function peSetTool(tool, opts) {
   }
   peState.tool = tool;
   peSyncToolButtons();
+  peUpdateDrawShiftPassthrough(false);
   if (tool !== 'crop') {
     document.getElementById('peCropConfirmBtn')?.blur();
     document.getElementById('peCropCancelBtn')?.blur();
@@ -32703,7 +32880,10 @@ function peBeginSingleMoveDrag(e, o, opts) {
     oboxX: host.boxX, oboxY: host.boxY,
     boxStartX: (host.boxX || 0) * W,
     boxStartY: (host.boxY || 0) * H,
-    frames0: (o.type === 'callout') ? peCalloutFrames(o).map(f => ({ x: f.x, y: f.y, w: f.w, h: f.h })) : null
+    frames0: (o.type === 'callout') ? peCalloutFrames(o).map(f => ({ x: f.x, y: f.y, w: f.w, h: f.h })) : null,
+    // Plain click (no drag) cycles when multiple objects overlap under the pointer.
+    cycleIds: (!boxOnly && opts && opts.cycleIds && opts.cycleIds.length >= 2) ? opts.cycleIds.slice() : null,
+    cycleOnClick: !!(!boxOnly && opts && opts.cycleIds && opts.cycleIds.length >= 2)
   };
   peUpdatePanUi();
 }
@@ -34222,6 +34402,13 @@ function peHideObjCtxMenu() {
   if (!menu) return;
   menu.classList.remove('visible');
   menu.setAttribute('aria-hidden', 'true');
+  const overlapSep = document.getElementById('peObjCtxOverlapSep');
+  const overlapList = document.getElementById('peObjCtxOverlapList');
+  if (overlapSep) overlapSep.hidden = true;
+  if (overlapList) {
+    overlapList.hidden = true;
+    overlapList.innerHTML = '';
+  }
 }
 
 function peHidePageToolsCtxMenu() {
@@ -35677,7 +35864,7 @@ function peShouldIgnoreCtxMenuOutside() {
   return performance.now() < peCtxMenuIgnoreOutsideUntil;
 }
 
-function peShowObjCtxMenu(clientX, clientY) {
+function peShowObjCtxMenu(clientX, clientY, overlapObjs) {
   const menu = document.getElementById('peObjCtxMenu');
   if (!menu) return;
   peHidePageToolsCtxMenu();
@@ -35700,6 +35887,14 @@ function peShowObjCtxMenu(clientX, clientY) {
   menu.querySelector('[data-action="delete"]').disabled = !sel.length;
   const hlCommentBtn = menu.querySelector('[data-action="hl-comment"]');
   if (hlCommentBtn) hlCommentBtn.style.display = 'none';
+  const editTextBtn = menu.querySelector('[data-action="edit-text"]');
+  if (editTextBtn) {
+    const sole = sel.length === 1 ? sel[0] : null;
+    // Show only for a selected text block that is not already being edited.
+    const showEdit = !!(sole && sole.type === 'text' && peState.inlineEditId !== sole.id);
+    editTextBtn.style.display = showEdit ? '' : 'none';
+    editTextBtn.hidden = !showEdit;
+  }
   const shapeCommentBtn = menu.querySelector('[data-action="shape-comment"]');
   if (shapeCommentBtn) {
     const sole = sel.length === 1 ? sel[0] : null;
@@ -35709,6 +35904,25 @@ function peShowObjCtxMenu(clientX, clientY) {
     const on = show && peShapeHasComment(sole);
     shapeCommentBtn.classList.toggle('active', on);
     shapeCommentBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+  }
+  const overlapSep = document.getElementById('peObjCtxOverlapSep');
+  const overlapList = document.getElementById('peObjCtxOverlapList');
+  const overlaps = (overlapObjs || []).filter(peObjOverlapPickType);
+  const showOverlap = overlaps.length >= 2;
+  if (overlapSep) overlapSep.hidden = !showOverlap;
+  if (overlapList) {
+    overlapList.innerHTML = '';
+    overlapList.hidden = !showOverlap;
+    if (showOverlap) {
+      overlaps.forEach(o => {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.dataset.action = 'pick-object';
+        btn.dataset.peId = String(o.id);
+        btn.textContent = peObjOverlapLabel(o) + ' #' + peObjOverlapOrdinal(o);
+        overlapList.appendChild(btn);
+      });
+    }
   }
   menu.classList.add('visible');
   menu.setAttribute('aria-hidden', 'false');
@@ -35771,7 +35985,8 @@ function peOnObjContextMenu(e) {
 
   const pt = peStagePointFromClient(e.clientX, e.clientY);
   peObjCtxPastePos = { x: pt.x, y: pt.y };
-  peShowObjCtxMenu(e.clientX, e.clientY);
+  const overlaps = peObjectsAtClientPoint(e.clientX, e.clientY);
+  peShowObjCtxMenu(e.clientX, e.clientY, overlaps);
 }
 
 // ── Mouse interaction ─────────────────────── ────────────────────────
@@ -36206,6 +36421,43 @@ function peStagePoint(e) {
 // (when saving, the excess will be cut off at the peBakeOverlayPng stage).
 function peClampObjXY(o, x, y) {
   return { x, y };
+}
+
+/** Types that support arrow-key nudge (1px / Shift+10px). */
+function peObjSupportsArrowNudge(o) {
+  return !!(o && (o.type === 'redact' || o.type === 'text' || o.type === 'image' || o.type === 'shape'));
+}
+
+let peNudgeHistoryPending = false;
+
+/** Move selected redact/text/image/shape objects by stage pixels. */
+function peNudgeSelectedObjects(dxPx, dyPx) {
+  if (!peState || (!dxPx && !dyPx)) return false;
+  if (peState.tool === 'crop') return false;
+  if (peState.drag) return false;
+  if (peState.inlineEditId) return false;
+  const objs = peGetSelectedObjects().filter(peObjSupportsArrowNudge);
+  if (!objs.length) return false;
+  const { w: W, h: H } = peStageSize();
+  if (!(W > 0) || !(H > 0)) return false;
+  const dxFrac = dxPx / W;
+  const dyFrac = dyPx / H;
+  objs.forEach(o => {
+    const c = peClampObjXY(o, o.x + dxFrac, o.y + dyFrac);
+    o.x = c.x;
+    o.y = c.y;
+  });
+  peRedrawObjects();
+  peUpdateProps();
+  peUpdateRedactActionsUi();
+  peNudgeHistoryPending = true;
+  return true;
+}
+
+function peFlushNudgeHistory() {
+  if (!peNudgeHistoryPending) return;
+  peNudgeHistoryPending = false;
+  peCommitEditorHistory();
 }
 
 // Moves a group of objects (multiple selection) with one overall shift.
@@ -37042,6 +37294,16 @@ function peObjMouseDown(e, o) {
     peStartPanView(e);
     return;
   }
+  // Overlap stack: prefer the already-selected object for drag (hold = move
+  // without switching). A plain click later cycles via move-pending.cycleIds.
+  let overlapCycleIds = null;
+  if (!onHandle && !e.shiftKey && peState && peState.tool === 'select'
+      && !peState.inlineEditId && !peIsMultiSelection()
+      && peObjOverlapPickType(o)) {
+    const resolved = peResolveOverlapPointerTarget(o, e.clientX, e.clientY);
+    o = resolved.obj;
+    overlapCycleIds = resolved.cycleIds;
+  }
   // Text block corner anchor - always resize, regardless
   // current tool/state (including active text input); checking
   // before other branches - otherwise the click on the anchor would have been intercepted by the normal
@@ -37223,7 +37485,7 @@ function peObjMouseDown(e, o) {
       peUpdatePanUi();
       peCommitSelectionHistoryIfChanged(before);
     }
-    peBeginSingleMoveDrag(e, o);
+    peBeginSingleMoveDrag(e, o, { cycleIds: overlapCycleIds });
     return;
   }
   if (o.type === 'shape' && peState.tool === 'select') {
@@ -37243,7 +37505,7 @@ function peObjMouseDown(e, o) {
       peUpdatePanUi();
       peCommitSelectionHistoryIfChanged(before);
     }
-    peBeginSingleMoveDrag(e, o);
+    peBeginSingleMoveDrag(e, o, { cycleIds: overlapCycleIds });
     return;
   }
   // A shape with “Text” (or another drawing mode) active is the same as
@@ -37312,15 +37574,7 @@ function peObjMouseDown(e, o) {
     if (peState.multiSel && peState.multiSel.length) peState.multiSel = [];
   }
   peSelect(o);
-  const pt = peStagePoint(e);
-  const { w: W, h: H } = peStageSize();
-  peState.drag = {
-    kind: 'move-pending', obj: o,
-    startX: pt.x, startY: pt.y,
-    ox: o.x, oy: o.y, ow: o.w || 0, oh: o.h || 0,
-    threshold: 4
-  };
-  peUpdatePanUi();
+  peBeginSingleMoveDrag(e, o, { cycleIds: overlapCycleIds });
 }
 
 (function initPageEditorUI() {
@@ -37779,7 +38033,11 @@ function peObjMouseDown(e, o) {
   // stopPropagation so this handler must not run in capture on the same node.
   peBindPointerDown(stage, (e) => {
     if (!peState || peState.drag || pePinchActive) return;
-    if (e.target.closest && e.target.closest('.pe-obj')) return;
+    if (peDrawPlacementIgnoresObjects()) peUpdateDrawShiftPassthrough(e.shiftKey);
+    if (e.target.closest && e.target.closest('.pe-obj')) {
+      const passObj = e.shiftKey && peDrawPlacementIgnoresObjects();
+      if (!passObj) return;
+    }
     // A click that lands on the PDF text-selection layer (object-select mode
     // only) must start a native text selection, not an object marquee - the
     // shield on #peTextLayer already stops this event from bubbling here in
@@ -38051,6 +38309,10 @@ function peObjMouseDown(e, o) {
     if (d.kind === 'move-pending-multi' && d.clickObj) {
       peCollapseMultiToObject(d.clickObj);
     }
+    if (d.kind === 'move-pending' && d.cycleOnClick && d.cycleIds && d.cycleIds.length >= 2) {
+      // Click without drag on a stacked hit → cycle to the next overlapping object.
+      peCycleOverlapSelection(d.cycleIds, d.obj);
+    }
     if (d.kind === 'highlight-draw' && d.obj && (d.obj.w < 0.005 || d.obj.h < 0.005)) {
       peState.objects = peState.objects.filter(o => o !== d.obj);
       peSelect(null);
@@ -38279,6 +38541,16 @@ function peObjMouseDown(e, o) {
     peHideObjCtxMenu();
     if (action === 'delete') {
       peDeleteSelected();
+    } else if (action === 'edit-text') {
+      const sole = peGetSelectedObjects();
+      if (sole.length === 1 && sole[0].type === 'text' && peState.inlineEditId !== sole[0].id) {
+        peBeginInlineEdit(sole[0]);
+        peFocusInlineEditorNow();
+      }
+    } else if (action === 'pick-object') {
+      const id = parseInt(btn.dataset.peId, 10);
+      const o = peState.objects.find(x => x.id === id);
+      if (o) peSelect(o);
     } else if (action === 'copy') {
       peCopySelectedObjects();
     } else if (action === 'cut') {
