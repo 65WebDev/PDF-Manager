@@ -94,6 +94,12 @@
       <a class="btn btn-secondary" id="downloadOfflineBtn" href="https://github.com/5451165-bot/PDF-Manager/releases/latest/download/PDF_manager_offline.html">
         Скачать офлайн-версию
       </a>
+      <a class="btn btn-secondary" id="downloadWindowsSetupBtn" href="https://github.com/5451165-bot/PDF-Manager/releases/download/windows-v0.1.8/PDF.Manager_0.1.8_x64-setup.exe">
+        Windows: установщик
+      </a>
+      <a class="btn btn-secondary" id="downloadWindowsPortableBtn" href="https://github.com/5451165-bot/PDF-Manager/releases/download/windows-v0.1.8/pdf-manager.exe">
+        Windows: portable .exe
+      </a>
     </div>
 
     <div class="meta" id="versionInfo">Загрузка информации о версии…</div>
@@ -108,15 +114,27 @@
       const el = document.getElementById('versionInfo');
       const downloadBtn = document.getElementById('downloadBtn');
       const downloadOfflineBtn = document.getElementById('downloadOfflineBtn');
+      const winSetupBtn = document.getElementById('downloadWindowsSetupBtn');
+      const winPortableBtn = document.getElementById('downloadWindowsPortableBtn');
       try {
         const res = await fetch('version.json', { cache: 'no-store' });
         if (!res.ok) throw new Error('no version');
         const v = await res.json();
         if (v.downloadUrl) downloadBtn.href = v.downloadUrl;
         if (v.offlineDownloadUrl) downloadOfflineBtn.href = v.offlineDownloadUrl;
+        const winVer = String(v.windowsVersion || '').trim();
+        if (winVer) {
+          const tag = 'windows-v' + winVer;
+          const setupName = 'PDF.Manager_' + winVer + '_x64-setup.exe';
+          winSetupBtn.href = 'https://github.com/5451165-bot/PDF-Manager/releases/download/' + tag + '/' + setupName;
+          winPortableBtn.href = 'https://github.com/5451165-bot/PDF-Manager/releases/download/' + tag + '/pdf-manager.exe';
+          winSetupBtn.textContent = 'Windows: установщик v' + winVer;
+          winPortableBtn.textContent = 'Windows: portable v' + winVer;
+        }
         const date = v.date ? new Date(v.date).toLocaleString('ru-RU') : '—';
         el.innerHTML =
           '<strong>Текущая сборка:</strong> ' + (v.build || '—') +
+          (winVer ? ('<br><strong>Windows:</strong> <a href="https://github.com/5451165-bot/PDF-Manager/releases/tag/windows-v' + winVer + '">v' + winVer + '</a>') : '') +
           '<br><strong>Коммит:</strong> <a href="https://github.com/5451165-bot/PDF-Manager/commit/' + (v.commit || '') + '">' + (v.shortCommit || '—') + '</a>' +
           '<br><strong>Дата:</strong> ' + date;
       } catch {

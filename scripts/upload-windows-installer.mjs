@@ -5,6 +5,12 @@
  * Invoked automatically after `npm run tauri:build` unless:
  *   TAURI_SKIP_UPLOAD=1
  *
+ * After a successful upload also:
+ *   - refreshes the About version-feed (windowsVersion)
+ *   - rewrites Windows download links in README.md to this version
+ *   - commits/pushes README.md to the current branch (unless SKIP_README_COMMIT=1)
+ *   - updates the GitHub repository description with the current Windows tag
+ *
  * Requirements:
  *   - GitHub CLI (`gh`) installed and authenticated (`gh auth login`)
  *   - Push access to the repository
@@ -12,15 +18,22 @@
  * Release tag: windows-v{version} from src-tauri/tauri.conf.json
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
+const REPO_SLUG = '5451165-bot/PDF-Manager';
+const README_PATH = join(root, 'README.md');
 
 function skipUpload() {
   const v = String(process.env.TAURI_SKIP_UPLOAD || '').trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes';
+}
+
+function envFlag(name) {
+  const v = String(process.env[name] || '').trim().toLowerCase();
   return v === '1' || v === 'true' || v === 'yes';
 }
 
@@ -58,6 +71,15 @@ function runGh(ghBin, args, opts = {}) {
     ...opts,
   });
   return r;
+}
+
+function runGit(args, opts = {}) {
+  return spawnSync('git', args, {
+    cwd: root,
+    encoding: 'utf8',
+    windowsHide: true,
+    ...opts,
+  });
 }
 
 function ensureGhAuth(ghBin) {
@@ -108,7 +130,7 @@ function findArtifacts() {
   const seen = new Set();
   const unique = [];
   for (const f of files) {
-    const base = f.split(/[/\\]/).pop();
+    const base = basename(f);
     if (seen.has(base)) continue;
     seen.add(base);
     unique.push(f);
@@ -116,9 +138,155 @@ function findArtifacts() {
   return unique;
 }
 
+function pickSetupArtifact(artifacts, version) {
+  const names = artifacts.map((f) => basename(f));
+  const exact = names.find((n) =>
+    new RegExp(`PDF[ .]?Manager[_ ]${version.replace(/\./g, '\\.')}.*setup\\.exe$`, 'i').test(n),
+  );
+  if (exact) return exact;
+  const anySetup = names.find((n) => /setup\.exe$/i.test(n));
+  return anySetup || null;
+}
+
+function pickPortableArtifact(artifacts) {
+  const names = artifacts.map((f) => basename(f));
+  const preferred = names.find((n) => /^pdf-manager\.exe$/i.test(n));
+  if (preferred) return preferred;
+  return names.find((n) => /\.exe$/i.test(n) && !/setup\.exe$/i.test(n)) || null;
+}
+
 function releaseExists(ghBin, tag) {
   const r = runGh(ghBin, ['release', 'view', tag], { stdio: 'ignore' });
   return r.status === 0;
+}
+
+function buildReleaseNotes({ version, tag, setupName, portableName, releaseUrl }) {
+  const setupUrl = setupName
+    ? `https://github.com/${REPO_SLUG}/releases/download/${tag}/${encodeURIComponent(setupName)}`
+    : releaseUrl;
+  const portableUrl = portableName
+    ? `https://github.com/${REPO_SLUG}/releases/download/${tag}/${encodeURIComponent(portableName)}`
+    : releaseUrl;
+
+  return [
+    `Windows-приложение PDF Manager **v${version}** (Tauri).`,
+    '',
+    '### Скачать',
+    setupName ? `- **Установщик (NSIS):** [${setupName}](${setupUrl})` : null,
+    portableName ? `- **Portable .exe:** [${portableName}](${portableUrl})` : null,
+    `- Страница релиза: ${releaseUrl}`,
+    '',
+    '### Что внутри',
+    '- Установщик NSIS регистрирует ассоциацию с `.pdf`',
+    '- После установки: ПКМ по PDF → «Открыть с помощью» → PDF Manager',
+    '- Офлайн-редактор (библиотеки встроены в UI)',
+    '',
+    'Не является частью автоматического HTML release pipeline (`build-N`).',
+  ]
+    .filter((line) => line != null)
+    .join('\n');
+}
+
+/**
+ * Rewrite Windows download rows / “актуальная версия” line in README.md.
+ * Returns true if the file changed.
+ */
+function updateReadmeWindowsLinks({ version, tag, setupName, portableName }) {
+  if (!existsSync(README_PATH)) {
+    console.warn('README.md не найден — пропускаю обновление ссылок.');
+    return false;
+  }
+
+  const setupFile = setupName || `PDF.Manager_${version}_x64-setup.exe`;
+  const portableFile = portableName || 'pdf-manager.exe';
+  const setupUrl = `https://github.com/${REPO_SLUG}/releases/download/${tag}/${setupFile}`;
+  const portableUrl = `https://github.com/${REPO_SLUG}/releases/download/${tag}/${portableFile}`;
+  const tagUrl = `https://github.com/${REPO_SLUG}/releases/tag/${tag}`;
+
+  let text = readFileSync(README_PATH, 'utf8');
+  const before = text;
+
+  text = text.replace(
+    /\|\s*\*\*Windows: установщик\*\*\s*\|\s*https:\/\/github\.com\/[^|\s]+\/releases\/download\/windows-v[^|\s]+\/[^\s|]+\s*\|/,
+    `| **Windows: установщик** | ${setupUrl} |`,
+  );
+  text = text.replace(
+    /\|\s*\*\*Windows: portable `\.exe`\*\*\s*\|\s*https:\/\/github\.com\/[^|\s]+\/releases\/download\/windows-v[^|\s]+\/[^\s|]+\s*\|/,
+    `| **Windows: portable \`.exe\`** | ${portableUrl} |`,
+  );
+  text = text.replace(
+    /\|\s*\*\*Релиз Windows\*\*\s*\|\s*https:\/\/github\.com\/[^|\s]+\/releases\/tag\/windows-v[^|\s]+\s*\|/,
+    `| **Релиз Windows** | ${tagUrl} |`,
+  );
+  text = text.replace(
+    /Актуальная версия сейчас:\s*\[[^\]]*\]\([^)]+\)/,
+    `Актуальная версия сейчас: [${tag}](${tagUrl})`,
+  );
+  // Broader fallback for any leftover version pins in the quick-download block.
+  text = text.replace(/windows-v\d+\.\d+\.\d+/g, tag);
+  text = text.replace(/PDF\.Manager_\d+\.\d+\.\d+_x64-setup\.exe/g, setupFile);
+
+  if (text === before) {
+    console.log('README.md уже содержит актуальные Windows-ссылки.');
+    return false;
+  }
+  writeFileSync(README_PATH, text, 'utf8');
+  console.log('README.md: обновлены ссылки на', tag);
+  return true;
+}
+
+function commitAndPushReadme(version, tag) {
+  if (envFlag('SKIP_README_COMMIT')) {
+    console.log('SKIP_README_COMMIT=1 — README изменён локально, commit/push пропущен.');
+    return;
+  }
+
+  const status = runGit(['status', '--porcelain', '--', 'README.md']);
+  if (!(status.stdout || '').trim()) {
+    console.log('README.md не изменён в git — commit не нужен.');
+    return;
+  }
+
+  runGit(['add', 'README.md']);
+  const commit = runGit(
+    ['commit', '-m', `docs: point Windows download links to ${tag}`],
+    { stdio: 'inherit' },
+  );
+  if (commit.status !== 0) {
+    console.warn('Не удалось закоммитить README.md.');
+    return;
+  }
+
+  const branch = (runGit(['rev-parse', '--abbrev-ref', 'HEAD']).stdout || '').trim() || 'main';
+  const push = runGit(['push', 'origin', `HEAD:${branch}`], { stdio: 'inherit' });
+  if (push.status !== 0) {
+    console.warn(`Push README.md в origin/${branch} не удался (релиз уже загружен).`);
+  } else {
+    console.log(`README.md запушен в origin/${branch}.`);
+  }
+}
+
+function updateRepoDescription(ghBin, version, tag) {
+  if (envFlag('SKIP_REPO_DESCRIPTION')) return;
+  const description =
+    `PDF Document Manager — HTML builds + Windows desktop (актуально: ${tag}).`;
+  const homepage = `https://github.com/${REPO_SLUG}/releases/tag/${tag}`;
+  const r = runGh(ghBin, [
+    'api',
+    '-X',
+    'PATCH',
+    `repos/${REPO_SLUG}`,
+    '-f',
+    `description=${description}`,
+    '-f',
+    `homepage=${homepage}`,
+  ]);
+  if (r.status === 0) {
+    console.log('Описание репозитория GitHub обновлено.');
+  } else {
+    console.warn('Описание репозитория обновить не удалось (нет прав или API).');
+    if (r.stderr) console.warn(String(r.stderr).trim());
+  }
 }
 
 function main() {
@@ -141,14 +309,6 @@ function main() {
   const version = readVersion();
   const tag = `windows-v${version}`;
   const title = `Windows installer v${version}`;
-  const notes = [
-    'Экспериментальный установщик Tauri (локальная сборка).',
-    '',
-    '- Установщик NSIS регистрирует ассоциацию с `.pdf`',
-    '- После установки: ПКМ по PDF → «Открыть с помощью» → PDF Manager',
-    '',
-    'Не является частью автоматического HTML release pipeline.',
-  ].join('\n');
 
   const artifacts = findArtifacts();
   if (!artifacts.length) {
@@ -157,37 +317,71 @@ function main() {
     process.exit(1);
   }
 
+  const setupName = pickSetupArtifact(artifacts, version);
+  const portableName = pickPortableArtifact(artifacts);
+  const releaseUrl = `https://github.com/${REPO_SLUG}/releases/tag/${tag}`;
+  const notes = buildReleaseNotes({
+    version,
+    tag,
+    setupName,
+    portableName,
+    releaseUrl,
+  });
+
   console.log('Артефакты для загрузки:');
   for (const f of artifacts) console.log('  -', f);
+  if (setupName) console.log('Установщик (для README):', setupName);
+  if (portableName) console.log('Portable (для README):', portableName);
 
-  if (!releaseExists(ghBin, tag)) {
-    console.log(`Создаю release ${tag}…`);
-    const created = runGh(
-      ghBin,
-      ['release', 'create', tag, ...artifacts, '--title', title, '--notes', notes],
-      { stdio: 'inherit' },
-    );
-    if (created.status !== 0) process.exit(created.status ?? 1);
-  } else {
-    console.log(`Release ${tag} уже есть — обновляю файлы (--clobber)…`);
-    const uploaded = runGh(
-      ghBin,
-      ['release', 'upload', tag, ...artifacts, '--clobber'],
-      { stdio: 'inherit' },
-    );
-    if (uploaded.status !== 0) process.exit(uploaded.status ?? 1);
+  // Write notes to a temp file so multiline / Cyrillic stay intact for gh.
+  const notesPath = join(root, '.windows-release-notes.tmp.md');
+  writeFileSync(notesPath, notes, 'utf8');
 
-    runGh(ghBin, ['release', 'edit', tag, '--title', title, '--notes', notes], {
-      stdio: 'ignore',
-    });
+  try {
+    if (!releaseExists(ghBin, tag)) {
+      console.log(`Создаю release ${tag}…`);
+      const created = runGh(
+        ghBin,
+        [
+          'release',
+          'create',
+          tag,
+          ...artifacts,
+          '--title',
+          title,
+          '--notes-file',
+          notesPath,
+        ],
+        { stdio: 'inherit' },
+      );
+      if (created.status !== 0) process.exit(created.status ?? 1);
+    } else {
+      console.log(`Release ${tag} уже есть — обновляю файлы (--clobber)…`);
+      const uploaded = runGh(
+        ghBin,
+        ['release', 'upload', tag, ...artifacts, '--clobber'],
+        { stdio: 'inherit' },
+      );
+      if (uploaded.status !== 0) process.exit(uploaded.status ?? 1);
+
+      runGh(
+        ghBin,
+        ['release', 'edit', tag, '--title', title, '--notes-file', notesPath],
+        { stdio: 'inherit' },
+      );
+    }
+  } finally {
+    try {
+      if (existsSync(notesPath)) unlinkSync(notesPath);
+    } catch { /* ignore */ }
   }
 
   const view = runGh(ghBin, ['release', 'view', tag, '--json', 'url']);
-  let releaseUrl = `https://github.com/5451165-bot/PDF-Manager/releases/tag/${tag}`;
+  let finalReleaseUrl = releaseUrl;
   if (view.status === 0 && view.stdout) {
     try {
       const { url } = JSON.parse(view.stdout);
-      if (url) releaseUrl = url;
+      if (url) finalReleaseUrl = url;
       console.log('\nГотово:', url);
     } catch {
       console.log('\nГотово. Тег release:', tag);
@@ -197,7 +391,6 @@ function main() {
   }
 
   // Refresh About update-check feed with the new Windows version.
-  // Do not auto-commit from a local machine (SKIP_COMMIT=1).
   console.log('Обновляю version-feed (Windows)…');
   const feed = spawnSync(
     process.platform === 'win32' ? 'node.exe' : 'node',
@@ -209,7 +402,7 @@ function main() {
       env: {
         ...process.env,
         WINDOWS_VERSION: version,
-        WINDOWS_DOWNLOAD_URL: releaseUrl,
+        WINDOWS_DOWNLOAD_URL: finalReleaseUrl,
         SKIP_COMMIT: '1',
       },
       stdio: 'inherit',
@@ -218,6 +411,16 @@ function main() {
   if (feed.status !== 0) {
     console.warn('version-feed обновить не удалось (установщик уже загружен).');
   }
+
+  // Keep GitHub README / repo description in sync with this Windows build.
+  const readmeChanged = updateReadmeWindowsLinks({
+    version,
+    tag,
+    setupName,
+    portableName,
+  });
+  if (readmeChanged) commitAndPushReadme(version, tag);
+  updateRepoDescription(ghBin, version, tag);
 }
 
 main();
