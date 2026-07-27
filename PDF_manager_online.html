@@ -30211,17 +30211,11 @@ function peSyncShapePropsUi(o, opts) {
 
 function peEditablePlainText(el) {
   if (!el) return '';
-  // Prefer innerText: the browser already maps contentEditable blank lines
-  // (<div><br></div>) to "\n" the same way the caret/layout sees them.
-  if (typeof el.innerText === 'string') {
-    let t = el.innerText.replace(/\u200B/g, '').replace(/\r\n/g, '\n');
-    if (t.replace(/\n/g, '').trim()) {
-      // Block layout often appends one trailing newline — keep internal blanks.
-      if (t.endsWith('\n')) t = t.slice(0, -1);
-      return t;
-    }
-  }
-  // Fallback DOM walk (no innerText / empty host).
+  // Walk the contentEditable DOM so each visual blank line
+  // (<div><br></div> / empty block / <br>) becomes exactly one "\n" between
+  // content lines. Chrome innerText over-emits newlines for empty blocks
+  // (often "\n\n\n" per blank), which made preview/print line gaps much
+  // taller than the editor.
   let out = '';
   const BLOCK = {
     DIV: 1, P: 1, LI: 1, H1: 1, H2: 1, H3: 1, H4: 1, H5: 1, H6: 1,
@@ -30248,6 +30242,7 @@ function peEditablePlainText(el) {
       const mark = out.length;
       for (let i = 0; i < node.childNodes.length; i++) walk(node.childNodes[i]);
       if (out.length === mark) {
+        // Empty block (e.g. <div></div>): one blank line for the next sibling.
         if (out.length) out += '\n';
       } else if (!out.endsWith('\n')) {
         out += '\n';
@@ -30258,7 +30253,18 @@ function peEditablePlainText(el) {
   };
   walk(el);
   out = out.replace(/\u200B/g, '').replace(/\r\n/g, '\n');
-  return out.trim() ? out.replace(/\r\n/g, '\n') : '';
+  if (!out.replace(/\n/g, '').trim()) {
+    // Fallback when the host is empty / not yet parsed as elements.
+    if (typeof el.innerText === 'string') {
+      let t = el.innerText.replace(/\u200B/g, '').replace(/\r\n/g, '\n');
+      if (t.endsWith('\n')) t = t.slice(0, -1);
+      return t;
+    }
+    return '';
+  }
+  // Block walk often leaves one trailing newline — drop it (keep internal blanks).
+  if (out.endsWith('\n')) out = out.slice(0, -1);
+  return out;
 }
 
 function peIsEmptyTextObject(o) {
@@ -35954,8 +35960,17 @@ function peOnObjContextMenu(e) {
   const objEl = e.target.closest && e.target.closest('.pe-obj');
   if (!objEl || !document.getElementById('peObjLayer')?.contains(objEl)) return;
   const id = parseInt(objEl.dataset.peId, 10);
-  const o = peState.objects.find(x => x.id === id);
+  let o = peState.objects.find(x => x.id === id);
   if (!o) return;
+  // Overlap: if the current selection is under the pointer, keep the RMB on
+  // that object (do not steal selection to the topmost covering shape/image).
+  if (!e.shiftKey && peState.sel && peObjOverlapPickType(peState.sel)
+      && !(peState.multiSel && peState.multiSel.length)) {
+    const stack = peObjectsAtClientPoint(e.clientX, e.clientY);
+    if (stack.length >= 2 && stack.includes(peState.sel)) {
+      o = peState.sel;
+    }
+  }
   e.preventDefault();
   e.stopPropagation();
   peHideCropCtxMenu();
@@ -41393,10 +41408,15 @@ function peDrawEditorObjects(ctx, canvasW, canvasH, objects, stageW, stageH) {
         ctx.translate(-cx, -cy);
       }
       const paragraphs = peTextParagraphsForBake(o);
-      let ly = ty + 1 * S;
+      // CSS .pe-obj-text uses padding: 1px 2px — content box inset from (tx,ty).
+      const padX = 2 * S;
+      const padY = 1 * S;
+      let ly = ty + padY;
       ctx.textBaseline = 'top';
       const align = (o.textAlign || 'left') === 'justify' ? 'left' : (o.textAlign || 'left');
-      const blockLeft = tx + 2 * S;
+      // Content width excludes horizontal padding; centering/right must use that
+      // box or text drifts right of the editor (blockLeft + full blockW was wrong).
+      const contentW = Math.max(0, blockW - 2 * padX);
       // Editor uses width:max-content + white-space:pre-wrap — only explicit
       // Enter/<br> breaks lines. Do NOT soft-wrap to boxW (that reflowed text
       // near the page edge onto a second line on preview/print).
@@ -41407,9 +41427,9 @@ function peDrawEditorObjects(ctx, canvasW, canvasH, objects, stageW, stageH) {
         const lineH = Math.max(o.fontPt * 1.25, maxRunPt * 1.25) * S;
         if (!blank) {
           const lineW = peBakeMeasureRunsWidth(ctx, runs, o, S);
-          let lx = blockLeft;
-          if (align === 'center') lx = blockLeft + (blockW - lineW) / 2;
-          else if (align === 'right') lx = blockLeft + blockW - lineW;
+          let lx = tx + padX;
+          if (align === 'center') lx = tx + padX + (contentW - lineW) / 2;
+          else if (align === 'right') lx = tx + padX + contentW - lineW;
           peBakeDrawRunsLine(ctx, runs, lx, ly, lineH, o, S, 0);
         }
         ly += lineH;
@@ -41549,6 +41569,28 @@ function peMergePlainLinesWithStyled(plainParas, styledParas) {
       fontPt: src.fontPt || base.fontPt
     }];
   };
+  const plainContent = plainParas.filter(hasContent);
+  const styledContent = styled.filter(hasContent);
+  const contentMatch = plainContent.length === styledContent.length
+    && plainContent.every((line, i) => norm(lineText(line)) === norm(lineText(styledContent[i])));
+  // Old innerText sync inflated blank gaps ("\n\n\n" per visual blank). When
+  // styled HTML/DOM has the same content lines but fewer blanks, trust styled
+  // break cardinality so preview/print match the editor.
+  if (contentMatch && styled.length < plainParas.length) {
+    const outStyled = [];
+    let ci = 0;
+    for (let si = 0; si < styled.length; si++) {
+      if (!hasContent(styled[si])) {
+        outStyled.push([]);
+        continue;
+      }
+      const plain = plainContent[ci++];
+      const cur = styled[si];
+      if (norm(lineText(plain)) === norm(lineText(cur))) outStyled.push(cur);
+      else outStyled.push(styleEnvelope(cur, plain));
+    }
+    return outStyled;
+  }
   const out = [];
   let si = 0;
   for (let i = 0; i < plainParas.length; i++) {
@@ -41879,12 +41921,15 @@ function peBakeDrawToken(ctx, run, text, lx, ly, lineH, o, S) {
     ctx.restore();
   }
   ctx.fillStyle = run.color || o.color;
-  ctx.fillText(text, lx, ly);
+  // CSS line-height centers the content area in the line box (half-leading).
+  // Canvas textBaseline=top without that offset paints glyphs too high vs editor.
+  const textY = ly + Math.max(0, (lineH - fpx) / 2);
+  ctx.fillText(text, lx, textY);
   if (run.underline) {
     ctx.save();
     ctx.strokeStyle = run.color || o.color;
     ctx.lineWidth = Math.max(1, fpx * 0.06);
-    const uy = ly + fpx * 1.05;
+    const uy = textY + fpx * 1.05;
     ctx.beginPath(); ctx.moveTo(lx, uy); ctx.lineTo(lx + w, uy); ctx.stroke();
     ctx.restore();
   }
