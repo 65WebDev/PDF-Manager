@@ -19457,6 +19457,8 @@
      * Returns { outdated, messages[] } or null when the feed is unreachable.
      */
     async function pdfManagerCheckForUpdates() {
+      // Offline HTML builds never phone home for updates (Windows shell still may).
+      if (PDF_MANAGER_OFFLINE_BUILD && !pdfManagerIsDesktopShell()) return null;
       const feed = await pdfManagerFetchLatestVersionFeed();
       if (!feed) return null;
       const messages = [];
@@ -19491,6 +19493,7 @@
 
       const isStamped = !PDF_MANAGER_BUILD_VERSION.startsWith('__');
       const winVer = String(PDF_MANAGER_WINDOWS_VERSION || '').trim();
+      const isOfflineHtml = !!(PDF_MANAGER_OFFLINE_BUILD && !pdfManagerIsDesktopShell());
       let versionLine = isStamped
         ? `Версия ${escapeHtml(PDF_MANAGER_BUILD_VERSION)} от ${escapeHtml(PDF_MANAGER_BUILD_DATE)}`
         : 'Версия неизвестна (сборка не через релизный пайплайн)';
@@ -19498,7 +19501,7 @@
         versionLine += `<br>Windows-приложение: ${escapeHtml(winVer)}`;
       }
       const networkLine = PDF_MANAGER_OFFLINE_BUILD
-        ? 'Все библиотеки встроены в код веб-приложения. Обращение к сети отсутствует (кроме проверки обновлений в «О программе»).'
+        ? 'Все библиотеки встроены в код веб-приложения. Обращение к сети отсутствует.'
         : 'Библиотеки подгружаются из CDN при первом запуске. Офлайн-версия содержит их прямо в файле, без обращений к сети.';
       const libsHtml = PDF_MANAGER_LIBRARIES
         .map(([name, ver]) => `${escapeHtml(name)} ${escapeHtml(ver)}`)
@@ -19506,6 +19509,10 @@
       const aboutKind = pdfManagerIsDesktopShell()
         ? 'Десктопное приложение для работы с PDF-документами.'
         : 'Веб-приложение для работы с PDF-документами. Вся обработка выполняется в браузере.';
+      const updateLineHtml = isOfflineHtml
+        ? ''
+        : `<p id="aboutUpdateLine" style="display:none; margin:0 0 8px; padding:8px 10px; border-radius:8px;
+            background:#fff6e5; border:1px solid #f0c36d; color:#7a4b00; font-size:12.5px; font-weight:600; line-height:1.35;"></p>`;
 
       box.innerHTML = `
         <div style="display:flex; align-items:center; justify-content:center; gap:8px; margin-bottom:8px;">
@@ -19515,8 +19522,7 @@
         <div style="font-size:13.5px; color:#333; line-height:1.25;">
           <p style="margin:0 0 6px;">${aboutKind}</p>
           <p style="margin:0 0 6px; color:#666; font-size:12px;">${versionLine}</p>
-          <p id="aboutUpdateLine" style="display:none; margin:0 0 8px; padding:8px 10px; border-radius:8px;
-            background:#fff6e5; border:1px solid #f0c36d; color:#7a4b00; font-size:12.5px; font-weight:600; line-height:1.35;"></p>
+          ${updateLineHtml}
           <p style="margin:0 0 6px; color:#555; font-size:12px;"><b>Библиотеки:</b> ${libsHtml}</p>
           <p style="margin:0 0 6px;">${networkLine}</p>
           <p style="margin:0 0 6px;">Значительная часть кода написана с использованием искусственного интеллекта по техническому заданию и под контролем разработчика.</p>
@@ -19548,27 +19554,29 @@
         if (el) el.textContent = hash ? ('SHA-256: ' + hash) : 'SHA-256: недоступно в этом контексте';
       });
 
-      pdfManagerCheckForUpdates().then((result) => {
-        const el = document.getElementById('aboutUpdateLine');
-        if (!el) return;
-        if (result && result.outdated && result.messages && result.messages.length) {
-          el.style.display = 'block';
-          el.style.background = '#fff6e5';
-          el.style.borderColor = '#f0c36d';
-          el.style.color = '#7a4b00';
-          el.textContent = result.messages.join(' ');
-          return;
-        }
-        if (!result) {
-          // Feed unreachable (typical for private GitHub assets from file://).
-          el.style.display = 'block';
-          el.style.background = '#f4f6f8';
-          el.style.borderColor = '#d0d7de';
-          el.style.color = '#57606a';
-          el.style.fontWeight = '500';
-          el.textContent = 'Не удалось проверить обновления (нет доступа к списку версий).';
-        }
-      }).catch(() => { /* ignore */ });
+      if (!isOfflineHtml) {
+        pdfManagerCheckForUpdates().then((result) => {
+          const el = document.getElementById('aboutUpdateLine');
+          if (!el) return;
+          if (result && result.outdated && result.messages && result.messages.length) {
+            el.style.display = 'block';
+            el.style.background = '#fff6e5';
+            el.style.borderColor = '#f0c36d';
+            el.style.color = '#7a4b00';
+            el.textContent = result.messages.join(' ');
+            return;
+          }
+          if (!result) {
+            // Feed unreachable (typical for private GitHub assets from file://).
+            el.style.display = 'block';
+            el.style.background = '#f4f6f8';
+            el.style.borderColor = '#d0d7de';
+            el.style.color = '#57606a';
+            el.style.fontWeight = '500';
+            el.textContent = 'Не удалось проверить обновления (нет доступа к списку версий).';
+          }
+        }).catch(() => { /* ignore */ });
+      }
     }
 
     // ─── Hidden provenance check (Ctrl+Alt+Shift+P) ───
