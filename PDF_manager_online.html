@@ -28813,6 +28813,23 @@ function peOnKeyDown(e) {
   if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && peState.sel) {
     e.preventDefault(); e.stopPropagation(); peDeleteSelected();
   }
+  if (!typing && !e.ctrlKey && !e.metaKey && !e.altKey
+      && (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+    // Arrow keys move selected objects; caret navigation wins while editing text.
+    if (!peState.inlineEditId) {
+      const step = e.shiftKey ? 10 : 1;
+      let dx = 0, dy = 0;
+      if (e.key === 'ArrowLeft') dx = -step;
+      else if (e.key === 'ArrowRight') dx = step;
+      else if (e.key === 'ArrowUp') dy = -step;
+      else if (e.key === 'ArrowDown') dy = step;
+      if (peNudgeSelectedObjects(dx, dy)) {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+    }
+  }
   if (e.key === 'F2' && !peState.inlineEditId) {
     const o = peState.sel;
     if (o && (o.type === 'text' || o.type === 'callout')) {
@@ -28841,6 +28858,9 @@ function peOnKeyUp(e) {
     peSyncActiveDragShift(e);
     peUpdateDrawShiftPassthrough(false);
   }
+  if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    peFlushNudgeHistory();
+  }
 }
 
 // If the window loses focus while holding Alt (switching applications, etc.) -
@@ -28848,6 +28868,7 @@ function peOnKeyUp(e) {
 function peOnWinBlurAlt() {
   document.getElementById('pageEditModal')?.classList.remove('pe-alt-highlight');
   document.getElementById('pageEditModal')?.classList.remove('pe-draw-shift-passthrough');
+  peFlushNudgeHistory();
 }
 
 // While the color/background picker is open, clicking outside the palette only closes it.
@@ -36324,6 +36345,43 @@ function peStagePoint(e) {
 // (when saving, the excess will be cut off at the peBakeOverlayPng stage).
 function peClampObjXY(o, x, y) {
   return { x, y };
+}
+
+/** Types that support arrow-key nudge (1px / Shift+10px). */
+function peObjSupportsArrowNudge(o) {
+  return !!(o && (o.type === 'redact' || o.type === 'text' || o.type === 'image' || o.type === 'shape'));
+}
+
+let peNudgeHistoryPending = false;
+
+/** Move selected redact/text/image/shape objects by stage pixels. */
+function peNudgeSelectedObjects(dxPx, dyPx) {
+  if (!peState || (!dxPx && !dyPx)) return false;
+  if (peState.tool === 'crop') return false;
+  if (peState.drag) return false;
+  if (peState.inlineEditId) return false;
+  const objs = peGetSelectedObjects().filter(peObjSupportsArrowNudge);
+  if (!objs.length) return false;
+  const { w: W, h: H } = peStageSize();
+  if (!(W > 0) || !(H > 0)) return false;
+  const dxFrac = dxPx / W;
+  const dyFrac = dyPx / H;
+  objs.forEach(o => {
+    const c = peClampObjXY(o, o.x + dxFrac, o.y + dyFrac);
+    o.x = c.x;
+    o.y = c.y;
+  });
+  peRedrawObjects();
+  peUpdateProps();
+  peUpdateRedactActionsUi();
+  peNudgeHistoryPending = true;
+  return true;
+}
+
+function peFlushNudgeHistory() {
+  if (!peNudgeHistoryPending) return;
+  peNudgeHistoryPending = false;
+  peCommitEditorHistory();
 }
 
 // Moves a group of objects (multiple selection) with one overall shift.
