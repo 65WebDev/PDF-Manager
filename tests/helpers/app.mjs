@@ -79,6 +79,8 @@ export async function peSnapshot(page) {
       inlineEditId: s.inlineEditId,
       selId: s.sel && s.sel.id,
       selType: s.sel && s.sel.type,
+      selShape: s.sel && s.sel.shape,
+      multiSelIds: (s.multiSel || []).map((o) => o.id),
       objectCount: s.objects.length,
       objects: s.objects.map((o) => ({
         id: o.id,
@@ -86,6 +88,8 @@ export async function peSnapshot(page) {
         shape: o.shape || null,
         text: o.text || '',
         x: o.x, y: o.y, w: o.w, h: o.h,
+        filled: !!o.filled,
+        pathLen: Array.isArray(o.path) ? o.path.length : 0,
       })),
     };
   });
@@ -100,6 +104,77 @@ export async function clickStage(page, fx = 0.5, fy = 0.4, opts = {}) {
   const box = await page.locator('#peStage').boundingBox();
   if (!box) throw new Error('#peStage has no box');
   await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy, opts);
+}
+
+/** Drag on the stage from one fraction to another. */
+export async function dragStage(page, x1, y1, x2, y2, { steps = 10 } = {}) {
+  const box = await page.locator('#peStage').boundingBox();
+  if (!box) throw new Error('#peStage has no box');
+  const a = { x: box.x + box.width * x1, y: box.y + box.height * y1 };
+  const b = { x: box.x + box.width * x2, y: box.y + box.height * y2 };
+  await page.mouse.move(a.x, a.y);
+  await page.mouse.down();
+  await page.mouse.move(b.x, b.y, { steps });
+  await page.mouse.up();
+  return { a, b, box };
+}
+
+export async function enableObjSelect(page) {
+  await page.evaluate(() => {
+    window.peSetTool('select');
+    window.peSetObjSelectMode(true);
+  });
+  await page.waitForFunction(() => {
+    const s = window.__peState;
+    return s && s.tool === 'select' && s.objSelectMode;
+  });
+}
+
+export async function drawShape(page, kind, x1, y1, x2, y2) {
+  await page.evaluate((k) => {
+    window.peSelectShapeKind(k);
+    window.peSetTool('shape');
+  }, kind);
+  await page.waitForFunction((k) => {
+    const s = window.__peState;
+    return s && s.tool === 'shape';
+  }, kind);
+  await dragStage(page, x1, y1, x2, y2);
+  await page.waitForFunction(() => {
+    const s = window.__peState;
+    return s && !s.drag && !s.draftShapeId;
+  }, null, { timeout: 5000 });
+}
+
+/** Seed filled rect shapes (normalized coords). Returns ids in order. */
+export async function seedShapes(page, rects) {
+  return page.evaluate((list) => {
+    const s = window.__peState;
+    const ids = [];
+    for (const r of list) {
+      const o = {
+        id: ++s.seq,
+        type: 'shape',
+        shape: r.shape || 'rect',
+        color: r.color || '#000000',
+        rot: 0,
+        filled: r.filled !== false,
+        opacity: r.opacity != null ? r.opacity : 80,
+        strokePx: 2,
+        x: r.x, y: r.y, w: r.w, h: r.h,
+      };
+      s.objects.push(o);
+      ids.push(o.id);
+    }
+    window.peRedrawObjects();
+    return ids;
+  }, rects);
+}
+
+export async function clickObjectById(page, id, opts = {}) {
+  const box = await page.locator(`#peObjLayer .pe-obj[data-pe-id="${id}"]`).boundingBox();
+  if (!box) throw new Error('object box missing: ' + id);
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, opts);
 }
 
 export async function createTextAt(page, fx = 0.5, fy = 0.35, text = 'Тест') {

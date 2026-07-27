@@ -26,3 +26,5 @@ npm run test:e2e:report
 | `tests/page-edit.spec.mjs` | Page-editor scenarios |
 
 Tests inject the PDF via `loadPDF(File)` and open the editor with `openPageEditor(0)` to avoid file-picker UI.
+
+The app exposes `window.__peState` (getter for the internal `let peState`) so tests can snapshot editor state without fragile DOM scraping.
