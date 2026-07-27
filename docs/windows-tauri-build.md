@@ -186,7 +186,13 @@ npm run tauri:build
 1. `npm run build:offline` → `PDF_manager_offline.html`  
 2. Копия в `tauri-ui\index.html` + мост для открытия PDF из ОС  
 3. `tauri build` → `PDF Manager.exe` + NSIS‑установщик с ассоциацией `.pdf`  
-4. `scripts/upload-windows-installer.mjs` → GitHub Release `windows-v{version}`  
+4. `scripts/upload-windows-installer.mjs` → GitHub Release `windows-v{version}` и синхронизация описания:
+   - notes релиза со ссылками на установщик / portable  
+   - ссылки Windows в `README.md` (commit + push)  
+   - `version-feed` (поле `windowsVersion` для «О программе»)  
+   - описание репозитория на GitHub (если есть права admin)  
+
+Чтобы только залить `.exe` без правки README: `$env:SKIP_README_COMMIT="1"`.
 
 Первая сборка часто занимает **10–20+ минут**. Повторные быстрее (кэш).
 
