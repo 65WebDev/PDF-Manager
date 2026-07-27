@@ -28157,12 +28157,15 @@ function peCropBoxesEqual(a, b) {
 }
 
 function peToolAfterHistoryRestore(snap, isUndo) {
-  let tool = snap.tool || 'select';
-  if (!isUndo) return tool;
-  const drawTools = ['text', 'highlight', 'redact', 'crop', 'shape'];
-  if (!drawTools.includes(tool)) return tool;
-  if (tool === 'crop') peState.cropPdf = null;
-  return 'select';
+  const snapTool = snap.tool || 'select';
+  if (!isUndo) return snapTool;
+  // Keep the active placement tool across Ctrl+Z. Remapping draw-tool snaps
+  // to 'select' used to bounce the toolbar into Object-select (via
+  // modeBeforeTool) after undoing a just-placed shape/text/redact.
+  const drawTools = ['text', 'highlight', 'redact', 'shape', 'crop'];
+  const cur = peState && peState.tool;
+  if (drawTools.includes(cur)) return cur;
+  return snapTool;
 }
 
 async function peRestoreEditorSnapshot(snap, isUndo) {
