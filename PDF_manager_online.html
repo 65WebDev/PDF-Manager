@@ -30032,8 +30032,14 @@ function peSyncShapePropsUi(o, opts) {
 
 function peEditablePlainText(el) {
   if (!el) return '';
-  // We take only real text nodes (without CSS ::before “Text”).
+  // We take only real text nodes (without CSS ::before “Text”), and preserve
+  // hard line breaks from <br> / block boundaries so bake/preview keep
+  // multiline layout (center/right align) after Save when peState is gone.
   let out = '';
+  const BLOCK = {
+    DIV: 1, P: 1, LI: 1, H1: 1, H2: 1, H3: 1, H4: 1, H5: 1, H6: 1,
+    TR: 1, BLOCKQUOTE: 1, PRE: 1, SECTION: 1, ARTICLE: 1, HEADER: 1, FOOTER: 1
+  };
   const walk = (node) => {
     if (!node) return;
     if (node.nodeType === 3) {
@@ -30045,7 +30051,15 @@ function peEditablePlainText(el) {
     if (node.classList && (node.classList.contains('pe-text-corner-handle') ||
         node.classList.contains('pe-text-rotate-handle') ||
         node.classList.contains('pe-obj-mobile-del'))) return;
+    const tag = node.tagName;
+    if (tag === 'BR') {
+      out += '\n';
+      return;
+    }
+    const isBlock = !!BLOCK[tag];
+    if (isBlock && out.length && !out.endsWith('\n')) out += '\n';
     for (let i = 0; i < node.childNodes.length; i++) walk(node.childNodes[i]);
+    if (isBlock && out.length && !out.endsWith('\n')) out += '\n';
   };
   walk(el);
   out = out.replace(/\u200B/g, '').replace(/\r\n/g, '\n');
@@ -40879,7 +40893,14 @@ function peDrawEditorObjects(ctx, canvasW, canvasH, objects, stageW, stageH) {
   const sh = stageH || canvasH;
   const S = canvasW / Math.max(1, sw);
   let drew = false;
-  objects.forEach(o => {
+  // Always paint text after shapes/images/markers so a filled rect under a
+  // text block cannot cover it when array order is ambiguous after Save.
+  const ordered = objects.slice().sort((a, b) => {
+    const at = (a && a.type === 'text') ? 1 : 0;
+    const bt = (b && b.type === 'text') ? 1 : 0;
+    return at - bt;
+  });
+  ordered.forEach(o => {
     if (o.type === 'highlight') {
       ctx.save(); ctx.globalAlpha = 0.4; ctx.fillStyle = o.color;
       ctx.fillRect(o.x * canvasW, o.y * canvasH, o.w * canvasW, o.h * canvasH);
@@ -41030,7 +41051,7 @@ function peDrawEditorObjects(ctx, canvasW, canvasH, objects, stageW, stageH) {
       peBakeDrawShape(ctx, o, fakeCanvas, S);
       if (peShapeHasComment(o)) peBakeDrawShapeComment(ctx, o, canvasW, canvasH, S);
       drew = true;
-    } else if (o.type === 'text' && (o.text || '').trim()) {
+    } else if (o.type === 'text' && peTextHasContent(o)) {
       ctx.save();
       const el = peState ? peGetInlineTextEl(o) : null;
       const est = peTextBoxPx(o, sw, sh);
@@ -41063,21 +41084,16 @@ function peDrawEditorObjects(ctx, canvasW, canvasH, objects, stageW, stageH) {
         ctx.rotate(rot * Math.PI / 180);
         ctx.translate(-cx, -cy);
       }
-      const paragraphs = el
-        ? peExtractTextRuns(el)
-        : (() => {
-          const lines = String(o.text || '').split('\n');
-          return lines.map(line => [{
-            text: line, bold: !!o.bold, italic: !!o.italic, underline: !!o.underline,
-            color: o.color, bg: null, fontPt: o.fontPt
-          }]);
-        })();
+      const paragraphs = peTextParagraphsForBake(o);
       let ly = ty + 1 * S;
       ctx.textBaseline = 'top';
       const align = (o.textAlign || 'left') === 'justify' ? 'left' : (o.textAlign || 'left');
       const blockLeft = tx + 2 * S;
       paragraphs.forEach(runs => {
-        const visualLines = [runs];
+        // Prefer explicit hard breaks from HTML/<br>/o.text; soft-wrap only when
+        // a single run line is wider than the saved text box (matches editor).
+        const soft = peBakeSoftWrapRuns(runs, Math.max(8, blockW - 4 * S), ctx, o, S);
+        const visualLines = (soft && soft.length) ? soft : [runs];
         visualLines.forEach(lineRuns => {
           let maxRunPt = o.fontPt;
           lineRuns.forEach(r => { if (r.fontPt > maxRunPt) maxRunPt = r.fontPt; });
@@ -41140,6 +41156,80 @@ function peOverlayPlacement(R, cb) {
     case 270: return { x: cb.x, y: cb.y + cb.height, w: cb.height, h: cb.width };
     default:  return { x: cb.x, y: cb.y, w: cb.width, h: cb.height };
   }
+}
+
+function peHtmlHasVisibleText(html) {
+  if (!html) return false;
+  let t = String(html)
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(div|p|li|h[1-6])>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/gi, ' ');
+  try { t = peDecodeHtmlEntities(t); } catch (_) {}
+  return !!String(t || '').trim();
+}
+
+function peTextHasContent(o) {
+  return !!(o && o.type === 'text' &&
+    ((o.text || '').trim() || peHtmlHasVisibleText(o.html)));
+}
+
+/** Parse saved o.html into bake runs (hilite/bold/br) without a live editor node. */
+function peExtractTextRunsFromHtml(html, o) {
+  if (!html || !document.body) return null;
+  const host = document.createElement('div');
+  host.style.cssText = 'position:fixed;left:-99999px;top:0;visibility:hidden;pointer-events:none;';
+  const inner = document.createElement('div');
+  inner.className = 'pe-obj-text';
+  const fontPt = (o && o.fontPt) || 16;
+  // peExtractTextRuns undoes peState.scale on getComputedStyle fontSize — match
+  // the live editor by applying the scaled CSS size when the editor is open.
+  const sc = (typeof peState !== 'undefined' && peState && peState.scale) ? peState.scale : 1;
+  inner.style.fontSize = (fontPt * Math.max(1e-6, sc)) + 'px';
+  inner.style.fontWeight = (o && o.bold) ? 'bold' : 'normal';
+  inner.style.fontStyle = (o && o.italic) ? 'italic' : 'normal';
+  inner.style.textDecoration = (o && o.underline) ? 'underline' : 'none';
+  inner.style.color = (o && o.color) || '#000';
+  if (o && o.bg && o.bg !== 'transparent') inner.style.backgroundColor = o.bg;
+  inner.style.fontFamily = '"Segoe UI", Arial, sans-serif';
+  inner.style.lineHeight = '1.25';
+  inner.style.whiteSpace = 'pre-wrap';
+  inner.innerHTML = String(html);
+  host.appendChild(inner);
+  document.body.appendChild(host);
+  try {
+    return peExtractTextRuns(inner);
+  } finally {
+    try { document.body.removeChild(host); } catch (_) {}
+  }
+}
+
+function peTextParagraphsPlainFallback(o) {
+  const lines = String(o.text || '').replace(/\r\n/g, '\n').split('\n');
+  const bg = (o.bg && o.bg !== 'transparent') ? o.bg : null;
+  return lines.map(line => [{
+    text: line,
+    bold: !!o.bold,
+    italic: !!o.italic,
+    underline: !!o.underline,
+    color: o.color,
+    bg,
+    fontPt: o.fontPt
+  }]);
+}
+
+/** Live DOM → saved HTML → plain o.text. Keeps <br>/hilite after Save when peState is null. */
+function peTextParagraphsForBake(o) {
+  const el = (typeof peState !== 'undefined' && peState) ? peGetInlineTextEl(o) : null;
+  if (el) {
+    const live = peExtractTextRuns(el);
+    if (live && live.some(line => line.some(r => (r.text || '').length))) return live;
+  }
+  if (o && o.html) {
+    const fromHtml = peExtractTextRunsFromHtml(o.html, o);
+    if (fromHtml && fromHtml.some(line => line.some(r => (r.text || '').length))) return fromHtml;
+  }
+  return peTextParagraphsPlainFallback(o || {});
 }
 
 // Bakes text/images/markers into a transparent PNG in the final orientation.
@@ -43960,7 +44050,7 @@ async function peBakeShapesOntoPdfPage(doc, page, shapes, rot, cb) {
 function pePageHasEditorVisuals(objects) {
   return (objects || []).some(o => {
     if (o.type === 'image' || o.type === 'shape' || o.type === 'redact' || o.type === 'callout') return true;
-    if (o.type === 'text' && (o.text || '').trim()) return true;
+    if (o.type === 'text' && peTextHasContent(o)) return true;
     if (o.type === 'highlight' || o.type === 'strikeout' || o.type === 'underline') {
       if (o.type === 'highlight' && o.hlComment &&
           (String(o.hlComment.text || '').trim() || String(o.hlComment.author || '').trim())) return true;
