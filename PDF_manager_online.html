@@ -30033,8 +30033,8 @@ function peSyncShapePropsUi(o, opts) {
 function peEditablePlainText(el) {
   if (!el) return '';
   // We take only real text nodes (without CSS ::before “Text”), and preserve
-  // hard line breaks from <br> / block boundaries so bake/preview keep
-  // multiline layout (center/right align) after Save when peState is gone.
+  // hard line breaks from <br> / block boundaries — including blank lines
+  // (contentEditable empty line is often <div><br></div> or <div></div>).
   let out = '';
   const BLOCK = {
     DIV: 1, P: 1, LI: 1, H1: 1, H2: 1, H3: 1, H4: 1, H5: 1, H6: 1,
@@ -30057,9 +30057,19 @@ function peEditablePlainText(el) {
       return;
     }
     const isBlock = !!BLOCK[tag];
-    if (isBlock && out.length && !out.endsWith('\n')) out += '\n';
+    if (isBlock) {
+      if (out.length && !out.endsWith('\n')) out += '\n';
+      const mark = out.length;
+      for (let i = 0; i < node.childNodes.length; i++) walk(node.childNodes[i]);
+      if (out.length === mark) {
+        // Truly empty block → blank line (even without a <br>).
+        if (out.length) out += '\n';
+      } else if (!out.endsWith('\n')) {
+        out += '\n';
+      }
+      return;
+    }
     for (let i = 0; i < node.childNodes.length; i++) walk(node.childNodes[i]);
-    if (isBlock && out.length && !out.endsWith('\n')) out += '\n';
   };
   walk(el);
   out = out.replace(/\u200B/g, '').replace(/\r\n/g, '\n');
@@ -40893,14 +40903,8 @@ function peDrawEditorObjects(ctx, canvasW, canvasH, objects, stageW, stageH) {
   const sh = stageH || canvasH;
   const S = canvasW / Math.max(1, sw);
   let drew = false;
-  // Always paint text after shapes/images/markers so a filled rect under a
-  // text block cannot cover it when array order is ambiguous after Save.
-  const ordered = objects.slice().sort((a, b) => {
-    const at = (a && a.type === 'text') ? 1 : 0;
-    const bt = (b && b.type === 'text') ? 1 : 0;
-    return at - bt;
-  });
-  ordered.forEach(o => {
+  // Same stacking as the page editor: array order, last object on top.
+  objects.forEach(o => {
     if (o.type === 'highlight') {
       ctx.save(); ctx.globalAlpha = 0.4; ctx.fillStyle = o.color;
       ctx.fillRect(o.x * canvasW, o.y * canvasH, o.w * canvasW, o.h * canvasH);
@@ -41090,9 +41094,12 @@ function peDrawEditorObjects(ctx, canvasW, canvasH, objects, stageW, stageH) {
       const align = (o.textAlign || 'left') === 'justify' ? 'left' : (o.textAlign || 'left');
       const blockLeft = tx + 2 * S;
       paragraphs.forEach(runs => {
-        // Prefer explicit hard breaks from HTML/<br>/o.text; soft-wrap only when
-        // a single run line is wider than the saved text box (matches editor).
-        const soft = peBakeSoftWrapRuns(runs, Math.max(8, blockW - 4 * S), ctx, o, S);
+        // Blank line (empty runs or only empty strings) must still advance ly —
+        // soft-wrap tokenizes "" away and would otherwise collapse spacing.
+        const blank = !runs.some(r => (r.text || '').length);
+        const soft = blank
+          ? [[]]
+          : peBakeSoftWrapRuns(runs, Math.max(8, blockW - 4 * S), ctx, o, S);
         const visualLines = (soft && soft.length) ? soft : [runs];
         visualLines.forEach(lineRuns => {
           let maxRunPt = o.fontPt;
@@ -41102,7 +41109,7 @@ function peDrawEditorObjects(ctx, canvasW, canvasH, objects, stageW, stageH) {
           let lx = blockLeft;
           if (align === 'center') lx = blockLeft + (blockW - lineW) / 2;
           else if (align === 'right') lx = blockLeft + blockW - lineW;
-          peBakeDrawRunsLine(ctx, lineRuns, lx, ly, lineH, o, S, 0);
+          if (!blank) peBakeDrawRunsLine(ctx, lineRuns, lx, ly, lineH, o, S, 0);
           ly += lineH;
         });
       });
@@ -41238,8 +41245,20 @@ function peTextParagraphsForBake(o) {
 // color,bg,fontPt }. We use exactly getComputedStyle of text nodes -
 // more reliable than manual parsing of arbitrary nested tags, which leaves
 // execCommand (b/i/u/span with inline styles in different combinations).
+// Blank lines (contentEditable <div><br></div> / empty blocks) are kept as
+// empty run-arrays so preview/print match the editor’s vertical spacing.
+function peIsHtmlBlockTag(tag) {
+  return !!({
+    DIV: 1, P: 1, LI: 1, H1: 1, H2: 1, H3: 1, H4: 1, H5: 1, H6: 1,
+    TR: 1, BLOCKQUOTE: 1, PRE: 1, SECTION: 1, ARTICLE: 1, HEADER: 1, FOOTER: 1
+  }[tag]);
+}
+
 function peExtractTextRuns(el) {
   const lines = [[]];
+  function breakLine() {
+    lines.push([]);
+  }
   function pushText(text, styleEl) {
     if (!text) return;
     const cs = getComputedStyle(styleEl);
@@ -41274,17 +41293,39 @@ function peExtractTextRuns(el) {
       if (child.nodeType === Node.TEXT_NODE) {
         pushText(child.textContent, styleEl);
       } else if (child.nodeType === Node.ELEMENT_NODE) {
-        if (child.classList && child.classList.contains('pe-text-corner-handle')) return;
-        if (child.tagName === 'BR') { lines.push([]); return; }
-        const isBlock = getComputedStyle(child).display === 'block';
-        if (isBlock && lines[lines.length - 1].length) lines.push([]);
-        walk(child, child);
-        if (isBlock) lines.push([]);
+        if (child.classList && (child.classList.contains('pe-text-corner-handle') ||
+            child.classList.contains('pe-text-rotate-handle') ||
+            child.classList.contains('pe-obj-mobile-del'))) return;
+        if (child.tagName === 'BR') {
+          breakLine();
+          return;
+        }
+        // Prefer tag map over getComputedStyle: more reliable for off-DOM HTML
+        // hosts and matches how contentEditable encodes Enter as <div>…</div>.
+        let isBlock = peIsHtmlBlockTag(child.tagName);
+        if (!isBlock) {
+          try { isBlock = getComputedStyle(child).display === 'block'; } catch (_) {}
+        }
+        if (isBlock) {
+          if (lines[lines.length - 1].length) breakLine();
+          const idxAtEntry = lines.length - 1;
+          walk(child, child);
+          // <div><br></div>: BR already inserted a following empty line — the
+          // entry line stays empty (= blank). <div></div>: still on entry
+          // line empty — leave it as the blank. Content block: break after.
+          if (lines[lines.length - 1].length) breakLine();
+          else if (lines.length - 1 === idxAtEntry) {
+            // Empty block with no <br>: ensure a blank line exists for the next sibling.
+            breakLine();
+          }
+        } else {
+          walk(child, child);
+        }
       }
     });
   }
   walk(el, el);
-  if (lines.length > 1 && lines[lines.length - 1].length === 0) lines.pop();
+  while (lines.length > 1 && lines[lines.length - 1].length === 0) lines.pop();
   return lines;
 }
 
