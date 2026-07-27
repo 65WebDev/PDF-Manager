@@ -6390,6 +6390,7 @@
     <button type="button" data-action="copy">Скопировать</button>
     <button type="button" data-action="cut">Вырезать</button>
     <button type="button" data-action="paste">Вставить</button>
+    <button type="button" data-action="edit-text" hidden style="display:none">Редактировать</button>
     <button type="button" data-action="shape-comment" class="pe-ctx-checkable" hidden style="display:none">
       <span class="ctx-label">Комментарий</span>
       <span class="ctx-check" aria-hidden="true">✓</span>
@@ -35856,6 +35857,14 @@ function peShowObjCtxMenu(clientX, clientY, overlapObjs) {
   menu.querySelector('[data-action="delete"]').disabled = !sel.length;
   const hlCommentBtn = menu.querySelector('[data-action="hl-comment"]');
   if (hlCommentBtn) hlCommentBtn.style.display = 'none';
+  const editTextBtn = menu.querySelector('[data-action="edit-text"]');
+  if (editTextBtn) {
+    const sole = sel.length === 1 ? sel[0] : null;
+    // Show only for a selected text block that is not already being edited.
+    const showEdit = !!(sole && sole.type === 'text' && peState.inlineEditId !== sole.id);
+    editTextBtn.style.display = showEdit ? '' : 'none';
+    editTextBtn.hidden = !showEdit;
+  }
   const shapeCommentBtn = menu.querySelector('[data-action="shape-comment"]');
   if (shapeCommentBtn) {
     const sole = sel.length === 1 ? sel[0] : null;
@@ -38502,6 +38511,12 @@ function peObjMouseDown(e, o) {
     peHideObjCtxMenu();
     if (action === 'delete') {
       peDeleteSelected();
+    } else if (action === 'edit-text') {
+      const sole = peGetSelectedObjects();
+      if (sole.length === 1 && sole[0].type === 'text' && peState.inlineEditId !== sole[0].id) {
+        peBeginInlineEdit(sole[0]);
+        peFocusInlineEditorNow();
+      }
     } else if (action === 'pick-object') {
       const id = parseInt(btn.dataset.peId, 10);
       const o = peState.objects.find(x => x.id === id);
