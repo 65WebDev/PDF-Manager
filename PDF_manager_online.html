@@ -30211,17 +30211,11 @@ function peSyncShapePropsUi(o, opts) {
 
 function peEditablePlainText(el) {
   if (!el) return '';
-  // Prefer innerText: the browser already maps contentEditable blank lines
-  // (<div><br></div>) to "\n" the same way the caret/layout sees them.
-  if (typeof el.innerText === 'string') {
-    let t = el.innerText.replace(/\u200B/g, '').replace(/\r\n/g, '\n');
-    if (t.replace(/\n/g, '').trim()) {
-      // Block layout often appends one trailing newline — keep internal blanks.
-      if (t.endsWith('\n')) t = t.slice(0, -1);
-      return t;
-    }
-  }
-  // Fallback DOM walk (no innerText / empty host).
+  // Walk the contentEditable DOM so each visual blank line
+  // (<div><br></div> / empty block / <br>) becomes exactly one "\n" between
+  // content lines. Chrome innerText over-emits newlines for empty blocks
+  // (often "\n\n\n" per blank), which made preview/print line gaps much
+  // taller than the editor.
   let out = '';
   const BLOCK = {
     DIV: 1, P: 1, LI: 1, H1: 1, H2: 1, H3: 1, H4: 1, H5: 1, H6: 1,
@@ -30248,6 +30242,7 @@ function peEditablePlainText(el) {
       const mark = out.length;
       for (let i = 0; i < node.childNodes.length; i++) walk(node.childNodes[i]);
       if (out.length === mark) {
+        // Empty block (e.g. <div></div>): one blank line for the next sibling.
         if (out.length) out += '\n';
       } else if (!out.endsWith('\n')) {
         out += '\n';
@@ -30258,7 +30253,18 @@ function peEditablePlainText(el) {
   };
   walk(el);
   out = out.replace(/\u200B/g, '').replace(/\r\n/g, '\n');
-  return out.trim() ? out.replace(/\r\n/g, '\n') : '';
+  if (!out.replace(/\n/g, '').trim()) {
+    // Fallback when the host is empty / not yet parsed as elements.
+    if (typeof el.innerText === 'string') {
+      let t = el.innerText.replace(/\u200B/g, '').replace(/\r\n/g, '\n');
+      if (t.endsWith('\n')) t = t.slice(0, -1);
+      return t;
+    }
+    return '';
+  }
+  // Block walk often leaves one trailing newline — drop it (keep internal blanks).
+  if (out.endsWith('\n')) out = out.slice(0, -1);
+  return out;
 }
 
 function peIsEmptyTextObject(o) {
@@ -41549,6 +41555,28 @@ function peMergePlainLinesWithStyled(plainParas, styledParas) {
       fontPt: src.fontPt || base.fontPt
     }];
   };
+  const plainContent = plainParas.filter(hasContent);
+  const styledContent = styled.filter(hasContent);
+  const contentMatch = plainContent.length === styledContent.length
+    && plainContent.every((line, i) => norm(lineText(line)) === norm(lineText(styledContent[i])));
+  // Old innerText sync inflated blank gaps ("\n\n\n" per visual blank). When
+  // styled HTML/DOM has the same content lines but fewer blanks, trust styled
+  // break cardinality so preview/print match the editor.
+  if (contentMatch && styled.length < plainParas.length) {
+    const outStyled = [];
+    let ci = 0;
+    for (let si = 0; si < styled.length; si++) {
+      if (!hasContent(styled[si])) {
+        outStyled.push([]);
+        continue;
+      }
+      const plain = plainContent[ci++];
+      const cur = styled[si];
+      if (norm(lineText(plain)) === norm(lineText(cur))) outStyled.push(cur);
+      else outStyled.push(styleEnvelope(cur, plain));
+    }
+    return outStyled;
+  }
   const out = [];
   let si = 0;
   for (let i = 0; i < plainParas.length; i++) {
