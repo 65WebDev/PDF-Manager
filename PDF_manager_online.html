@@ -41639,11 +41639,43 @@ function peTextParagraphsForBake(o) {
   }
   const styledOk = !!(styled && styled.some(line =>
     line.some(r => (r.text || '').replace(/\u200B/g, '').length)));
+  let paragraphs;
   if (styledOk && String((o && o.text) || '').length) {
-    return peMergePlainLinesWithStyled(plain, styled);
+    paragraphs = peMergePlainLinesWithStyled(plain, styled);
+  } else if (styledOk) {
+    paragraphs = styled;
+  } else {
+    paragraphs = plain;
   }
-  if (styledOk) return styled;
-  return plain;
+  // Whole-block hilite stores o.bg even when some span lines were dropped.
+  const blockBg = (o && o.bg && o.bg !== 'transparent') ? o.bg : null;
+  if (blockBg) {
+    paragraphs = paragraphs.map(line => (line || []).map(r => (
+      r && !r.bg ? Object.assign({}, r, { bg: blockBg }) : r
+    )));
+  } else {
+    // If most content lines share one hilite and a trailing line lost it in
+    // extract/merge, copy that hilite onto bare content lines.
+    const contentBgs = [];
+    paragraphs.forEach(line => {
+      const t = (line || []).map(r => r.text || '').join('').replace(/\u200B/g, '').trim();
+      if (!t) return;
+      const bg = (line && line[0] && line[0].bg) || null;
+      contentBgs.push(bg);
+    });
+    const known = contentBgs.filter(Boolean);
+    if (known.length && known.length < contentBgs.length) {
+      const ref = known[0];
+      if (known.every(b => b === ref)) {
+        paragraphs = paragraphs.map(line => {
+          const t = (line || []).map(r => r.text || '').join('').replace(/\u200B/g, '').trim();
+          if (!t) return line;
+          return (line || []).map(r => (r && !r.bg ? Object.assign({}, r, { bg: ref }) : r));
+        });
+      }
+    }
+  }
+  return paragraphs;
 }
 
 // Bakes text/images/markers into a transparent PNG in the final orientation.
@@ -41661,8 +41693,45 @@ function peIsHtmlBlockTag(tag) {
   }[tag]);
 }
 
+/** Non-transparent background on one element (computed, then inline/bgcolor). */
+function peElementBgColor(el) {
+  if (!el || el.nodeType !== 1) return null;
+  try {
+    const cs = getComputedStyle(el);
+    const bgRaw = cs.backgroundColor || '';
+    if (bgRaw && bgRaw !== 'rgba(0, 0, 0, 0)' && bgRaw !== 'transparent') return bgRaw;
+  } catch (_) {}
+  try {
+    const inline = (el.style && (el.style.backgroundColor || el.style.background)) || '';
+    if (inline && inline !== 'transparent' && inline !== 'rgba(0, 0, 0, 0)') return inline;
+  } catch (_) {}
+  try {
+    const attr = el.getAttribute && el.getAttribute('bgcolor');
+    if (attr) return attr;
+  } catch (_) {}
+  return null;
+}
+
+/**
+ * Hilite spans often wrap block <div> lines (contentEditable). background-color
+ * is not inherited, so reading only the innermost styleEl dropped the yellow
+ * on nested lines (commonly the last one). Walk ancestors up to the text host.
+ */
+function peResolveRunBg(styleEl, hostEl) {
+  let el = styleEl;
+  while (el && el.nodeType === 1) {
+    const bg = peElementBgColor(el);
+    if (bg) return bg;
+    if (hostEl && el === hostEl) break;
+    if (el.classList && el.classList.contains('pe-obj-text')) break;
+    el = el.parentElement;
+  }
+  return null;
+}
+
 function peExtractTextRuns(el) {
   const lines = [[]];
+  const hostEl = el;
   function breakLine() {
     lines.push([]);
   }
@@ -41670,14 +41739,13 @@ function peExtractTextRuns(el) {
     if (!text) return;
     const cs = getComputedStyle(styleEl);
     const decoration = cs.textDecorationLine || cs.textDecoration || '';
-    const bgRaw = cs.backgroundColor || '';
     const run = {
       text,
       bold: parseInt(cs.fontWeight, 10) >= 600 || cs.fontWeight === 'bold',
       italic: cs.fontStyle === 'italic',
       underline: decoration.includes('underline'),
       color: cs.color,
-      bg: (bgRaw && bgRaw !== 'rgba(0, 0, 0, 0)' && bgRaw !== 'transparent') ? bgRaw : null,
+      bg: peResolveRunBg(styleEl, hostEl),
       fontPt: (() => {
         const px = parseFloat(cs.fontSize) || 16;
         // getComputedStyle returns CSS px already multiplied by peState.scale;
