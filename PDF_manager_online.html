@@ -41228,10 +41228,29 @@ function peTextParagraphsPlainFallback(o) {
   }]);
 }
 
-/** Insert blank lines from plain o.text into styled HTML runs (DOM often drops them). */
+/** Align plain o.text lines (incl. blanks) with styled HTML runs.
+ *  Never substitute a mismatched styled line wholesale — that duplicated
+ *  words when HTML extract collapsed two lines into one while o.text still
+ *  had them separate around a blank Enter. */
 function peMergePlainLinesWithStyled(plainParas, styledParas) {
   if (!styledParas || !styledParas.length) return plainParas;
-  const hasContent = (line) => !!(line && line.some(r => (r.text || '').replace(/\u200B/g, '').length));
+  const styled = styledParas.slice();
+  const norm = (s) => String(s || '').replace(/\u200B/g, '').replace(/\s+/g, ' ').trim();
+  const lineText = (line) => (line || []).map(r => r.text || '').join('');
+  const hasContent = (line) => !!norm(lineText(line));
+  const styleEnvelope = (srcLine, plainLine) => {
+    const src = (srcLine && srcLine[0]) || {};
+    const base = (plainLine && plainLine[0]) || {};
+    return [{
+      text: lineText(plainLine),
+      bold: !!src.bold,
+      italic: !!src.italic,
+      underline: !!src.underline,
+      color: src.color || base.color,
+      bg: src.bg != null ? src.bg : base.bg,
+      fontPt: src.fontPt || base.fontPt
+    }];
+  };
   const out = [];
   let si = 0;
   for (let i = 0; i < plainParas.length; i++) {
@@ -41240,9 +41259,29 @@ function peMergePlainLinesWithStyled(plainParas, styledParas) {
       out.push([]);
       continue;
     }
-    while (si < styledParas.length && !hasContent(styledParas[si])) si++;
-    if (si < styledParas.length) out.push(styledParas[si++]);
-    else out.push(plain);
+    while (si < styled.length && !hasContent(styled[si])) si++;
+    if (si >= styled.length) {
+      out.push(plain);
+      continue;
+    }
+    const cur = styled[si++];
+    const pt = lineText(plain);
+    const st = lineText(cur);
+    const ptN = norm(pt);
+    const stN = norm(st);
+    if (stN === ptN) {
+      out.push(cur);
+      continue;
+    }
+    // Keep plain wording; copy hilite/weight from the styled run.
+    out.push(styleEnvelope(cur, plain));
+    // If styled collapsed this line + following text, peel the remainder
+    // back so the next plain content line still gets the same style.
+    if (ptN && stN.startsWith(ptN)) {
+      const at = st.indexOf(pt);
+      let rest = st.slice(at >= 0 ? at + pt.length : pt.length).replace(/^\s+/, '');
+      if (norm(rest)) styled.splice(si, 0, styleEnvelope(cur, [{ text: rest }]));
+    }
   }
   return out;
 }
@@ -41260,13 +41299,10 @@ function peTextParagraphsForBake(o) {
   }
   const styledOk = !!(styled && styled.some(line =>
     line.some(r => (r.text || '').replace(/\u200B/g, '').length)));
-  if (styledOk) {
-    // o.text is authoritative for blank Enter lines; HTML supplies hilite/bold.
-    if (plain.length && String(o.text || '').length) {
-      return peMergePlainLinesWithStyled(plain, styled);
-    }
-    return styled;
+  if (styledOk && String((o && o.text) || '').length) {
+    return peMergePlainLinesWithStyled(plain, styled);
   }
+  if (styledOk) return styled;
   return plain;
 }
 
