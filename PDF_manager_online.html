@@ -30032,9 +30032,17 @@ function peSyncShapePropsUi(o, opts) {
 
 function peEditablePlainText(el) {
   if (!el) return '';
-  // We take only real text nodes (without CSS ::before “Text”), and preserve
-  // hard line breaks from <br> / block boundaries — including blank lines
-  // (contentEditable empty line is often <div><br></div> or <div></div>).
+  // Prefer innerText: the browser already maps contentEditable blank lines
+  // (<div><br></div>) to "\n" the same way the caret/layout sees them.
+  if (typeof el.innerText === 'string') {
+    let t = el.innerText.replace(/\u200B/g, '').replace(/\r\n/g, '\n');
+    if (t.replace(/\n/g, '').trim()) {
+      // Block layout often appends one trailing newline — keep internal blanks.
+      if (t.endsWith('\n')) t = t.slice(0, -1);
+      return t;
+    }
+  }
+  // Fallback DOM walk (no innerText / empty host).
   let out = '';
   const BLOCK = {
     DIV: 1, P: 1, LI: 1, H1: 1, H2: 1, H3: 1, H4: 1, H5: 1, H6: 1,
@@ -30047,7 +30055,6 @@ function peEditablePlainText(el) {
       return;
     }
     if (node.nodeType !== 1) return;
-    // Corner anchors/contentEditable service children do not apply here.
     if (node.classList && (node.classList.contains('pe-text-corner-handle') ||
         node.classList.contains('pe-text-rotate-handle') ||
         node.classList.contains('pe-obj-mobile-del'))) return;
@@ -30062,7 +30069,6 @@ function peEditablePlainText(el) {
       const mark = out.length;
       for (let i = 0; i < node.childNodes.length; i++) walk(node.childNodes[i]);
       if (out.length === mark) {
-        // Truly empty block → blank line (even without a <br>).
         if (out.length) out += '\n';
       } else if (!out.endsWith('\n')) {
         out += '\n';
@@ -41093,25 +41099,22 @@ function peDrawEditorObjects(ctx, canvasW, canvasH, objects, stageW, stageH) {
       ctx.textBaseline = 'top';
       const align = (o.textAlign || 'left') === 'justify' ? 'left' : (o.textAlign || 'left');
       const blockLeft = tx + 2 * S;
+      // Editor uses width:max-content + white-space:pre-wrap — only explicit
+      // Enter/<br> breaks lines. Do NOT soft-wrap to boxW (that reflowed text
+      // near the page edge onto a second line on preview/print).
       paragraphs.forEach(runs => {
-        // Blank line (empty runs or only empty strings) must still advance ly —
-        // soft-wrap tokenizes "" away and would otherwise collapse spacing.
-        const blank = !runs.some(r => (r.text || '').length);
-        const soft = blank
-          ? [[]]
-          : peBakeSoftWrapRuns(runs, Math.max(8, blockW - 4 * S), ctx, o, S);
-        const visualLines = (soft && soft.length) ? soft : [runs];
-        visualLines.forEach(lineRuns => {
-          let maxRunPt = o.fontPt;
-          lineRuns.forEach(r => { if (r.fontPt > maxRunPt) maxRunPt = r.fontPt; });
-          const lineH = Math.max(o.fontPt * 1.25, maxRunPt * 1.25) * S;
-          const lineW = peBakeMeasureRunsWidth(ctx, lineRuns, o, S);
+        const blank = !runs.some(r => (r.text || '').replace(/\u200B/g, '').length);
+        let maxRunPt = o.fontPt;
+        runs.forEach(r => { if (r.fontPt > maxRunPt) maxRunPt = r.fontPt; });
+        const lineH = Math.max(o.fontPt * 1.25, maxRunPt * 1.25) * S;
+        if (!blank) {
+          const lineW = peBakeMeasureRunsWidth(ctx, runs, o, S);
           let lx = blockLeft;
           if (align === 'center') lx = blockLeft + (blockW - lineW) / 2;
           else if (align === 'right') lx = blockLeft + blockW - lineW;
-          if (!blank) peBakeDrawRunsLine(ctx, lineRuns, lx, ly, lineH, o, S, 0);
-          ly += lineH;
-        });
+          peBakeDrawRunsLine(ctx, runs, lx, ly, lineH, o, S, 0);
+        }
+        ly += lineH;
       });
       ctx.restore(); drew = true;
     }
@@ -41225,18 +41228,46 @@ function peTextParagraphsPlainFallback(o) {
   }]);
 }
 
-/** Live DOM → saved HTML → plain o.text. Keeps <br>/hilite after Save when peState is null. */
+/** Insert blank lines from plain o.text into styled HTML runs (DOM often drops them). */
+function peMergePlainLinesWithStyled(plainParas, styledParas) {
+  if (!styledParas || !styledParas.length) return plainParas;
+  const hasContent = (line) => !!(line && line.some(r => (r.text || '').replace(/\u200B/g, '').length));
+  const out = [];
+  let si = 0;
+  for (let i = 0; i < plainParas.length; i++) {
+    const plain = plainParas[i];
+    if (!hasContent(plain)) {
+      out.push([]);
+      continue;
+    }
+    while (si < styledParas.length && !hasContent(styledParas[si])) si++;
+    if (si < styledParas.length) out.push(styledParas[si++]);
+    else out.push(plain);
+  }
+  return out;
+}
+
+/** Live DOM / HTML for styles; o.text for line breaks (incl. blank lines). */
 function peTextParagraphsForBake(o) {
+  const plain = peTextParagraphsPlainFallback(o || {});
+  let styled = null;
   const el = (typeof peState !== 'undefined' && peState) ? peGetInlineTextEl(o) : null;
   if (el) {
-    const live = peExtractTextRuns(el);
-    if (live && live.some(line => line.some(r => (r.text || '').length))) return live;
+    try { styled = peExtractTextRuns(el); } catch (_) { styled = null; }
   }
-  if (o && o.html) {
-    const fromHtml = peExtractTextRunsFromHtml(o.html, o);
-    if (fromHtml && fromHtml.some(line => line.some(r => (r.text || '').length))) return fromHtml;
+  if ((!styled || !styled.length) && o && o.html) {
+    try { styled = peExtractTextRunsFromHtml(o.html, o); } catch (_) { styled = null; }
   }
-  return peTextParagraphsPlainFallback(o || {});
+  const styledOk = !!(styled && styled.some(line =>
+    line.some(r => (r.text || '').replace(/\u200B/g, '').length)));
+  if (styledOk) {
+    // o.text is authoritative for blank Enter lines; HTML supplies hilite/bold.
+    if (plain.length && String(o.text || '').length) {
+      return peMergePlainLinesWithStyled(plain, styled);
+    }
+    return styled;
+  }
+  return plain;
 }
 
 // Bakes text/images/markers into a transparent PNG in the final orientation.
