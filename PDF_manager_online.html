@@ -25753,6 +25753,40 @@ function peObjectsAtClientPoint(clientX, clientY) {
   return hits;
 }
 
+/**
+ * Overlap click: if the current selection is under the pointer among 2+
+ * stacked objects, keep it as the drag target (hold = move without switch).
+ * A plain click (no drag) then cycles to the next object in the stack.
+ * Returns { obj, cycleIds } where cycleIds is set only when a click should cycle.
+ */
+function peResolveOverlapPointerTarget(hitObj, clientX, clientY) {
+  if (!peState || !peObjOverlapPickType(hitObj)) {
+    return { obj: hitObj, cycleIds: null };
+  }
+  const stack = peObjectsAtClientPoint(clientX, clientY);
+  if (stack.length < 2) return { obj: hitObj, cycleIds: null };
+  const sel = peState.sel;
+  if (sel && peObjOverlapPickType(sel) && stack.includes(sel)
+      && !(peState.multiSel && peState.multiSel.length)) {
+    return { obj: sel, cycleIds: stack.map(x => x.id) };
+  }
+  return { obj: stack[0], cycleIds: null };
+}
+
+/** Advance selection to the next overlapping object (wraps). */
+function peCycleOverlapSelection(cycleIds, current) {
+  if (!peState || !cycleIds || cycleIds.length < 2) return;
+  const curId = current && current.id != null
+    ? current.id
+    : (peState.sel && peState.sel.id);
+  let idx = cycleIds.indexOf(curId);
+  if (idx < 0) idx = 0;
+  const nextId = cycleIds[(idx + 1) % cycleIds.length];
+  if (nextId === curId) return;
+  const next = peState.objects.find(x => x.id === nextId);
+  if (next) peSelect(next);
+}
+
 /** Nearest non-deleted page index in direction dir (+1 / -1), or -1. */
 function peFindNeighborEditablePage(fromIdx, dir) {
   if (!pdfDoc || !dir) return -1;
@@ -32815,7 +32849,10 @@ function peBeginSingleMoveDrag(e, o, opts) {
     oboxX: host.boxX, oboxY: host.boxY,
     boxStartX: (host.boxX || 0) * W,
     boxStartY: (host.boxY || 0) * H,
-    frames0: (o.type === 'callout') ? peCalloutFrames(o).map(f => ({ x: f.x, y: f.y, w: f.w, h: f.h })) : null
+    frames0: (o.type === 'callout') ? peCalloutFrames(o).map(f => ({ x: f.x, y: f.y, w: f.w, h: f.h })) : null,
+    // Plain click (no drag) cycles when multiple objects overlap under the pointer.
+    cycleIds: (!boxOnly && opts && opts.cycleIds && opts.cycleIds.length >= 2) ? opts.cycleIds.slice() : null,
+    cycleOnClick: !!(!boxOnly && opts && opts.cycleIds && opts.cycleIds.length >= 2)
   };
   peUpdatePanUi();
 }
@@ -37218,6 +37255,16 @@ function peObjMouseDown(e, o) {
     peStartPanView(e);
     return;
   }
+  // Overlap stack: prefer the already-selected object for drag (hold = move
+  // without switching). A plain click later cycles via move-pending.cycleIds.
+  let overlapCycleIds = null;
+  if (!onHandle && !e.shiftKey && peState && peState.tool === 'select'
+      && !peState.inlineEditId && !peIsMultiSelection()
+      && peObjOverlapPickType(o)) {
+    const resolved = peResolveOverlapPointerTarget(o, e.clientX, e.clientY);
+    o = resolved.obj;
+    overlapCycleIds = resolved.cycleIds;
+  }
   // Text block corner anchor - always resize, regardless
   // current tool/state (including active text input); checking
   // before other branches - otherwise the click on the anchor would have been intercepted by the normal
@@ -37399,7 +37446,7 @@ function peObjMouseDown(e, o) {
       peUpdatePanUi();
       peCommitSelectionHistoryIfChanged(before);
     }
-    peBeginSingleMoveDrag(e, o);
+    peBeginSingleMoveDrag(e, o, { cycleIds: overlapCycleIds });
     return;
   }
   if (o.type === 'shape' && peState.tool === 'select') {
@@ -37419,7 +37466,7 @@ function peObjMouseDown(e, o) {
       peUpdatePanUi();
       peCommitSelectionHistoryIfChanged(before);
     }
-    peBeginSingleMoveDrag(e, o);
+    peBeginSingleMoveDrag(e, o, { cycleIds: overlapCycleIds });
     return;
   }
   // A shape with “Text” (or another drawing mode) active is the same as
@@ -37488,15 +37535,7 @@ function peObjMouseDown(e, o) {
     if (peState.multiSel && peState.multiSel.length) peState.multiSel = [];
   }
   peSelect(o);
-  const pt = peStagePoint(e);
-  const { w: W, h: H } = peStageSize();
-  peState.drag = {
-    kind: 'move-pending', obj: o,
-    startX: pt.x, startY: pt.y,
-    ox: o.x, oy: o.y, ow: o.w || 0, oh: o.h || 0,
-    threshold: 4
-  };
-  peUpdatePanUi();
+  peBeginSingleMoveDrag(e, o, { cycleIds: overlapCycleIds });
 }
 
 (function initPageEditorUI() {
@@ -38230,6 +38269,10 @@ function peObjMouseDown(e, o) {
     }
     if (d.kind === 'move-pending-multi' && d.clickObj) {
       peCollapseMultiToObject(d.clickObj);
+    }
+    if (d.kind === 'move-pending' && d.cycleOnClick && d.cycleIds && d.cycleIds.length >= 2) {
+      // Click without drag on a stacked hit → cycle to the next overlapping object.
+      peCycleOverlapSelection(d.cycleIds, d.obj);
     }
     if (d.kind === 'highlight-draw' && d.obj && (d.obj.w < 0.005 || d.obj.h < 0.005)) {
       peState.objects = peState.objects.filter(o => o !== d.obj);
