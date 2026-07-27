@@ -25123,6 +25123,12 @@ function pmSearchToggleOpen() {
 // by clicking on the marker. When exporting - PDF annotations (hidden in the application).
 // ═══════════════════════════════════════════════════════════════════════
 let peState = null;   // null = editor is closed
+// Playwright / debug: `let peState` is not a window property — expose a getter.
+Object.defineProperty(window, '__peState', {
+  get() { return peState; },
+  set(v) { peState = v; },
+  configurable: true
+});
 let peSavedPageSelection = null;
 let peAutoScrollTimer = null;
 let peAutoScrollDx = 0, peAutoScrollDy = 0;
