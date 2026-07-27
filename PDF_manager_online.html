@@ -33066,6 +33066,7 @@ function peSelect(o, opts) {
     peStopMobileEditOverlay();
     peState.inlineEditId = null;
     peState.inlineEditFocusPending = false;
+    peTextClickSeq = { id: null, t: 0 };
     clearTimeout(peTextKbTimer);
     peTextKbTimer = null;
     peBindTextKeyboardGuards(false);
@@ -37295,6 +37296,28 @@ function peObjMouseDown(e, o) {
     e.preventDefault();
     e.stopPropagation();
     peStartPanView(e);
+    return;
+  }
+  // Clicking a different object while text/callout is being edited must end
+  // edit via peSelect. Several branches below assign peState.sel directly and
+  // used to leave inlineEditId stuck — the next click on the text then looked
+  // like "already editing" / false double-click, and the previous object stayed
+  // selected alongside the text editor.
+  if (peState.inlineEditId && o && peState.inlineEditId !== o.id) {
+    peTextClickSeq = { id: null, t: 0 };
+    peHideObjCtxMenu();
+    peCloseShapeColorPopup();
+    if (touchLike && e.cancelable) e.preventDefault();
+    e.stopPropagation();
+    peSelect(o);
+    if (!onHandle && peState.sel === o && peState.objects.includes(o)) {
+      const onBox = !!(e.target.closest && e.target.closest('.pe-obj-callout-box'));
+      if (onBox && peIsCalloutLike(o)) {
+        peBeginSingleMoveDrag(e, o, { calloutBoxOnly: true });
+      } else if (!peIsPageTextMarkup(o)) {
+        peBeginSingleMoveDrag(e, o);
+      }
+    }
     return;
   }
   // Overlap stack: prefer the already-selected object for drag (hold = move
