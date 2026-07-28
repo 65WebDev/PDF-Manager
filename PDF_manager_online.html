@@ -25238,11 +25238,61 @@ function peLayoutFrame() {
 function peGetWrapAvailSize() {
   const wrap = document.getElementById('peStageWrap');
   if (!wrap) return { w: 640, h: 480 };
-  const pad = 36;
+  // Measure without scrollbars so fitScale is not reduced by a phantom gutter
+  // (overflow:auto + min-height:100% pad can otherwise leave a residual bar).
+  const prevOverflow = wrap.style.overflow;
+  wrap.style.overflow = 'hidden';
+  const cw = wrap.clientWidth;
+  const ch = wrap.clientHeight;
+  wrap.style.overflow = prevOverflow;
+  const pad = 36; // matches .pe-stage-pad padding: 18px
   return {
-    w: Math.max(120, wrap.clientWidth - pad),
-    h: Math.max(120, wrap.clientHeight - pad)
+    w: Math.max(120, cw - pad),
+    h: Math.max(120, ch - pad)
   };
+}
+
+/** Base + dynamic chrome around #peStage inside #peStagePad (CSS + KB/pinch). */
+function peStagePadChromePads() {
+  const pad = document.getElementById('peStagePad');
+  const spacer = document.getElementById('peStageFocusSpacer');
+  let top = 18, bottom = 18, left = 18, right = 18;
+  if (spacer) top += parseFloat(spacer.style.height) || 0;
+  if (pad) {
+    const pb = parseFloat(pad.style.paddingBottom);
+    if (Number.isFinite(pb)) bottom = pb;
+    const pl = parseFloat(pad.style.paddingLeft);
+    if (Number.isFinite(pl)) left = pl;
+    const pr = parseFloat(pad.style.paddingRight);
+    if (Number.isFinite(pr)) right = pr;
+    const pt = parseFloat(pad.style.paddingTop);
+    if (Number.isFinite(pt)) top = pt + (parseFloat(spacer?.style.height) || 0);
+  }
+  return { top, bottom, left, right };
+}
+
+/**
+ * Show #peStageWrap scrollbars only when the sheet (+ pad chrome) truly
+ * overflows. Avoids a residual vertical bar when the page fits but the pad's
+ * min-height:100% + overflow:auto still reports scrollHeight > clientHeight.
+ */
+function peUpdateStageWrapOverflow() {
+  const wrap = document.getElementById('peStageWrap');
+  const stage = document.getElementById('peStage');
+  if (!wrap || !stage) return;
+  const chrome = peStagePadChromePads();
+  const contentW = stage.offsetWidth + chrome.left + chrome.right;
+  const contentH = stage.offsetHeight + chrome.top + chrome.bottom;
+  wrap.style.overflow = 'hidden';
+  const cw = wrap.clientWidth;
+  const ch = wrap.clientHeight;
+  const needsX = contentW > cw + 1;
+  const needsY = contentH > ch + 1;
+  wrap.style.overflow = '';
+  wrap.style.overflowX = needsX ? 'auto' : 'hidden';
+  wrap.style.overflowY = needsY ? 'auto' : 'hidden';
+  if (!needsX) wrap.scrollLeft = 0;
+  if (!needsY) wrap.scrollTop = 0;
 }
 
 function peResolveZoomAnchor(anchorX, anchorY) {
@@ -25381,6 +25431,7 @@ function peApplyStageLayout(options = {}) {
   // Keep crop overlay in sync with live stage size (pinch used to skip this
   // and the box drifted until the gesture ended).
   if (!options.skipCrop) peRedrawCrop();
+  if (!options.skipOverflow) peUpdateStageWrapOverflow();
 }
 
 /** Continuous zoom used while a pinch gesture is active (midpoint stays put). */
@@ -25400,17 +25451,27 @@ function peApplyLiveZoomMul(zoomMul, anchorX, anchorY) {
 }
 
 async function peRenderStagePdf() {
+  const prepared = await pePrepareStagePdfBitmap();
+  if (!prepared) return;
+  peCommitStagePdfBitmap(prepared);
+  await peFinalizeStagePdfCommit(prepared.gen);
+}
+
+/**
+ * Render the current peState page into an offscreen bitmap without touching
+ * the visible #peStage/#peCanvas. Used for seamless rotate swaps.
+ */
+async function pePrepareStagePdfBitmap() {
   const st = peState;
-  if (!st) return;
+  if (!st) return null;
   peUpdateStageMetrics();
   const gen = ++peZoomRenderGen;
   const finalR = peFinalRotation();
-  const canvas = document.getElementById('peCanvas');
-  const stage = document.getElementById('peStage');
-  if (!canvas || !stage) return;
   const dpr = window.devicePixelRatio || 1;
-  const bw = Math.round(st.viewport.width * dpr);
-  const bh = Math.round(st.viewport.height * dpr);
+  const cssW = Math.round(st.viewport.width);
+  const cssH = Math.round(st.viewport.height);
+  const bw = Math.round(cssW * dpr);
+  const bh = Math.round(cssH * dpr);
   const renderVp = st.page.getViewport({ scale: st.scale * dpr, rotation: finalR });
   const off = document.createElement('canvas');
   off.width = bw;
@@ -25420,17 +25481,36 @@ async function peRenderStagePdf() {
     viewport: renderVp,
     annotationMode: 0
   }).promise;
-  if (!peState || gen !== peZoomRenderGen) return;
+  if (!peState || gen !== peZoomRenderGen) return null;
+  return { gen, off, cssW, cssH, bw, bh };
+}
+
+/**
+ * Install a prepared bitmap onto the visible stage. When clearRotateAnim is
+ * set, drop the CSS spin in the same turn as the paint so the upright page
+ * replaces the spun frame without an opacity blink.
+ */
+function peCommitStagePdfBitmap(prepared, opts) {
+  if (!prepared || !peState) return;
+  const canvas = document.getElementById('peCanvas');
+  const stage = document.getElementById('peStage');
+  if (!canvas || !stage) return;
+  const { off, cssW, cssH, bw, bh } = prepared;
+  if (opts && opts.clearRotateAnim) {
+    stage.style.transition = 'none';
+    stage.style.transform = '';
+    stage.style.opacity = '';
+    stage.style.willChange = '';
+    stage.classList.remove('pe-rotate-anim-active');
+  }
   canvas.width = bw;
   canvas.height = bh;
-  canvas.style.width = Math.round(st.viewport.width) + 'px';
-  canvas.style.height = Math.round(st.viewport.height) + 'px';
-  stage.style.width = canvas.style.width;
-  stage.style.height = canvas.style.height;
+  canvas.style.width = cssW + 'px';
+  canvas.style.height = cssH + 'px';
+  stage.style.width = cssW + 'px';
+  stage.style.height = cssH + 'px';
   canvas.getContext('2d').drawImage(off, 0, 0);
   stage.classList.remove('pe-layout-zoom');
-  // Full object rebuild steals contentEditable focus (mobile keyboard dies).
-  // While typing, only reflow existing nodes; re-focus only if focus was lost.
   if (peState.inlineEditId) {
     peUpdateObjectsLayout();
     const editingEl = peInlineTextEl() || document.querySelector(
@@ -25445,7 +25525,12 @@ async function peRenderStagePdf() {
   peRedrawCrop();
   peSyncScaleSliderUi(false);
   peUpdatePanUi();
-  await peBuildTextLayer(st, gen);
+  peUpdateStageWrapOverflow();
+}
+
+async function peFinalizeStagePdfCommit(gen) {
+  if (!peState) return;
+  await peBuildTextLayer(peState, gen);
 }
 
 // Builds the (invisible, selectable) text-selection layer for the page
@@ -28672,6 +28757,12 @@ function peDestroy() {
   peTextKbTimer = null;
   peBindTextKeyboardGuards(false);
   peClearEditorKbScrollRoom();
+  const peWrap = document.getElementById('peStageWrap');
+  if (peWrap) {
+    peWrap.style.overflow = '';
+    peWrap.style.overflowX = '';
+    peWrap.style.overflowY = '';
+  }
   peInlineEditFocusSuppressed = false;
   peTextSelHandleDragging = false;
   peTextSelMenuResume = null;
@@ -31273,6 +31364,7 @@ function peEnsureEditorKbScrollRoom(opts) {
       if (Math.abs(drift) > 1) wrap.scrollTop += drift;
     } catch (_) {}
   }
+  peUpdateStageWrapOverflow();
 }
 
 function peClearEditorKbScrollRoom() {
@@ -31287,6 +31379,7 @@ function peClearEditorKbScrollRoom() {
     pad.classList.remove('pe-stage-pad-focus');
   }
   if (spacer) spacer.style.height = '0px';
+  peUpdateStageWrapOverflow();
 }
 
 /**
@@ -40396,6 +40489,25 @@ function pePrefersReducedMotion() {
   return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 }
 
+/**
+ * After a ±90° view rotate, fitScale changes (page axes swap). Keep the
+ * absolute CSS scale (pdf-pt → px) identical so the page does not zoom.
+ * _liveZoomMul may sit outside the slider range; the slider UI is clamped.
+ */
+function pePreserveScaleAcrossRotation(prevScale) {
+  if (!peState || !(prevScale > 0)) return;
+  peUpdateStageMetrics();
+  if (!(peState.fitScale > 0)) return;
+  const mul = prevScale / peState.fitScale;
+  peState._liveZoomMul = mul;
+  peState.scale = prevScale;
+  const sl = document.getElementById('peScaleSlider');
+  const minMul = peSliderToZoomMul(parseInt(sl?.min, 10) || 100);
+  const maxMul = peSliderToZoomMul(parseInt(sl?.max, 10) || 200);
+  const sliderMul = Math.max(minMul, Math.min(maxMul, mul));
+  peState.zoomSlider = peZoomMulToSlider(sliderMul);
+}
+
 /** Compositor spin of the current stage before swapping to the re-rendered page. */
 function peAnimateStageRotate(deg) {
   const stage = document.getElementById('peStage');
@@ -40440,17 +40552,26 @@ function peClearStageRotateAnim() {
 async function peRotateView(deg) {
   if (!peState || peRotateViewBusy) return;
   peRotateViewBusy = true;
+  let spinPending = false;
   try {
+    const stage = document.getElementById('peStage');
+    // Capture the stage center before the spin; transform-origin is center, so
+    // it stays put visually and we re-anchor scroll there after the size swap.
+    let anchorX = null, anchorY = null;
+    if (stage) {
+      const sr = stage.getBoundingClientRect();
+      if (sr.width > 0 && sr.height > 0) {
+        anchorX = sr.left + sr.width / 2;
+        anchorY = sr.top + sr.height / 2;
+      }
+    }
+    const prevScale = peState.scale;
+
     if (!pePrefersReducedMotion()) {
       await peAnimateStageRotate(deg);
-      // Hide old (still sideways via CSS) content while we swap to the
-      // upright re-render — avoids a one-frame double-rotated flash.
-      const stage = document.getElementById('peStage');
-      if (stage) {
-        stage.style.transition = 'none';
-        stage.style.opacity = '0';
-        stage.style.transform = '';
-      }
+      spinPending = true;
+      // Keep the CSS-spun frame visible while the upright bitmap renders
+      // offscreen — hiding via opacity caused a visible blink.
     }
 
     // PDF points (scale=1), not peStageSize()'s current-zoom CSS pixels: text's
@@ -40505,7 +40626,31 @@ async function peRotateView(deg) {
       if (o.w != null && o.h != null) { const t = o.w; o.w = o.h; o.h = t; }
     });
     peState.delta = ((peState.delta + deg) % 360 + 360) % 360;
-    await peRenderStage();
+    pePreserveScaleAcrossRotation(prevScale);
+
+    if (spinPending) {
+      // Render upright page offscreen, then swap transform+bitmap in one turn.
+      const prepared = await pePrepareStagePdfBitmap();
+      if (prepared) {
+        peCommitStagePdfBitmap(prepared, { clearRotateAnim: true });
+        if (anchorX != null && anchorY != null) {
+          peRestoreScrollToAnchor(anchorX, anchorY, 0.5, 0.5);
+        }
+        peSyncScaleSliderUi();
+        await peFinalizeStagePdfCommit(prepared.gen);
+        spinPending = false;
+      } else {
+        await peRenderStage();
+        if (anchorX != null && anchorY != null) {
+          peRestoreScrollToAnchor(anchorX, anchorY, 0.5, 0.5);
+        }
+      }
+    } else {
+      await peRenderStage();
+      if (anchorX != null && anchorY != null) {
+        peRestoreScrollToAnchor(anchorX, anchorY, 0.5, 0.5);
+      }
+    }
     peCommitEditorHistory();
   } finally {
     peClearStageRotateAnim();
