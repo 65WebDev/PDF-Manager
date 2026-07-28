@@ -25238,11 +25238,61 @@ function peLayoutFrame() {
 function peGetWrapAvailSize() {
   const wrap = document.getElementById('peStageWrap');
   if (!wrap) return { w: 640, h: 480 };
-  const pad = 36;
+  // Measure without scrollbars so fitScale is not reduced by a phantom gutter
+  // (overflow:auto + min-height:100% pad can otherwise leave a residual bar).
+  const prevOverflow = wrap.style.overflow;
+  wrap.style.overflow = 'hidden';
+  const cw = wrap.clientWidth;
+  const ch = wrap.clientHeight;
+  wrap.style.overflow = prevOverflow;
+  const pad = 36; // matches .pe-stage-pad padding: 18px
   return {
-    w: Math.max(120, wrap.clientWidth - pad),
-    h: Math.max(120, wrap.clientHeight - pad)
+    w: Math.max(120, cw - pad),
+    h: Math.max(120, ch - pad)
   };
+}
+
+/** Base + dynamic chrome around #peStage inside #peStagePad (CSS + KB/pinch). */
+function peStagePadChromePads() {
+  const pad = document.getElementById('peStagePad');
+  const spacer = document.getElementById('peStageFocusSpacer');
+  let top = 18, bottom = 18, left = 18, right = 18;
+  if (spacer) top += parseFloat(spacer.style.height) || 0;
+  if (pad) {
+    const pb = parseFloat(pad.style.paddingBottom);
+    if (Number.isFinite(pb)) bottom = pb;
+    const pl = parseFloat(pad.style.paddingLeft);
+    if (Number.isFinite(pl)) left = pl;
+    const pr = parseFloat(pad.style.paddingRight);
+    if (Number.isFinite(pr)) right = pr;
+    const pt = parseFloat(pad.style.paddingTop);
+    if (Number.isFinite(pt)) top = pt + (parseFloat(spacer?.style.height) || 0);
+  }
+  return { top, bottom, left, right };
+}
+
+/**
+ * Show #peStageWrap scrollbars only when the sheet (+ pad chrome) truly
+ * overflows. Avoids a residual vertical bar when the page fits but the pad's
+ * min-height:100% + overflow:auto still reports scrollHeight > clientHeight.
+ */
+function peUpdateStageWrapOverflow() {
+  const wrap = document.getElementById('peStageWrap');
+  const stage = document.getElementById('peStage');
+  if (!wrap || !stage) return;
+  const chrome = peStagePadChromePads();
+  const contentW = stage.offsetWidth + chrome.left + chrome.right;
+  const contentH = stage.offsetHeight + chrome.top + chrome.bottom;
+  wrap.style.overflow = 'hidden';
+  const cw = wrap.clientWidth;
+  const ch = wrap.clientHeight;
+  const needsX = contentW > cw + 1;
+  const needsY = contentH > ch + 1;
+  wrap.style.overflow = '';
+  wrap.style.overflowX = needsX ? 'auto' : 'hidden';
+  wrap.style.overflowY = needsY ? 'auto' : 'hidden';
+  if (!needsX) wrap.scrollLeft = 0;
+  if (!needsY) wrap.scrollTop = 0;
 }
 
 function peResolveZoomAnchor(anchorX, anchorY) {
@@ -25381,6 +25431,7 @@ function peApplyStageLayout(options = {}) {
   // Keep crop overlay in sync with live stage size (pinch used to skip this
   // and the box drifted until the gesture ended).
   if (!options.skipCrop) peRedrawCrop();
+  if (!options.skipOverflow) peUpdateStageWrapOverflow();
 }
 
 /** Continuous zoom used while a pinch gesture is active (midpoint stays put). */
@@ -25474,6 +25525,7 @@ function peCommitStagePdfBitmap(prepared, opts) {
   peRedrawCrop();
   peSyncScaleSliderUi(false);
   peUpdatePanUi();
+  peUpdateStageWrapOverflow();
 }
 
 async function peFinalizeStagePdfCommit(gen) {
@@ -31306,6 +31358,7 @@ function peEnsureEditorKbScrollRoom(opts) {
       if (Math.abs(drift) > 1) wrap.scrollTop += drift;
     } catch (_) {}
   }
+  peUpdateStageWrapOverflow();
 }
 
 function peClearEditorKbScrollRoom() {
@@ -31320,6 +31373,7 @@ function peClearEditorKbScrollRoom() {
     pad.classList.remove('pe-stage-pad-focus');
   }
   if (spacer) spacer.style.height = '0px';
+  peUpdateStageWrapOverflow();
 }
 
 /**
@@ -40593,8 +40647,7 @@ async function peRotateView(deg) {
     }
     peCommitEditorHistory();
   } finally {
-    if (spinPending) peClearStageRotateAnim();
-    else peClearStageRotateAnim();
+    peClearStageRotateAnim();
     peRotateViewBusy = false;
   }
 }
