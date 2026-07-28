@@ -2853,23 +2853,26 @@
       body.zoom-text-select-active:not(.nav-mode-active) .page .img-wrapper {
         position: relative;
       }
+      /* Preview + page editor share the same hit model: the layer/inner must
+         NOT intercept pointer events over the full page box — only glyph
+         spans do (re-enabled below). Preview used to set pointer-events:auto
+         on the container with 9999px span padding; on OCR/image-heavy pages
+         later overlapping spans stole hits so the I-beam appeared over text
+         that would not start a selection (while the page editor, which never
+         used that model, selected the same text fine). */
       body.zoom-text-select-active:not(.nav-mode-active) .page .page-text-layer {
         position: absolute;
         top: 0;
         left: 0;
         overflow: hidden;
-        pointer-events: auto;
+        pointer-events: none;
         user-select: text;
         -webkit-user-select: text;
-        cursor: text;
         z-index: 2;
       }
-      /*Page editor: the container itself must NOT intercept pointer events
-         over its full (page-sized) box - only actual glyph spans should
-         (re-enabled explicitly below), so hovering/dragging blank space or
-         another object reaches object-select/marquee instead of being
-         swallowed here regardless of span padding. Position stays absolute
-         via the base #peTextLayer rule above (active in every tool).*/
+      /*Page editor: blank space / other objects stay reachable for
+         object-select/marquee. Position stays absolute via the base
+         #peTextLayer rule above (active in every tool).*/
       #peTextLayer.pe-text-active {
         pointer-events: none;
         user-select: text;
@@ -2888,14 +2891,15 @@
         transform-origin: 0 0;
         user-select: text;
         -webkit-user-select: text;
-        pointer-events: auto;
+        pointer-events: none;
       }
       #peTextLayer.pe-text-active .page-text-layer-inner.textLayer {
         user-select: text;
         -webkit-user-select: text;
         pointer-events: none;
       }
-      /*PDF.js text layer styles (as in web/viewer)*/
+      /*PDF.js text layer styles (as in web/viewer). Spans re-enable
+         pointer-events so the hit area is exactly the (padded) glyph boxes.*/
       body.zoom-text-select-active:not(.nav-mode-active) .page .textLayer :is(span, br),
       #pageEditModal.pe-obj-select-mode #peStage .textLayer :is(span, br) {
         color: rgba(0, 0, 0, 0);
@@ -2907,11 +2911,8 @@
         transform-origin: 0% 0%;
         user-select: text;
         -webkit-user-select: text;
+        pointer-events: auto;
       }
-      /*Page editor's spans re-enable pointer-events individually, since
-         their container above is pointer-events:none - this is what makes
-         the hit area exactly the (padded, see below) glyph boxes and
-         nothing more.*/
       #peTextLayer.pe-text-active .textLayer :is(span, br) {
         color: rgba(0, 0, 0, 0);
         -webkit-text-fill-color: transparent;
@@ -2930,61 +2931,19 @@
         top: 0;
         height: 0;
       }
-      /*No-dead-zone hit areas. The empty space between lines/paragraphs and in
-         the margins contains no selectable content, so mid-drag Blink maps the
-         cursor there to a caret "at the end of the layer" - the selection
-         jumps, and correcting it afterwards inevitably blinks (the bad state
-         gets painted for a frame first). Instead we make the dead zones not
-         exist: bottom/right padding extends every glyph span's hit box to
-         swallow the space below it (line gaps, paragraph gaps, bottom margin)
-         and to its right (right margin). Only top/left padding offsets a
-         box's content, so the glyphs do not move a pixel, and the layer's
-         overflow:hidden clips the excess. Overlaps are safe: with equal
-         z-index the later span in DOM order wins hit-testing, so every line
-         still owns its own pixels, and a point in a gap resolves to the
-         nearest line above it - which is exactly the selection behavior of a
-         normal text document. .markedContent wrappers are excluded: they sit
-         at top:0/height:0, so padding on them would cover the entire page.
-         Preview-mode only: the whole page there is nothing but text, so
-         claiming the entire remaining area below/right of each line is
-         exactly right. The page editor deliberately does NOT get this (see
-         the dedicated, tight #peTextLayer rule below) - its page also holds
-         clickable objects (text blocks, images, shapes) that need blank
-         space and margins to stay theirs for marquee-select.*/
-      body.zoom-text-select-active:not(.nav-mode-active) .page .textLayer span:not(.markedContent) {
-        padding-bottom: 9999px;
-        padding-right: 9999px;
-      }
-      /*Page editor: hit boxes stay close to the actual glyphs rather than
-         claiming the whole remaining page, so hovering/dragging on blank
-         space or on another object still reaches object-select/marquee
-         instead of starting a text selection. padding-bottom here is just
-         the fallback before JS's per-line dynamic bridging runs (see
-         tightenTextLayerLineGaps, which scales the bottom padding to the
-         actual measured gap to the next line - a fixed value here can't
-         work for that, since gaps vary a lot between tight lines and
-         paragraph breaks). padding-right stays fixed since there's no
-         equivalent "next line" to measure toward - it's sized to give a
-         fast rightward drag some overshoot room without eating too far
-         into the right margin objects need.*/
+      /* Tight hit padding (preview + page editor). A former preview-only
+         9999px bottom/right pad claimed the whole remaining page per span;
+         on OCR/image-heavy PDFs later overlapping spans won hit-testing and
+         showed an I-beam over text that would not select. Line gaps are
+         bridged by JS (tightenTextLayerLineGaps) after render. padding-bottom
+         here is only the fallback before that runs; padding-right gives a
+         fast rightward drag some overshoot without covering neighboring
+         glyphs / objects. .markedContent wrappers are excluded: they sit at
+         top:0/height:0, so padding on them would cover the entire page. */
+      body.zoom-text-select-active:not(.nav-mode-active) .page .textLayer span:not(.markedContent),
       #peTextLayer.pe-text-active .textLayer span:not(.markedContent) {
         padding-bottom: 3px;
         padding-right: 20px;
-      }
-      /*Left margin: an invisible strip on each visual line's FIRST span
-         (marked from JS after the layer renders). right:100% keeps it
-         strictly left of the line's own text; height:100% (the padded box)
-         lets it also cover the left margin of the gap below, and lower
-         lines' own strips - later in DOM - reclaim their bands.
-         Preview-mode only, for the same reason as the padding above - the
-         page editor needs its left margin free for objects/marquee-select.*/
-      body.zoom-text-select-active:not(.nav-mode-active) .page .textLayer span.tl-line-start::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        right: 100%;
-        width: 9999px;
-        height: 100%;
       }
       /*Chrome: Don't highlight <br> when highlighted (pdf.js issue #13840)*/
       body.zoom-text-select-active:not(.nav-mode-active) .page .textLayer br::selection,
@@ -3005,20 +2964,14 @@
         cursor: default;
         user-select: none;
         -webkit-user-select: none;
-      }
-      /*Page editor only: the space below the last line of text must stay
-         available for object-select/marquee, not be claimed by the
-         end-of-content marker the way preview mode's full-page text layer
-         claims it.*/
-      #peTextLayer.pe-text-active .textLayer .endOfContent {
         pointer-events: none;
       }
+      /* Keep the guard below the glyphs in both preview and editor.
+         Expanding .active to top:0 made caretRangeFromPoint jump to the
+         page start in word gaps / OCR overlaps, and let the I-beam appear
+         over regions that would not select. */
       body.zoom-text-select-active:not(.nav-mode-active) .page .textLayer .endOfContent.active,
-      #pageEditModal.pe-obj-select-mode #peStage .textLayer .endOfContent.active {
-        top: 0;
-      }
-      /* Editor text layer: keep the guard below the glyphs. Expanding it to
-         top:0 makes caretRangeFromPoint jump to the page start in word gaps. */
+      #pageEditModal.pe-obj-select-mode #peStage .textLayer .endOfContent.active,
       #peTextLayer.pe-text-active .textLayer .endOfContent.active {
         top: 100%;
         pointer-events: none;
@@ -13335,11 +13288,12 @@
 
     function navPanStart(e) {
       const zoomPan = isMobileZoomPan() && interactionMode === 'select';
-      // Desktop ≥400% select: pan like a hand when the pointer is outside the
-      // page text layer (empty canvas, card chrome, gaps). On the text layer
-      // keep native text selection.
+      // Desktop ≥400% select: pan like a hand when the pointer is not on a
+      // glyph span (blank canvas, card chrome, gaps). Hits on text spans keep
+      // native selection. Layer containers use pointer-events:none so blank
+      // areas fall through here even when a text layer is mounted.
       const desktopOutsidePagePan = isDesktopZoomTextSelect()
-        && !e.target.closest('.page-text-layer')
+        && !e.target.closest('.page-text-layer span, .page-text-layer br')
         && !e.target.closest('.quick-actions, .selection-checkbox, button, a, input, textarea, select');
       // Page-nav auto-scroll forces hand/pan regardless of the selected mode
       // (while not button-paused). Holding LMB pauses auto-scroll until release.
@@ -16034,20 +15988,14 @@
       } catch (_) { textLayerCorrecting = false; }
     }
 
-    // Marks the first (leftmost) glyph span of every visual line so CSS can
-    // hang the left-margin hit strip on it (see span.tl-line-start::before).
-    // Uses pdf.js's own inline top/left/font-size styles - cheap, no layout,
-    // and unaffected by the hit-area padding.
-    // Page-editor only counterpart to preview mode's flat 9999px no-dead-zone
-    // padding (see the CSS). That flat padding can't be used here - it would
-    // claim the whole remaining page for text, blocking object-select/
-    // marquee. Instead, each line's glyph spans get JUST enough bottom
-    // padding to reach the next line (plus a couple px of slack), computed
-    // from the actual measured gap - so intra-paragraph gaps, paragraph
-    // gaps, and everything in between get exactly bridged, while true blank
-    // space below the last line of text is left alone. maxBridgePx caps the
-    // very last line (which has no "next line" to reach for) and any
-    // pathological gap from being unbounded.
+    // Marks the first (leftmost) glyph span of every visual line (tl-line-start).
+    // Uses measured glyph geometry - cheap enough after layout, and unaffected
+    // by the hit-area padding.
+    // Bridges line gaps with per-line bottom padding so mid-drag selection
+    // does not fall into dead space (Blink would map that to "end of layer"
+    // and jump). Preview and the page editor share this: a flat 9999px pad
+    // used to cover OCR overlaps on image-heavy pages. maxBridgePx caps the
+    // last line and pathological gaps.
     // Collects the glyph spans of `inner` grouped into visual-line bands,
     // measured with getBoundingClientRect and converted into the inner's own
     // (pre-transform) px coordinates. Inline styles CANNOT be used for this:
@@ -16300,14 +16248,29 @@
         await renderPdfjsTextLayer(inner, textContent, viewport);
         if (token !== pageTextLayerToken || !isDesktopZoomTextSelect()) return;
 
+        if (typeof tightenTextLayerLineGaps === 'function') {
+          tightenTextLayerLineGaps(inner);
+        }
+
         inner.style.transform = 'none';
         inner.style.width = viewport.width + 'px';
         inner.style.height = viewport.height + 'px';
         const fitX = metrics.width / viewport.width;
         const fitY = metrics.height / viewport.height;
+        // Prefer a 1:1 layer (displayScale already matches metrics.width).
+        // Only apply a residual CSS scale for sub-pixel rounding — large
+        // scale() mismatch skews caret hit-testing vs painted glyphs.
         if (Math.abs(fitX - 1) > 0.002 || Math.abs(fitY - 1) > 0.002) {
           inner.style.transformOrigin = '0 0';
           inner.style.transform = 'scale(' + fitX + ', ' + fitY + ')';
+          // Re-bridge after scale so measured gaps match the painted layout.
+          if (typeof tightenTextLayerLineGaps === 'function') {
+            requestAnimationFrame(() => {
+              if (token !== pageTextLayerToken) return;
+              if (!inner.isConnected) return;
+              tightenTextLayerLineGaps(inner);
+            });
+          }
         }
       } catch (e) {
         console.error('Text layer error for page', idx, e);
@@ -25428,7 +25391,17 @@ function peUpdateStageWrapOverflow() {
   // Pin pad alignment when overflowed so the leading edges stay reachable.
   if (pad && !pad.classList.contains('pe-stage-pad-pinching')
       && !pad.classList.contains('pe-stage-pad-focus')) {
-    pad.classList.toggle('pe-stage-pad-overflow', needsX || needsY);
+    const want = needsX || needsY;
+    const had = pad.classList.contains('pe-stage-pad-overflow');
+    if (had !== want) {
+      const beforeLeft = stage.getBoundingClientRect().left;
+      const beforeTop = stage.getBoundingClientRect().top;
+      pad.classList.toggle('pe-stage-pad-overflow', want);
+      wrap.scrollLeft += stage.getBoundingClientRect().left - beforeLeft;
+      wrap.scrollTop += stage.getBoundingClientRect().top - beforeTop;
+    }
+  } else if (pad && !needsX && !needsY) {
+    pad.classList.remove('pe-stage-pad-overflow');
   }
 }
 
