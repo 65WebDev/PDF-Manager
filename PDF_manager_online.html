@@ -2028,12 +2028,16 @@
     .pe-stage-pad.pe-stage-pad-focus {
       justify-content: flex-start;
     }
-    /* When the sheet is wider/taller than the wrap, pin to top-left so
+    /* When the sheet overflows the wrap, pin only the overflowing axis so
        scrollLeft/Top can reach every edge (flex center + overflow clips the
-       leading side because scroll offsets cannot go negative). */
-    .pe-stage-pad.pe-stage-pad-overflow {
-      justify-content: flex-start;
+       leading side because scroll offsets cannot go negative). Pinning both
+       axes whenever either overflows left-aligned a still-narrow page as soon
+       as it grew taller than the wrap. */
+    .pe-stage-pad.pe-stage-pad-overflow-x {
       align-items: flex-start;
+    }
+    .pe-stage-pad.pe-stage-pad-overflow-y {
+      justify-content: flex-start;
     }
     /* During pinch, pin stage to top-left so scroll restore can keep the
        midpoint under the fingers (flex center + maxScroll≈0 drifts to TL). */
@@ -25388,20 +25392,22 @@ function peUpdateStageWrapOverflow() {
   wrap.style.overflowY = needsY ? 'auto' : 'hidden';
   if (!needsX) wrap.scrollLeft = 0;
   if (!needsY) wrap.scrollTop = 0;
-  // Pin pad alignment when overflowed so the leading edges stay reachable.
+  // Pin pad alignment per axis when that axis overflows, so leading edges
+  // stay reachable without left-aligning a page that still fits in width.
   if (pad && !pad.classList.contains('pe-stage-pad-pinching')
       && !pad.classList.contains('pe-stage-pad-focus')) {
-    const want = needsX || needsY;
-    const had = pad.classList.contains('pe-stage-pad-overflow');
-    if (had !== want) {
+    const hadX = pad.classList.contains('pe-stage-pad-overflow-x');
+    const hadY = pad.classList.contains('pe-stage-pad-overflow-y');
+    if (hadX !== needsX || hadY !== needsY) {
       const beforeLeft = stage.getBoundingClientRect().left;
       const beforeTop = stage.getBoundingClientRect().top;
-      pad.classList.toggle('pe-stage-pad-overflow', want);
+      pad.classList.toggle('pe-stage-pad-overflow-x', needsX);
+      pad.classList.toggle('pe-stage-pad-overflow-y', needsY);
       wrap.scrollLeft += stage.getBoundingClientRect().left - beforeLeft;
       wrap.scrollTop += stage.getBoundingClientRect().top - beforeTop;
     }
   } else if (pad && !needsX && !needsY) {
-    pad.classList.remove('pe-stage-pad-overflow');
+    pad.classList.remove('pe-stage-pad-overflow-x', 'pe-stage-pad-overflow-y');
   }
 }
 
