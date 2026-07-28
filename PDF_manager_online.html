@@ -40396,6 +40396,26 @@ function pePrefersReducedMotion() {
   return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 }
 
+/**
+ * After a ±90° view rotate, fitScale changes (page axes swap) while zoomSlider
+ * stays put — that used to snap the stage to a new CSS size the instant the
+ * spin finished. Keep the absolute CSS scale (pdf-pt → px) continuous so the
+ * post-render stage matches the rotated AABB of the pre-render stage.
+ */
+function pePreserveScaleAcrossRotation(prevScale) {
+  if (!peState || !(prevScale > 0)) return;
+  peUpdateStageMetrics();
+  if (!(peState.fitScale > 0)) return;
+  const sl = document.getElementById('peScaleSlider');
+  const minMul = peSliderToZoomMul(parseInt(sl?.min, 10) || 100);
+  const maxMul = peSliderToZoomMul(parseInt(sl?.max, 10) || 200);
+  let mul = prevScale / peState.fitScale;
+  mul = Math.max(minMul, Math.min(maxMul, mul));
+  peState._liveZoomMul = mul;
+  peState.zoomSlider = peZoomMulToSlider(mul);
+  peState.scale = peState.fitScale * mul;
+}
+
 /** Compositor spin of the current stage before swapping to the re-rendered page. */
 function peAnimateStageRotate(deg) {
   const stage = document.getElementById('peStage');
@@ -40427,25 +40447,58 @@ function peAnimateStageRotate(deg) {
   });
 }
 
-function peClearStageRotateAnim() {
+function peClearStageRotateAnim(opts) {
   const stage = document.getElementById('peStage');
   if (!stage) return;
+  const fadeIn = !!(opts && opts.fadeIn) && stage.style.opacity === '0';
   stage.classList.remove('pe-rotate-anim-active');
-  stage.style.transition = 'none';
   stage.style.transform = '';
-  stage.style.opacity = '';
   stage.style.willChange = '';
+  if (fadeIn) {
+    // Size already matches the rotated AABB — just ease the new upright bitmap in.
+    stage.style.transition = 'opacity 140ms ease-out';
+    void stage.offsetWidth;
+    stage.style.opacity = '1';
+    const clear = () => {
+      stage.style.transition = 'none';
+      stage.style.opacity = '';
+      stage.removeEventListener('transitionend', onFade);
+    };
+    const onFade = (e) => {
+      if (e && e.propertyName && e.propertyName !== 'opacity') return;
+      clear();
+    };
+    stage.addEventListener('transitionend', onFade);
+    setTimeout(clear, 200);
+  } else {
+    stage.style.transition = 'none';
+    stage.style.opacity = '';
+  }
 }
 
 async function peRotateView(deg) {
   if (!peState || peRotateViewBusy) return;
   peRotateViewBusy = true;
+  let didSpin = false;
   try {
+    const stage = document.getElementById('peStage');
+    // Capture the stage center before the spin; transform-origin is center, so
+    // it stays put visually and we re-anchor scroll there after the size swap.
+    let anchorX = null, anchorY = null;
+    if (stage) {
+      const sr = stage.getBoundingClientRect();
+      if (sr.width > 0 && sr.height > 0) {
+        anchorX = sr.left + sr.width / 2;
+        anchorY = sr.top + sr.height / 2;
+      }
+    }
+    const prevScale = peState.scale;
+
     if (!pePrefersReducedMotion()) {
       await peAnimateStageRotate(deg);
+      didSpin = true;
       // Hide old (still sideways via CSS) content while we swap to the
       // upright re-render — avoids a one-frame double-rotated flash.
-      const stage = document.getElementById('peStage');
       if (stage) {
         stage.style.transition = 'none';
         stage.style.opacity = '0';
@@ -40505,10 +40558,14 @@ async function peRotateView(deg) {
       if (o.w != null && o.h != null) { const t = o.w; o.w = o.h; o.h = t; }
     });
     peState.delta = ((peState.delta + deg) % 360 + 360) % 360;
+    pePreserveScaleAcrossRotation(prevScale);
     await peRenderStage();
+    if (anchorX != null && anchorY != null) {
+      peRestoreScrollToAnchor(anchorX, anchorY, 0.5, 0.5);
+    }
     peCommitEditorHistory();
   } finally {
-    peClearStageRotateAnim();
+    peClearStageRotateAnim({ fadeIn: didSpin });
     peRotateViewBusy = false;
   }
 }
