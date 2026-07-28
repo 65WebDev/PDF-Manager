@@ -9285,13 +9285,13 @@
 
     //Non-linear scale: slider 0–200, center(100) = 100% scale.
     //Left half 0→100: 70%→100% (linear).
-    //Right half 100→200: 100%→900% by QUADRATIC curve -
+    //Right half 100→200: 100%→1300% by QUADRATIC curve -
     //Around 100% the increase is smooth, accelerating towards the edge.
     function sliderToScale(v) {
       v = parseInt(v);
       if (v <= 100) return Math.round(70 + 0.30 * v);     // 0→70%, 100→100%
       const d = v - 100;                                  // 0..100
-      return Math.round(100 + 8 * (d * d) / 100);         // 100→100%, 200→900%
+      return Math.round(100 + 12 * (d * d) / 100);        // 100→100%, 200→1300%
     }
 
     //Inverse transformation: scale (%) → slider value 0..200
@@ -9299,7 +9299,7 @@
       if (scale <= 100) {
         return Math.round((scale - 70) / 0.30);           //inverse of 70 + 0.30*v
       }
-      return Math.round(100 + Math.sqrt((scale - 100) * 100 / 8)); //inverse to quadratic
+      return Math.round(100 + Math.sqrt((scale - 100) * 100 / 12)); //inverse to quadratic
     }
 
     //Called from the slider (user input) and Alt+wheel / pinch.
@@ -10020,7 +10020,7 @@
         const minS = mobileMinScale || computeMobilePinchMinScale();
         return Math.max(minS, Math.min(700, scale));
       }
-      return Math.max(70, Math.min(900, scale));
+      return Math.max(70, Math.min(1300, scale));
     }
 
     //Mobile fit: when opened - 2/4 column; pinch can reduce to 4/8.
@@ -12873,7 +12873,7 @@
     //   • cursor inside the window → 100% visibility;
     //   • as you move away, visibility drops to 10% at the boundary of the attenuation distance;
     //   • beyond the border (but while the cursor is in the square) 10% remains.
-    // The fade distance depends on the scale: 40px at 70%, 400px at 900%.
+    // The fade distance depends on the scale: 40px at 70%, 400px at 1300%.
     const MIN_OPACITY = 0.10;
     let activeActionsPage = null;
 
@@ -12891,7 +12891,7 @@
     }
 
     function fadeDistanceForScale() {
-      const t = Math.max(0, Math.min(1, (currentScale - 70) / (900 - 70)));
+      const t = Math.max(0, Math.min(1, (currentScale - 70) / (1300 - 70)));
       return 40 + (400 - 40) * t;
     }
 
@@ -14203,9 +14203,9 @@
     // available working-area width (same "fit the square block" logic as mobile).
     function computeReadModeDesktopScale() {
       const avail = getScrollAvailWidth();
-      if (avail <= 0) return clampScale(900);
+      if (avail <= 0) return clampScale(1300);
       let best = 70;
-      for (let s = 70; s <= 900; s++) {
+      for (let s = 70; s <= 1300; s++) {
         if (cardRowWidth(s, 1) <= avail) best = s;
         else break;
       }
