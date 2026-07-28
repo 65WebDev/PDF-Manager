@@ -2028,6 +2028,13 @@
     .pe-stage-pad.pe-stage-pad-focus {
       justify-content: flex-start;
     }
+    /* When the sheet is wider/taller than the wrap, pin to top-left so
+       scrollLeft/Top can reach every edge (flex center + overflow clips the
+       leading side because scroll offsets cannot go negative). */
+    .pe-stage-pad.pe-stage-pad-overflow {
+      justify-content: flex-start;
+      align-items: flex-start;
+    }
     /* During pinch, pin stage to top-left so scroll restore can keep the
        midpoint under the fingers (flex center + maxScroll≈0 drifts to TL). */
     .pe-stage-pad.pe-stage-pad-pinching {
@@ -2846,23 +2853,26 @@
       body.zoom-text-select-active:not(.nav-mode-active) .page .img-wrapper {
         position: relative;
       }
+      /* Preview + page editor share the same hit model: the layer/inner must
+         NOT intercept pointer events over the full page box — only glyph
+         spans do (re-enabled below). Preview used to set pointer-events:auto
+         on the container with 9999px span padding; on OCR/image-heavy pages
+         later overlapping spans stole hits so the I-beam appeared over text
+         that would not start a selection (while the page editor, which never
+         used that model, selected the same text fine). */
       body.zoom-text-select-active:not(.nav-mode-active) .page .page-text-layer {
         position: absolute;
         top: 0;
         left: 0;
         overflow: hidden;
-        pointer-events: auto;
+        pointer-events: none;
         user-select: text;
         -webkit-user-select: text;
-        cursor: text;
         z-index: 2;
       }
-      /*Page editor: the container itself must NOT intercept pointer events
-         over its full (page-sized) box - only actual glyph spans should
-         (re-enabled explicitly below), so hovering/dragging blank space or
-         another object reaches object-select/marquee instead of being
-         swallowed here regardless of span padding. Position stays absolute
-         via the base #peTextLayer rule above (active in every tool).*/
+      /*Page editor: blank space / other objects stay reachable for
+         object-select/marquee. Position stays absolute via the base
+         #peTextLayer rule above (active in every tool).*/
       #peTextLayer.pe-text-active {
         pointer-events: none;
         user-select: text;
@@ -2881,14 +2891,15 @@
         transform-origin: 0 0;
         user-select: text;
         -webkit-user-select: text;
-        pointer-events: auto;
+        pointer-events: none;
       }
       #peTextLayer.pe-text-active .page-text-layer-inner.textLayer {
         user-select: text;
         -webkit-user-select: text;
         pointer-events: none;
       }
-      /*PDF.js text layer styles (as in web/viewer)*/
+      /*PDF.js text layer styles (as in web/viewer). Spans re-enable
+         pointer-events so the hit area is exactly the (padded) glyph boxes.*/
       body.zoom-text-select-active:not(.nav-mode-active) .page .textLayer :is(span, br),
       #pageEditModal.pe-obj-select-mode #peStage .textLayer :is(span, br) {
         color: rgba(0, 0, 0, 0);
@@ -2900,11 +2911,8 @@
         transform-origin: 0% 0%;
         user-select: text;
         -webkit-user-select: text;
+        pointer-events: auto;
       }
-      /*Page editor's spans re-enable pointer-events individually, since
-         their container above is pointer-events:none - this is what makes
-         the hit area exactly the (padded, see below) glyph boxes and
-         nothing more.*/
       #peTextLayer.pe-text-active .textLayer :is(span, br) {
         color: rgba(0, 0, 0, 0);
         -webkit-text-fill-color: transparent;
@@ -2923,61 +2931,19 @@
         top: 0;
         height: 0;
       }
-      /*No-dead-zone hit areas. The empty space between lines/paragraphs and in
-         the margins contains no selectable content, so mid-drag Blink maps the
-         cursor there to a caret "at the end of the layer" - the selection
-         jumps, and correcting it afterwards inevitably blinks (the bad state
-         gets painted for a frame first). Instead we make the dead zones not
-         exist: bottom/right padding extends every glyph span's hit box to
-         swallow the space below it (line gaps, paragraph gaps, bottom margin)
-         and to its right (right margin). Only top/left padding offsets a
-         box's content, so the glyphs do not move a pixel, and the layer's
-         overflow:hidden clips the excess. Overlaps are safe: with equal
-         z-index the later span in DOM order wins hit-testing, so every line
-         still owns its own pixels, and a point in a gap resolves to the
-         nearest line above it - which is exactly the selection behavior of a
-         normal text document. .markedContent wrappers are excluded: they sit
-         at top:0/height:0, so padding on them would cover the entire page.
-         Preview-mode only: the whole page there is nothing but text, so
-         claiming the entire remaining area below/right of each line is
-         exactly right. The page editor deliberately does NOT get this (see
-         the dedicated, tight #peTextLayer rule below) - its page also holds
-         clickable objects (text blocks, images, shapes) that need blank
-         space and margins to stay theirs for marquee-select.*/
-      body.zoom-text-select-active:not(.nav-mode-active) .page .textLayer span:not(.markedContent) {
-        padding-bottom: 9999px;
-        padding-right: 9999px;
-      }
-      /*Page editor: hit boxes stay close to the actual glyphs rather than
-         claiming the whole remaining page, so hovering/dragging on blank
-         space or on another object still reaches object-select/marquee
-         instead of starting a text selection. padding-bottom here is just
-         the fallback before JS's per-line dynamic bridging runs (see
-         tightenTextLayerLineGaps, which scales the bottom padding to the
-         actual measured gap to the next line - a fixed value here can't
-         work for that, since gaps vary a lot between tight lines and
-         paragraph breaks). padding-right stays fixed since there's no
-         equivalent "next line" to measure toward - it's sized to give a
-         fast rightward drag some overshoot room without eating too far
-         into the right margin objects need.*/
+      /* Tight hit padding (preview + page editor). A former preview-only
+         9999px bottom/right pad claimed the whole remaining page per span;
+         on OCR/image-heavy PDFs later overlapping spans won hit-testing and
+         showed an I-beam over text that would not select. Line gaps are
+         bridged by JS (tightenTextLayerLineGaps) after render. padding-bottom
+         here is only the fallback before that runs; padding-right gives a
+         fast rightward drag some overshoot without covering neighboring
+         glyphs / objects. .markedContent wrappers are excluded: they sit at
+         top:0/height:0, so padding on them would cover the entire page. */
+      body.zoom-text-select-active:not(.nav-mode-active) .page .textLayer span:not(.markedContent),
       #peTextLayer.pe-text-active .textLayer span:not(.markedContent) {
         padding-bottom: 3px;
         padding-right: 20px;
-      }
-      /*Left margin: an invisible strip on each visual line's FIRST span
-         (marked from JS after the layer renders). right:100% keeps it
-         strictly left of the line's own text; height:100% (the padded box)
-         lets it also cover the left margin of the gap below, and lower
-         lines' own strips - later in DOM - reclaim their bands.
-         Preview-mode only, for the same reason as the padding above - the
-         page editor needs its left margin free for objects/marquee-select.*/
-      body.zoom-text-select-active:not(.nav-mode-active) .page .textLayer span.tl-line-start::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        right: 100%;
-        width: 9999px;
-        height: 100%;
       }
       /*Chrome: Don't highlight <br> when highlighted (pdf.js issue #13840)*/
       body.zoom-text-select-active:not(.nav-mode-active) .page .textLayer br::selection,
@@ -2998,20 +2964,14 @@
         cursor: default;
         user-select: none;
         -webkit-user-select: none;
-      }
-      /*Page editor only: the space below the last line of text must stay
-         available for object-select/marquee, not be claimed by the
-         end-of-content marker the way preview mode's full-page text layer
-         claims it.*/
-      #peTextLayer.pe-text-active .textLayer .endOfContent {
         pointer-events: none;
       }
+      /* Keep the guard below the glyphs in both preview and editor.
+         Expanding .active to top:0 made caretRangeFromPoint jump to the
+         page start in word gaps / OCR overlaps, and let the I-beam appear
+         over regions that would not select. */
       body.zoom-text-select-active:not(.nav-mode-active) .page .textLayer .endOfContent.active,
-      #pageEditModal.pe-obj-select-mode #peStage .textLayer .endOfContent.active {
-        top: 0;
-      }
-      /* Editor text layer: keep the guard below the glyphs. Expanding it to
-         top:0 makes caretRangeFromPoint jump to the page start in word gaps. */
+      #pageEditModal.pe-obj-select-mode #peStage .textLayer .endOfContent.active,
       #peTextLayer.pe-text-active .textLayer .endOfContent.active {
         top: 100%;
         pointer-events: none;
@@ -3689,9 +3649,12 @@
       align-items: center; /*cards are vertically centered*/
       width: 100%;
     }
-    /*On the desktop, with ≤2 columns, center the pages horizontally*/
+    /*On the desktop, with ≤2 columns, center the pages horizontally.
+      When a zoomed card/row is wider than the viewport, pages-row-overflow
+      switches to flex-start so scrollLeft can reach the left edge (same as mobile).*/
     @media (hover: hover) and (pointer: fine) {
       .pages.pages-few-cols { justify-content: center; }
+      .pages.pages-few-cols.pages-row-overflow { justify-content: flex-start; }
     }
 
     .page { 
@@ -10229,16 +10192,21 @@
       const hyst = pagesContainer.classList.contains('pages-few-cols') ? -28 : 28;
       const fewCols = pdfDoc && rowW3 > avail + hyst;
       const hadFewCols = pagesContainer.classList.contains('pages-few-cols');
-      if (hadFewCols === !!fewCols) return;
-      preserveViewportCenterOnLayoutChange(() => {
-        pagesContainer.classList.toggle('pages-few-cols', !!fewCols);
-      });
+      if (hadFewCols !== !!fewCols) {
+        preserveViewportCenterOnLayoutChange(() => {
+          pagesContainer.classList.toggle('pages-few-cols', !!fewCols);
+        });
+      }
+      // After few-cols toggles (or when already few-cols at high zoom), ensure
+      // overflow rows use flex-start so the left edge of the page is scrollable.
+      updatePagesRowOverflow();
     }
 
-    //Mobile scrolling: if the row is wider than the screen - flex-start (without changing width),
-    //otherwise, the center “eats” the left side with a strong zoom.
-    function updateMobilePagesRowOverflow(anchorEl) {
-      if (!isTouchDevice || !pdfDoc) {
+    // If a preview row is wider than the viewport, use flex-start — otherwise
+    // justify-content:center “eats” the left side and scrollLeft cannot reach it.
+    // Used on mobile always, and on desktop together with pages-few-cols.
+    function updatePagesRowOverflow(anchorEl) {
+      if (!pdfDoc) {
         pagesContainer.classList.remove('pages-row-overflow');
         return;
       }
@@ -10255,8 +10223,8 @@
 
       let overflow = false;
 
-      //One column: count by scale (without getBoundingClientRect) + hysteresis
-      if (isMobilePagesSingleColumn()) {
+      // One column: count by scale (without getBoundingClientRect) + hysteresis
+      if (isMobilePagesSingleColumn() || isPagesSingleColumnLayout()) {
         const cardW = cardRowWidth(currentScale, 1);
         const hyst = pagesContainer.classList.contains('pages-row-overflow') ? -16 : 16;
         overflow = cardW > avail + hyst;
@@ -10271,6 +10239,12 @@
         }
       }
 
+      // Desktop centering only applies with pages-few-cols; keep the overflow
+      // class off when three-across layout is active (default flex-start).
+      if (!isTouchDevice && !pagesContainer.classList.contains('pages-few-cols')) {
+        overflow = false;
+      }
+
       const hadOverflow = pagesContainer.classList.contains('pages-row-overflow');
       if (hadOverflow === overflow) return;
 
@@ -10282,6 +10256,11 @@
         scrollContainer.scrollLeft += refPage.getBoundingClientRect().left - beforeLeft;
       }
       scrollContainer.scrollTop = scrollTop;
+    }
+
+    // Legacy name kept for call sites.
+    function updateMobilePagesRowOverflow(anchorEl) {
+      updatePagesRowOverflow(anchorEl);
     }
 
     function getVisiblePages() {
@@ -10367,6 +10346,12 @@
     //Lazy loading of cached pdf.js document from current pdfDoc.
     async function getHQPdfjsDoc(token) {
       if (hqPdfjsDoc && token === hqPdfjsToken) return hqPdfjsDoc;
+      // renderThumbsFromBytes temporarily swaps global pdfDoc to a history
+      // snapshot (often an intermediate page-edit step WITHOUT a just-confirmed
+      // redact). Saving that stand-in would paint the wrong raster onto the
+      // live preview a moment after Save.
+      if (typeof whenPdfDocIdle === 'function') await whenPdfDocIdle();
+      if (token !== hqPdfjsToken) return null;
       const bytes = await pdfDoc.save();
       if (token !== hqPdfjsToken) return null;          //the document has changed - cancel
       const doc = await pdfjsLib.getDocument({ data: bytes }).promise;
@@ -10388,6 +10373,7 @@
     async function runHQUpgrade(opts) {
       const force = !!(opts && opts.force);
       if (!pdfDoc || (!force && currentScale < HQ_SCALE_THRESHOLD)) return;
+      if (typeof whenPdfDocIdle === 'function') await whenPdfDocIdle();
       const token = hqPdfjsToken;
 
       //Visible pages (cross the work area)
@@ -13302,11 +13288,12 @@
 
     function navPanStart(e) {
       const zoomPan = isMobileZoomPan() && interactionMode === 'select';
-      // Desktop ≥400% select: pan like a hand when the pointer is outside the
-      // page text layer (empty canvas, card chrome, gaps). On the text layer
-      // keep native text selection.
+      // Desktop ≥400% select: pan like a hand when the pointer is not on a
+      // glyph span (blank canvas, card chrome, gaps). Hits on text spans keep
+      // native selection. Layer containers use pointer-events:none so blank
+      // areas fall through here even when a text layer is mounted.
       const desktopOutsidePagePan = isDesktopZoomTextSelect()
-        && !e.target.closest('.page-text-layer')
+        && !e.target.closest('.page-text-layer span, .page-text-layer br')
         && !e.target.closest('.quick-actions, .selection-checkbox, button, a, input, textarea, select');
       // Page-nav auto-scroll forces hand/pan regardless of the selected mode
       // (while not button-paused). Holding LMB pauses auto-scroll until release.
@@ -16001,20 +15988,14 @@
       } catch (_) { textLayerCorrecting = false; }
     }
 
-    // Marks the first (leftmost) glyph span of every visual line so CSS can
-    // hang the left-margin hit strip on it (see span.tl-line-start::before).
-    // Uses pdf.js's own inline top/left/font-size styles - cheap, no layout,
-    // and unaffected by the hit-area padding.
-    // Page-editor only counterpart to preview mode's flat 9999px no-dead-zone
-    // padding (see the CSS). That flat padding can't be used here - it would
-    // claim the whole remaining page for text, blocking object-select/
-    // marquee. Instead, each line's glyph spans get JUST enough bottom
-    // padding to reach the next line (plus a couple px of slack), computed
-    // from the actual measured gap - so intra-paragraph gaps, paragraph
-    // gaps, and everything in between get exactly bridged, while true blank
-    // space below the last line of text is left alone. maxBridgePx caps the
-    // very last line (which has no "next line" to reach for) and any
-    // pathological gap from being unbounded.
+    // Marks the first (leftmost) glyph span of every visual line (tl-line-start).
+    // Uses measured glyph geometry - cheap enough after layout, and unaffected
+    // by the hit-area padding.
+    // Bridges line gaps with per-line bottom padding so mid-drag selection
+    // does not fall into dead space (Blink would map that to "end of layer"
+    // and jump). Preview and the page editor share this: a flat 9999px pad
+    // used to cover OCR overlaps on image-heavy pages. maxBridgePx caps the
+    // last line and pathological gaps.
     // Collects the glyph spans of `inner` grouped into visual-line bands,
     // measured with getBoundingClientRect and converted into the inner's own
     // (pre-transform) px coordinates. Inline styles CANNOT be used for this:
@@ -16267,14 +16248,29 @@
         await renderPdfjsTextLayer(inner, textContent, viewport);
         if (token !== pageTextLayerToken || !isDesktopZoomTextSelect()) return;
 
+        if (typeof tightenTextLayerLineGaps === 'function') {
+          tightenTextLayerLineGaps(inner);
+        }
+
         inner.style.transform = 'none';
         inner.style.width = viewport.width + 'px';
         inner.style.height = viewport.height + 'px';
         const fitX = metrics.width / viewport.width;
         const fitY = metrics.height / viewport.height;
+        // Prefer a 1:1 layer (displayScale already matches metrics.width).
+        // Only apply a residual CSS scale for sub-pixel rounding — large
+        // scale() mismatch skews caret hit-testing vs painted glyphs.
         if (Math.abs(fitX - 1) > 0.002 || Math.abs(fitY - 1) > 0.002) {
           inner.style.transformOrigin = '0 0';
           inner.style.transform = 'scale(' + fitX + ', ' + fitY + ')';
+          // Re-bridge after scale so measured gaps match the painted layout.
+          if (typeof tightenTextLayerLineGaps === 'function') {
+            requestAnimationFrame(() => {
+              if (token !== pageTextLayerToken) return;
+              if (!inner.isConnected) return;
+              tightenTextLayerLineGaps(inner);
+            });
+          }
         }
       } catch (e) {
         console.error('Text layer error for page', idx, e);
@@ -25377,6 +25373,7 @@ function peStagePadChromePads() {
 function peUpdateStageWrapOverflow() {
   const wrap = document.getElementById('peStageWrap');
   const stage = document.getElementById('peStage');
+  const pad = document.getElementById('peStagePad');
   if (!wrap || !stage) return;
   const chrome = peStagePadChromePads();
   const contentW = stage.offsetWidth + chrome.left + chrome.right;
@@ -25391,6 +25388,21 @@ function peUpdateStageWrapOverflow() {
   wrap.style.overflowY = needsY ? 'auto' : 'hidden';
   if (!needsX) wrap.scrollLeft = 0;
   if (!needsY) wrap.scrollTop = 0;
+  // Pin pad alignment when overflowed so the leading edges stay reachable.
+  if (pad && !pad.classList.contains('pe-stage-pad-pinching')
+      && !pad.classList.contains('pe-stage-pad-focus')) {
+    const want = needsX || needsY;
+    const had = pad.classList.contains('pe-stage-pad-overflow');
+    if (had !== want) {
+      const beforeLeft = stage.getBoundingClientRect().left;
+      const beforeTop = stage.getBoundingClientRect().top;
+      pad.classList.toggle('pe-stage-pad-overflow', want);
+      wrap.scrollLeft += stage.getBoundingClientRect().left - beforeLeft;
+      wrap.scrollTop += stage.getBoundingClientRect().top - beforeTop;
+    }
+  } else if (pad && !needsX && !needsY) {
+    pad.classList.remove('pe-stage-pad-overflow');
+  }
 }
 
 function peResolveZoomAnchor(anchorX, anchorY) {
@@ -26269,9 +26281,32 @@ function pePendingRedactTarget() {
   if (sel) return sel;
   if (!peState || !peState.objects) return null;
   if (peState.drag && peState.drag.kind === 'redact-draw') return null;
-  const list = peState.objects.filter(o =>
-    o && o.type === 'redact' && !o.confirmed && o.w > 0.005 && o.h > 0.005);
+  const list = peListPendingRedactObjects();
   return list.length ? list[list.length - 1] : null;
+}
+
+/** Unconfirmed redact frames still on the page (drawn, ✓ not pressed yet). */
+function peListPendingRedactObjects() {
+  if (!peState || !peState.objects) return [];
+  return peState.objects.filter(o =>
+    o && o.type === 'redact' && !o.confirmed && o.w > 0.005 && o.h > 0.005);
+}
+
+/**
+ * Bake every pending redact frame into the page (same as pressing ✓ on each).
+ * Used by page Save so marked areas are not silently discarded.
+ */
+async function peConfirmAllPendingRedacts(opts) {
+  if (!peState) return false;
+  const pending = peListPendingRedactObjects().slice();
+  if (!pending.length) return false;
+  const confirmOpts = opts || {};
+  for (let i = 0; i < pending.length; i++) {
+    const o = pending[i];
+    if (!peState || !peState.objects || !peState.objects.includes(o)) continue;
+    await peRedactConfirm(o, confirmOpts);
+  }
+  return true;
 }
 
 function peUpdateRedactActionsUi() {
@@ -26645,16 +26680,18 @@ async function peReloadEditorPageFromPdfDoc() {
   await peRenderStage();
 }
 
-async function peRedactConfirm(o) {
+async function peRedactConfirm(o, opts) {
   if (!peState || !pdfDoc) return;
   if (peState.__redactConfirmBusy) return;
+  const options = opts || {};
+  const skipLoading = !!options.skipLoading;
   const target = o || pePendingRedactTarget();
   if (!target || target.type !== 'redact' || target.confirmed) return;
   if (!(target.w > 0.005 && target.h > 0.005)) return;
 
   peState.__redactConfirmBusy = true;
   try {
-    showLoading('Затирание информации...');
+    if (!skipLoading) showLoading('Затирание информации...');
     document.getElementById('peRedactConfirmBtn')?.blur();
 
     // Snapshot for undo, then reload pdfDoc — save() leaves the in-memory
@@ -26715,7 +26752,7 @@ async function peRedactConfirm(o) {
     alert('Не удалось затереть область: ' + (err.message || err));
   } finally {
     peState.__redactConfirmBusy = false;
-    hideLoading();
+    if (!skipLoading) hideLoading();
   }
 }
 
@@ -27033,6 +27070,8 @@ function editSelectedPage() {
   let textCopyClipboard = '';
   let textCopyCtxRange = null;
   let textCopyCtxPageIdx = null;
+  let textCopyCtxFracs = null;
+  let textCopyCtxKind = 'page'; // 'page' | 'markup-obj'
 
   function blurIfInside(el) {
     if (el && document.activeElement && el.contains(document.activeElement)) {
@@ -27167,6 +27206,58 @@ function editSelectedPage() {
     textCopyClipboard = '';
     textCopyCtxRange = null;
     textCopyCtxPageIdx = null;
+    textCopyCtxFracs = null;
+    textCopyCtxKind = 'page';
+    if (typeof peSyncTextSelMenuActive === 'function') {
+      peSyncTextSelMenuActive(new Set(), textCopyMenu);
+    }
+    textCopyMenu.querySelectorAll('.pe-text-sel-clear-sep, [data-action="clear-markup"]').forEach(el => {
+      el.hidden = true;
+      el.style.display = 'none';
+    });
+    const copyBtn = textCopyMenu.querySelector('.pe-text-sel-copy');
+    if (copyBtn) copyBtn.style.display = '';
+    const sep = textCopyMenu.querySelector('.pe-text-sel-sep');
+    if (sep) sep.style.display = '';
+  }
+
+  function showTextCopyMenu(e, text, range, pageIdx, opts) {
+    if (!textCopyMenu) return;
+    hideMenu();
+    const options = opts || {};
+    textCopyClipboard = text || '';
+    textCopyCtxRange = range || null;
+    textCopyCtxPageIdx = pageIdx != null ? pageIdx : null;
+    textCopyCtxKind = options.kind || 'page';
+    let fracs = options.fracs || null;
+    if ((!fracs || !fracs.length) && range && pageIdx != null) {
+      try { fracs = gridTextSelRangeToPageFracs(range, pageIdx); } catch (_) { fracs = []; }
+    }
+    textCopyCtxFracs = fracs || [];
+    syncPreviewTextCopyMenuActive(textCopyCtxFracs, pageIdx);
+
+    const hideCopy = textCopyCtxKind === 'markup-obj';
+    const copyBtn = textCopyMenu.querySelector('.pe-text-sel-copy');
+    if (copyBtn) copyBtn.style.display = hideCopy ? 'none' : '';
+    const sep = textCopyMenu.querySelector('.pe-text-sel-sep');
+    if (sep) sep.style.display = hideCopy ? 'none' : '';
+
+    // Same as pe: redact applies only to live page-text selection.
+    const showRedact = textCopyCtxKind === 'page';
+    textCopyMenu.querySelectorAll('.pe-text-sel-redact-sep, [data-action="redact-text"]').forEach(el => {
+      el.hidden = !showRedact;
+      el.style.display = showRedact ? '' : 'none';
+    });
+
+    textCopyMenu.classList.add('visible');
+    const w = textCopyMenu.offsetWidth;
+    const h = textCopyMenu.offsetHeight;
+    let x = e.clientX;
+    let y = e.clientY;
+    if (x + w > window.innerWidth - 6) x = window.innerWidth - w - 6;
+    if (y + h > window.innerHeight - 6) y = window.innerHeight - h - 6;
+    textCopyMenu.style.left = x + 'px';
+    textCopyMenu.style.top = y + 'px';
   }
 
   function getSelectionPageTextLayer(range) {
@@ -27369,23 +27460,6 @@ function editSelectedPage() {
       }
     } catch (_) {}
     return '';
-  }
-
-  function showTextCopyMenu(e, text, range, pageIdx) {
-    if (!textCopyMenu) return;
-    hideMenu();
-    textCopyClipboard = text;
-    textCopyCtxRange = range || null;
-    textCopyCtxPageIdx = pageIdx != null ? pageIdx : null;
-    textCopyMenu.classList.add('visible');
-    const w = textCopyMenu.offsetWidth;
-    const h = textCopyMenu.offsetHeight;
-    let x = e.clientX;
-    let y = e.clientY;
-    if (x + w > window.innerWidth - 6) x = window.innerWidth - w - 6;
-    if (y + h > window.innerHeight - 6) y = window.innerHeight - h - 6;
-    textCopyMenu.style.left = x + 'px';
-    textCopyMenu.style.top = y + 'px';
   }
 
   async function copyTextToClipboard(text) {
@@ -27597,6 +27671,18 @@ function editSelectedPage() {
           if (sel && sel.rangeCount && !sel.isCollapsed) capturedRange = sel.getRangeAt(0).cloneRange();
         } catch (_) {}
         showTextCopyMenu(e, selectedText, capturedRange, idx);
+        return;
+      }
+      // No text selection — RMB on an existing pe text-markup (same as editor).
+      const hit = typeof gridHitTestTextMarkups === 'function'
+        ? gridHitTestTextMarkups(idx, e.clientX, e.clientY) : [];
+      if (hit && hit.length) {
+        e.preventDefault();
+        let fracs = [];
+        hit.forEach(o => {
+          if (typeof peMarkupFracsOf === 'function') fracs = fracs.concat(peMarkupFracsOf(o));
+        });
+        showTextCopyMenu(e, '', null, idx, { kind: 'markup-obj', fracs });
         return;
       }
     }
@@ -27900,6 +27986,114 @@ function editSelectedPage() {
     }).filter(r => (r.x1 - r.x0) > 0.01 && (r.y1 - r.y0) > 0.01);
   }
 
+  /** Selection → page-fraction rects (same space as pe objects / peTextSelRangeToPageFracs). */
+  function gridTextSelRangeToPageFracs(range, pageIdx) {
+    if (!range || pageIdx == null) return [];
+    const pageDiv = document.querySelector('.page[data-index="' + pageIdx + '"]');
+    if (!pageDiv) return [];
+    const layer = pageDiv.querySelector('.page-text-layer');
+    const inner = layer && layer.querySelector('.page-text-layer-inner.textLayer');
+    if (!layer || !inner) return [];
+    try {
+      if (!range.intersectsNode(inner)) {
+        const sel = window.getSelection();
+        if (!sel || !sel.rangeCount || sel.isCollapsed) return [];
+        range = sel.getRangeAt(0);
+        if (!range.intersectsNode(inner)) return [];
+      }
+    } catch (_) { return []; }
+    if (typeof textLayerSelectionRectsIn !== 'function' || typeof textLayerMergeSelectionRects !== 'function') {
+      return [];
+    }
+    let merged;
+    try {
+      const glyphRects = textLayerSelectionRectsIn(inner, range);
+      merged = textLayerMergeSelectionRects(glyphRects || []);
+    } catch (_) { return []; }
+    if (!merged || !merged.length) return [];
+    const lr = layer.getBoundingClientRect();
+    if (!(lr.width > 0) || !(lr.height > 0)) return [];
+    return merged.map(m => {
+      const x = (m.left - lr.left) / lr.width;
+      const y = (m.top - lr.top) / lr.height;
+      const w = (m.right - m.left) / lr.width;
+      const h = (m.bottom - m.top) / lr.height;
+      return {
+        x: Math.max(0, Math.min(1, x)),
+        y: Math.max(0, Math.min(1, y)),
+        w: Math.max(0.001, Math.min(1 - Math.max(0, x), w)),
+        h: Math.max(0.001, Math.min(1 - Math.max(0, y), h))
+      };
+    }).filter(r => r.w > 0.001 && r.h > 0.001);
+  }
+
+  /** Hit-test pe text-markup objects under a client point on a preview page. */
+  function gridHitTestTextMarkups(pageIdx, clientX, clientY) {
+    if (pageIdx == null || typeof peLoadPageEditorObjects !== 'function') return [];
+    const pageDiv = document.querySelector('.page[data-index="' + pageIdx + '"]');
+    if (!pageDiv) return [];
+    const layer = pageDiv.querySelector('.page-text-layer')
+      || pageDiv.querySelector('.img-wrapper')
+      || pageDiv;
+    const r = layer.getBoundingClientRect();
+    if (!(r.width > 0) || !(r.height > 0)) return [];
+    const fx = (clientX - r.left) / r.width;
+    const fy = (clientY - r.top) / r.height;
+    if (fx < 0 || fy < 0 || fx > 1 || fy > 1) return [];
+    const objects = (typeof peHydrateEditorObjects === 'function')
+      ? peHydrateEditorObjects(peLoadPageEditorObjects(pageIdx), pageIdx)
+      : peLoadPageEditorObjects(pageIdx);
+    return (objects || []).filter(o => {
+      if (typeof peIsPageTextMarkup !== 'function' || !peIsPageTextMarkup(o)) return false;
+      const fracs = typeof peMarkupFracsOf === 'function' ? peMarkupFracsOf(o) : [];
+      return fracs.some(f => fx >= f.x && fx <= f.x + f.w && fy >= f.y && fy <= f.y + f.h);
+    });
+  }
+
+  function syncPreviewTextCopyMenuActive(fracs, pageIdx) {
+    if (!textCopyMenu) return;
+    let related = [];
+    if (fracs && fracs.length && typeof peFindRelatedTextMarkupsIn === 'function'
+        && typeof peLoadPageEditorObjects === 'function') {
+      const objects = (typeof peHydrateEditorObjects === 'function')
+        ? peHydrateEditorObjects(peLoadPageEditorObjects(pageIdx), pageIdx)
+        : peLoadPageEditorObjects(pageIdx);
+      related = peFindRelatedTextMarkupsIn(objects, fracs);
+    }
+    const activeSet = (typeof peActiveActionsForMarkups === 'function')
+      ? peActiveActionsForMarkups(related) : new Set();
+    if (typeof peSyncTextSelMenuActive === 'function') {
+      peSyncTextSelMenuActive(activeSet, textCopyMenu);
+    } else {
+      textCopyMenu.querySelectorAll('.pe-text-sel-icons button[data-action]').forEach(btn => {
+        const act = btn.dataset.action;
+        if (act === 'clear-markup' || act === 'redact-text') return;
+        btn.classList.toggle('active', activeSet.has(act));
+      });
+    }
+    const showClear = textCopyCtxKind === 'markup-obj' || activeSet.size > 0;
+    textCopyMenu.querySelectorAll('.pe-text-sel-clear-sep, [data-action="clear-markup"]').forEach(el => {
+      el.hidden = !showClear;
+      el.style.display = showClear ? '' : 'none';
+    });
+    return related;
+  }
+
+  function refreshPreviewTextCopyMenuAfterMarkup(fracs, pageIdx, kind) {
+    if (!textCopyMenu) return;
+    textCopyCtxFracs = fracs || [];
+    textCopyCtxPageIdx = pageIdx;
+    textCopyCtxKind = kind || 'page';
+    const related = syncPreviewTextCopyMenuActive(textCopyCtxFracs, pageIdx) || [];
+    if (!related.length && textCopyCtxKind === 'markup-obj') {
+      hideTextCopyMenu();
+      return;
+    }
+    if (!textCopyMenu.classList.contains('visible')) {
+      textCopyMenu.classList.add('visible');
+    }
+  }
+
   // Dedicated preview refresh from known bytes (one pdf.js load for raster
   // + HQ cache + text layer). Avoids concurrent pdfDoc.save() with history.
   async function applyMarkupBytesToPreview(pageIdx, bytes) {
@@ -28049,6 +28243,81 @@ function editSelectedPage() {
     }
   }
 
+  // Preview HL/UL/SO → same pe editor objects (editable later in page editor).
+  // Does NOT bake into the PDF content stream.
+  async function applyPreviewTextMarkupOnPage(pageIdx, fracs, action) {
+    if (pageIdx == null || !fracs || !fracs.length) return;
+    if (typeof peUpsertTextMarkupsOnPage !== 'function') return;
+    if (!pdfDoc) return;
+
+    const canSuspend = (typeof historyPushSuspended !== 'undefined');
+    const wasSuspended = canSuspend ? historyPushSuspended : false;
+    if (canSuspend) historyPushSuspended = true;
+
+    try {
+      if (typeof peEnsurePageNormSize === 'function') peEnsurePageNormSize(pageIdx);
+
+      let objects;
+      let seq;
+      if (typeof peState !== 'undefined' && peState && peState.idx === pageIdx) {
+        objects = peState.objects.slice();
+        seq = peState.seq;
+      } else {
+        objects = (typeof peHydrateEditorObjects === 'function')
+          ? peHydrateEditorObjects(peLoadPageEditorObjects(pageIdx), pageIdx)
+          : peLoadPageEditorObjects(pageIdx);
+        seq = objects.reduce((m, o) => Math.max(m, (o && o.id) || 0), 0);
+      }
+
+      const result = peUpsertTextMarkupsOnPage(pageIdx, action, fracs, { objects, seq });
+      if (!result.changed) return;
+
+      if (typeof peState !== 'undefined' && peState && peState.idx === pageIdx) {
+        peState.objects = result.objects;
+        peState.seq = result.nextSeq;
+        // Drop selection if deleted.
+        if (peState.sel && !result.objects.includes(peState.sel)) peState.sel = null;
+        peState.multiSel = (peState.multiSel || []).filter(o => result.objects.includes(o));
+        if (typeof peRedrawObjects === 'function') peRedrawObjects();
+        if (typeof peCommitEditorHistory === 'function') peCommitEditorHistory();
+      }
+
+      if (typeof peSavePageEditorObjects === 'function') {
+        peSavePageEditorObjects(pageIdx, result.objects);
+      }
+
+      if (typeof whenPdfDocIdle === 'function') await whenPdfDocIdle();
+      const bytes = new Uint8Array(await pdfDoc.save());
+      try {
+        const loadBytes = (typeof peClonePdfBytes === 'function')
+          ? peClonePdfBytes(bytes) : bytes.slice();
+        pdfDoc = await PDFLib.PDFDocument.load(loadBytes);
+      } catch (_) { /* keep previous pdfDoc */ }
+
+      if (typeof hqPdfjsToken === 'number') hqPdfjsToken++;
+      if (typeof hqUpgraded !== 'undefined' && hqUpgraded && hqUpgraded.clear) hqUpgraded.clear();
+
+      await applyMarkupBytesToPreview(pageIdx, bytes);
+
+      if (typeof commitHistoryStep === 'function' && typeof historyCommitChain !== 'undefined') {
+        const marked = (typeof markedForDeletion !== 'undefined')
+          ? [...markedForDeletion].sort((x, y) => x - y) : [];
+        historyCommitChain = historyCommitChain
+          .then(() => commitHistoryStep(Promise.resolve(bytes), marked, [pageIdx]))
+          .catch(e => console.warn('history commit error', e));
+        if (typeof documentDirty !== 'undefined') documentDirty = true;
+        if (typeof updateInfo === 'function') updateInfo();
+        if (typeof updateStickyFileBar === 'function') updateStickyFileBar();
+        if (typeof pmOnDocumentDirtyChanged === 'function') pmOnDocumentDirtyChanged();
+      } else {
+        historyChangeHint = [pageIdx];
+        if (typeof setDocumentDirty === 'function') setDocumentDirty(true);
+      }
+    } finally {
+      if (canSuspend) historyPushSuspended = wasSuspended;
+    }
+  }
+
   // Cover selected page text with the current redact fill (no confirmation).
   // Same path as editor confirm / “Затереть текст”: pePaintBlackRedactRect
   // (visual/normalized cover + region markers); regional scrub on export/save.
@@ -28168,25 +28437,88 @@ function editSelectedPage() {
         void copyTextToClipboard(text);
         return;
       }
-      if (action === 'highlight' || action === 'strikeout' || action === 'underline' || action === 'comment' || action === 'redact-text') {
+      if (action === 'highlight' || action === 'strikeout' || action === 'underline'
+          || action === 'comment' || action === 'redact-text' || action === 'clear-markup') {
         let range = textCopyCtxRange;
         const pageIdx = textCopyCtxPageIdx;
-        hideTextCopyMenu();
-        if (pageIdx == null) return;
-        let rects = range ? gridTextSelRangeToPdfRects(range, pageIdx) : [];
-        if (!rects.length) {
+        let fracs = textCopyCtxFracs ? textCopyCtxFracs.slice() : [];
+        const kind = textCopyCtxKind;
+        if (pageIdx == null) { hideTextCopyMenu(); return; }
+
+        if ((!fracs || !fracs.length) && range) {
+          try { fracs = gridTextSelRangeToPageFracs(range, pageIdx); } catch (_) { fracs = []; }
+        }
+        if ((!fracs || !fracs.length) && range) {
           try {
             const sel = window.getSelection();
             if (sel && sel.rangeCount && !sel.isCollapsed) {
-              rects = gridTextSelRangeToPdfRects(sel.getRangeAt(0), pageIdx);
+              fracs = gridTextSelRangeToPageFracs(sel.getRangeAt(0), pageIdx);
             }
           } catch (_) {}
         }
-        if (!rects.length) return;
-        // Preview “Комментарий” opens the page editor with a movable callout
-        // object (bake would only freeze a static drawing).
+
+        // Redact still uses PDF-point bake (same as pe confirm).
+        if (action === 'redact-text') {
+          hideTextCopyMenu();
+          let rects = range ? gridTextSelRangeToPdfRects(range, pageIdx) : [];
+          if (!rects.length) {
+            try {
+              const sel = window.getSelection();
+              if (sel && sel.rangeCount && !sel.isCollapsed) {
+                rects = gridTextSelRangeToPdfRects(sel.getRangeAt(0), pageIdx);
+              }
+            } catch (_) {}
+          }
+          if (!rects.length) return;
+          gridMarkupBakeChain = gridMarkupBakeChain
+            .then(() => bakeTextRedactOnPage(pageIdx, rects))
+            .catch(err => console.error('text redact bake failed', err));
+          return;
+        }
+
+        // Comment: toggle-off existing callout in-place; otherwise open pe to create.
         if (action === 'comment') {
-          // Arm OSK now — applyPreviewCalloutInEditor is async and loses the gesture.
+          if (fracs && fracs.length && typeof peFindRelatedTextMarkupsIn === 'function'
+              && typeof peLoadPageEditorObjects === 'function') {
+            const objects = (typeof peHydrateEditorObjects === 'function')
+              ? peHydrateEditorObjects(peLoadPageEditorObjects(pageIdx), pageIdx)
+              : peLoadPageEditorObjects(pageIdx);
+            const related = peFindRelatedTextMarkupsIn(objects, fracs);
+            if (related.some(o => o && o.type === 'callout')) {
+              hideTextCopyMenu();
+              gridMarkupBakeChain = gridMarkupBakeChain
+                .then(() => applyPreviewTextMarkupOnPage(pageIdx, fracs, 'comment'))
+                .catch(err => console.error('text callout remove failed', err));
+              return;
+            }
+          }
+          hideTextCopyMenu();
+          let rects = range ? gridTextSelRangeToPdfRects(range, pageIdx) : [];
+          if (!rects.length && fracs && fracs.length) {
+            // Convert fracs → PDF pts when opened from markup-obj hit.
+            try {
+              const vp = gridMarkupViewportForPage(pageIdx);
+              if (vp) {
+                rects = fracs.map(f => {
+                  const tl = vp.convertToPdfPoint(f.x * vp.width, f.y * vp.height);
+                  const br = vp.convertToPdfPoint((f.x + f.w) * vp.width, (f.y + f.h) * vp.height);
+                  return {
+                    x0: Math.min(tl[0], br[0]), y0: Math.min(tl[1], br[1]),
+                    x1: Math.max(tl[0], br[0]), y1: Math.max(tl[1], br[1])
+                  };
+                });
+              }
+            } catch (_) {}
+          }
+          if (!rects.length) {
+            try {
+              const sel = window.getSelection();
+              if (sel && sel.rangeCount && !sel.isCollapsed) {
+                rects = gridTextSelRangeToPdfRects(sel.getRangeAt(0), pageIdx);
+              }
+            } catch (_) {}
+          }
+          if (!rects.length) return;
           if (typeof isTouchDevice !== 'undefined' && isTouchDevice
               && typeof peArmOskProxy === 'function') {
             peArmOskProxy();
@@ -28196,15 +28528,28 @@ function editSelectedPage() {
             .catch(err => console.error('text callout failed', err));
           return;
         }
-        if (action === 'redact-text') {
+
+        if (!fracs || !fracs.length) { hideTextCopyMenu(); return; }
+
+        // Clear closes the menu (same as pe). HL/UL/SO keep it and refresh active icons.
+        if (action === 'clear-markup') {
+          hideTextCopyMenu();
           gridMarkupBakeChain = gridMarkupBakeChain
-            .then(() => bakeTextRedactOnPage(pageIdx, rects))
-            .catch(err => console.error('text redact bake failed', err));
+            .then(() => applyPreviewTextMarkupOnPage(pageIdx, fracs, action))
+            .catch(err => console.error('text markup apply failed', err));
           return;
         }
+
+        // HL / UL / SO → pe objects (editable in page editor); refresh active buttons.
         gridMarkupBakeChain = gridMarkupBakeChain
-          .then(() => bakeTextMarkupOnPage(pageIdx, rects, action))
-          .catch(err => console.error('text markup bake failed', err));
+          .then(async () => {
+            await applyPreviewTextMarkupOnPage(pageIdx, fracs, action);
+            refreshPreviewTextCopyMenuAfterMarkup(fracs, pageIdx, kind);
+            if (kind === 'page' && range && typeof peRestoreTextSelRange === 'function') {
+              peRestoreTextSelRange(range);
+            }
+          })
+          .catch(err => console.error('text markup apply failed', err));
       }
     });
   }
@@ -28283,6 +28628,9 @@ async function openPageEditor(idx, restoreSelection) {
 function peDirtyEdits() {
   if (!peState) return false;
   if (peState.delta || peState.cropPdf || peState.cropApplied || peState.pdfContentMutated) return true;
+  // Unconfirmed redact frames are excluded from meta serialization, but they
+  // are still real edits — Save must not treat the page as clean / discard them.
+  if (typeof peListPendingRedactObjects === 'function' && peListPendingRedactObjects().length) return true;
   const sig = JSON.stringify(peSerializeObjectsForMeta(peState.objects));
   return sig !== (peState.objectsAtOpenSig || '[]');
 }
@@ -28691,6 +29039,41 @@ async function peExpandPageEditHistoryIntoDoc(pageIdx, baseRot, baselineBytes, u
       const tip = (docHistoryIndex >= 0) ? docHistory[docHistoryIndex] : null;
       if (tip) tip.pdfBytes = lastBytes;
     } catch (_) { /* pageNorm best-effort */ }
+  }
+
+  // Authoritative page-content bytes for redact/crop sessions: the newest
+  // editor snap that carried pdfBytes. A trailing meta-only snap must not
+  // leave the tip on an intermediate (pre-paint) document.
+  if (anyPageRewrite) {
+    let contentBytes = null;
+    let contentSnap = null;
+    for (let i = steps.length - 1; i >= 0; i--) {
+      const s = steps[i];
+      if (s && s.pdfBytes && s.pdfBytes.length) {
+        contentBytes = s.pdfBytes;
+        contentSnap = s;
+        break;
+      }
+    }
+    if (contentBytes) {
+      try {
+        doc = await PDFLib.PDFDocument.load(contentBytes.slice());
+        const finalSnap = steps[steps.length - 1] || contentSnap;
+        peApplyEditorHistorySnapToDoc(doc, pageIdx, baseRot, finalSnap);
+        pdfDoc = doc;
+        if (peState && peState.page) {
+          const rot = ((baseRot + (Number((finalSnap || {}).delta) || 0)) % 360 + 360) % 360;
+          const vp1 = peState.page.getViewport({ scale: 1, rotation: rot });
+          peSetPageNormSize(pageIdx, rot, { W: vp1.width, H: vp1.height });
+        }
+        lastBytes = new Uint8Array(await doc.save(saveOpts));
+        if (typeof originalFileBytes !== 'undefined') originalFileBytes = lastBytes;
+        const tip = (docHistoryIndex >= 0) ? docHistory[docHistoryIndex] : null;
+        if (tip) tip.pdfBytes = lastBytes;
+      } catch (err) {
+        console.warn('peExpandPageEditHistoryIntoDoc: content-bytes restamp failed', err);
+      }
+    }
   }
 
   // Tip thumb is filled by pageEditSave’s live grid render + patchHistoryPending.
@@ -35574,7 +35957,12 @@ function peMarkupFracsRelated(aFracs, bFracs) {
 
 function peFindRelatedTextMarkups(fracs) {
   if (!peState || !fracs || !fracs.length) return [];
-  return peState.objects.filter(o =>
+  return peFindRelatedTextMarkupsIn(peState.objects, fracs);
+}
+
+function peFindRelatedTextMarkupsIn(objects, fracs) {
+  if (!fracs || !fracs.length) return [];
+  return (objects || []).filter(o =>
     peIsPageTextMarkup(o) && peMarkupFracsRelated(fracs, peMarkupFracsOf(o)));
 }
 
@@ -35588,17 +35976,75 @@ function peActiveActionsForMarkups(objs) {
   return set;
 }
 
-function peSyncTextSelMenuActive(activeSet) {
-  const menu = document.getElementById('peTextSelCtxMenu');
+function peSyncTextSelMenuActive(activeSet, menuEl) {
+  const menu = menuEl || document.getElementById('peTextSelCtxMenu');
   if (!menu) return;
   const set = activeSet instanceof Set ? activeSet : new Set(activeSet || []);
-  menu.querySelectorAll('.pe-text-sel-icons button[data-action]').forEach(btn => {
+  const buttons = menu.querySelectorAll('.pe-text-sel-icons button[data-action], button[data-action]');
+  buttons.forEach(btn => {
+    if (!btn.closest('.pe-text-sel-icons') && menu.id === 'peTextSelCtxMenu') return;
     const act = btn.dataset.action;
-    if (act === 'clear-markup' || act === 'redact-text') return;
+    if (act === 'clear-markup' || act === 'redact-text' || act === 'copy-text') return;
     const on = set.has(act);
     btn.classList.toggle('active', on);
     btn.setAttribute('aria-pressed', on ? 'true' : 'false');
   });
+}
+
+/**
+ * Toggle highlight / strikeout / underline / clear on page-fraction rects.
+ * Works on any objects array (page editor live state OR catalog meta).
+ * Returns { objects, nextSeq, changed, related }.
+ */
+function peUpsertTextMarkupsOnPage(pageIdx, action, fracs, opts) {
+  const options = opts || {};
+  let objects = (options.objects || []).slice();
+  let seq = options.seq != null ? options.seq
+    : objects.reduce((m, o) => Math.max(m, (o && o.id) || 0), 0);
+  const related = peFindRelatedTextMarkupsIn(objects, fracs);
+  let changed = false;
+
+  if (action === 'clear-markup') {
+    if (related.length) {
+      const ids = new Set(related.map(o => o.id));
+      objects = objects.filter(o => !ids.has(o.id));
+      changed = true;
+    }
+    return { objects, nextSeq: seq, changed, related };
+  }
+
+  if (action === 'highlight' || action === 'strikeout' || action === 'underline') {
+    const existing = related.filter(o => o.type === action);
+    if (existing.length) {
+      const ids = new Set(existing.map(o => o.id));
+      objects = objects.filter(o => !ids.has(o.id));
+      changed = true;
+    } else if (fracs && fracs.length) {
+      const color = action === 'highlight' ? '#ffe45e' : '#e74c3c';
+      fracs.forEach(r => {
+        objects.push({
+          id: ++seq,
+          type: action, color,
+          x: r.x, y: r.y, w: r.w, h: r.h
+        });
+      });
+      changed = true;
+    }
+    return { objects, nextSeq: seq, changed, related };
+  }
+
+  // Comment create needs pe UI; here we only toggle-off an existing callout.
+  if (action === 'comment') {
+    const existing = related.filter(o => o.type === 'callout');
+    if (existing.length) {
+      const ids = new Set(existing.map(o => o.id));
+      objects = objects.filter(o => !ids.has(o.id));
+      changed = true;
+    }
+    return { objects, nextSeq: seq, changed, related };
+  }
+
+  return { objects, nextSeq: seq, changed: false, related };
 }
 
 function peShowTextSelCtxMenu(clientX, clientY, info) {
@@ -35788,14 +36234,9 @@ function peRefreshTextSelMarkupMenu(fracs) {
  */
 function peToggleTextMarkupsAtFracs(action, fracs) {
   if (!peState || !fracs || !fracs.length) return fracs || [];
-  const related = peFindRelatedTextMarkups(fracs);
-
-  if (action === 'clear-markup') {
-    if (related.length) peDeleteObjects(related);
-    return fracs;
-  }
 
   if (action === 'comment') {
+    const related = peFindRelatedTextMarkups(fracs);
     const existing = related.find(o => o.type === 'callout');
     if (existing) {
       peDeleteObjects([existing]);
@@ -35807,22 +36248,20 @@ function peToggleTextMarkupsAtFracs(action, fracs) {
     return fracs;
   }
 
-  if (action === 'highlight' || action === 'strikeout' || action === 'underline') {
-    const existing = related.filter(o => o.type === action);
-    if (existing.length) {
-      peDeleteObjects(existing);
-      return fracs;
-    }
-    const color = action === 'highlight' ? '#ffe45e' : '#e74c3c';
-    fracs.forEach(r => {
-      peState.objects.push({
-        id: ++peState.seq,
-        type: action, color,
-        x: r.x, y: r.y, w: r.w, h: r.h
-      });
+  if (action === 'highlight' || action === 'strikeout' || action === 'underline'
+      || action === 'clear-markup') {
+    const result = peUpsertTextMarkupsOnPage(peState.idx, action, fracs, {
+      objects: peState.objects,
+      seq: peState.seq
     });
-    peRedrawObjects();
-    peCommitEditorHistory();
+    if (result.changed) {
+      peState.objects = result.objects;
+      peState.seq = result.nextSeq;
+      if (peState.sel && !result.objects.includes(peState.sel)) peState.sel = null;
+      peState.multiSel = (peState.multiSel || []).filter(o => result.objects.includes(o));
+      peRedrawObjects();
+      peCommitEditorHistory();
+    }
     return fracs;
   }
   return fracs;
@@ -45067,6 +45506,12 @@ async function pageEditSave(options) {
     : new Uint8Array(await pdfDoc.save());
   try {
     showLoading(openIdx != null ? 'Сохранение и переход...' : 'Применение правок...');
+    // Pending redact frames (drawn but not ✓) used to be dropped on Save, so
+    // the black cover vanished from preview and on reopen. Confirm them first.
+    if (typeof peConfirmAllPendingRedacts === 'function') {
+      await peConfirmAllPendingRedacts({ skipLoading: true });
+      if (!peState) return;
+    }
     // Finalize editor undo queue (include last object state) before expanding
     // into document history.
     peCommitEditorHistory(true);
@@ -45090,7 +45535,8 @@ async function pageEditSave(options) {
     // happens at export/print time (see peFlattenEditorObjectsIntoDoc),
     // working on a disposable copy of the document, never the live one.
     try { page.node.delete(PDFLib.PDFName.of(PE_NEEDS_SHAPE_RASTER_KEY)); } catch (_) {}
-    // Drop unconfirmed redact frames — they are only valid after ✓.
+    // Any remaining redact frames should already have been confirmed above;
+    // strip leftovers so they never enter page metadata.
     const persistObjs = peState.objects.filter(o => o.type !== 'redact');
     peState.objects = persistObjs;
     // Capture real text box sizes (PDF points) so later page rotates in the
@@ -45099,6 +45545,19 @@ async function pageEditSave(options) {
     if (peState.page) {
       const vp1 = peState.page.getViewport({ scale: 1, rotation: peFinalRotation() });
       peSetPageNormSize(idx, peFinalRotation(), { W: vp1.width, H: vp1.height });
+    }
+    peSavePageEditorObjects(idx, persistObjs);
+
+    // Snapshot the live page AFTER confirm/rotate/crop/meta. Expand rebuilds
+    // history from baseline + undo snaps and can leave the tip on pre-paint
+    // bytes — the editor still showed the black plate, so Save looked like
+    // “preview flashes then loses the redact”. These bytes are authoritative.
+    const contentMutated = !!(peState.pdfContentMutated || peState.cropApplied);
+    let authoritativeBytes = null;
+    if (contentMutated) {
+      authoritativeBytes = (typeof peClonePdfBytes === 'function')
+        ? peClonePdfBytes(await pdfDoc.save({ useObjectStreams: false }))
+        : new Uint8Array(await pdfDoc.save({ useObjectStreams: false }));
     }
 
     // Ensure the last editor snap reflects final objects + live crop/rotation.
@@ -45114,23 +45573,87 @@ async function pageEditSave(options) {
     const lastBytes = await peExpandPageEditHistoryIntoDoc(idx, baseRot, baselineBytes, stack);
     historyPushSuspended = false;
 
-    // Expand leaves pdfDoc on the working document that produced lastBytes.
-    if (lastBytes) {
-      if (typeof originalFileBytes !== 'undefined') originalFileBytes = lastBytes;
-    } else {
-      peSavePageEditorObjects(idx, persistObjs);
+    let bytes = lastBytes || new Uint8Array(await pdfDoc.save({ useObjectStreams: false }));
+    if (authoritativeBytes) {
+      bytes = authoritativeBytes;
     }
+
+    // Bake pending redact markers into the live page now (same path as
+    // export/print). Keeps the cover in the page stream so HQ / history-thumb
+    // fills cannot resurrect a pre-redact raster.
+    try {
+      pdfDoc = await PDFLib.PDFDocument.load(
+        (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
+      );
+      peSavePageEditorObjects(idx, persistObjs);
+      if (typeof peApplyPendingRedactRasterization === 'function'
+          && typeof pePageShouldFullRasterForRedact === 'function'
+          && pePageShouldFullRasterForRedact(pdfDoc.getPage(idx), idx)) {
+        let work = await PDFLib.PDFDocument.load(
+          (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
+        );
+        work = await peApplyPendingRedactRasterization(work) || work;
+        bytes = (typeof peClonePdfBytes === 'function')
+          ? peClonePdfBytes(await work.save({ useObjectStreams: false }))
+          : new Uint8Array(await work.save({ useObjectStreams: false }));
+        pdfDoc = await PDFLib.PDFDocument.load(
+          (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
+        );
+        peSavePageEditorObjects(idx, persistObjs);
+      } else {
+        bytes = (typeof peClonePdfBytes === 'function')
+          ? peClonePdfBytes(await pdfDoc.save({ useObjectStreams: false }))
+          : new Uint8Array(await pdfDoc.save({ useObjectStreams: false }));
+      }
+    } catch (err) {
+      console.warn('pageEditSave: post-expand content restamp failed', err);
+      try {
+        pdfDoc = await PDFLib.PDFDocument.load(
+          (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
+        );
+      } catch (_) {}
+    }
+
+    if (typeof originalFileBytes !== 'undefined') originalFileBytes = bytes;
+    try {
+      const tip = (typeof docHistoryIndex === 'number' && docHistoryIndex >= 0
+        && typeof docHistory !== 'undefined') ? docHistory[docHistoryIndex] : null;
+      if (tip) tip.pdfBytes = bytes;
+    } catch (_) {}
 
     invalidateHQ();
 
     // Update the thumbnail of the edited page (also patches the history tip
     // via patchHistoryPending — intermediate undo thumbs fill in background).
-    const bytes = lastBytes || new Uint8Array(await pdfDoc.save({ useObjectStreams: false }));
     const pj = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
     const div = pagesContainer.querySelector('.page[data-index="' + idx + '"]');
     const im = div ? div.querySelector('img') : null;
     if (div && im) {
       await renderPageImageInto(div, im, pj, idx + 1, idx, THUMBNAIL_SCALE);
+      // Seed HQ cache from the same bytes so a later upgrade cannot redraw
+      // from a borrowed intermediate history snapshot without the redact.
+      if (typeof currentScale !== 'undefined' && typeof HQ_SCALE_THRESHOLD !== 'undefined'
+          && currentScale >= HQ_SCALE_THRESHOLD
+          && typeof HQ_RENDER_SCALE !== 'undefined') {
+        try {
+          const page = await pj.getPage(idx + 1);
+          const effectiveRotation = typeof page.rotate === 'number' ? page.rotate : 0;
+          const viewport = page.getViewport({ scale: HQ_RENDER_SCALE, rotation: effectiveRotation });
+          const canvas = document.createElement('canvas');
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+          if (typeof peCompositeEditorObjectsOnCanvas === 'function') {
+            await peCompositeEditorObjectsOnCanvas(
+              canvas.getContext('2d'), idx, viewport.width, viewport.height);
+          }
+          im.src = canvas.toDataURL('image/jpeg', 0.92);
+          if (typeof hqPdfjsDoc !== 'undefined') hqPdfjsDoc = pj;
+          if (typeof hqUpgraded !== 'undefined' && hqUpgraded) hqUpgraded.add(idx);
+        } catch (err) {
+          console.warn('pageEditSave: HQ seed failed', err);
+        }
+      }
       if (typeof patchHistoryPending === 'function') {
         const dataUrl = im.getAttribute('src') || '';
         if (dataUrl) {
@@ -45141,7 +45664,10 @@ async function pageEditSave(options) {
         }
       }
     }
-    try { pj.destroy && pj.destroy(); } catch (_) {}
+    // If HQ seeded hqPdfjsDoc = pj, do not destroy; otherwise release.
+    if (!(typeof hqPdfjsDoc !== 'undefined' && hqPdfjsDoc === pj)) {
+      try { pj.destroy && pj.destroy(); } catch (_) {}
+    }
     if (typeof scheduleSnapshotFill === 'function') scheduleSnapshotFill();
 
     syncDirtyFromHistory();
@@ -45149,6 +45675,8 @@ async function pageEditSave(options) {
     updateUIState();
     if (typeof updateInfo === 'function') updateInfo();
     await pageEditClose(true);
+    // Wait out any in-flight history-thumb pdfDoc borrow before HQ save().
+    if (typeof whenPdfDocIdle === 'function') await whenPdfDocIdle();
     // Restore sharp preview at the current zoom (invalidateHQ cleared HQ cache).
     if (typeof scheduleHQUpgrade === 'function') scheduleHQUpgrade();
     if (openIdx != null) {
