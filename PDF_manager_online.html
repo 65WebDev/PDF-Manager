@@ -45541,6 +45541,19 @@ async function pageEditSave(options) {
       const vp1 = peState.page.getViewport({ scale: 1, rotation: peFinalRotation() });
       peSetPageNormSize(idx, peFinalRotation(), { W: vp1.width, H: vp1.height });
     }
+    peSavePageEditorObjects(idx, persistObjs);
+
+    // Snapshot the live page AFTER confirm/rotate/crop/meta. Expand rebuilds
+    // history from baseline + undo snaps and can leave the tip on pre-paint
+    // bytes — the editor still showed the black plate, so Save looked like
+    // “preview flashes then loses the redact”. These bytes are authoritative.
+    const contentMutated = !!(peState.pdfContentMutated || peState.cropApplied);
+    let authoritativeBytes = null;
+    if (contentMutated) {
+      authoritativeBytes = (typeof peClonePdfBytes === 'function')
+        ? peClonePdfBytes(await pdfDoc.save({ useObjectStreams: false }))
+        : new Uint8Array(await pdfDoc.save({ useObjectStreams: false }));
+    }
 
     // Ensure the last editor snap reflects final objects + live crop/rotation.
     peCommitEditorHistory(true);
@@ -45555,36 +45568,87 @@ async function pageEditSave(options) {
     const lastBytes = await peExpandPageEditHistoryIntoDoc(idx, baseRot, baselineBytes, stack);
     historyPushSuspended = false;
 
-    // Expand leaves pdfDoc on the working document that produced lastBytes.
-    if (lastBytes) {
-      if (typeof originalFileBytes !== 'undefined') originalFileBytes = lastBytes;
-    } else {
-      peSavePageEditorObjects(idx, persistObjs);
+    let bytes = lastBytes || new Uint8Array(await pdfDoc.save({ useObjectStreams: false }));
+    if (authoritativeBytes) {
+      bytes = authoritativeBytes;
     }
+
+    // Bake pending redact markers into the live page now (same path as
+    // export/print). Keeps the cover in the page stream so HQ / history-thumb
+    // fills cannot resurrect a pre-redact raster.
+    try {
+      pdfDoc = await PDFLib.PDFDocument.load(
+        (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
+      );
+      peSavePageEditorObjects(idx, persistObjs);
+      if (typeof peApplyPendingRedactRasterization === 'function'
+          && typeof pePageShouldFullRasterForRedact === 'function'
+          && pePageShouldFullRasterForRedact(pdfDoc.getPage(idx), idx)) {
+        let work = await PDFLib.PDFDocument.load(
+          (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
+        );
+        work = await peApplyPendingRedactRasterization(work) || work;
+        bytes = (typeof peClonePdfBytes === 'function')
+          ? peClonePdfBytes(await work.save({ useObjectStreams: false }))
+          : new Uint8Array(await work.save({ useObjectStreams: false }));
+        pdfDoc = await PDFLib.PDFDocument.load(
+          (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
+        );
+        peSavePageEditorObjects(idx, persistObjs);
+      } else {
+        bytes = (typeof peClonePdfBytes === 'function')
+          ? peClonePdfBytes(await pdfDoc.save({ useObjectStreams: false }))
+          : new Uint8Array(await pdfDoc.save({ useObjectStreams: false }));
+      }
+    } catch (err) {
+      console.warn('pageEditSave: post-expand content restamp failed', err);
+      try {
+        pdfDoc = await PDFLib.PDFDocument.load(
+          (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
+        );
+      } catch (_) {}
+    }
+
+    if (typeof originalFileBytes !== 'undefined') originalFileBytes = bytes;
+    try {
+      const tip = (typeof docHistoryIndex === 'number' && docHistoryIndex >= 0
+        && typeof docHistory !== 'undefined') ? docHistory[docHistoryIndex] : null;
+      if (tip) tip.pdfBytes = bytes;
+    } catch (_) {}
 
     invalidateHQ();
 
     // Update the thumbnail of the edited page (also patches the history tip
     // via patchHistoryPending — intermediate undo thumbs fill in background).
-    let bytes = lastBytes || new Uint8Array(await pdfDoc.save({ useObjectStreams: false }));
-    // Keep the live document identical to the bytes we render. Background
-    // history-thumb fills temporarily swap pdfDoc; HQ upgrade must see the
-    // same post-redact bytes as this preview (not an intermediate undo step).
-    try {
-      pdfDoc = await PDFLib.PDFDocument.load(
-        (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
-      );
-      const tip = (typeof docHistoryIndex === 'number' && docHistoryIndex >= 0
-        && typeof docHistory !== 'undefined') ? docHistory[docHistoryIndex] : null;
-      if (tip) tip.pdfBytes = bytes;
-      if (typeof originalFileBytes !== 'undefined') originalFileBytes = bytes;
-    } catch (_) { /* keep expand pdfDoc */ }
-
     const pj = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
     const div = pagesContainer.querySelector('.page[data-index="' + idx + '"]');
     const im = div ? div.querySelector('img') : null;
     if (div && im) {
       await renderPageImageInto(div, im, pj, idx + 1, idx, THUMBNAIL_SCALE);
+      // Seed HQ cache from the same bytes so a later upgrade cannot redraw
+      // from a borrowed intermediate history snapshot without the redact.
+      if (typeof currentScale !== 'undefined' && typeof HQ_SCALE_THRESHOLD !== 'undefined'
+          && currentScale >= HQ_SCALE_THRESHOLD
+          && typeof HQ_RENDER_SCALE !== 'undefined') {
+        try {
+          const page = await pj.getPage(idx + 1);
+          const effectiveRotation = typeof page.rotate === 'number' ? page.rotate : 0;
+          const viewport = page.getViewport({ scale: HQ_RENDER_SCALE, rotation: effectiveRotation });
+          const canvas = document.createElement('canvas');
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+          if (typeof peCompositeEditorObjectsOnCanvas === 'function') {
+            await peCompositeEditorObjectsOnCanvas(
+              canvas.getContext('2d'), idx, viewport.width, viewport.height);
+          }
+          im.src = canvas.toDataURL('image/jpeg', 0.92);
+          if (typeof hqPdfjsDoc !== 'undefined') hqPdfjsDoc = pj;
+          if (typeof hqUpgraded !== 'undefined' && hqUpgraded) hqUpgraded.add(idx);
+        } catch (err) {
+          console.warn('pageEditSave: HQ seed failed', err);
+        }
+      }
       if (typeof patchHistoryPending === 'function') {
         const dataUrl = im.getAttribute('src') || '';
         if (dataUrl) {
@@ -45595,7 +45659,10 @@ async function pageEditSave(options) {
         }
       }
     }
-    try { pj.destroy && pj.destroy(); } catch (_) {}
+    // If HQ seeded hqPdfjsDoc = pj, do not destroy; otherwise release.
+    if (!(typeof hqPdfjsDoc !== 'undefined' && hqPdfjsDoc === pj)) {
+      try { pj.destroy && pj.destroy(); } catch (_) {}
+    }
     if (typeof scheduleSnapshotFill === 'function') scheduleSnapshotFill();
 
     syncDirtyFromHistory();
