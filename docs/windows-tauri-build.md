@@ -254,6 +254,7 @@ NSIS‑установщик регистрирует приложение как
 | Симптом | Что сделать |
 |---------|-------------|
 | `git` / `node` / `rustc` не найдены | PATH; новый терминал после установки |
+| `npm ci` / `package-lock.json` missing (`EUSAGE`) | В корне репо должен быть `package-lock.json` (он в git). `git pull origin main`, затем `git checkout HEAD -- package-lock.json`. Проверка: `dir package-lock.json`. Временно: `npm install` или `-SkipNpmCi`, если `node_modules` уже есть. |
 | `linker link.exe not found` | Установить workload **«Разработка классических приложений на C++»**, новый терминал |
 | Ошибка на `build:offline` / fetch | Интернет или блокировка CDN (unpkg, cdnjs, jsdelivr) |
 | Долго `Updating crates.io` / Downloading crates | Нормально на первом запуске |

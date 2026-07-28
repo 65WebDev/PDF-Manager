@@ -248,6 +248,25 @@ if ($doUpload) {
 }
 
 if (-not $SkipNpmCi) {
+  $lockPath = Join-Path $RepoRoot 'package-lock.json'
+  if (-not (Test-Path -LiteralPath $lockPath)) {
+    Write-Fail "package-lock.json is missing in the repo root."
+    Write-Host @"
+
+npm ci needs package-lock.json (it is tracked in git on main).
+
+Restore it, then rerun this script:
+  git pull origin main
+  git checkout HEAD -- package-lock.json
+
+If the file is still missing, generate one (less reproducible than npm ci):
+  npm install
+
+Or skip install when node_modules already exists:
+  .\scripts\build-windows-exe.ps1 -SkipNpmCi
+"@ -ForegroundColor Yellow
+    exit 1
+  }
   Write-Step "npm ci"
   npm ci
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
