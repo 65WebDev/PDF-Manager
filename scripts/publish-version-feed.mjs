@@ -108,11 +108,11 @@ function buildFeed() {
 
   const windowsVersion = env(
     'WINDOWS_VERSION',
-    prev.windowsVersion || winGh.windowsVersion || '',
+    winGh.windowsVersion || prev.windowsVersion || '',
   );
   const windowsDownloadUrl = env(
     'WINDOWS_DOWNLOAD_URL',
-    prev.windowsDownloadUrl || winGh.windowsDownloadUrl || '',
+    winGh.windowsDownloadUrl || prev.windowsDownloadUrl || '',
   );
 
   const feed = {
