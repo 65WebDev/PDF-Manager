@@ -2028,6 +2028,13 @@
     .pe-stage-pad.pe-stage-pad-focus {
       justify-content: flex-start;
     }
+    /* When the sheet is wider/taller than the wrap, pin to top-left so
+       scrollLeft/Top can reach every edge (flex center + overflow clips the
+       leading side because scroll offsets cannot go negative). */
+    .pe-stage-pad.pe-stage-pad-overflow {
+      justify-content: flex-start;
+      align-items: flex-start;
+    }
     /* During pinch, pin stage to top-left so scroll restore can keep the
        midpoint under the fingers (flex center + maxScroll≈0 drifts to TL). */
     .pe-stage-pad.pe-stage-pad-pinching {
@@ -3689,9 +3696,12 @@
       align-items: center; /*cards are vertically centered*/
       width: 100%;
     }
-    /*On the desktop, with ≤2 columns, center the pages horizontally*/
+    /*On the desktop, with ≤2 columns, center the pages horizontally.
+      When a zoomed card/row is wider than the viewport, pages-row-overflow
+      switches to flex-start so scrollLeft can reach the left edge (same as mobile).*/
     @media (hover: hover) and (pointer: fine) {
       .pages.pages-few-cols { justify-content: center; }
+      .pages.pages-few-cols.pages-row-overflow { justify-content: flex-start; }
     }
 
     .page { 
@@ -10229,16 +10239,21 @@
       const hyst = pagesContainer.classList.contains('pages-few-cols') ? -28 : 28;
       const fewCols = pdfDoc && rowW3 > avail + hyst;
       const hadFewCols = pagesContainer.classList.contains('pages-few-cols');
-      if (hadFewCols === !!fewCols) return;
-      preserveViewportCenterOnLayoutChange(() => {
-        pagesContainer.classList.toggle('pages-few-cols', !!fewCols);
-      });
+      if (hadFewCols !== !!fewCols) {
+        preserveViewportCenterOnLayoutChange(() => {
+          pagesContainer.classList.toggle('pages-few-cols', !!fewCols);
+        });
+      }
+      // After few-cols toggles (or when already few-cols at high zoom), ensure
+      // overflow rows use flex-start so the left edge of the page is scrollable.
+      updatePagesRowOverflow();
     }
 
-    //Mobile scrolling: if the row is wider than the screen - flex-start (without changing width),
-    //otherwise, the center “eats” the left side with a strong zoom.
-    function updateMobilePagesRowOverflow(anchorEl) {
-      if (!isTouchDevice || !pdfDoc) {
+    // If a preview row is wider than the viewport, use flex-start — otherwise
+    // justify-content:center “eats” the left side and scrollLeft cannot reach it.
+    // Used on mobile always, and on desktop together with pages-few-cols.
+    function updatePagesRowOverflow(anchorEl) {
+      if (!pdfDoc) {
         pagesContainer.classList.remove('pages-row-overflow');
         return;
       }
@@ -10255,8 +10270,8 @@
 
       let overflow = false;
 
-      //One column: count by scale (without getBoundingClientRect) + hysteresis
-      if (isMobilePagesSingleColumn()) {
+      // One column: count by scale (without getBoundingClientRect) + hysteresis
+      if (isMobilePagesSingleColumn() || isPagesSingleColumnLayout()) {
         const cardW = cardRowWidth(currentScale, 1);
         const hyst = pagesContainer.classList.contains('pages-row-overflow') ? -16 : 16;
         overflow = cardW > avail + hyst;
@@ -10271,6 +10286,12 @@
         }
       }
 
+      // Desktop centering only applies with pages-few-cols; keep the overflow
+      // class off when three-across layout is active (default flex-start).
+      if (!isTouchDevice && !pagesContainer.classList.contains('pages-few-cols')) {
+        overflow = false;
+      }
+
       const hadOverflow = pagesContainer.classList.contains('pages-row-overflow');
       if (hadOverflow === overflow) return;
 
@@ -10282,6 +10303,11 @@
         scrollContainer.scrollLeft += refPage.getBoundingClientRect().left - beforeLeft;
       }
       scrollContainer.scrollTop = scrollTop;
+    }
+
+    // Legacy name kept for call sites.
+    function updateMobilePagesRowOverflow(anchorEl) {
+      updatePagesRowOverflow(anchorEl);
     }
 
     function getVisiblePages() {
@@ -25384,6 +25410,7 @@ function peStagePadChromePads() {
 function peUpdateStageWrapOverflow() {
   const wrap = document.getElementById('peStageWrap');
   const stage = document.getElementById('peStage');
+  const pad = document.getElementById('peStagePad');
   if (!wrap || !stage) return;
   const chrome = peStagePadChromePads();
   const contentW = stage.offsetWidth + chrome.left + chrome.right;
@@ -25398,6 +25425,11 @@ function peUpdateStageWrapOverflow() {
   wrap.style.overflowY = needsY ? 'auto' : 'hidden';
   if (!needsX) wrap.scrollLeft = 0;
   if (!needsY) wrap.scrollTop = 0;
+  // Pin pad alignment when overflowed so the leading edges stay reachable.
+  if (pad && !pad.classList.contains('pe-stage-pad-pinching')
+      && !pad.classList.contains('pe-stage-pad-focus')) {
+    pad.classList.toggle('pe-stage-pad-overflow', needsX || needsY);
+  }
 }
 
 function peResolveZoomAnchor(anchorX, anchorY) {
