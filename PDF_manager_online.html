@@ -26269,9 +26269,32 @@ function pePendingRedactTarget() {
   if (sel) return sel;
   if (!peState || !peState.objects) return null;
   if (peState.drag && peState.drag.kind === 'redact-draw') return null;
-  const list = peState.objects.filter(o =>
-    o && o.type === 'redact' && !o.confirmed && o.w > 0.005 && o.h > 0.005);
+  const list = peListPendingRedactObjects();
   return list.length ? list[list.length - 1] : null;
+}
+
+/** Unconfirmed redact frames still on the page (drawn, ✓ not pressed yet). */
+function peListPendingRedactObjects() {
+  if (!peState || !peState.objects) return [];
+  return peState.objects.filter(o =>
+    o && o.type === 'redact' && !o.confirmed && o.w > 0.005 && o.h > 0.005);
+}
+
+/**
+ * Bake every pending redact frame into the page (same as pressing ✓ on each).
+ * Used by page Save so marked areas are not silently discarded.
+ */
+async function peConfirmAllPendingRedacts(opts) {
+  if (!peState) return false;
+  const pending = peListPendingRedactObjects().slice();
+  if (!pending.length) return false;
+  const confirmOpts = opts || {};
+  for (let i = 0; i < pending.length; i++) {
+    const o = pending[i];
+    if (!peState || !peState.objects || !peState.objects.includes(o)) continue;
+    await peRedactConfirm(o, confirmOpts);
+  }
+  return true;
 }
 
 function peUpdateRedactActionsUi() {
@@ -26645,16 +26668,18 @@ async function peReloadEditorPageFromPdfDoc() {
   await peRenderStage();
 }
 
-async function peRedactConfirm(o) {
+async function peRedactConfirm(o, opts) {
   if (!peState || !pdfDoc) return;
   if (peState.__redactConfirmBusy) return;
+  const options = opts || {};
+  const skipLoading = !!options.skipLoading;
   const target = o || pePendingRedactTarget();
   if (!target || target.type !== 'redact' || target.confirmed) return;
   if (!(target.w > 0.005 && target.h > 0.005)) return;
 
   peState.__redactConfirmBusy = true;
   try {
-    showLoading('Затирание информации...');
+    if (!skipLoading) showLoading('Затирание информации...');
     document.getElementById('peRedactConfirmBtn')?.blur();
 
     // Snapshot for undo, then reload pdfDoc — save() leaves the in-memory
@@ -26715,7 +26740,7 @@ async function peRedactConfirm(o) {
     alert('Не удалось затереть область: ' + (err.message || err));
   } finally {
     peState.__redactConfirmBusy = false;
-    hideLoading();
+    if (!skipLoading) hideLoading();
   }
 }
 
@@ -28591,6 +28616,9 @@ async function openPageEditor(idx, restoreSelection) {
 function peDirtyEdits() {
   if (!peState) return false;
   if (peState.delta || peState.cropPdf || peState.cropApplied || peState.pdfContentMutated) return true;
+  // Unconfirmed redact frames are excluded from meta serialization, but they
+  // are still real edits — Save must not treat the page as clean / discard them.
+  if (typeof peListPendingRedactObjects === 'function' && peListPendingRedactObjects().length) return true;
   const sig = JSON.stringify(peSerializeObjectsForMeta(peState.objects));
   return sig !== (peState.objectsAtOpenSig || '[]');
 }
@@ -45431,6 +45459,12 @@ async function pageEditSave(options) {
     : new Uint8Array(await pdfDoc.save());
   try {
     showLoading(openIdx != null ? 'Сохранение и переход...' : 'Применение правок...');
+    // Pending redact frames (drawn but not ✓) used to be dropped on Save, so
+    // the black cover vanished from preview and on reopen. Confirm them first.
+    if (typeof peConfirmAllPendingRedacts === 'function') {
+      await peConfirmAllPendingRedacts({ skipLoading: true });
+      if (!peState) return;
+    }
     // Finalize editor undo queue (include last object state) before expanding
     // into document history.
     peCommitEditorHistory(true);
@@ -45454,7 +45488,8 @@ async function pageEditSave(options) {
     // happens at export/print time (see peFlattenEditorObjectsIntoDoc),
     // working on a disposable copy of the document, never the live one.
     try { page.node.delete(PDFLib.PDFName.of(PE_NEEDS_SHAPE_RASTER_KEY)); } catch (_) {}
-    // Drop unconfirmed redact frames — they are only valid after ✓.
+    // Any remaining redact frames should already have been confirmed above;
+    // strip leftovers so they never enter page metadata.
     const persistObjs = peState.objects.filter(o => o.type !== 'redact');
     peState.objects = persistObjs;
     // Capture real text box sizes (PDF points) so later page rotates in the
