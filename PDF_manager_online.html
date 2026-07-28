@@ -14080,6 +14080,9 @@
         await renderInitialThumbnailsFromOriginalBytes();
         checkHintVisibility();
         await resetDocHistoryToCurrent(initialHistoryBytes);
+        if (typeof pdfManagerMaximizeDesktopWindow === 'function') {
+          pdfManagerMaximizeDesktopWindow();
+        }
 
       } catch (e) {
         console.error(e);
@@ -19485,6 +19488,28 @@
 
     function pdfManagerIsDesktopShell() {
       return !!(window.__TAURI_INTERNALS__ || window.__TAURI__ || PDF_MANAGER_WINDOWS_VERSION);
+    }
+
+    /** Windows shell: maximize (развернуть) when opening a document. */
+    function pdfManagerMaximizeDesktopWindow() {
+      if (!pdfManagerIsDesktopShell()) return;
+      try {
+        const invoke = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
+        if (typeof invoke === 'function') {
+          Promise.resolve(invoke.call(window.__TAURI__.core, 'maximize_main_window_cmd')).catch(() => {});
+          return;
+        }
+      } catch (_) { /* ignore */ }
+      try {
+        const winApi = window.__TAURI__ && window.__TAURI__.window;
+        const getWin = winApi && (winApi.getCurrentWindow || (winApi.Window && winApi.Window.getCurrent));
+        if (typeof getWin === 'function') {
+          const win = getWin.call(winApi);
+          if (win && typeof win.maximize === 'function') {
+            Promise.resolve(win.maximize()).catch(() => {});
+          }
+        }
+      } catch (_) { /* ignore */ }
     }
 
     function pdfManagerLocalBuildNumber() {

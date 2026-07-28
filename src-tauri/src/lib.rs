@@ -67,6 +67,16 @@ fn focus_main_window(app: &AppHandle) {
   }
 }
 
+/// Maximize the main window (Windows “развернуть”), not exclusive fullscreen.
+fn maximize_main_window(app: &AppHandle) {
+  if let Some(window) = app.get_webview_window("main") {
+    let _ = window.show();
+    let _ = window.unminimize();
+    let _ = window.maximize();
+    let _ = window.set_focus();
+  }
+}
+
 fn emit_open_files(app: &AppHandle, paths: &[PathBuf]) {
   if paths.is_empty() {
     return;
@@ -88,6 +98,12 @@ fn take_pending_open_files(state: State<'_, PendingOpenFiles>) -> Vec<String> {
       .collect(),
     Err(_) => Vec::new(),
   }
+}
+
+/// Maximize the main window when the UI opens a document (file picker / DnD / etc.).
+#[tauri::command]
+fn maximize_main_window_cmd(app: AppHandle) {
+  maximize_main_window(&app);
 }
 
 /// Read a local PDF for the embedded editor (file-association / Open with).
@@ -130,6 +146,7 @@ async fn fetch_url_text(url: String) -> Result<String, String> {
 pub fn run() {
   // argv[0] is the executable; the rest may include PDF paths from the shell.
   let startup_files = collect_pdf_paths_from_args(std::env::args().skip(1));
+  let maximize_on_start = !startup_files.is_empty();
 
   tauri::Builder::default()
     .manage(PendingOpenFiles(Mutex::new(startup_files)))
@@ -138,15 +155,20 @@ pub fn run() {
       focus_main_window(&app);
       let paths = collect_pdf_paths_from_args(args.iter().skip(1).map(String::as_str));
       if !paths.is_empty() {
+        maximize_main_window(&app);
         emit_open_files(&app, &paths);
       }
     }))
     .invoke_handler(tauri::generate_handler![
       take_pending_open_files,
       read_local_file,
-      fetch_url_text
+      fetch_url_text,
+      maximize_main_window_cmd
     ])
-    .setup(|app| {
+    .setup(move |app| {
+      if maximize_on_start {
+        maximize_main_window(app.handle());
+      }
       if cfg!(debug_assertions) {
         app.handle().plugin(
           tauri_plugin_log::Builder::default()

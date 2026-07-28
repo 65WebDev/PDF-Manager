@@ -349,8 +349,35 @@ const TAURI_OPEN_BRIDGE = `
     return files;
   }
 
+  async function maximizeMainWindow(invoke) {
+    try {
+      if (typeof invoke === 'function') {
+        await invoke('maximize_main_window_cmd');
+        return;
+      }
+    } catch (err) {
+      console.warn('[Tauri] maximize via command failed', err);
+    }
+    try {
+      var tauri = window.__TAURI__;
+      var winApi = tauri && tauri.window;
+      var getWin = winApi && (winApi.getCurrentWindow || (winApi.Window && winApi.Window.getCurrent));
+      if (typeof getWin === 'function') {
+        var win = getWin.call(winApi);
+        if (win && typeof win.maximize === 'function') await win.maximize();
+      }
+    } catch (err2) {
+      console.warn('[Tauri] maximize via window API failed', err2);
+    }
+  }
+
   async function openFiles(files) {
     if (!files || !files.length) return;
+    try {
+      var inv = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
+      if (inv) await maximizeMainWindow(inv.bind(window.__TAURI__.core));
+      else await maximizeMainWindow(null);
+    } catch (_) {}
     var loader = getLoader();
     var tabsEnabled = getGlobalFn('pmTabsEnabled');
     var openTabs = getGlobalFn('pmOpenFilesAsTabs');
@@ -388,6 +415,9 @@ const TAURI_OPEN_BRIDGE = `
       endOsDragUi();
       return;
     }
+
+    // New document from OS / association / Explorer → maximize immediately.
+    await maximizeMainWindow(invoke);
 
     var clientPos = mapDragPos(position);
 

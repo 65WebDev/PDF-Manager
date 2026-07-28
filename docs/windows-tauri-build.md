@@ -171,7 +171,9 @@ Set-ExecutionPolicy -Scope Process Bypass
 
 > Windows PowerShell 5.1: файл должен быть в **UTF-8 с BOM** (так и сохранён в репозитории). Если копируете текст вручную в Блокнот — «Сохранить как» → кодировка **UTF-8**.
 
-Release tag: `windows-v{version}` из `src-tauri/tauri.conf.json` (сейчас, например, `windows-v0.1.8`).
+Release tag: `windows-v{version}` из `src-tauri/tauri.conf.json` (сейчас, например, `windows-v0.1.9`).
+
+При открытии PDF (ассоциация файла, «Открыть с помощью», DnD из Проводника, выбор файла в приложении) окно **разворачивается** (maximize), не exclusive fullscreen.
 
 ### Вручную через npm
 
