@@ -40397,23 +40397,22 @@ function pePrefersReducedMotion() {
 }
 
 /**
- * After a ±90° view rotate, fitScale changes (page axes swap) while zoomSlider
- * stays put — that used to snap the stage to a new CSS size the instant the
- * spin finished. Keep the absolute CSS scale (pdf-pt → px) continuous so the
- * post-render stage matches the rotated AABB of the pre-render stage.
+ * After a ±90° view rotate, fitScale changes (page axes swap). Keep the
+ * absolute CSS scale (pdf-pt → px) identical so the page does not zoom.
+ * _liveZoomMul may sit outside the slider range; the slider UI is clamped.
  */
 function pePreserveScaleAcrossRotation(prevScale) {
   if (!peState || !(prevScale > 0)) return;
   peUpdateStageMetrics();
   if (!(peState.fitScale > 0)) return;
+  const mul = prevScale / peState.fitScale;
+  peState._liveZoomMul = mul;
+  peState.scale = prevScale;
   const sl = document.getElementById('peScaleSlider');
   const minMul = peSliderToZoomMul(parseInt(sl?.min, 10) || 100);
   const maxMul = peSliderToZoomMul(parseInt(sl?.max, 10) || 200);
-  let mul = prevScale / peState.fitScale;
-  mul = Math.max(minMul, Math.min(maxMul, mul));
-  peState._liveZoomMul = mul;
-  peState.zoomSlider = peZoomMulToSlider(mul);
-  peState.scale = peState.fitScale * mul;
+  const sliderMul = Math.max(minMul, Math.min(maxMul, mul));
+  peState.zoomSlider = peZoomMulToSlider(sliderMul);
 }
 
 /** Compositor spin of the current stage before swapping to the re-rendered page. */
@@ -40447,43 +40446,21 @@ function peAnimateStageRotate(deg) {
   });
 }
 
-function peClearStageRotateAnim(opts) {
+function peClearStageRotateAnim() {
   const stage = document.getElementById('peStage');
   if (!stage) return;
-  const fadeIn = !!(opts && opts.fadeIn) && stage.style.opacity === '0';
   stage.classList.remove('pe-rotate-anim-active');
+  stage.style.transition = 'none';
   stage.style.transform = '';
+  stage.style.opacity = '';
   stage.style.willChange = '';
-  if (fadeIn) {
-    // Size already matches the rotated AABB — just ease the new upright bitmap in.
-    stage.style.transition = 'opacity 140ms ease-out';
-    void stage.offsetWidth;
-    stage.style.opacity = '1';
-    const clear = () => {
-      stage.style.transition = 'none';
-      stage.style.opacity = '';
-      stage.removeEventListener('transitionend', onFade);
-    };
-    const onFade = (e) => {
-      if (e && e.propertyName && e.propertyName !== 'opacity') return;
-      clear();
-    };
-    stage.addEventListener('transitionend', onFade);
-    setTimeout(clear, 200);
-  } else {
-    stage.style.transition = 'none';
-    stage.style.opacity = '';
-  }
 }
 
 async function peRotateView(deg) {
   if (!peState || peRotateViewBusy) return;
   peRotateViewBusy = true;
-  let didSpin = false;
-  let needFadeIn = false;
   try {
     const stage = document.getElementById('peStage');
-    const wrap = document.getElementById('peStageWrap');
     // Capture the stage center before the spin; transform-origin is center, so
     // it stays put visually and we re-anchor scroll there after the size swap.
     let anchorX = null, anchorY = null;
@@ -40498,7 +40475,6 @@ async function peRotateView(deg) {
 
     if (!pePrefersReducedMotion()) {
       await peAnimateStageRotate(deg);
-      didSpin = true;
       // Hide old (still sideways via CSS) content while we swap to the
       // upright re-render — avoids a one-frame double-rotated flash.
       if (stage) {
@@ -40565,26 +40541,9 @@ async function peRotateView(deg) {
     if (anchorX != null && anchorY != null) {
       peRestoreScrollToAnchor(anchorX, anchorY, 0.5, 0.5);
     }
-    // Fade only when zoom or on-screen position actually shifted (e.g. mul
-    // clamped to slider range). If both stayed put, reveal instantly.
-    if (didSpin) {
-      const scaleChanged = Math.abs((peState.scale || 0) - (prevScale || 0)) > 0.02;
-      let posChanged = false;
-      if (stage && anchorX != null && anchorY != null) {
-        const sr = stage.getBoundingClientRect();
-        if (sr.width > 0 && sr.height > 0) {
-          const cx = sr.left + sr.width / 2;
-          const cy = sr.top + sr.height / 2;
-          posChanged = Math.hypot(cx - anchorX, cy - anchorY) > 2;
-        }
-      } else if (wrap) {
-        posChanged = false;
-      }
-      needFadeIn = scaleChanged || posChanged;
-    }
     peCommitEditorHistory();
   } finally {
-    peClearStageRotateAnim({ fadeIn: needFadeIn });
+    peClearStageRotateAnim();
     peRotateViewBusy = false;
   }
 }
