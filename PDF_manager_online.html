@@ -40480,8 +40480,10 @@ async function peRotateView(deg) {
   if (!peState || peRotateViewBusy) return;
   peRotateViewBusy = true;
   let didSpin = false;
+  let needFadeIn = false;
   try {
     const stage = document.getElementById('peStage');
+    const wrap = document.getElementById('peStageWrap');
     // Capture the stage center before the spin; transform-origin is center, so
     // it stays put visually and we re-anchor scroll there after the size swap.
     let anchorX = null, anchorY = null;
@@ -40563,9 +40565,26 @@ async function peRotateView(deg) {
     if (anchorX != null && anchorY != null) {
       peRestoreScrollToAnchor(anchorX, anchorY, 0.5, 0.5);
     }
+    // Fade only when zoom or on-screen position actually shifted (e.g. mul
+    // clamped to slider range). If both stayed put, reveal instantly.
+    if (didSpin) {
+      const scaleChanged = Math.abs((peState.scale || 0) - (prevScale || 0)) > 0.02;
+      let posChanged = false;
+      if (stage && anchorX != null && anchorY != null) {
+        const sr = stage.getBoundingClientRect();
+        if (sr.width > 0 && sr.height > 0) {
+          const cx = sr.left + sr.width / 2;
+          const cy = sr.top + sr.height / 2;
+          posChanged = Math.hypot(cx - anchorX, cy - anchorY) > 2;
+        }
+      } else if (wrap) {
+        posChanged = false;
+      }
+      needFadeIn = scaleChanged || posChanged;
+    }
     peCommitEditorHistory();
   } finally {
-    peClearStageRotateAnim({ fadeIn: didSpin });
+    peClearStageRotateAnim({ fadeIn: needFadeIn });
     peRotateViewBusy = false;
   }
 }
