@@ -648,41 +648,47 @@ try {
 } catch (_) { /* ignore */ }
 if (windowsVersion) {
   html = html.replace(
-    /const PDF_MANAGER_WINDOWS_VERSION = '';/,
+    /const PDF_MANAGER_WINDOWS_VERSION = [^;]+;/,
     `const PDF_MANAGER_WINDOWS_VERSION = ${JSON.stringify(windowsVersion)};`,
   );
 }
 
-// If HTML build placeholders were not stamped by CI, copy numbers from the
-// local version feed so About can compare against newer releases.
+// Stamp editor build/date from the local version feed into About.
+// Always overwrite — CI-stamped offline HTML, old release copies, or
+// placeholders all must pick up the current version-feed.js / version.json
+// (otherwise a leftover build-N stays forever and Windows builds look stale).
+let stampedBuild = '';
+let stampedDate = '';
 try {
+  let feed = null;
+  const jsonPath = join(root, 'version.json');
   const feedPath = join(root, 'version-feed.js');
-  if (
-    existsSync(feedPath) &&
-    html.includes("const PDF_MANAGER_BUILD_VERSION = '__PDF_MANAGER_BUILD__'")
-  ) {
+  if (existsSync(jsonPath)) {
+    feed = JSON.parse(readFileSync(jsonPath, 'utf8'));
+  } else if (existsSync(feedPath)) {
     const feedText = readFileSync(feedPath, 'utf8');
     const m = feedText.match(
       /window\.__PDF_MANAGER_VERSION_FEED__\s*=\s*(\{[\s\S]*?\})\s*;/,
     );
-    if (m) {
-      const feed = JSON.parse(m[1]);
-      if (feed.build) {
-        html = html.replace(
-          /const PDF_MANAGER_BUILD_VERSION = '__PDF_MANAGER_BUILD__';/,
-          `const PDF_MANAGER_BUILD_VERSION = ${JSON.stringify(String(feed.build))};`,
-        );
-      }
-      if (feed.date) {
-        const dateOnly = String(feed.date).slice(0, 10);
-        html = html.replace(
-          /const PDF_MANAGER_BUILD_DATE = '__PDF_MANAGER_DATE__';/,
-          `const PDF_MANAGER_BUILD_DATE = ${JSON.stringify(dateOnly)};`,
-        );
-      }
-    }
+    if (m) feed = JSON.parse(m[1]);
   }
-} catch (_) { /* ignore */ }
+  if (feed && feed.build) {
+    stampedBuild = String(feed.build).trim();
+    html = html.replace(
+      /const PDF_MANAGER_BUILD_VERSION = [^;]+;/,
+      `const PDF_MANAGER_BUILD_VERSION = ${JSON.stringify(stampedBuild)};`,
+    );
+  }
+  if (feed && feed.date) {
+    stampedDate = String(feed.date).slice(0, 10);
+    html = html.replace(
+      /const PDF_MANAGER_BUILD_DATE = [^;]+;/,
+      `const PDF_MANAGER_BUILD_DATE = ${JSON.stringify(stampedDate)};`,
+    );
+  }
+} catch (err) {
+  console.warn('Could not stamp build version from version feed:', err && err.message ? err.message : err);
+}
 
 if (!html.includes('Tauri desktop bridge')) {
   // Insert before the document's final </html>. Never use a global
@@ -698,10 +704,15 @@ if (!html.includes('Tauri desktop bridge')) {
   }
 }
 writeFileSync(uiIndex, html, 'utf8');
+const stampInfo = [
+  windowsVersion ? `Windows ${windowsVersion}` : null,
+  stampedBuild || null,
+  stampedDate || null,
+].filter(Boolean).join(', ');
 console.log(
   'Wrote',
   uiIndex,
-  windowsVersion
-    ? `(Windows ${windowsVersion}, file-association + Explorer DnD bridge)`
+  stampInfo
+    ? `(${stampInfo}; file-association + Explorer DnD bridge)`
     : '(with file-association + Explorer DnD bridge)',
 );

@@ -260,6 +260,21 @@ if (-not $SkipNpmCi) {
   }
 }
 
+# Show which editor build-N will be stamped into About (from version.json).
+$verJsonPath = Join-Path $RepoRoot 'version.json'
+if (Test-Path -LiteralPath $verJsonPath) {
+  try {
+    $verInfo = Get-Content -LiteralPath $verJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($verInfo.build) {
+      Write-Host ("Editor build stamp: {0} (from version.json — keep this file up to date via git pull)" -f $verInfo.build) -ForegroundColor DarkGray
+    }
+  } catch {
+    Write-Host "Could not read version.json for build stamp preview." -ForegroundColor DarkGray
+  }
+} else {
+  Write-Host "WARN version.json missing — About may show an unknown/old editor build." -ForegroundColor Yellow
+}
+
 if ($Dev) {
   Write-Step "Dev mode: npm run tauri:dev"
   Write-Host "Window opens after compile. Stop: Ctrl+C" -ForegroundColor DarkGray
