@@ -33353,7 +33353,9 @@ function peAspectSnapTipText(o) {
 
 /**
  * Toast above the shape when the user left the target aspect and then
- * restored it via the magnet (resize or create). Stays ~1.4s, then fades out.
+ * restored it via the magnet (resize or create). Stays ~1.4s while the
+ * ratio remains at target, then fades out. Leaving the target aspect
+ * (see peSoftSnapAspectPx) hides the tip immediately.
  */
 function peShowAspectSnapRestoreTip(o) {
   const lbl = document.getElementById('peAspectSnapLabel');
@@ -36432,6 +36434,9 @@ function peSoftSnapAspectPx(d, wPx, hPx) {
   if (dAng > leaveDeg) {
     d.aspectLeftOriginal = true;
     d.aspectTipArmed = true;
+    // Delay/fade only while still at target aspect; leave → hide now
+    // (same gesture or a new resize while the previous tip is still up).
+    peHideAspectSnapLabel();
   }
 
   if (d.aspectSnapped) {
@@ -36818,6 +36823,7 @@ function peProcessDrag(clientX, clientY) {
       d.obj.w = Math.max(0.01, d.startW * scale);
       d.obj.h = Math.max(0.01, d.startH * scale);
       d.aspectSnapped = false;
+      peHideAspectSnapLabel();
     } else {
       const rot = -((d.obj.rot || 0) * Math.PI / 180);
       const vx = pt.x - d.anchorX, vy = pt.y - d.anchorY;
