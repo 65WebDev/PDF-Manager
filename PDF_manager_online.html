@@ -6882,6 +6882,57 @@
     let lastSelectedIndex = null;
     let multiSelectMode = false;
     let interactionMode = 'select'; // 'select' | 'nav'
+    // Desktop cursor tool (select / nav / loupe) is global across tabs and
+    // survives reload via localStorage. Read mode is never persisted —
+    // closing while reading restores «Режим выбора» on next open.
+    const PM_CURSOR_MODE_KEY = 'pmCursorMode';
+    let pmNeedRestoreCursorMode = true;
+
+    function pmGetPersistedCursorMode() {
+      try {
+        const v = localStorage.getItem(PM_CURSOR_MODE_KEY);
+        if (v === 'nav' || v === 'loupe' || v === 'select') return v;
+      } catch (_) { /* private mode / blocked storage */ }
+      return 'select';
+    }
+
+    function pmCurrentCursorModeId() {
+      if (typeof readModeActive !== 'undefined' && readModeActive) return 'select';
+      if (typeof loupeModeOn !== 'undefined' && loupeModeOn) return 'loupe';
+      return interactionMode === 'nav' ? 'nav' : 'select';
+    }
+
+    function pmPersistCursorMode(mode) {
+      if (typeof isTouchDevice !== 'undefined' && isTouchDevice) return;
+      const m = (mode === 'nav' || mode === 'loupe' || mode === 'select')
+        ? mode
+        : pmCurrentCursorModeId();
+      try { localStorage.setItem(PM_CURSOR_MODE_KEY, m); } catch (_) { /* best effort */ }
+    }
+
+    function pmApplyPersistedCursorMode(mode) {
+      if (typeof isTouchDevice !== 'undefined' && isTouchDevice) return;
+      if (isLoading || !pdfDoc) return;
+      const m = mode || pmGetPersistedCursorMode();
+      if (typeof readModeActive !== 'undefined' && readModeActive && typeof exitReadMode === 'function') {
+        exitReadMode(false);
+      }
+      if (m === 'loupe') {
+        if (typeof loupeModeOn !== 'undefined' && loupeModeOn) return;
+        if (typeof setReadLoupeSlots === 'function') setReadLoupeSlots(true);
+        if (typeof loupeModeOn !== 'undefined') loupeModeOn = true;
+        const loupeBtn = document.getElementById('loupeModeBtn');
+        if (loupeBtn) loupeBtn.classList.add('active-mode');
+        const selectModeBtn = document.getElementById('selectModeBtn');
+        const navModeBtn = document.getElementById('navModeBtn');
+        if (selectModeBtn) selectModeBtn.classList.remove('active-mode');
+        if (navModeBtn) navModeBtn.classList.remove('active-mode');
+        if (interactionMode !== 'select' && interactionMode !== 'nav') interactionMode = 'select';
+        if (typeof updateNavShiftCursorState === 'function') updateNavShiftCursorState();
+        return;
+      }
+      if (typeof setMode === 'function') setMode(m === 'nav' ? 'nav' : 'select');
+    }
 
     //=== READING MODE ===
     let readModeActive = false;
@@ -7495,6 +7546,12 @@
       isLoading = false;
       loadingOverlay.style.display = 'none';
       updateUIState();
+      // After the first document is ready, restore the last desktop cursor tool
+      // (select / nav / loupe). Later tab switches keep the live global mode.
+      if (pmNeedRestoreCursorMode && pdfDoc && !isTouchDevice) {
+        pmNeedRestoreCursorMode = false;
+        pmApplyPersistedCursorMode(pmGetPersistedCursorMode());
+      }
     }
 
     async function cancelLoading() {
@@ -13235,6 +13292,8 @@
       if (typeof updateZoomPanHandBadge === 'function') updateZoomPanHandBadge();
       if (typeof updateUndoRedoUI === 'function') updateUndoRedoUI();
       if (typeof updateNavShiftCursorState === 'function') updateNavShiftCursorState();
+      // Do not persist while reading (enterReadMode forces nav temporarily).
+      if (!readModeActive) pmPersistCursorMode(mode === 'nav' ? 'nav' : 'select');
     }
 
     // Navigation mode: grab and drag the canvas (pan) along the X and Y axes.
@@ -13375,6 +13434,7 @@
         loupeModeOn = true;
       } else if (loupeModeOn) {
         turnOffLoupeMode();
+        pmPersistCursorMode(interactionMode === 'nav' ? 'nav' : 'select');
         return;
       } else {
         loupeModeOn = true;
@@ -13391,7 +13451,15 @@
         updateMultiSelectMode();
       }
       updateNavShiftCursorState();
+      pmPersistCursorMode('loupe');
     }
+
+    // Persist cursor tool on tab/window close. Reading mode → select next time.
+    window.addEventListener('pagehide', () => {
+      if (typeof isTouchDevice !== 'undefined' && isTouchDevice) return;
+      if (typeof readModeActive !== 'undefined' && readModeActive) pmPersistCursorMode('select');
+      else pmPersistCursorMode(pmCurrentCursorModeId());
+    });
 
     // Click on the “Reading Mode” button. If it is now hidden under “Mode
     // increases” - first we change places, then we start reading as usual.
@@ -22858,7 +22926,7 @@ function pmCaptureActive() {
   }
   t.dirty = documentDirty; t.docHistory = docHistory; t.docHistoryIndex = docHistoryIndex;
   t.scale = currentScale; t.autoScale = autoScaleEnabled; t.scaleLocked = scaleUserLocked;
-  t.mobileMin = mobileMinScale; t.mode = interactionMode; t.multiSel = multiSelectMode;
+  t.mobileMin = mobileMinScale; t.multiSel = multiSelectMode;
   t.deletedHidden = deletedPagesHidden; t.scrollTop = scrollContainer.scrollTop;
   t.selected = [...selectedPages];
   t.lastSel = lastSelectedIndex;
@@ -22897,7 +22965,7 @@ async function pmActivate(id, skipCapture, keepSelection) {
 
   if (scaleSlider) scaleSlider.value = Math.max(0, Math.min(200, scaleToSlider(currentScale)));
   applyScale();
-  setMode(t.mode);
+  // Cursor tool (select / nav / loupe) is global — do not restore per-tab mode.
   if (multiSelectCheckbox) { multiSelectCheckbox.checked = t.multiSel; updateMultiSelectMode(); }
   // We restore the selection of pages explicitly (more reliably than through a history snapshot).
   selectedPages = new Set(t.selected || []);
@@ -23273,8 +23341,11 @@ async function pmCloseTab(id) {
       await pmActivate(next.id, true);
     } else {
       pmActiveId = null;
+      // Closing the last document while reading → next open uses select mode.
       if (typeof readModeActive !== 'undefined' && readModeActive && typeof exitReadMode === 'function') {
-        exitReadMode();
+        exitReadMode(false);
+        if (typeof setMode === 'function') setMode('select');
+        else if (typeof pmPersistCursorMode === 'function') pmPersistCursorMode('select');
       }
       pmClearToEmpty();
     }
