@@ -27033,6 +27033,8 @@ function editSelectedPage() {
   let textCopyClipboard = '';
   let textCopyCtxRange = null;
   let textCopyCtxPageIdx = null;
+  let textCopyCtxFracs = null;
+  let textCopyCtxKind = 'page'; // 'page' | 'markup-obj'
 
   function blurIfInside(el) {
     if (el && document.activeElement && el.contains(document.activeElement)) {
@@ -27167,6 +27169,58 @@ function editSelectedPage() {
     textCopyClipboard = '';
     textCopyCtxRange = null;
     textCopyCtxPageIdx = null;
+    textCopyCtxFracs = null;
+    textCopyCtxKind = 'page';
+    if (typeof peSyncTextSelMenuActive === 'function') {
+      peSyncTextSelMenuActive(new Set(), textCopyMenu);
+    }
+    textCopyMenu.querySelectorAll('.pe-text-sel-clear-sep, [data-action="clear-markup"]').forEach(el => {
+      el.hidden = true;
+      el.style.display = 'none';
+    });
+    const copyBtn = textCopyMenu.querySelector('.pe-text-sel-copy');
+    if (copyBtn) copyBtn.style.display = '';
+    const sep = textCopyMenu.querySelector('.pe-text-sel-sep');
+    if (sep) sep.style.display = '';
+  }
+
+  function showTextCopyMenu(e, text, range, pageIdx, opts) {
+    if (!textCopyMenu) return;
+    hideMenu();
+    const options = opts || {};
+    textCopyClipboard = text || '';
+    textCopyCtxRange = range || null;
+    textCopyCtxPageIdx = pageIdx != null ? pageIdx : null;
+    textCopyCtxKind = options.kind || 'page';
+    let fracs = options.fracs || null;
+    if ((!fracs || !fracs.length) && range && pageIdx != null) {
+      try { fracs = gridTextSelRangeToPageFracs(range, pageIdx); } catch (_) { fracs = []; }
+    }
+    textCopyCtxFracs = fracs || [];
+    syncPreviewTextCopyMenuActive(textCopyCtxFracs, pageIdx);
+
+    const hideCopy = textCopyCtxKind === 'markup-obj';
+    const copyBtn = textCopyMenu.querySelector('.pe-text-sel-copy');
+    if (copyBtn) copyBtn.style.display = hideCopy ? 'none' : '';
+    const sep = textCopyMenu.querySelector('.pe-text-sel-sep');
+    if (sep) sep.style.display = hideCopy ? 'none' : '';
+
+    // Same as pe: redact applies only to live page-text selection.
+    const showRedact = textCopyCtxKind === 'page';
+    textCopyMenu.querySelectorAll('.pe-text-sel-redact-sep, [data-action="redact-text"]').forEach(el => {
+      el.hidden = !showRedact;
+      el.style.display = showRedact ? '' : 'none';
+    });
+
+    textCopyMenu.classList.add('visible');
+    const w = textCopyMenu.offsetWidth;
+    const h = textCopyMenu.offsetHeight;
+    let x = e.clientX;
+    let y = e.clientY;
+    if (x + w > window.innerWidth - 6) x = window.innerWidth - w - 6;
+    if (y + h > window.innerHeight - 6) y = window.innerHeight - h - 6;
+    textCopyMenu.style.left = x + 'px';
+    textCopyMenu.style.top = y + 'px';
   }
 
   function getSelectionPageTextLayer(range) {
@@ -27369,23 +27423,6 @@ function editSelectedPage() {
       }
     } catch (_) {}
     return '';
-  }
-
-  function showTextCopyMenu(e, text, range, pageIdx) {
-    if (!textCopyMenu) return;
-    hideMenu();
-    textCopyClipboard = text;
-    textCopyCtxRange = range || null;
-    textCopyCtxPageIdx = pageIdx != null ? pageIdx : null;
-    textCopyMenu.classList.add('visible');
-    const w = textCopyMenu.offsetWidth;
-    const h = textCopyMenu.offsetHeight;
-    let x = e.clientX;
-    let y = e.clientY;
-    if (x + w > window.innerWidth - 6) x = window.innerWidth - w - 6;
-    if (y + h > window.innerHeight - 6) y = window.innerHeight - h - 6;
-    textCopyMenu.style.left = x + 'px';
-    textCopyMenu.style.top = y + 'px';
   }
 
   async function copyTextToClipboard(text) {
@@ -27597,6 +27634,18 @@ function editSelectedPage() {
           if (sel && sel.rangeCount && !sel.isCollapsed) capturedRange = sel.getRangeAt(0).cloneRange();
         } catch (_) {}
         showTextCopyMenu(e, selectedText, capturedRange, idx);
+        return;
+      }
+      // No text selection — RMB on an existing pe text-markup (same as editor).
+      const hit = typeof gridHitTestTextMarkups === 'function'
+        ? gridHitTestTextMarkups(idx, e.clientX, e.clientY) : [];
+      if (hit && hit.length) {
+        e.preventDefault();
+        let fracs = [];
+        hit.forEach(o => {
+          if (typeof peMarkupFracsOf === 'function') fracs = fracs.concat(peMarkupFracsOf(o));
+        });
+        showTextCopyMenu(e, '', null, idx, { kind: 'markup-obj', fracs });
         return;
       }
     }
@@ -27900,6 +27949,114 @@ function editSelectedPage() {
     }).filter(r => (r.x1 - r.x0) > 0.01 && (r.y1 - r.y0) > 0.01);
   }
 
+  /** Selection → page-fraction rects (same space as pe objects / peTextSelRangeToPageFracs). */
+  function gridTextSelRangeToPageFracs(range, pageIdx) {
+    if (!range || pageIdx == null) return [];
+    const pageDiv = document.querySelector('.page[data-index="' + pageIdx + '"]');
+    if (!pageDiv) return [];
+    const layer = pageDiv.querySelector('.page-text-layer');
+    const inner = layer && layer.querySelector('.page-text-layer-inner.textLayer');
+    if (!layer || !inner) return [];
+    try {
+      if (!range.intersectsNode(inner)) {
+        const sel = window.getSelection();
+        if (!sel || !sel.rangeCount || sel.isCollapsed) return [];
+        range = sel.getRangeAt(0);
+        if (!range.intersectsNode(inner)) return [];
+      }
+    } catch (_) { return []; }
+    if (typeof textLayerSelectionRectsIn !== 'function' || typeof textLayerMergeSelectionRects !== 'function') {
+      return [];
+    }
+    let merged;
+    try {
+      const glyphRects = textLayerSelectionRectsIn(inner, range);
+      merged = textLayerMergeSelectionRects(glyphRects || []);
+    } catch (_) { return []; }
+    if (!merged || !merged.length) return [];
+    const lr = layer.getBoundingClientRect();
+    if (!(lr.width > 0) || !(lr.height > 0)) return [];
+    return merged.map(m => {
+      const x = (m.left - lr.left) / lr.width;
+      const y = (m.top - lr.top) / lr.height;
+      const w = (m.right - m.left) / lr.width;
+      const h = (m.bottom - m.top) / lr.height;
+      return {
+        x: Math.max(0, Math.min(1, x)),
+        y: Math.max(0, Math.min(1, y)),
+        w: Math.max(0.001, Math.min(1 - Math.max(0, x), w)),
+        h: Math.max(0.001, Math.min(1 - Math.max(0, y), h))
+      };
+    }).filter(r => r.w > 0.001 && r.h > 0.001);
+  }
+
+  /** Hit-test pe text-markup objects under a client point on a preview page. */
+  function gridHitTestTextMarkups(pageIdx, clientX, clientY) {
+    if (pageIdx == null || typeof peLoadPageEditorObjects !== 'function') return [];
+    const pageDiv = document.querySelector('.page[data-index="' + pageIdx + '"]');
+    if (!pageDiv) return [];
+    const layer = pageDiv.querySelector('.page-text-layer')
+      || pageDiv.querySelector('.img-wrapper')
+      || pageDiv;
+    const r = layer.getBoundingClientRect();
+    if (!(r.width > 0) || !(r.height > 0)) return [];
+    const fx = (clientX - r.left) / r.width;
+    const fy = (clientY - r.top) / r.height;
+    if (fx < 0 || fy < 0 || fx > 1 || fy > 1) return [];
+    const objects = (typeof peHydrateEditorObjects === 'function')
+      ? peHydrateEditorObjects(peLoadPageEditorObjects(pageIdx), pageIdx)
+      : peLoadPageEditorObjects(pageIdx);
+    return (objects || []).filter(o => {
+      if (typeof peIsPageTextMarkup !== 'function' || !peIsPageTextMarkup(o)) return false;
+      const fracs = typeof peMarkupFracsOf === 'function' ? peMarkupFracsOf(o) : [];
+      return fracs.some(f => fx >= f.x && fx <= f.x + f.w && fy >= f.y && fy <= f.y + f.h);
+    });
+  }
+
+  function syncPreviewTextCopyMenuActive(fracs, pageIdx) {
+    if (!textCopyMenu) return;
+    let related = [];
+    if (fracs && fracs.length && typeof peFindRelatedTextMarkupsIn === 'function'
+        && typeof peLoadPageEditorObjects === 'function') {
+      const objects = (typeof peHydrateEditorObjects === 'function')
+        ? peHydrateEditorObjects(peLoadPageEditorObjects(pageIdx), pageIdx)
+        : peLoadPageEditorObjects(pageIdx);
+      related = peFindRelatedTextMarkupsIn(objects, fracs);
+    }
+    const activeSet = (typeof peActiveActionsForMarkups === 'function')
+      ? peActiveActionsForMarkups(related) : new Set();
+    if (typeof peSyncTextSelMenuActive === 'function') {
+      peSyncTextSelMenuActive(activeSet, textCopyMenu);
+    } else {
+      textCopyMenu.querySelectorAll('.pe-text-sel-icons button[data-action]').forEach(btn => {
+        const act = btn.dataset.action;
+        if (act === 'clear-markup' || act === 'redact-text') return;
+        btn.classList.toggle('active', activeSet.has(act));
+      });
+    }
+    const showClear = textCopyCtxKind === 'markup-obj' || activeSet.size > 0;
+    textCopyMenu.querySelectorAll('.pe-text-sel-clear-sep, [data-action="clear-markup"]').forEach(el => {
+      el.hidden = !showClear;
+      el.style.display = showClear ? '' : 'none';
+    });
+    return related;
+  }
+
+  function refreshPreviewTextCopyMenuAfterMarkup(fracs, pageIdx, kind) {
+    if (!textCopyMenu) return;
+    textCopyCtxFracs = fracs || [];
+    textCopyCtxPageIdx = pageIdx;
+    textCopyCtxKind = kind || 'page';
+    const related = syncPreviewTextCopyMenuActive(textCopyCtxFracs, pageIdx) || [];
+    if (!related.length && textCopyCtxKind === 'markup-obj') {
+      hideTextCopyMenu();
+      return;
+    }
+    if (!textCopyMenu.classList.contains('visible')) {
+      textCopyMenu.classList.add('visible');
+    }
+  }
+
   // Dedicated preview refresh from known bytes (one pdf.js load for raster
   // + HQ cache + text layer). Avoids concurrent pdfDoc.save() with history.
   async function applyMarkupBytesToPreview(pageIdx, bytes) {
@@ -28049,6 +28206,81 @@ function editSelectedPage() {
     }
   }
 
+  // Preview HL/UL/SO → same pe editor objects (editable later in page editor).
+  // Does NOT bake into the PDF content stream.
+  async function applyPreviewTextMarkupOnPage(pageIdx, fracs, action) {
+    if (pageIdx == null || !fracs || !fracs.length) return;
+    if (typeof peUpsertTextMarkupsOnPage !== 'function') return;
+    if (!pdfDoc) return;
+
+    const canSuspend = (typeof historyPushSuspended !== 'undefined');
+    const wasSuspended = canSuspend ? historyPushSuspended : false;
+    if (canSuspend) historyPushSuspended = true;
+
+    try {
+      if (typeof peEnsurePageNormSize === 'function') peEnsurePageNormSize(pageIdx);
+
+      let objects;
+      let seq;
+      if (typeof peState !== 'undefined' && peState && peState.idx === pageIdx) {
+        objects = peState.objects.slice();
+        seq = peState.seq;
+      } else {
+        objects = (typeof peHydrateEditorObjects === 'function')
+          ? peHydrateEditorObjects(peLoadPageEditorObjects(pageIdx), pageIdx)
+          : peLoadPageEditorObjects(pageIdx);
+        seq = objects.reduce((m, o) => Math.max(m, (o && o.id) || 0), 0);
+      }
+
+      const result = peUpsertTextMarkupsOnPage(pageIdx, action, fracs, { objects, seq });
+      if (!result.changed) return;
+
+      if (typeof peState !== 'undefined' && peState && peState.idx === pageIdx) {
+        peState.objects = result.objects;
+        peState.seq = result.nextSeq;
+        // Drop selection if deleted.
+        if (peState.sel && !result.objects.includes(peState.sel)) peState.sel = null;
+        peState.multiSel = (peState.multiSel || []).filter(o => result.objects.includes(o));
+        if (typeof peRedrawObjects === 'function') peRedrawObjects();
+        if (typeof peCommitEditorHistory === 'function') peCommitEditorHistory();
+      }
+
+      if (typeof peSavePageEditorObjects === 'function') {
+        peSavePageEditorObjects(pageIdx, result.objects);
+      }
+
+      if (typeof whenPdfDocIdle === 'function') await whenPdfDocIdle();
+      const bytes = new Uint8Array(await pdfDoc.save());
+      try {
+        const loadBytes = (typeof peClonePdfBytes === 'function')
+          ? peClonePdfBytes(bytes) : bytes.slice();
+        pdfDoc = await PDFLib.PDFDocument.load(loadBytes);
+      } catch (_) { /* keep previous pdfDoc */ }
+
+      if (typeof hqPdfjsToken === 'number') hqPdfjsToken++;
+      if (typeof hqUpgraded !== 'undefined' && hqUpgraded && hqUpgraded.clear) hqUpgraded.clear();
+
+      await applyMarkupBytesToPreview(pageIdx, bytes);
+
+      if (typeof commitHistoryStep === 'function' && typeof historyCommitChain !== 'undefined') {
+        const marked = (typeof markedForDeletion !== 'undefined')
+          ? [...markedForDeletion].sort((x, y) => x - y) : [];
+        historyCommitChain = historyCommitChain
+          .then(() => commitHistoryStep(Promise.resolve(bytes), marked, [pageIdx]))
+          .catch(e => console.warn('history commit error', e));
+        if (typeof documentDirty !== 'undefined') documentDirty = true;
+        if (typeof updateInfo === 'function') updateInfo();
+        if (typeof updateStickyFileBar === 'function') updateStickyFileBar();
+        if (typeof pmOnDocumentDirtyChanged === 'function') pmOnDocumentDirtyChanged();
+      } else {
+        historyChangeHint = [pageIdx];
+        if (typeof setDocumentDirty === 'function') setDocumentDirty(true);
+      }
+    } finally {
+      if (canSuspend) historyPushSuspended = wasSuspended;
+    }
+  }
+
   // Cover selected page text with the current redact fill (no confirmation).
   // Same path as editor confirm / “Затереть текст”: pePaintBlackRedactRect
   // (visual/normalized cover + region markers); regional scrub on export/save.
@@ -28168,25 +28400,88 @@ function editSelectedPage() {
         void copyTextToClipboard(text);
         return;
       }
-      if (action === 'highlight' || action === 'strikeout' || action === 'underline' || action === 'comment' || action === 'redact-text') {
+      if (action === 'highlight' || action === 'strikeout' || action === 'underline'
+          || action === 'comment' || action === 'redact-text' || action === 'clear-markup') {
         let range = textCopyCtxRange;
         const pageIdx = textCopyCtxPageIdx;
-        hideTextCopyMenu();
-        if (pageIdx == null) return;
-        let rects = range ? gridTextSelRangeToPdfRects(range, pageIdx) : [];
-        if (!rects.length) {
+        let fracs = textCopyCtxFracs ? textCopyCtxFracs.slice() : [];
+        const kind = textCopyCtxKind;
+        if (pageIdx == null) { hideTextCopyMenu(); return; }
+
+        if ((!fracs || !fracs.length) && range) {
+          try { fracs = gridTextSelRangeToPageFracs(range, pageIdx); } catch (_) { fracs = []; }
+        }
+        if ((!fracs || !fracs.length) && range) {
           try {
             const sel = window.getSelection();
             if (sel && sel.rangeCount && !sel.isCollapsed) {
-              rects = gridTextSelRangeToPdfRects(sel.getRangeAt(0), pageIdx);
+              fracs = gridTextSelRangeToPageFracs(sel.getRangeAt(0), pageIdx);
             }
           } catch (_) {}
         }
-        if (!rects.length) return;
-        // Preview “Комментарий” opens the page editor with a movable callout
-        // object (bake would only freeze a static drawing).
+
+        // Redact still uses PDF-point bake (same as pe confirm).
+        if (action === 'redact-text') {
+          hideTextCopyMenu();
+          let rects = range ? gridTextSelRangeToPdfRects(range, pageIdx) : [];
+          if (!rects.length) {
+            try {
+              const sel = window.getSelection();
+              if (sel && sel.rangeCount && !sel.isCollapsed) {
+                rects = gridTextSelRangeToPdfRects(sel.getRangeAt(0), pageIdx);
+              }
+            } catch (_) {}
+          }
+          if (!rects.length) return;
+          gridMarkupBakeChain = gridMarkupBakeChain
+            .then(() => bakeTextRedactOnPage(pageIdx, rects))
+            .catch(err => console.error('text redact bake failed', err));
+          return;
+        }
+
+        // Comment: toggle-off existing callout in-place; otherwise open pe to create.
         if (action === 'comment') {
-          // Arm OSK now — applyPreviewCalloutInEditor is async and loses the gesture.
+          if (fracs && fracs.length && typeof peFindRelatedTextMarkupsIn === 'function'
+              && typeof peLoadPageEditorObjects === 'function') {
+            const objects = (typeof peHydrateEditorObjects === 'function')
+              ? peHydrateEditorObjects(peLoadPageEditorObjects(pageIdx), pageIdx)
+              : peLoadPageEditorObjects(pageIdx);
+            const related = peFindRelatedTextMarkupsIn(objects, fracs);
+            if (related.some(o => o && o.type === 'callout')) {
+              hideTextCopyMenu();
+              gridMarkupBakeChain = gridMarkupBakeChain
+                .then(() => applyPreviewTextMarkupOnPage(pageIdx, fracs, 'comment'))
+                .catch(err => console.error('text callout remove failed', err));
+              return;
+            }
+          }
+          hideTextCopyMenu();
+          let rects = range ? gridTextSelRangeToPdfRects(range, pageIdx) : [];
+          if (!rects.length && fracs && fracs.length) {
+            // Convert fracs → PDF pts when opened from markup-obj hit.
+            try {
+              const vp = gridMarkupViewportForPage(pageIdx);
+              if (vp) {
+                rects = fracs.map(f => {
+                  const tl = vp.convertToPdfPoint(f.x * vp.width, f.y * vp.height);
+                  const br = vp.convertToPdfPoint((f.x + f.w) * vp.width, (f.y + f.h) * vp.height);
+                  return {
+                    x0: Math.min(tl[0], br[0]), y0: Math.min(tl[1], br[1]),
+                    x1: Math.max(tl[0], br[0]), y1: Math.max(tl[1], br[1])
+                  };
+                });
+              }
+            } catch (_) {}
+          }
+          if (!rects.length) {
+            try {
+              const sel = window.getSelection();
+              if (sel && sel.rangeCount && !sel.isCollapsed) {
+                rects = gridTextSelRangeToPdfRects(sel.getRangeAt(0), pageIdx);
+              }
+            } catch (_) {}
+          }
+          if (!rects.length) return;
           if (typeof isTouchDevice !== 'undefined' && isTouchDevice
               && typeof peArmOskProxy === 'function') {
             peArmOskProxy();
@@ -28196,15 +28491,28 @@ function editSelectedPage() {
             .catch(err => console.error('text callout failed', err));
           return;
         }
-        if (action === 'redact-text') {
+
+        if (!fracs || !fracs.length) { hideTextCopyMenu(); return; }
+
+        // Clear closes the menu (same as pe). HL/UL/SO keep it and refresh active icons.
+        if (action === 'clear-markup') {
+          hideTextCopyMenu();
           gridMarkupBakeChain = gridMarkupBakeChain
-            .then(() => bakeTextRedactOnPage(pageIdx, rects))
-            .catch(err => console.error('text redact bake failed', err));
+            .then(() => applyPreviewTextMarkupOnPage(pageIdx, fracs, action))
+            .catch(err => console.error('text markup apply failed', err));
           return;
         }
+
+        // HL / UL / SO → pe objects (editable in page editor); refresh active buttons.
         gridMarkupBakeChain = gridMarkupBakeChain
-          .then(() => bakeTextMarkupOnPage(pageIdx, rects, action))
-          .catch(err => console.error('text markup bake failed', err));
+          .then(async () => {
+            await applyPreviewTextMarkupOnPage(pageIdx, fracs, action);
+            refreshPreviewTextCopyMenuAfterMarkup(fracs, pageIdx, kind);
+            if (kind === 'page' && range && typeof peRestoreTextSelRange === 'function') {
+              peRestoreTextSelRange(range);
+            }
+          })
+          .catch(err => console.error('text markup apply failed', err));
       }
     });
   }
@@ -35574,7 +35882,12 @@ function peMarkupFracsRelated(aFracs, bFracs) {
 
 function peFindRelatedTextMarkups(fracs) {
   if (!peState || !fracs || !fracs.length) return [];
-  return peState.objects.filter(o =>
+  return peFindRelatedTextMarkupsIn(peState.objects, fracs);
+}
+
+function peFindRelatedTextMarkupsIn(objects, fracs) {
+  if (!fracs || !fracs.length) return [];
+  return (objects || []).filter(o =>
     peIsPageTextMarkup(o) && peMarkupFracsRelated(fracs, peMarkupFracsOf(o)));
 }
 
@@ -35588,17 +35901,75 @@ function peActiveActionsForMarkups(objs) {
   return set;
 }
 
-function peSyncTextSelMenuActive(activeSet) {
-  const menu = document.getElementById('peTextSelCtxMenu');
+function peSyncTextSelMenuActive(activeSet, menuEl) {
+  const menu = menuEl || document.getElementById('peTextSelCtxMenu');
   if (!menu) return;
   const set = activeSet instanceof Set ? activeSet : new Set(activeSet || []);
-  menu.querySelectorAll('.pe-text-sel-icons button[data-action]').forEach(btn => {
+  const buttons = menu.querySelectorAll('.pe-text-sel-icons button[data-action], button[data-action]');
+  buttons.forEach(btn => {
+    if (!btn.closest('.pe-text-sel-icons') && menu.id === 'peTextSelCtxMenu') return;
     const act = btn.dataset.action;
-    if (act === 'clear-markup' || act === 'redact-text') return;
+    if (act === 'clear-markup' || act === 'redact-text' || act === 'copy-text') return;
     const on = set.has(act);
     btn.classList.toggle('active', on);
     btn.setAttribute('aria-pressed', on ? 'true' : 'false');
   });
+}
+
+/**
+ * Toggle highlight / strikeout / underline / clear on page-fraction rects.
+ * Works on any objects array (page editor live state OR catalog meta).
+ * Returns { objects, nextSeq, changed, related }.
+ */
+function peUpsertTextMarkupsOnPage(pageIdx, action, fracs, opts) {
+  const options = opts || {};
+  let objects = (options.objects || []).slice();
+  let seq = options.seq != null ? options.seq
+    : objects.reduce((m, o) => Math.max(m, (o && o.id) || 0), 0);
+  const related = peFindRelatedTextMarkupsIn(objects, fracs);
+  let changed = false;
+
+  if (action === 'clear-markup') {
+    if (related.length) {
+      const ids = new Set(related.map(o => o.id));
+      objects = objects.filter(o => !ids.has(o.id));
+      changed = true;
+    }
+    return { objects, nextSeq: seq, changed, related };
+  }
+
+  if (action === 'highlight' || action === 'strikeout' || action === 'underline') {
+    const existing = related.filter(o => o.type === action);
+    if (existing.length) {
+      const ids = new Set(existing.map(o => o.id));
+      objects = objects.filter(o => !ids.has(o.id));
+      changed = true;
+    } else if (fracs && fracs.length) {
+      const color = action === 'highlight' ? '#ffe45e' : '#e74c3c';
+      fracs.forEach(r => {
+        objects.push({
+          id: ++seq,
+          type: action, color,
+          x: r.x, y: r.y, w: r.w, h: r.h
+        });
+      });
+      changed = true;
+    }
+    return { objects, nextSeq: seq, changed, related };
+  }
+
+  // Comment create needs pe UI; here we only toggle-off an existing callout.
+  if (action === 'comment') {
+    const existing = related.filter(o => o.type === 'callout');
+    if (existing.length) {
+      const ids = new Set(existing.map(o => o.id));
+      objects = objects.filter(o => !ids.has(o.id));
+      changed = true;
+    }
+    return { objects, nextSeq: seq, changed, related };
+  }
+
+  return { objects, nextSeq: seq, changed: false, related };
 }
 
 function peShowTextSelCtxMenu(clientX, clientY, info) {
@@ -35788,14 +36159,9 @@ function peRefreshTextSelMarkupMenu(fracs) {
  */
 function peToggleTextMarkupsAtFracs(action, fracs) {
   if (!peState || !fracs || !fracs.length) return fracs || [];
-  const related = peFindRelatedTextMarkups(fracs);
-
-  if (action === 'clear-markup') {
-    if (related.length) peDeleteObjects(related);
-    return fracs;
-  }
 
   if (action === 'comment') {
+    const related = peFindRelatedTextMarkups(fracs);
     const existing = related.find(o => o.type === 'callout');
     if (existing) {
       peDeleteObjects([existing]);
@@ -35807,22 +36173,20 @@ function peToggleTextMarkupsAtFracs(action, fracs) {
     return fracs;
   }
 
-  if (action === 'highlight' || action === 'strikeout' || action === 'underline') {
-    const existing = related.filter(o => o.type === action);
-    if (existing.length) {
-      peDeleteObjects(existing);
-      return fracs;
-    }
-    const color = action === 'highlight' ? '#ffe45e' : '#e74c3c';
-    fracs.forEach(r => {
-      peState.objects.push({
-        id: ++peState.seq,
-        type: action, color,
-        x: r.x, y: r.y, w: r.w, h: r.h
-      });
+  if (action === 'highlight' || action === 'strikeout' || action === 'underline'
+      || action === 'clear-markup') {
+    const result = peUpsertTextMarkupsOnPage(peState.idx, action, fracs, {
+      objects: peState.objects,
+      seq: peState.seq
     });
-    peRedrawObjects();
-    peCommitEditorHistory();
+    if (result.changed) {
+      peState.objects = result.objects;
+      peState.seq = result.nextSeq;
+      if (peState.sel && !result.objects.includes(peState.sel)) peState.sel = null;
+      peState.multiSel = (peState.multiSel || []).filter(o => result.objects.includes(o));
+      peRedrawObjects();
+      peCommitEditorHistory();
+    }
     return fracs;
   }
   return fracs;
