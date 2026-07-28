@@ -6,10 +6,11 @@
  *   TAURI_SKIP_UPLOAD=1
  *
  * After a successful upload also:
- *   - refreshes the About version-feed (windowsVersion)
- *   - rewrites Windows download links in README.md to this version
- *   - commits/pushes README.md to the current branch (unless SKIP_README_COMMIT=1)
+ *   - refreshes the About version-feed (windowsVersion) and commits it to the branch
+ *   - rewrites Windows download links in README.md and index.html
+ *   - commits/pushes those meta files (unless SKIP_META_COMMIT=1)
  *   - updates the GitHub repository description with the current Windows tag
+ *   - rewrites the release notes body and drops leftover setup assets from older versions
  *
  * Requirements:
  *   - GitHub CLI (`gh`) installed and authenticated (`gh auth login`)
@@ -26,6 +27,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
 const REPO_SLUG = '5451165-bot/PDF-Manager';
 const README_PATH = join(root, 'README.md');
+const INDEX_PATH = join(root, 'index.html');
 
 function skipUpload() {
   const v = String(process.env.TAURI_SKIP_UPLOAD || '').trim().toLowerCase();
@@ -199,8 +201,13 @@ function updateReadmeWindowsLinks({ version, tag, setupName, portableName }) {
 
   const setupFile = setupName || `PDF.Manager_${version}_x64-setup.exe`;
   const portableFile = portableName || 'pdf-manager.exe';
-  const setupUrl = `https://github.com/${REPO_SLUG}/releases/download/${tag}/${setupFile}`;
-  const portableUrl = `https://github.com/${REPO_SLUG}/releases/download/${tag}/${portableFile}`;
+  // GitHub release asset URLs: spaces → %20; keep dotted PDF.Manager_* as-is.
+  const setupUrl =
+    `https://github.com/${REPO_SLUG}/releases/download/${tag}/` +
+    encodeURIComponent(setupFile).replace(/%2F/gi, '/');
+  const portableUrl =
+    `https://github.com/${REPO_SLUG}/releases/download/${tag}/` +
+    encodeURIComponent(portableFile).replace(/%2F/gi, '/');
   const tagUrl = `https://github.com/${REPO_SLUG}/releases/tag/${tag}`;
 
   let text = readFileSync(README_PATH, 'utf8');
@@ -235,34 +242,133 @@ function updateReadmeWindowsLinks({ version, tag, setupName, portableName }) {
   return true;
 }
 
-function commitAndPushReadme(version, tag) {
-  if (envFlag('SKIP_README_COMMIT')) {
-    console.log('SKIP_README_COMMIT=1 — README изменён локально, commit/push пропущен.');
+/**
+ * Update fallback Windows download hrefs on the GitHub Pages landing page.
+ * Runtime JS still prefers version.json when available.
+ */
+function updateIndexWindowsLinks({ version, tag, setupName, portableName }) {
+  if (!existsSync(INDEX_PATH)) {
+    console.warn('index.html не найден — пропускаю обновление ссылок.');
+    return false;
+  }
+  const setupFile = setupName || `PDF.Manager_${version}_x64-setup.exe`;
+  const portableFile = portableName || 'pdf-manager.exe';
+  const setupUrl =
+    `https://github.com/${REPO_SLUG}/releases/download/${tag}/` +
+    encodeURIComponent(setupFile).replace(/%2F/gi, '/');
+  const portableUrl =
+    `https://github.com/${REPO_SLUG}/releases/download/${tag}/` +
+    encodeURIComponent(portableFile).replace(/%2F/gi, '/');
+
+  let text = readFileSync(INDEX_PATH, 'utf8');
+  const before = text;
+  text = text.replace(
+    /id="downloadWindowsSetupBtn" href="[^"]+"/,
+    `id="downloadWindowsSetupBtn" href="${setupUrl}"`,
+  );
+  text = text.replace(
+    /id="downloadWindowsPortableBtn" href="[^"]+"/,
+    `id="downloadWindowsPortableBtn" href="${portableUrl}"`,
+  );
+  if (text === before) {
+    console.log('index.html уже содержит актуальные Windows-ссылки.');
+    return false;
+  }
+  writeFileSync(INDEX_PATH, text, 'utf8');
+  console.log('index.html: обновлены ссылки на', tag);
+  return true;
+}
+
+function resolveGitBin() {
+  if (process.platform === 'win32') {
+    const where = spawnSync('where.exe', ['git'], { encoding: 'utf8' });
+    const lines = (where.stdout || '')
+      .split(/\r?\n/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const exe = lines.find((p) => /\.exe$/i.test(p));
+    return exe || lines[0] || null;
+  }
+  const which = spawnSync('which', ['git'], { encoding: 'utf8' });
+  const path = (which.stdout || '').trim();
+  return which.status === 0 && path ? path : null;
+}
+
+function commitAndPushReleaseMeta(version, tag, paths) {
+  if (envFlag('SKIP_README_COMMIT') || envFlag('SKIP_META_COMMIT')) {
+    console.log('SKIP_META_COMMIT — локальные файлы обновлены, commit/push пропущен.');
     return;
   }
 
-  const status = runGit(['status', '--porcelain', '--', 'README.md']);
+  const gitBin = resolveGitBin();
+  if (!gitBin) {
+    console.warn('git не найден в PATH — README/version-feed не запушены.');
+    console.warn('Добавьте Git в PATH или выполните вручную: git add/commit/push для');
+    for (const p of paths) console.warn('  -', p);
+    return;
+  }
+
+  const existing = paths.filter((p) => existsSync(p));
+  if (!existing.length) return;
+
+  const run = (args, opts = {}) =>
+    spawnSync(gitBin, args, {
+      cwd: root,
+      encoding: 'utf8',
+      windowsHide: true,
+      ...opts,
+    });
+
+  const rel = existing.map((p) => {
+    if (p.startsWith(root)) return p.slice(root.length).replace(/^[/\\]/, '');
+    return p;
+  });
+  run(['add', '--', ...rel]);
+
+  const status = run(['status', '--porcelain', '--', ...rel]);
   if (!(status.stdout || '').trim()) {
-    console.log('README.md не изменён в git — commit не нужен.');
+    console.log('Метаданные релиза не изменились в git — commit не нужен.');
     return;
   }
 
-  runGit(['add', 'README.md']);
-  const commit = runGit(
-    ['commit', '-m', `docs: point Windows download links to ${tag}`],
+  const commit = run(
+    ['commit', '-m', `docs: sync Windows ${tag} release links and version feed`],
     { stdio: 'inherit' },
   );
   if (commit.status !== 0) {
-    console.warn('Не удалось закоммитить README.md.');
+    console.warn('Не удалось закоммитить метаданные Windows-релиза.');
     return;
   }
 
-  const branch = (runGit(['rev-parse', '--abbrev-ref', 'HEAD']).stdout || '').trim() || 'main';
-  const push = runGit(['push', 'origin', `HEAD:${branch}`], { stdio: 'inherit' });
+  const branch = (run(['rev-parse', '--abbrev-ref', 'HEAD']).stdout || '').trim() || 'main';
+  const push = run(['push', 'origin', `HEAD:${branch}`], { stdio: 'inherit' });
   if (push.status !== 0) {
-    console.warn(`Push README.md в origin/${branch} не удался (релиз уже загружен).`);
+    console.warn(`Push в origin/${branch} не удался (релиз уже загружен).`);
   } else {
-    console.log(`README.md запушен в origin/${branch}.`);
+    console.log(`Метаданные Windows-релиза запушены в origin/${branch}.`);
+  }
+}
+
+/** Remove leftover setup exes from this tag that do not match the current version. */
+function pruneStaleSetupAssets(ghBin, tag, version, keepNames) {
+  const view = runGh(ghBin, ['release', 'view', tag, '--json', 'assets']);
+  if (view.status !== 0 || !view.stdout) return;
+  let assets = [];
+  try {
+    assets = JSON.parse(view.stdout).assets || [];
+  } catch {
+    return;
+  }
+  const keep = new Set((keepNames || []).filter(Boolean));
+  for (const asset of assets) {
+    const name = String(asset.name || '');
+    if (!/setup\.exe$/i.test(name)) continue;
+    if (keep.has(name)) continue;
+    // Only drop other PDF Manager setup builds on this same tag.
+    if (!/PDF[ .]?Manager/i.test(name)) continue;
+    if (name.includes(version)) continue;
+    console.log(`Удаляю устаревший asset с ${tag}: ${name}`);
+    runGh(ghBin, ['release', 'delete-asset', tag, name, '--yes'], { stdio: 'inherit' });
   }
 }
 
@@ -390,7 +496,11 @@ function main() {
     console.log('\nГотово. Тег release:', tag);
   }
 
+  pruneStaleSetupAssets(ghBin, tag, version, [setupName, portableName]);
+
   // Refresh About update-check feed with the new Windows version.
+  // Files are written locally; we commit them together with README/index below
+  // (do not SKIP_COMMIT here — otherwise main keeps an old windowsVersion).
   console.log('Обновляю version-feed (Windows)…');
   const feed = spawnSync(
     process.platform === 'win32' ? 'node.exe' : 'node',
@@ -412,14 +522,25 @@ function main() {
     console.warn('version-feed обновить не удалось (установщик уже загружен).');
   }
 
-  // Keep GitHub README / repo description in sync with this Windows build.
-  const readmeChanged = updateReadmeWindowsLinks({
+  // Keep GitHub README / landing / repo description in sync with this Windows build.
+  updateReadmeWindowsLinks({
     version,
     tag,
     setupName,
     portableName,
   });
-  if (readmeChanged) commitAndPushReadme(version, tag);
+  updateIndexWindowsLinks({
+    version,
+    tag,
+    setupName,
+    portableName,
+  });
+  commitAndPushReleaseMeta(version, tag, [
+    join(root, 'README.md'),
+    join(root, 'index.html'),
+    join(root, 'version.json'),
+    join(root, 'version-feed.js'),
+  ]);
   updateRepoDescription(ghBin, version, tag);
 }
 
