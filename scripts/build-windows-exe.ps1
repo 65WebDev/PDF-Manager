@@ -426,6 +426,26 @@ if ($Dev) {
 }
 
 if ($doUpload -and -not $NoBump) {
+  # Shrink the race window: version-feed commits often land on main while npm ci runs.
+  if (-not $SkipGitSync) {
+    Write-Step "Refresh origin/main before Windows version bump"
+    & git -C $RepoRoot fetch origin main
+    if ($LASTEXITCODE -ne 0) {
+      Write-Fail "git fetch origin main failed (before version bump)."
+      exit $LASTEXITCODE
+    }
+    & git -C $RepoRoot pull --ff-only origin main
+    if ($LASTEXITCODE -ne 0) {
+      Write-Fail "git pull --ff-only origin main failed (before version bump)."
+      Write-Host "If you have a leftover local bump commit from a failed build, use -Force or:" -ForegroundColor Yellow
+      Write-Host "  git pull --rebase origin main" -ForegroundColor Yellow
+      Write-Host "  git push origin HEAD" -ForegroundColor Yellow
+      exit $LASTEXITCODE
+    }
+    $head = (& git -C $RepoRoot rev-parse --short HEAD 2>$null)
+    Write-Ok ("main @ {0} (pre-bump)" -f $head)
+  }
+
   Write-Step "Auto-bump Windows version if tool changed since last windows-v* release"
   node (Join-Path $RepoRoot 'scripts\bump-windows-version-if-needed.mjs')
   if ($LASTEXITCODE -ne 0) {

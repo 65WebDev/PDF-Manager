@@ -203,11 +203,60 @@ function main() {
     process.exit(commit.status || 1);
   }
 
-  const push = run('git', ['push', 'origin', 'HEAD']);
-  if (push.status !== 0) {
-    console.error(push.stderr || push.stdout || 'git push failed');
-    console.error('Version files were committed locally but not pushed.');
-    process.exit(push.status || 1);
+  // Race: version-feed / other bots often push to main while we build.
+  // Rebase onto origin/main and retry push instead of failing the whole build.
+  const maxAttempts = 4;
+  let pushed = false;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const push = run('git', ['push', 'origin', 'HEAD']);
+    if (push.status === 0) {
+      pushed = true;
+      break;
+    }
+    const errText = `${push.stderr || ''}\n${push.stdout || ''}`.trim();
+    console.warn(
+      `WARN: git push rejected (attempt ${attempt}/${maxAttempts}).`,
+    );
+    if (errText) console.warn(errText);
+
+    if (attempt === maxAttempts) break;
+
+    console.log('Fetching origin/main and rebasing bump commit…');
+    const fetch = run('git', ['fetch', 'origin', 'main']);
+    if (fetch.status !== 0) {
+      console.error(fetch.stderr || fetch.stdout || 'git fetch failed');
+      process.exit(fetch.status || 1);
+    }
+    const rebase = run('git', [
+      '-c',
+      `user.name=${id.name}`,
+      '-c',
+      `user.email=${id.email}`,
+      'rebase',
+      'origin/main',
+    ]);
+    if (rebase.status !== 0) {
+      console.error(rebase.stderr || rebase.stdout || 'git rebase failed');
+      run('git', ['rebase', '--abort'], { stdio: 'ignore' });
+      console.error(
+        'Could not rebase the Windows version bump onto origin/main.',
+      );
+      console.error(
+        'Fix manually: git pull --rebase origin main && git push origin HEAD',
+      );
+      console.error('Or discard the local bump and rebuild with -Force.');
+      process.exit(rebase.status || 1);
+    }
+  }
+
+  if (!pushed) {
+    console.error('ERR: git push failed after rebase retries.');
+    console.error('Version bump commit exists locally but is not on origin/main.');
+    console.error(
+      'Fix manually: git pull --rebase origin main && git push origin HEAD',
+    );
+    console.error('Or discard and rebuild: .\\scripts\\build-windows-exe.ps1 -Force');
+    process.exit(1);
   }
 
   console.log(`OK  Bumped and pushed Windows version ${next} (will release as windows-v${next}).`);
