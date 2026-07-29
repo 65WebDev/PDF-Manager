@@ -10456,6 +10456,57 @@
       return out;
     }
 
+    /** Client rect of the visible page bitmap in preview (object-fit: contain letterboxing). */
+    function gridGetPreviewPageContentClientRect(pageIdx) {
+      const pageDiv = document.querySelector('.page[data-index="' + pageIdx + '"]');
+      if (!pageDiv) return null;
+      const wrapper = pageDiv.querySelector('.img-wrapper');
+      const img = wrapper ? wrapper.querySelector('img') : null;
+      if (!img || !(img.naturalWidth > 0) || !(img.naturalHeight > 0)) {
+        return (wrapper || pageDiv).getBoundingClientRect();
+      }
+      const imgRect = img.getBoundingClientRect();
+      if (!(imgRect.width > 0) || !(imgRect.height > 0)) return null;
+
+      // Prefer PDF CropBox aspect (same as text-layer) over raster pixels.
+      let trueAspect = 0;
+      try {
+        if (typeof pdfDoc !== 'undefined' && pdfDoc) {
+          const page = pdfDoc.getPage(pageIdx);
+          const cb = page.getCropBox();
+          const rotObj = page.getRotation && page.getRotation();
+          const rot = rotObj && typeof rotObj.angle === 'number' ? rotObj.angle : 0;
+          const r = ((rot % 360) + 360) % 360;
+          const W = (r === 90 || r === 270) ? cb.height : cb.width;
+          const H = (r === 90 || r === 270) ? cb.width : cb.height;
+          if (H > 0) trueAspect = W / H;
+        }
+      } catch (_) {}
+
+      const boxRatio = imgRect.width / imgRect.height;
+      const natRatio = (trueAspect > 0) ? trueAspect : (img.naturalWidth / img.naturalHeight);
+      let dispW, dispH, offX, offY;
+      if (natRatio > boxRatio) {
+        dispW = imgRect.width;
+        dispH = imgRect.width / natRatio;
+        offX = 0;
+        offY = (imgRect.height - dispH) / 2;
+      } else {
+        dispH = imgRect.height;
+        dispW = imgRect.height * natRatio;
+        offX = (imgRect.width - dispW) / 2;
+        offY = 0;
+      }
+      return {
+        left: imgRect.left + offX,
+        top: imgRect.top + offY,
+        width: dispW,
+        height: dispH,
+        right: imgRect.left + offX + dispW,
+        bottom: imgRect.top + offY + dispH
+      };
+    }
+
     async function gridHitTestPdfImagesAt(pageIdx, clientX, clientY, rect) {
       if (!rect || !(rect.width > 0) || !(rect.height > 0)) return null;
       const fx = (clientX - rect.left) / rect.width;
@@ -10468,14 +10519,11 @@
       return null;
     }
 
-    /** Hit-test embedded PDF images. Optional rect = page content box (preview img-wrapper or #peStage). */
+    /** Hit-test embedded PDF images. Optional rect = page content box (preview content or #peStage). */
     async function gridHitTestPdfImages(pageIdx, clientX, clientY, rectOpt) {
       let r = rectOpt;
       if (!r) {
-        const pageDiv = document.querySelector('.page[data-index="' + pageIdx + '"]');
-        if (!pageDiv) return null;
-        const layer = pageDiv.querySelector('.img-wrapper') || pageDiv;
-        r = layer.getBoundingClientRect();
+        r = gridGetPreviewPageContentClientRect(pageIdx);
       }
       return gridHitTestPdfImagesAt(pageIdx, clientX, clientY, r);
     }
@@ -10573,6 +10621,7 @@
 
     window.gridLoadPdfPageImages = gridLoadPdfPageImages;
     window.gridHitTestPdfImages = gridHitTestPdfImages;
+    window.gridGetPreviewPageContentClientRect = gridGetPreviewPageContentClientRect;
     window.gridCopyPdfImageToSystemClipboard = gridCopyPdfImageToSystemClipboard;
     window.gridSavePdfImageAs = gridSavePdfImageAs;
     window.savePngBlobWithPicker = savePngBlobWithPicker;
@@ -28009,9 +28058,8 @@ function editSelectedPage() {
     // Preview image copy only above 400% zoom (same threshold as HQ raster).
     // Page editor keeps image copy at any zoom via peStage hit-test.
     if (!isTouchDevice && currentScale > HQ_SCALE_THRESHOLD) {
-      const pageDiv = document.querySelector('.page[data-index="' + idx + '"]');
-      const imgLayer = pageDiv && (pageDiv.querySelector('.img-wrapper') || pageDiv);
-      const imgRect = imgLayer ? imgLayer.getBoundingClientRect() : null;
+      const contentRect = (typeof gridGetPreviewPageContentClientRect === 'function')
+        ? gridGetPreviewPageContentClientRect(idx) : null;
       // RMB on an editor-inserted image (baked into preview raster; hit-test metadata).
       if (typeof gridHitTestEditorImages === 'function') {
         const imgHit = gridHitTestEditorImages(idx, e.clientX, e.clientY);
@@ -28020,7 +28068,7 @@ function editSelectedPage() {
           showTextCopyMenu(e, '', null, idx, {
             kind: 'editor-image',
             imageId: imgHit.id,
-            hlRect: imgRect,
+            hlRect: contentRect,
             hlBounds: { x: imgHit.x, y: imgHit.y, w: imgHit.w, h: imgHit.h },
             hlRot: imgHit.rot || 0
           });
@@ -28030,13 +28078,13 @@ function editSelectedPage() {
 
       // RMB on an embedded PDF image (operator-list hit-test + objs.get).
       if (typeof gridHitTestPdfImages === 'function') {
-        const pdfHit = await gridHitTestPdfImages(idx, e.clientX, e.clientY);
+        const pdfHit = await gridHitTestPdfImages(idx, e.clientX, e.clientY, contentRect);
         if (pdfHit) {
           e.preventDefault();
           showTextCopyMenu(e, '', null, idx, {
             kind: 'pdf-image',
             pdfImageIndex: pdfHit.index,
-            hlRect: imgRect,
+            hlRect: contentRect,
             hlBounds: pdfHit.bounds
           });
           return;
@@ -28408,11 +28456,9 @@ function editSelectedPage() {
   /** Hit-test editor image objects under a client point on a preview page. */
   function gridHitTestEditorImages(pageIdx, clientX, clientY) {
     if (pageIdx == null || typeof peLoadPageEditorObjects !== 'function') return null;
-    const pageDiv = document.querySelector('.page[data-index="' + pageIdx + '"]');
-    if (!pageDiv) return null;
-    const layer = pageDiv.querySelector('.img-wrapper') || pageDiv;
-    const r = layer.getBoundingClientRect();
-    if (!(r.width > 0) || !(r.height > 0)) return null;
+    const r = (typeof gridGetPreviewPageContentClientRect === 'function')
+      ? gridGetPreviewPageContentClientRect(pageIdx) : null;
+    if (!r || !(r.width > 0) || !(r.height > 0)) return null;
     const fx = (clientX - r.left) / r.width;
     const fy = (clientY - r.top) / r.height;
     if (fx < 0 || fy < 0 || fx > 1 || fy > 1) return null;
