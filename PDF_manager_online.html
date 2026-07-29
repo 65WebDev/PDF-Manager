@@ -19881,6 +19881,25 @@
       return !!(window.__TAURI_INTERNALS__ || window.__TAURI__ || PDF_MANAGER_WINDOWS_VERSION);
     }
 
+    /**
+     * Windows app semver for About / update check.
+     * Prefer the build-time stamp; fall back to Tauri getVersion() so a stale
+     * UI copy still shows the real package version from Cargo/tauri.conf.
+     */
+    async function pdfManagerResolveDesktopAppVersion() {
+      const stamped = String(PDF_MANAGER_WINDOWS_VERSION || '').trim();
+      if (stamped) return stamped;
+      try {
+        const getVersion = window.__TAURI__ && window.__TAURI__.app
+          && window.__TAURI__.app.getVersion;
+        if (typeof getVersion === 'function') {
+          const v = await getVersion();
+          if (v != null && String(v).trim()) return String(v).trim();
+        }
+      } catch (_) { /* ignore */ }
+      return '';
+    }
+
     /** Windows shell: maximize (развернуть) when opening a document. */
     function pdfManagerMaximizeDesktopWindow() {
       if (!pdfManagerIsDesktopShell()) return;
@@ -20018,20 +20037,58 @@
       const feed = await pdfManagerFetchLatestVersionFeed();
       if (!feed) return null;
       const messages = [];
+      const isDesktop = pdfManagerIsDesktopShell();
+      const localWin = isDesktop
+        ? await pdfManagerResolveDesktopAppVersion()
+        : String(PDF_MANAGER_WINDOWS_VERSION || '').trim();
+      const remoteWin = String(feed.windowsVersion || '').trim();
+      if (localWin && remoteWin && pdfManagerCompareSemver(remoteWin, localWin) > 0) {
+        messages.push('Вышла обновлённая версия приложения ' + remoteWin);
+      }
       const localNum = pdfManagerLocalBuildNumber();
       const remoteNum = Number(feed.number) || 0;
       const remoteBuild = String(feed.build || (remoteNum ? ('build-' + remoteNum) : '')).trim();
       if (remoteNum > 0 && localNum > 0 && remoteNum > localNum) {
-        messages.push('Вышла обновлённая версия ' + remoteBuild);
-      }
-      const localWin = String(PDF_MANAGER_WINDOWS_VERSION || '').trim();
-      const remoteWin = String(feed.windowsVersion || '').trim();
-      if (localWin && remoteWin && pdfManagerCompareSemver(remoteWin, localWin) > 0) {
-        messages.push('Вышла обновлённая версия Windows ' + remoteWin);
+        // On desktop the package version is primary; phrase editor updates clearly.
+        messages.push(
+          isDesktop
+            ? ('Доступен обновлённый редактор ' + remoteBuild)
+            : ('Вышла обновлённая версия ' + remoteBuild)
+        );
       }
       // Unstamped local HTML (dev / Pages source): still hint if a release exists
       // and we are clearly behind is unknown — skip to avoid false alarms.
       return { outdated: messages.length > 0, messages, feed };
+    }
+
+    function pdfManagerFormatAboutVersionHtml(opts) {
+      const isStamped = !!(opts && opts.isStamped);
+      const isDesktop = !!(opts && opts.isDesktop);
+      const winVer = String((opts && opts.winVer) || '').trim();
+      const buildVer = String((opts && opts.buildVer) || PDF_MANAGER_BUILD_VERSION || '').trim();
+      const buildDate = String((opts && opts.buildDate) || PDF_MANAGER_BUILD_DATE || '').trim();
+      if (isDesktop) {
+        if (winVer) {
+          let html = `Версия ${escapeHtml(winVer)}`;
+          if (isStamped && buildVer && !buildVer.startsWith('__')) {
+            html += `<br><span style="opacity:.88">Редактор: ${escapeHtml(buildVer)}`
+              + (buildDate && !buildDate.startsWith('__') ? ` от ${escapeHtml(buildDate)}` : '')
+              + `</span>`;
+          }
+          return html;
+        }
+        if (isStamped && buildVer && !buildVer.startsWith('__')) {
+          return `Версия приложения неизвестна<br><span style="opacity:.88">Редактор: ${escapeHtml(buildVer)}`
+            + (buildDate && !buildDate.startsWith('__') ? ` от ${escapeHtml(buildDate)}` : '')
+            + `</span>`;
+        }
+        return 'Версия приложения неизвестна';
+      }
+      if (isStamped && buildVer && !buildVer.startsWith('__')) {
+        return `Версия ${escapeHtml(buildVer)}`
+          + (buildDate && !buildDate.startsWith('__') ? ` от ${escapeHtml(buildDate)}` : '');
+      }
+      return 'Версия неизвестна (сборка не через релизный пайплайн)';
     }
 
     function showAboutModal() {
@@ -20048,21 +20105,23 @@
         box-shadow: 0 10px 30px rgba(0,0,0,0.3); text-align: center; box-sizing: border-box;`;
 
       const isStamped = !PDF_MANAGER_BUILD_VERSION.startsWith('__');
-      const winVer = String(PDF_MANAGER_WINDOWS_VERSION || '').trim();
-      const isOfflineHtml = !!(PDF_MANAGER_OFFLINE_BUILD && !pdfManagerIsDesktopShell());
-      let versionLine = isStamped
-        ? `Версия ${escapeHtml(PDF_MANAGER_BUILD_VERSION)} от ${escapeHtml(PDF_MANAGER_BUILD_DATE)}`
-        : 'Версия неизвестна (сборка не через релизный пайплайн)';
-      if (winVer) {
-        versionLine += `<br>Windows-приложение: ${escapeHtml(winVer)}`;
-      }
+      const stampedWin = String(PDF_MANAGER_WINDOWS_VERSION || '').trim();
+      const isDesktop = pdfManagerIsDesktopShell();
+      const isOfflineHtml = !!(PDF_MANAGER_OFFLINE_BUILD && !isDesktop);
+      const versionLine = pdfManagerFormatAboutVersionHtml({
+        isStamped,
+        isDesktop,
+        winVer: stampedWin,
+        buildVer: PDF_MANAGER_BUILD_VERSION,
+        buildDate: PDF_MANAGER_BUILD_DATE
+      });
       const networkLine = PDF_MANAGER_OFFLINE_BUILD
         ? 'Все библиотеки встроены в код веб-приложения. Обращение к сети отсутствует.'
         : 'Библиотеки подгружаются из CDN при первом запуске. Офлайн-версия содержит их прямо в файле, без обращений к сети.';
       const libsHtml = PDF_MANAGER_LIBRARIES
         .map(([name, ver]) => `${escapeHtml(name)} ${escapeHtml(ver)}`)
         .join(' &nbsp;·&nbsp; ');
-      const aboutKind = pdfManagerIsDesktopShell()
+      const aboutKind = isDesktop
         ? 'Десктопное приложение для работы с PDF-документами.'
         : 'Веб-приложение для работы с PDF-документами. Вся обработка выполняется в браузере.';
       const updateLineHtml = isOfflineHtml
@@ -20077,7 +20136,7 @@
         </div>
         <div style="font-size:13.5px; color:#333; line-height:1.25;">
           <p style="margin:0 0 6px;">${aboutKind}</p>
-          <p style="margin:0 0 6px; color:#666; font-size:12px;">${versionLine}</p>
+          <p id="aboutVersionLine" style="margin:0 0 6px; color:#666; font-size:12px;">${versionLine}</p>
           ${updateLineHtml}
           <p style="margin:0 0 6px; color:#555; font-size:12px;"><b>Библиотеки:</b> ${libsHtml}</p>
           <p style="margin:0 0 6px;">${networkLine}</p>
@@ -20102,6 +20161,22 @@
         if (e.key === 'Escape' || e.key === 'Enter') { e.preventDefault(); close(); }
       };
       document.addEventListener('keydown', onKey, true);
+
+      // Desktop: if UI stamp is empty, fill package version from Tauri runtime.
+      if (isDesktop && !stampedWin) {
+        pdfManagerResolveDesktopAppVersion().then((liveVer) => {
+          if (!liveVer) return;
+          const el = document.getElementById('aboutVersionLine');
+          if (!el || !el.isConnected) return;
+          el.innerHTML = pdfManagerFormatAboutVersionHtml({
+            isStamped,
+            isDesktop: true,
+            winVer: liveVer,
+            buildVer: PDF_MANAGER_BUILD_VERSION,
+            buildDate: PDF_MANAGER_BUILD_DATE
+          });
+        }).catch(() => { /* ignore */ });
+      }
 
       // Same hash as the hidden provenance panel (Ctrl+Alt+Shift+P) - shown
       // here too so it doesn't rely on anyone knowing the hotkey exists.
