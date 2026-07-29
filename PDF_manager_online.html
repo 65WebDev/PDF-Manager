@@ -1272,15 +1272,20 @@
     #peCropCtxMenu button:hover:not(:disabled) { background: #eef4fa; }
 
     /*Context menu of an object in the page editor (RMB on text/key/marker, etc.)*/
-    /* Outline around the image targeted by «Копировать изображение» (preview / PE). */
-    #pdfImageCopyHighlight {
+    /* Outline around the image targeted by «Копировать изображение» (preview / PE).
+       Clip host keeps the frame inside the work area (never over the top menu). */
+    #pdfImageCopyHighlightClip {
       position: fixed; z-index: 99990; display: none; pointer-events: none;
+      overflow: hidden; box-sizing: border-box;
+    }
+    #pdfImageCopyHighlightClip.visible { display: block; }
+    #pdfImageCopyHighlight {
+      position: absolute; display: block; pointer-events: none;
       box-sizing: border-box;
       outline: 3px solid #3498db;
       box-shadow: 0 0 0 1px rgba(255,255,255,.6);
       transform-origin: center center;
     }
-    #pdfImageCopyHighlight.visible { display: block; }
 
     #peObjCtxMenu {
       position: fixed; z-index: 100000; display: none;
@@ -10627,33 +10632,97 @@
     window.savePngBlobWithPicker = savePngBlobWithPicker;
     window.suggestImageSaveFileName = suggestImageSaveFileName;
 
+    /** Visible work-area rect that may host the image-copy frame (never over chrome). */
+    function pdfImageCopyHighlightWorkRect(centerX) {
+      const peModal = document.getElementById('pageEditModal');
+      if (peModal && peModal.classList.contains('open')) {
+        const wrap = document.getElementById('peStageWrap') || peModal;
+        const r = wrap.getBoundingClientRect();
+        return {
+          left: r.left,
+          top: r.top,
+          width: Math.max(0, r.width),
+          height: Math.max(0, r.height),
+          right: r.right,
+          bottom: r.bottom
+        };
+      }
+      const sc = (typeof scrollContainer !== 'undefined' && scrollContainer)
+        ? scrollContainer : document.getElementById('scrollContainer');
+      const scR = sc
+        ? sc.getBoundingClientRect()
+        : { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight, width: window.innerWidth, height: window.innerHeight };
+      let top = scR.top;
+      if (typeof pmSearchGetHighlightClipTop === 'function') {
+        top = Math.max(top, pmSearchGetHighlightClipTop(centerX));
+      } else {
+        const menuEl = document.querySelector('.top-menu');
+        if (menuEl) top = Math.max(top, menuEl.getBoundingClientRect().bottom);
+        const stickyBar = document.getElementById('stickyFileBar');
+        if (stickyBar && stickyBar.classList.contains('visible')) {
+          top = Math.max(top, stickyBar.getBoundingClientRect().bottom);
+        }
+      }
+      return {
+        left: scR.left,
+        top,
+        width: Math.max(0, scR.right - scR.left),
+        height: Math.max(0, scR.bottom - top),
+        right: scR.right,
+        bottom: scR.bottom
+      };
+    }
+
     /** Blue frame over the image about to be copied (preview or page editor). */
     function showPdfImageCopyHighlight(containerRect, bounds, rotDeg) {
       if (!containerRect || !bounds) return;
       const bw = Number(bounds.w);
       const bh = Number(bounds.h);
       if (!(containerRect.width > 0) || !(containerRect.height > 0) || !(bw > 0) || !(bh > 0)) return;
+
+      let clip = document.getElementById('pdfImageCopyHighlightClip');
+      if (!clip) {
+        clip = document.createElement('div');
+        clip.id = 'pdfImageCopyHighlightClip';
+        clip.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(clip);
+      }
       let el = document.getElementById('pdfImageCopyHighlight');
       if (!el) {
         el = document.createElement('div');
         el.id = 'pdfImageCopyHighlight';
         el.setAttribute('aria-hidden', 'true');
-        document.body.appendChild(el);
+        clip.appendChild(el);
+      } else if (el.parentNode !== clip) {
+        clip.appendChild(el);
       }
+
       const left = containerRect.left + (Number(bounds.x) || 0) * containerRect.width;
       const top = containerRect.top + (Number(bounds.y) || 0) * containerRect.height;
-      const width = bw * containerRect.width;
-      const height = bh * containerRect.height;
-      el.style.left = left + 'px';
-      el.style.top = top + 'px';
-      el.style.width = Math.max(2, width) + 'px';
-      el.style.height = Math.max(2, height) + 'px';
+      const width = Math.max(2, bw * containerRect.width);
+      const height = Math.max(2, bh * containerRect.height);
+      const work = pdfImageCopyHighlightWorkRect(left + width / 2);
+      if (!(work.width > 0) || !(work.height > 0)) {
+        clip.classList.remove('visible');
+        return;
+      }
+
+      clip.style.left = work.left + 'px';
+      clip.style.top = work.top + 'px';
+      clip.style.width = work.width + 'px';
+      clip.style.height = work.height + 'px';
+      el.style.left = (left - work.left) + 'px';
+      el.style.top = (top - work.top) + 'px';
+      el.style.width = width + 'px';
+      el.style.height = height + 'px';
       const rot = Number(rotDeg) || 0;
       el.style.transform = rot ? ('rotate(' + rot + 'deg)') : '';
-      el.classList.add('visible');
+      clip.classList.add('visible');
     }
 
     function hidePdfImageCopyHighlight() {
+      const clip = document.getElementById('pdfImageCopyHighlightClip');
+      if (clip) clip.classList.remove('visible');
       const el = document.getElementById('pdfImageCopyHighlight');
       if (el) el.classList.remove('visible');
     }
