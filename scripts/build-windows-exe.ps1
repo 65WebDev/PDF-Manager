@@ -32,6 +32,9 @@
 .PARAMETER Force
   Discard local changes and hard-reset to origin/main (for one-click build shortcuts).
 
+.PARAMETER NoBump
+  Do not auto-bump Windows semver when main has commits since the last windows-v* release.
+
 .EXAMPLE
   .\scripts\build-windows-exe.ps1
 
@@ -54,7 +57,8 @@ param(
   [switch] $SkipNpmCi,
   [switch] $Dev,
   [switch] $SkipGitSync,
-  [switch] $Force
+  [switch] $Force,
+  [switch] $NoBump
 )
 
 $ErrorActionPreference = 'Stop'
@@ -405,6 +409,21 @@ if ($Dev) {
   Write-Host "Window opens after compile. Stop: Ctrl+C" -ForegroundColor DarkGray
   npm run tauri:dev
   exit $LASTEXITCODE
+}
+
+if ($doUpload -and -not $NoBump) {
+  Write-Step "Auto-bump Windows version if tool changed since last windows-v* release"
+  node (Join-Path $RepoRoot 'scripts\bump-windows-version-if-needed.mjs')
+  if ($LASTEXITCODE -ne 0) {
+    Write-Fail "Windows version bump check failed."
+    exit $LASTEXITCODE
+  }
+  $ver = Get-AppVersion
+  if ($ver) {
+    Write-Host ("Release tag for this build: windows-v{0}" -f $ver) -ForegroundColor DarkGray
+  }
+} elseif ($doUpload -and $NoBump) {
+  Write-Step "Windows version auto-bump skipped (-NoBump)"
 }
 
 if ($doUpload) {

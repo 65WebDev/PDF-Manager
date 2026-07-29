@@ -163,9 +163,18 @@ npm run tauri -- info
 # Папка только для сборки / ярлык: сбросить локальные правки и взять latest main:
 .\scripts\build-windows-exe.ps1 -Force
 
+# Не поднимать Windows-semver автоматически (оставить текущий tag / clobber):
+.\scripts\build-windows-exe.ps1 -NoBump
+
 # Режим разработки:
 .\scripts\build-windows-exe.ps1 -Dev
 ```
+
+Перед upload-сборкой (без `-Local` / `-NoBump`) скрипт проверяет GitHub:
+если релиз `windows-v{version}` уже есть **и** на `main` есть коммиты после этого тега —
+patch-версия в `tauri.conf.json` + `Cargo.toml` поднимается автоматически
+(например `0.1.9` → `0.1.10`), коммит пушится в `main`, затем собирается
+новый tag `windows-v0.1.10`. Upload также обновит `version.json` / README / лендинг.
 
 Если PowerShell блокирует скрипт:
 
