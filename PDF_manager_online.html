@@ -1272,6 +1272,16 @@
     #peCropCtxMenu button:hover:not(:disabled) { background: #eef4fa; }
 
     /*Context menu of an object in the page editor (RMB on text/key/marker, etc.)*/
+    /* Outline around the image targeted by «Копировать изображение» (preview / PE). */
+    #pdfImageCopyHighlight {
+      position: fixed; z-index: 99990; display: none; pointer-events: none;
+      box-sizing: border-box;
+      outline: 3px solid #3498db;
+      box-shadow: 0 0 0 1px rgba(255,255,255,.6);
+      transform-origin: center center;
+    }
+    #pdfImageCopyHighlight.visible { display: block; }
+
     #peObjCtxMenu {
       position: fixed; z-index: 100000; display: none;
       background: #fff; border: 1px solid #d5d9de; border-radius: 8px;
@@ -10491,6 +10501,40 @@
     window.gridLoadPdfPageImages = gridLoadPdfPageImages;
     window.gridHitTestPdfImages = gridHitTestPdfImages;
     window.gridCopyPdfImageToSystemClipboard = gridCopyPdfImageToSystemClipboard;
+
+    /** Blue frame over the image about to be copied (preview or page editor). */
+    function showPdfImageCopyHighlight(containerRect, bounds, rotDeg) {
+      if (!containerRect || !bounds) return;
+      const bw = Number(bounds.w);
+      const bh = Number(bounds.h);
+      if (!(containerRect.width > 0) || !(containerRect.height > 0) || !(bw > 0) || !(bh > 0)) return;
+      let el = document.getElementById('pdfImageCopyHighlight');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'pdfImageCopyHighlight';
+        el.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(el);
+      }
+      const left = containerRect.left + (Number(bounds.x) || 0) * containerRect.width;
+      const top = containerRect.top + (Number(bounds.y) || 0) * containerRect.height;
+      const width = bw * containerRect.width;
+      const height = bh * containerRect.height;
+      el.style.left = left + 'px';
+      el.style.top = top + 'px';
+      el.style.width = Math.max(2, width) + 'px';
+      el.style.height = Math.max(2, height) + 'px';
+      const rot = Number(rotDeg) || 0;
+      el.style.transform = rot ? ('rotate(' + rot + 'deg)') : '';
+      el.classList.add('visible');
+    }
+
+    function hidePdfImageCopyHighlight() {
+      const el = document.getElementById('pdfImageCopyHighlight');
+      if (el) el.classList.remove('visible');
+    }
+
+    window.showPdfImageCopyHighlight = showPdfImageCopyHighlight;
+    window.hidePdfImageCopyHighlight = hidePdfImageCopyHighlight;
 
     function gridSchedulePdfPageImagesWarm(pageIdx) {
       if (pageIdx == null || Number.isNaN(pageIdx)) return;
@@ -27367,6 +27411,7 @@ function editSelectedPage() {
     textCopyCtxKind = 'page';
     textCopyCtxImageId = null;
     textCopyCtxPdfImageIndex = null;
+    if (typeof hidePdfImageCopyHighlight === 'function') hidePdfImageCopyHighlight();
     if (typeof peSyncTextSelMenuActive === 'function') {
       peSyncTextSelMenuActive(new Set(), textCopyMenu);
     }
@@ -27407,6 +27452,12 @@ function editSelectedPage() {
 
     const hideCopy = textCopyCtxKind === 'markup-obj';
     const isImageCopy = textCopyCtxKind === 'editor-image' || textCopyCtxKind === 'pdf-image';
+    if (isImageCopy && options.hlRect && options.hlBounds
+        && typeof showPdfImageCopyHighlight === 'function') {
+      showPdfImageCopyHighlight(options.hlRect, options.hlBounds, options.hlRot);
+    } else if (typeof hidePdfImageCopyHighlight === 'function') {
+      hidePdfImageCopyHighlight();
+    }
     const copyBtn = textCopyMenu.querySelector('.pe-text-sel-copy');
     if (copyBtn) {
       copyBtn.style.display = hideCopy ? 'none' : '';
@@ -27867,12 +27918,21 @@ function editSelectedPage() {
     // Preview image copy only above 400% zoom (same threshold as HQ raster).
     // Page editor keeps image copy at any zoom via peStage hit-test.
     if (!isTouchDevice && currentScale > HQ_SCALE_THRESHOLD) {
+      const pageDiv = document.querySelector('.page[data-index="' + idx + '"]');
+      const imgLayer = pageDiv && (pageDiv.querySelector('.img-wrapper') || pageDiv);
+      const imgRect = imgLayer ? imgLayer.getBoundingClientRect() : null;
       // RMB on an editor-inserted image (baked into preview raster; hit-test metadata).
       if (typeof gridHitTestEditorImages === 'function') {
         const imgHit = gridHitTestEditorImages(idx, e.clientX, e.clientY);
         if (imgHit) {
           e.preventDefault();
-          showTextCopyMenu(e, '', null, idx, { kind: 'editor-image', imageId: imgHit.id });
+          showTextCopyMenu(e, '', null, idx, {
+            kind: 'editor-image',
+            imageId: imgHit.id,
+            hlRect: imgRect,
+            hlBounds: { x: imgHit.x, y: imgHit.y, w: imgHit.w, h: imgHit.h },
+            hlRot: imgHit.rot || 0
+          });
           return;
         }
       }
@@ -27882,7 +27942,12 @@ function editSelectedPage() {
         const pdfHit = await gridHitTestPdfImages(idx, e.clientX, e.clientY);
         if (pdfHit) {
           e.preventDefault();
-          showTextCopyMenu(e, '', null, idx, { kind: 'pdf-image', pdfImageIndex: pdfHit.index });
+          showTextCopyMenu(e, '', null, idx, {
+            kind: 'pdf-image',
+            pdfImageIndex: pdfHit.index,
+            hlRect: imgRect,
+            hlBounds: pdfHit.bounds
+          });
           return;
         }
       }
@@ -35284,6 +35349,14 @@ function peHideObjCtxMenu() {
     overlapList.hidden = true;
     overlapList.innerHTML = '';
   }
+  // Clear native-PDF image frame (editor objects use .sel outline instead).
+  if (typeof hidePdfImageCopyHighlight === 'function') hidePdfImageCopyHighlight();
+  const copyBtn = menu.querySelector('[data-action="copy"]');
+  if (copyBtn) {
+    delete copyBtn.dataset._pdfImgPageIdx;
+    delete copyBtn.dataset._pdfImgIndex;
+    if (copyBtn.textContent === 'Копировать изображение') copyBtn.textContent = 'Скопировать';
+  }
 }
 
 function peHidePageToolsCtxMenu() {
@@ -36795,7 +36868,7 @@ function peShouldIgnoreCtxMenuOutside() {
   return performance.now() < peCtxMenuIgnoreOutsideUntil;
 }
 
-function peShowPdfImageCopyMenu(clientX, clientY, pageIdx, imageIndex) {
+function peShowPdfImageCopyMenu(clientX, clientY, pageIdx, imageIndex, bounds) {
   const menu = document.getElementById('peObjCtxMenu');
   if (!menu) return;
   peHidePageToolsCtxMenu();
@@ -36808,7 +36881,14 @@ function peShowPdfImageCopyMenu(clientX, clientY, pageIdx, imageIndex) {
     copyBtn.dataset._pdfImgPageIdx = pageIdx;
     copyBtn.dataset._pdfImgIndex = imageIndex;
   }
+  const peStage = document.getElementById('peStage');
+  if (bounds && peStage && typeof showPdfImageCopyHighlight === 'function') {
+    showPdfImageCopyHighlight(peStage.getBoundingClientRect(), bounds, 0);
+  } else if (typeof hidePdfImageCopyHighlight === 'function') {
+    hidePdfImageCopyHighlight();
+  }
   menu.classList.add('visible');
+  menu.setAttribute('aria-hidden', 'false');
   const w = menu.offsetWidth;
   const h = menu.offsetHeight;
   let x = clientX;
@@ -36817,13 +36897,14 @@ function peShowPdfImageCopyMenu(clientX, clientY, pageIdx, imageIndex) {
   if (y + h > window.innerHeight - 6) y = window.innerHeight - h - 6;
   menu.style.left = x + 'px';
   menu.style.top = y + 'px';
-  peArmCtxMenuIgnoreOutside();
+  peArmCtxMenuOutsideGuard(600);
 }
 
 function peShowObjCtxMenu(clientX, clientY, overlapObjs) {
   const menu = document.getElementById('peObjCtxMenu');
   if (!menu) return;
   peHidePageToolsCtxMenu();
+  if (typeof hidePdfImageCopyHighlight === 'function') hidePdfImageCopyHighlight();
   const sel = peGetSelectedObjects();
   const copyBtn = menu.querySelector('[data-action="copy"]');
   const cutBtn = menu.querySelector('[data-action="cut"]');
@@ -36831,6 +36912,9 @@ function peShowObjCtxMenu(clientX, clientY, overlapObjs) {
   if (copyBtn) {
     copyBtn.style.display = '';
     copyBtn.disabled = !sel.length;
+    copyBtn.textContent = 'Скопировать';
+    delete copyBtn.dataset._pdfImgPageIdx;
+    delete copyBtn.dataset._pdfImgIndex;
   }
   if (cutBtn) {
     cutBtn.style.display = '';
@@ -39676,7 +39760,7 @@ function peObjMouseDown(e, o) {
           e.stopPropagation();
           peHidePageToolsCtxMenu();
           peHideObjCtxMenu();
-          peShowPdfImageCopyMenu(e.clientX, e.clientY, idx, hit.index);
+          peShowPdfImageCopyMenu(e.clientX, e.clientY, idx, hit.index, hit.bounds);
           return;
         }
       }
