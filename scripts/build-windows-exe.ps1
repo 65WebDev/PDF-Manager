@@ -271,19 +271,27 @@ Or manually discard, then rerun without -Force:
       Write-Host "Discarding local changes (-Force)..." -ForegroundColor Yellow
       Write-Host $status -ForegroundColor DarkGray
     }
-    & git -C $RepoRoot checkout -B main origin/main
+    # Must wipe the index/worktree BEFORE checkout - plain checkout -B still
+    # refuses to overwrite dirty tracked files (Windows build clones often have
+    # leftover version.json / README edits from a previous upload).
+    & git -C $RepoRoot reset --hard HEAD
     if ($LASTEXITCODE -ne 0) {
-      Write-Fail "git checkout -B main origin/main failed."
-      exit $LASTEXITCODE
-    }
-    & git -C $RepoRoot reset --hard origin/main
-    if ($LASTEXITCODE -ne 0) {
-      Write-Fail "git reset --hard origin/main failed."
+      Write-Fail "git reset --hard HEAD failed."
       exit $LASTEXITCODE
     }
     & git -C $RepoRoot clean -fd
     if ($LASTEXITCODE -ne 0) {
       Write-Fail "git clean -fd failed."
+      exit $LASTEXITCODE
+    }
+    & git -C $RepoRoot checkout -f -B main origin/main
+    if ($LASTEXITCODE -ne 0) {
+      Write-Fail "git checkout -f -B main origin/main failed."
+      exit $LASTEXITCODE
+    }
+    & git -C $RepoRoot reset --hard origin/main
+    if ($LASTEXITCODE -ne 0) {
+      Write-Fail "git reset --hard origin/main failed."
       exit $LASTEXITCODE
     }
   } else {
