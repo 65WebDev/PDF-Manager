@@ -10444,20 +10444,28 @@
       return out;
     }
 
-    async function gridHitTestPdfImages(pageIdx, clientX, clientY) {
-      const pageDiv = document.querySelector('.page[data-index="' + pageIdx + '"]');
-      if (!pageDiv) return null;
-      const layer = pageDiv.querySelector('.img-wrapper') || pageDiv;
-      const r = layer.getBoundingClientRect();
-      if (!(r.width > 0) || !(r.height > 0)) return null;
-      const fx = (clientX - r.left) / r.width;
-      const fy = (clientY - r.top) / r.height;
+    async function gridHitTestPdfImagesAt(pageIdx, clientX, clientY, rect) {
+      if (!rect || !(rect.width > 0) || !(rect.height > 0)) return null;
+      const fx = (clientX - rect.left) / rect.width;
+      const fy = (clientY - rect.top) / rect.height;
       if (fx < 0 || fy < 0 || fx > 1 || fy > 1) return null;
       const images = await gridLoadPdfPageImages(pageIdx);
       for (let i = images.length - 1; i >= 0; i--) {
         if (gridPointInNormFrac(fx, fy, images[i].bounds)) return images[i];
       }
       return null;
+    }
+
+    /** Hit-test embedded PDF images. Optional rect = page content box (preview img-wrapper or #peStage). */
+    async function gridHitTestPdfImages(pageIdx, clientX, clientY, rectOpt) {
+      let r = rectOpt;
+      if (!r) {
+        const pageDiv = document.querySelector('.page[data-index="' + pageIdx + '"]');
+        if (!pageDiv) return null;
+        const layer = pageDiv.querySelector('.img-wrapper') || pageDiv;
+        r = layer.getBoundingClientRect();
+      }
+      return gridHitTestPdfImagesAt(pageIdx, clientX, clientY, r);
     }
 
     async function gridCopyPdfImageToSystemClipboard(pageIdx, imageIndex) {
@@ -39654,10 +39662,11 @@ function peObjMouseDown(e, o) {
     if (e.target.closest && e.target.closest('.pe-obj')) return;
 
     // RMB on a native PDF embedded image on the page canvas → copy menu.
-    if (peState.objSelectMode && typeof gridHitTestPdfImages === 'function') {
+    if (typeof gridHitTestPdfImages === 'function') {
       const idx = peState.idx != null ? peState.idx : (peState.pageIdx != null ? peState.pageIdx : null);
-      if (idx != null) {
-        const hit = await gridHitTestPdfImages(idx, e.clientX, e.clientY);
+      const peStage = document.getElementById('peStage');
+      if (idx != null && peStage) {
+        const hit = await gridHitTestPdfImages(idx, e.clientX, e.clientY, peStage.getBoundingClientRect());
         if (hit) {
           e.preventDefault();
           e.stopPropagation();
