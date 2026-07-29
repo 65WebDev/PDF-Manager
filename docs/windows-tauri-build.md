@@ -160,6 +160,9 @@ npm run tauri -- info
 # Не обновлять git (собрать текущее дерево как есть):
 .\scripts\build-windows-exe.ps1 -SkipGitSync
 
+# Папка только для сборки / ярлык: сбросить локальные правки и взять latest main:
+.\scripts\build-windows-exe.ps1 -Force
+
 # Режим разработки:
 .\scripts\build-windows-exe.ps1 -Dev
 ```
