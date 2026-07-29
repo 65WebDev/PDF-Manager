@@ -397,13 +397,19 @@ if (-not $SkipNpmCi) {
   }
 }
 
-# Show which editor build-N will be stamped into About (from version.json).
+# Show which versions will appear in About (Windows package + editor build-N).
+$appVerPreview = Get-AppVersion
+if ($appVerPreview) {
+  Write-Host ("About primary version (Windows package): {0}" -f $appVerPreview) -ForegroundColor DarkGray
+} else {
+  Write-Host "WARN could not read Windows version from tauri.conf.json" -ForegroundColor Yellow
+}
 $verJsonPath = Join-Path $RepoRoot 'version.json'
 if (Test-Path -LiteralPath $verJsonPath) {
   try {
     $verInfo = Get-Content -LiteralPath $verJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($verInfo.build) {
-      Write-Host ("Editor build stamp: {0} (from version.json on current HEAD)" -f $verInfo.build) -ForegroundColor DarkGray
+      Write-Host ("About secondary (editor build): {0} (from version.json on current HEAD)" -f $verInfo.build) -ForegroundColor DarkGray
     }
   } catch {
     Write-Host "Could not read version.json for build stamp preview." -ForegroundColor DarkGray
@@ -429,6 +435,7 @@ if ($doUpload -and -not $NoBump) {
   $ver = Get-AppVersion
   if ($ver) {
     Write-Host ("Release tag for this build: windows-v{0}" -f $ver) -ForegroundColor DarkGray
+    Write-Host ("About will show primary version: {0}" -f $ver) -ForegroundColor DarkGray
   }
 } elseif ($doUpload -and $NoBump) {
   Write-Step "Windows version auto-bump skipped (-NoBump)"

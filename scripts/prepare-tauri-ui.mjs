@@ -645,12 +645,28 @@ try {
     readFileSync(join(root, 'src-tauri', 'tauri.conf.json'), 'utf8'),
   );
   windowsVersion = String(conf.version || '').trim();
-} catch (_) { /* ignore */ }
-if (windowsVersion) {
-  html = html.replace(
-    /const PDF_MANAGER_WINDOWS_VERSION = [^;]+;/,
-    `const PDF_MANAGER_WINDOWS_VERSION = ${JSON.stringify(windowsVersion)};`,
+} catch (err) {
+  console.error(
+    'Could not read src-tauri/tauri.conf.json for Windows version stamp:',
+    err && err.message ? err.message : err,
   );
+  process.exit(1);
+}
+if (!windowsVersion) {
+  console.error('ERR: empty version in src-tauri/tauri.conf.json — About would show a stale/unknown app version.');
+  process.exit(1);
+}
+{
+  const next = `const PDF_MANAGER_WINDOWS_VERSION = ${JSON.stringify(windowsVersion)};`;
+  const replaced = html.replace(
+    /const PDF_MANAGER_WINDOWS_VERSION = [^;]+;/,
+    next,
+  );
+  if (replaced === html) {
+    console.error('ERR: PDF_MANAGER_WINDOWS_VERSION placeholder not found in offline HTML.');
+    process.exit(1);
+  }
+  html = replaced;
 }
 
 // Stamp editor build/date from the local version feed into About.
@@ -704,15 +720,27 @@ if (!html.includes('Tauri desktop bridge')) {
   }
 }
 writeFileSync(uiIndex, html, 'utf8');
+
+// Fail the Tauri build if the About stamp did not land (avoids shipping an
+// installer whose «О программе» still shows an empty / old Windows version).
+const written = readFileSync(uiIndex, 'utf8');
+const winStampRe = /const PDF_MANAGER_WINDOWS_VERSION = ("([^"]*)"|'([^']*)');/;
+const winStamp = written.match(winStampRe);
+const stampedWin = winStamp ? String(winStamp[2] || winStamp[3] || '') : '';
+if (stampedWin !== windowsVersion) {
+  console.error(
+    `ERR: tauri-ui About stamp mismatch — expected Windows ${windowsVersion}, got ${JSON.stringify(stampedWin)}`,
+  );
+  process.exit(1);
+}
+
 const stampInfo = [
-  windowsVersion ? `Windows ${windowsVersion}` : null,
+  `Windows ${windowsVersion}`,
   stampedBuild || null,
   stampedDate || null,
 ].filter(Boolean).join(', ');
 console.log(
   'Wrote',
   uiIndex,
-  stampInfo
-    ? `(${stampInfo}; file-association + Explorer DnD bridge)`
-    : '(with file-association + Explorer DnD bridge)',
+  `(${stampInfo}; file-association + Explorer DnD bridge)`,
 );

@@ -272,7 +272,8 @@ NSIS‑установщик регистрирует приложение как
 | Симптом | Что сделать |
 |---------|-------------|
 | `git` / `node` / `rustc` не найдены | PATH; новый терминал после установки |
-| В About старый `build-N` (например 103 вместо 105) | Номер редактора берётся из `version.json` / `version-feed.js` при `build:tauri-ui`. Сделайте `git pull`, убедитесь что в `version.json` нужный `build`, пересоберите. Скрипт теперь **всегда** перезаписывает stamp (даже если в HTML уже был старый номер). В логе ищите `Editor build stamp:` / `Wrote tauri-ui … build-…`. |
+| В About старый `build-N` (например 103 вместо 105) | Номер **редактора** берётся из `version.json` / `version-feed.js` при `build:tauri-ui`. Сделайте `git pull`, убедитесь что в `version.json` нужный `build`, пересоберите. Скрипт **всегда** перезаписывает stamp. В логе: `About secondary (editor build):` / `Wrote tauri-ui … build-…`. |
+| В About старая версия приложения (0.1.x), хотя собрали новую | В десктопе основная строка — **Windows-пакет** из `tauri.conf.json` (не `build-N`). После bump/`tauri build` в логе должно быть `Wrote tauri-ui … (Windows 0.1.x, …)`. Если штамп не совпал, `build:tauri-ui` падает. Переустановите NSIS поверх; при пустом штампе About подтягивает версию через Tauri `getVersion()`. |
 | После `tauri:build` README/лендинг всё ещё на старой Windows-версии | Скрипт upload должен обновить README, `index.html`, `version.json` и запушить. Нужен `git` в PATH и `gh auth`. Без upload (`-Local`) метаданные не обновляются. |
 | `linker link.exe not found` | Установить workload **«Разработка классических приложений на C++»**, новый терминал |
 | Ошибка на `build:offline` / fetch | Интернет или блокировка CDN (unpkg, cdnjs, jsdelivr) |
