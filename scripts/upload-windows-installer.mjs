@@ -331,8 +331,33 @@ function commitAndPushReleaseMeta(version, tag, paths) {
     return;
   }
 
+  // Build PCs often have no git user.name/email — use gh login for this commit only.
+  let name = (run(['config', '--get', 'user.name']).stdout || '').trim();
+  let email = (run(['config', '--get', 'user.email']).stdout || '').trim();
+  if (!name || !email) {
+    const ghBin = resolveGhBin();
+    if (ghBin) {
+      const api = runGh(ghBin, ['api', 'user', '--jq', '.login']);
+      const login = (api.stdout || '').trim();
+      if (api.status === 0 && login) {
+        if (!name) name = login;
+        if (!email) email = `${login}@users.noreply.github.com`;
+      }
+    }
+  }
+  if (!name) name = 'PDF Manager Build';
+  if (!email) email = 'pdf-manager-build@users.noreply.github.com';
+
   const commit = run(
-    ['commit', '-m', `docs: sync Windows ${tag} release links and version feed`],
+    [
+      '-c',
+      `user.name=${name}`,
+      '-c',
+      `user.email=${email}`,
+      'commit',
+      '-m',
+      `docs: sync Windows ${tag} release links and version feed`,
+    ],
     { stdio: 'inherit' },
   );
   if (commit.status !== 0) {

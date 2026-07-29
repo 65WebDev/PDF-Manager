@@ -84,6 +84,35 @@ function releaseExists(ghBin, tag) {
   return r.status === 0;
 }
 
+function gitConfigValue(key) {
+  const r = run('git', ['config', '--get', key]);
+  if (r.status !== 0) return '';
+  return String(r.stdout || '').trim();
+}
+
+/** Prefer existing git identity; else gh login; else a fixed build bot. */
+function resolveCommitIdentity(ghBin) {
+  let name = gitConfigValue('user.name');
+  let email = gitConfigValue('user.email');
+  if (name && email) return { name, email, source: 'git config' };
+
+  if (ghBin) {
+    const api = run(ghBin, ['api', 'user', '--jq', '.login']);
+    const login = String(api.stdout || '').trim();
+    if (api.status === 0 && login) {
+      if (!name) name = login;
+      if (!email) email = `${login}@users.noreply.github.com`;
+      return { name, email, source: `gh:${login}` };
+    }
+  }
+
+  return {
+    name: name || 'PDF Manager Build',
+    email: email || 'pdf-manager-build@users.noreply.github.com',
+    source: 'fallback',
+  };
+}
+
 function commitsSinceTag(tag) {
   // Ensure the tag object is available locally for rev-list.
   run('git', ['fetch', 'origin', `refs/tags/${tag}:refs/tags/${tag}`], {
@@ -158,7 +187,13 @@ function main() {
     process.exit(add.status || 1);
   }
 
+  const id = resolveCommitIdentity(ghBin);
+  console.log(`Git commit identity: ${id.name} <${id.email}> (${id.source})`);
   const commit = run('git', [
+    '-c',
+    `user.name=${id.name}`,
+    '-c',
+    `user.email=${id.email}`,
     'commit',
     '-m',
     `chore: bump Windows version to ${next}`,
