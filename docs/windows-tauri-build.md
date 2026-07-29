@@ -148,6 +148,7 @@ npm run tauri -- info
 ```powershell
 # Сборка + загрузка установщика/portable в GitHub Release (по умолчанию):
 # Нужны: gh (GitHub CLI) и `gh auth login`
+# Перед сборкой скрипт сам делает fetch/checkout/pull latest origin/main.
 .\scripts\build-windows-exe.ps1
 
 # Только локальная сборка, без GitHub:
@@ -155,6 +156,9 @@ npm run tauri -- info
 
 # Зависимости уже стоят:
 .\scripts\build-windows-exe.ps1 -SkipNpmCi
+
+# Не обновлять git (собрать текущее дерево как есть):
+.\scripts\build-windows-exe.ps1 -SkipGitSync
 
 # Режим разработки:
 .\scripts\build-windows-exe.ps1 -Dev

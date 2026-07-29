@@ -26,6 +26,9 @@
 .PARAMETER Dev
   Run npm run tauri:dev instead of release build.
 
+.PARAMETER SkipGitSync
+  Do not fetch/checkout latest origin/main before building.
+
 .EXAMPLE
   .\scripts\build-windows-exe.ps1
 
@@ -34,13 +37,17 @@
 
 .EXAMPLE
   .\scripts\build-windows-exe.ps1 -SkipNpmCi
+
+.EXAMPLE
+  .\scripts\build-windows-exe.ps1 -SkipGitSync
 #>
 
 [CmdletBinding()]
 param(
   [switch] $Local,
   [switch] $SkipNpmCi,
-  [switch] $Dev
+  [switch] $Dev,
+  [switch] $SkipGitSync
 )
 
 $ErrorActionPreference = 'Stop'
@@ -200,6 +207,72 @@ Then rerun this script. Or build without upload:
   Write-Ok ("gh - logged in as {0}" -f $login)
 }
 
+function Ensure-LatestMain {
+  Assert-Cmd 'git' @"
+Git is required to sync the latest main before build.
+Install: https://git-scm.com/download/win
+Or skip sync: .\scripts\build-windows-exe.ps1 -SkipGitSync
+"@
+
+  if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot '.git'))) {
+    Write-Fail "Not a git repository: $RepoRoot"
+    Write-Host "Clone the repo (not a ZIP download), or use -SkipGitSync." -ForegroundColor Yellow
+    exit 1
+  }
+
+  $status = & git -C $RepoRoot status --porcelain 2>$null
+  if ($LASTEXITCODE -ne 0) {
+    Write-Fail "git status failed."
+    exit 1
+  }
+  if ($status) {
+    Write-Fail "Working tree has local changes — refusing to switch to main."
+    Write-Host @"
+Commit/stash/discard your changes, then rerun.
+Or build the current tree without syncing:
+  .\scripts\build-windows-exe.ps1 -SkipGitSync
+"@ -ForegroundColor Yellow
+    Write-Host $status -ForegroundColor DarkGray
+    exit 1
+  }
+
+  Write-Step "Sync latest origin/main"
+  & git -C $RepoRoot fetch origin main
+  if ($LASTEXITCODE -ne 0) {
+    Write-Fail "git fetch origin main failed."
+    exit $LASTEXITCODE
+  }
+
+  $branch = (& git -C $RepoRoot rev-parse --abbrev-ref HEAD 2>$null)
+  if ($branch -ne 'main') {
+    Write-Host ("Current branch: {0} -> checking out main" -f $branch) -ForegroundColor DarkGray
+    & git -C $RepoRoot checkout main
+    if ($LASTEXITCODE -ne 0) {
+      Write-Fail "git checkout main failed."
+      exit $LASTEXITCODE
+    }
+  }
+
+  & git -C $RepoRoot pull --ff-only origin main
+  if ($LASTEXITCODE -ne 0) {
+    Write-Fail "git pull --ff-only origin main failed (local main may have diverged)."
+    Write-Host @"
+Reset to remote main (discards local commits on main only):
+  git checkout main
+  git fetch origin main
+  git reset --hard origin/main
+
+Or build without syncing:
+  .\scripts\build-windows-exe.ps1 -SkipGitSync
+"@ -ForegroundColor Yellow
+    exit $LASTEXITCODE
+  }
+
+  $head = (& git -C $RepoRoot rev-parse --short HEAD 2>$null)
+  $subj = (& git -C $RepoRoot log -1 --pretty=%s 2>$null)
+  Write-Ok ("main @ {0} — {1}" -f $head, $subj)
+}
+
 # Repo root: script may live in scripts\ or in the repo root.
 $here = $PSScriptRoot
 if (-not $here) { $here = Split-Path -Parent $MyInvocation.MyCommand.Path }
@@ -214,6 +287,19 @@ if (Test-Path (Join-Path $here 'package.json')) {
 
 Set-Location $RepoRoot
 Write-Host ("Repo: {0}" -f $RepoRoot) -ForegroundColor DarkGray
+
+if (-not $SkipGitSync) {
+  Ensure-LatestMain
+} else {
+  Write-Step "Git sync skipped (-SkipGitSync)"
+  if (Test-Cmd 'git') {
+    $branch = (& git -C $RepoRoot rev-parse --abbrev-ref HEAD 2>$null)
+    $head = (& git -C $RepoRoot rev-parse --short HEAD 2>$null)
+    if ($branch -and $head) {
+      Write-Host ("Building from {0} @ {1}" -f $branch, $head) -ForegroundColor DarkGray
+    }
+  }
+}
 
 Write-Step "Environment check"
 
@@ -266,7 +352,7 @@ if (Test-Path -LiteralPath $verJsonPath) {
   try {
     $verInfo = Get-Content -LiteralPath $verJsonPath -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($verInfo.build) {
-      Write-Host ("Editor build stamp: {0} (from version.json — keep this file up to date via git pull)" -f $verInfo.build) -ForegroundColor DarkGray
+      Write-Host ("Editor build stamp: {0} (from version.json on current HEAD)" -f $verInfo.build) -ForegroundColor DarkGray
     }
   } catch {
     Write-Host "Could not read version.json for build stamp preview." -ForegroundColor DarkGray
