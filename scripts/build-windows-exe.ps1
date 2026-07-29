@@ -29,6 +29,9 @@
 .PARAMETER SkipGitSync
   Do not fetch/checkout latest origin/main before building.
 
+.PARAMETER Force
+  Discard local changes and hard-reset to origin/main (for one-click build shortcuts).
+
 .EXAMPLE
   .\scripts\build-windows-exe.ps1
 
@@ -40,6 +43,9 @@
 
 .EXAMPLE
   .\scripts\build-windows-exe.ps1 -SkipGitSync
+
+.EXAMPLE
+  .\scripts\build-windows-exe.ps1 -Force -Local
 #>
 
 [CmdletBinding()]
@@ -47,7 +53,8 @@ param(
   [switch] $Local,
   [switch] $SkipNpmCi,
   [switch] $Dev,
-  [switch] $SkipGitSync
+  [switch] $SkipGitSync,
+  [switch] $Force
 )
 
 $ErrorActionPreference = 'Stop'
@@ -220,17 +227,29 @@ Or skip sync: .\scripts\build-windows-exe.ps1 -SkipGitSync
     exit 1
   }
 
+  if ($SkipGitSync -and $Force) {
+    Write-Fail "Use either -Force or -SkipGitSync, not both."
+    exit 1
+  }
+
   $status = & git -C $RepoRoot status --porcelain 2>$null
   if ($LASTEXITCODE -ne 0) {
     Write-Fail "git status failed."
     exit 1
   }
-  if ($status) {
+  if ($status -and -not $Force) {
     Write-Fail "Working tree has local changes — refusing to switch to main."
     Write-Host @"
-Commit/stash/discard your changes, then rerun.
-Or build the current tree without syncing:
+For a build folder / desktop shortcut (discard local edits, use latest main):
+  .\scripts\build-windows-exe.ps1 -Force
+
+Or keep your local tree and build it as-is:
   .\scripts\build-windows-exe.ps1 -SkipGitSync
+
+Or manually discard, then rerun without -Force:
+  git checkout main
+  git fetch origin main
+  git reset --hard origin/main
 "@ -ForegroundColor Yellow
     Write-Host $status -ForegroundColor DarkGray
     exit 1
@@ -243,29 +262,49 @@ Or build the current tree without syncing:
     exit $LASTEXITCODE
   }
 
-  $branch = (& git -C $RepoRoot rev-parse --abbrev-ref HEAD 2>$null)
-  if ($branch -ne 'main') {
-    Write-Host ("Current branch: {0} -> checking out main" -f $branch) -ForegroundColor DarkGray
-    & git -C $RepoRoot checkout main
+  if ($Force) {
+    if ($status) {
+      Write-Host "Discarding local changes (-Force)..." -ForegroundColor Yellow
+      Write-Host $status -ForegroundColor DarkGray
+    }
+    & git -C $RepoRoot checkout -B main origin/main
     if ($LASTEXITCODE -ne 0) {
-      Write-Fail "git checkout main failed."
+      Write-Fail "git checkout -B main origin/main failed."
       exit $LASTEXITCODE
     }
-  }
+    & git -C $RepoRoot reset --hard origin/main
+    if ($LASTEXITCODE -ne 0) {
+      Write-Fail "git reset --hard origin/main failed."
+      exit $LASTEXITCODE
+    }
+    & git -C $RepoRoot clean -fd
+    if ($LASTEXITCODE -ne 0) {
+      Write-Fail "git clean -fd failed."
+      exit $LASTEXITCODE
+    }
+  } else {
+    $branch = (& git -C $RepoRoot rev-parse --abbrev-ref HEAD 2>$null)
+    if ($branch -ne 'main') {
+      Write-Host ("Current branch: {0} -> checking out main" -f $branch) -ForegroundColor DarkGray
+      & git -C $RepoRoot checkout main
+      if ($LASTEXITCODE -ne 0) {
+        Write-Fail "git checkout main failed."
+        exit $LASTEXITCODE
+      }
+    }
 
-  & git -C $RepoRoot pull --ff-only origin main
-  if ($LASTEXITCODE -ne 0) {
-    Write-Fail "git pull --ff-only origin main failed (local main may have diverged)."
-    Write-Host @"
-Reset to remote main (discards local commits on main only):
-  git checkout main
-  git fetch origin main
-  git reset --hard origin/main
+    & git -C $RepoRoot pull --ff-only origin main
+    if ($LASTEXITCODE -ne 0) {
+      Write-Fail "git pull --ff-only origin main failed (local main may have diverged)."
+      Write-Host @"
+Reset hard to remote main (discards local commits/edits on this clone):
+  .\scripts\build-windows-exe.ps1 -Force
 
 Or build without syncing:
   .\scripts\build-windows-exe.ps1 -SkipGitSync
 "@ -ForegroundColor Yellow
-    exit $LASTEXITCODE
+      exit $LASTEXITCODE
+    }
   }
 
   $head = (& git -C $RepoRoot rev-parse --short HEAD 2>$null)
