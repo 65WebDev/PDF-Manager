@@ -19,7 +19,7 @@
  * Release tag: windows-v{version} from src-tauri/tauri.conf.json
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -157,25 +157,68 @@ function pickPortableArtifact(artifacts) {
   return names.find((n) => /\.exe$/i.test(n) && !/setup\.exe$/i.test(n)) || null;
 }
 
+/**
+ * GitHub Release asset names cannot contain spaces — uploads rewrite " " → ".".
+ * Use the same name in download URLs or links 404 (PDF%20Manager_… vs PDF.Manager_…).
+ */
+function toGithubAssetName(name) {
+  return String(name || '').replace(/ /g, '.');
+}
+
+function githubDownloadUrl(tag, assetName) {
+  const name = toGithubAssetName(assetName);
+  return (
+    `https://github.com/${REPO_SLUG}/releases/download/${tag}/` +
+    encodeURIComponent(name).replace(/%2F/gi, '/')
+  );
+}
+
+/** Rename local artifacts so uploaded names match GitHub download URLs. */
+function normalizeArtifactsForGithub(paths) {
+  const out = [];
+  for (const p of paths) {
+    const base = basename(p);
+    const ghName = toGithubAssetName(base);
+    if (ghName === base) {
+      out.push(p);
+      continue;
+    }
+    const dest = join(dirname(p), ghName);
+    if (existsSync(dest)) {
+      if (dest !== p && existsSync(p)) {
+        try {
+          unlinkSync(p);
+        } catch {
+          /* ignore */
+        }
+      }
+      out.push(dest);
+      continue;
+    }
+    renameSync(p, dest);
+    console.log(`Asset rename for GitHub: "${base}" → "${ghName}"`);
+    out.push(dest);
+  }
+  return out;
+}
+
 function releaseExists(ghBin, tag) {
   const r = runGh(ghBin, ['release', 'view', tag], { stdio: 'ignore' });
   return r.status === 0;
 }
 
 function buildReleaseNotes({ version, tag, setupName, portableName, releaseUrl }) {
-  const setupUrl = setupName
-    ? `https://github.com/${REPO_SLUG}/releases/download/${tag}/${encodeURIComponent(setupName)}`
-    : releaseUrl;
-  const portableUrl = portableName
-    ? `https://github.com/${REPO_SLUG}/releases/download/${tag}/${encodeURIComponent(portableName)}`
-    : releaseUrl;
+  const setupAsset = setupName ? toGithubAssetName(setupName) : null;
+  const portableAsset = portableName ? toGithubAssetName(portableName) : null;
+  const setupUrl = setupAsset ? githubDownloadUrl(tag, setupAsset) : releaseUrl;
+  const portableUrl = portableAsset ? githubDownloadUrl(tag, portableAsset) : releaseUrl;
 
   return [
     `Windows-приложение PDF Manager **v${version}** (Tauri).`,
     '',
     '### Скачать',
-    setupName ? `- **Установщик (NSIS):** [${setupName}](${setupUrl})` : null,
-    portableName ? `- **Portable .exe:** [${portableName}](${portableUrl})` : null,
+    setupAsset ? `- **Установщик (NSIS):** [${setupAsset}](${setupUrl})` : null,
+    portableAsset ? `- **Portable .exe:** [${portableAsset}](${portableUrl})` : null,
     `- Страница релиза: ${releaseUrl}`,
     '',
     '### Что внутри',
@@ -199,15 +242,11 @@ function updateReadmeWindowsLinks({ version, tag, setupName, portableName }) {
     return false;
   }
 
-  const setupFile = setupName || `PDF.Manager_${version}_x64-setup.exe`;
-  const portableFile = portableName || 'pdf-manager.exe';
-  // GitHub release asset URLs: spaces → %20; keep dotted PDF.Manager_* as-is.
-  const setupUrl =
-    `https://github.com/${REPO_SLUG}/releases/download/${tag}/` +
-    encodeURIComponent(setupFile).replace(/%2F/gi, '/');
-  const portableUrl =
-    `https://github.com/${REPO_SLUG}/releases/download/${tag}/` +
-    encodeURIComponent(portableFile).replace(/%2F/gi, '/');
+  const setupFile = toGithubAssetName(setupName || `PDF.Manager_${version}_x64-setup.exe`);
+  const portableFile = toGithubAssetName(portableName || 'pdf-manager.exe');
+  // GitHub release asset URLs: spaces become "." on upload — never use %20.
+  const setupUrl = githubDownloadUrl(tag, setupFile);
+  const portableUrl = githubDownloadUrl(tag, portableFile);
   const tagUrl = `https://github.com/${REPO_SLUG}/releases/tag/${tag}`;
 
   let text = readFileSync(README_PATH, 'utf8');
@@ -231,7 +270,7 @@ function updateReadmeWindowsLinks({ version, tag, setupName, portableName }) {
   );
   // Broader fallback for any leftover version pins in the quick-download block.
   text = text.replace(/windows-v\d+\.\d+\.\d+/g, tag);
-  text = text.replace(/PDF\.Manager_\d+\.\d+\.\d+_x64-setup\.exe/g, setupFile);
+  text = text.replace(/PDF(?:\.|%20| )Manager_\d+\.\d+\.\d+_x64-setup\.exe/g, setupFile);
 
   if (text === before) {
     console.log('README.md уже содержит актуальные Windows-ссылки.');
@@ -251,14 +290,10 @@ function updateIndexWindowsLinks({ version, tag, setupName, portableName }) {
     console.warn('index.html не найден — пропускаю обновление ссылок.');
     return false;
   }
-  const setupFile = setupName || `PDF.Manager_${version}_x64-setup.exe`;
-  const portableFile = portableName || 'pdf-manager.exe';
-  const setupUrl =
-    `https://github.com/${REPO_SLUG}/releases/download/${tag}/` +
-    encodeURIComponent(setupFile).replace(/%2F/gi, '/');
-  const portableUrl =
-    `https://github.com/${REPO_SLUG}/releases/download/${tag}/` +
-    encodeURIComponent(portableFile).replace(/%2F/gi, '/');
+  const setupFile = toGithubAssetName(setupName || `PDF.Manager_${version}_x64-setup.exe`);
+  const portableFile = toGithubAssetName(portableName || 'pdf-manager.exe');
+  const setupUrl = githubDownloadUrl(tag, setupFile);
+  const portableUrl = githubDownloadUrl(tag, portableFile);
 
   let text = readFileSync(INDEX_PATH, 'utf8');
   const before = text;
@@ -384,7 +419,9 @@ function pruneStaleSetupAssets(ghBin, tag, version, keepNames) {
   } catch {
     return;
   }
-  const keep = new Set((keepNames || []).filter(Boolean));
+  const keep = new Set(
+    (keepNames || []).filter(Boolean).map((n) => toGithubAssetName(n)),
+  );
   for (const asset of assets) {
     const name = String(asset.name || '');
     if (!/setup\.exe$/i.test(name)) continue;
@@ -441,12 +478,15 @@ function main() {
   const tag = `windows-v${version}`;
   const title = `Windows installer v${version}`;
 
-  const artifacts = findArtifacts();
+  let artifacts = findArtifacts();
   if (!artifacts.length) {
     console.error('Не найдены .exe после сборки.');
     console.error('Ожидалось в: src-tauri/target/release/bundle/nsis/');
     process.exit(1);
   }
+  // GitHub rewrites spaces in asset names to "."; rename before upload so
+  // README / release notes URLs match the stored asset (no PDF%20Manager 404).
+  artifacts = normalizeArtifactsForGithub(artifacts);
 
   const setupName = pickSetupArtifact(artifacts, version);
   const portableName = pickPortableArtifact(artifacts);
@@ -461,8 +501,8 @@ function main() {
 
   console.log('Артефакты для загрузки:');
   for (const f of artifacts) console.log('  -', f);
-  if (setupName) console.log('Установщик (для README):', setupName);
-  if (portableName) console.log('Portable (для README):', portableName);
+  if (setupName) console.log('Установщик (для README):', toGithubAssetName(setupName));
+  if (portableName) console.log('Portable (для README):', toGithubAssetName(portableName));
 
   // Write notes to a temp file so multiline / Cyrillic stay intact for gh.
   const notesPath = join(root, '.windows-release-notes.tmp.md');
