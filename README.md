@@ -8,7 +8,7 @@
 |--------|--------|
 | **Скачать онлайн-версию** | https://github.com/5451165-bot/PDF-Manager/releases/latest/download/PDF_manager_online.html |
 | **Скачать офлайн-версию** | https://github.com/5451165-bot/PDF-Manager/releases/latest/download/PDF_manager_offline.html |
-| **Windows: установщик** | https://github.com/5451165-bot/PDF-Manager/releases/download/windows-v0.1.10/PDF%20Manager_0.1.10_x64-setup.exe |
+| **Windows: установщик** | https://github.com/5451165-bot/PDF-Manager/releases/download/windows-v0.1.10/PDF.Manager_0.1.10_x64-setup.exe |
 | **Windows: portable `.exe`** | https://github.com/5451165-bot/PDF-Manager/releases/download/windows-v0.1.10/pdf-manager.exe |
 | **Страница релизов (HTML)** | https://github.com/5451165-bot/PDF-Manager/releases/latest |
 | **Релиз Windows** | https://github.com/5451165-bot/PDF-Manager/releases/tag/windows-v0.1.10 |
