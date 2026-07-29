@@ -6004,7 +6004,7 @@
           <div class="slider-wrapper">
             <input type="range" id="scaleSlider" min="0" max="200" value="100" step="1" oninput="changeScale(this.value)" onmouseup="this.blur()" ontouchend="this.blur()" title="Alt + колесико мыши — изменение масштаба">
           </div>
-          <button type="button" id="fitWidthBtn" onclick="toggleFitWidthScale({ anchor: 'viewport-center' })" disabled title="По ширине страницы (средняя кнопка мыши)&#10;Правая кнопка мыши - настроить открытие по умолчанию" aria-pressed="false" aria-label="По ширине страницы">
+          <button type="button" id="fitWidthBtn" onclick="toggleFitWidthScale({ anchor: 'viewport-center' })" disabled title="По ширине страницы (двойной клик по странице)&#10;Правая кнопка мыши - настроить открытие по умолчанию" aria-pressed="false" aria-label="По ширине страницы">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <rect x="6" y="3" width="12" height="18" rx="1.5"/>
               <path d="M2 12h4M18 12h4M3.5 9.5 2 12l1.5 2.5M20.5 9.5 22 12l-1.5 2.5"/>
@@ -6680,7 +6680,7 @@
       <div class="help-row"><span class="hk">R</span> — режим чтения</div>
       <div class="help-row"><span class="hk">Z</span> — режим увеличения</div>
       <div class="help-row"><span class="hk">Alt + колесико мыши</span> — изменение масштаба</div>
-      <div class="help-row"><span class="hk">Средняя кнопка мыши</span> — по ширине страницы</div>
+      <div class="help-row"><span class="hk">Двойной клик по странице</span> — по ширине страницы</div>
       <hr>
       <div class="help-subtitle">Вкладки:</div>
       <div class="help-row"><span class="hk">Ctrl + стрелка влево</span> — выбрать вкладку слева</div>
@@ -9503,7 +9503,7 @@
       applyScale({ zoomAnchor });
     }
 
-    /** Fit-width toggle (toolbar / СКМ / context menus). */
+    /** Fit-width toggle (toolbar / double-click / context menus). */
     let fitWidthToggleOn = false;
     let fitWidthSavedScale = null;
     let fitWidthPointer = { x: null, y: null };
@@ -9634,7 +9634,8 @@
         if (pe && pe.classList.contains('open')) return;
       }
       // Toolbar button: page nearest the work-area center.
-      // RMB / MMB: page nearest the pointer (opts.clientX/Y or last tracked position).
+      // Double-click / context menu: page nearest the pointer (opts.clientX/Y
+      // or last tracked position).
       let ptrX, ptrY;
       if (opts.anchor === 'viewport-center') {
         if (scrollContainer) {
@@ -9683,34 +9684,12 @@
     }
     window.toggleFitWidthScale = toggleFitWidthScale;
 
-    // Middle mouse button: toggle fit-width in preview (all cursor modes).
-    (function initFitWidthMiddleClick() {
+    // Track pointer for fit-width from context menus (no middle-click hook).
+    (function initFitWidthPointerTracker() {
       document.addEventListener('mousemove', (e) => {
         fitWidthPointer.x = e.clientX;
         fitWidthPointer.y = e.clientY;
       }, { passive: true });
-      function overPreviewWorkspace(target) {
-        if (!target || !scrollContainer) return false;
-        if (target.closest && target.closest(
-          '.top-menu, #helpToggle, #helpPanel, #pageCountBox, #stickyFileBar, .tab-bar, #loadingOverlay, #pageEditModal, .modal-overlay-active, .pm-page-nav-btn, #pmAutoScrollSpeed, #pmAutoScrollPauseBtn, #fitWidthBtn'
-        )) return false;
-        return scrollContainer.contains(target) || target === scrollContainer;
-      }
-      document.addEventListener('mousedown', (e) => {
-        if (e.button !== 1) return;
-        if (!pdfDoc || isLoading) return;
-        if (!overPreviewWorkspace(e.target)) return;
-        e.preventDefault();
-        e.stopPropagation();
-        fitWidthPointer.x = e.clientX;
-        fitWidthPointer.y = e.clientY;
-        toggleFitWidthScale({ clientX: e.clientX, clientY: e.clientY });
-      }, true);
-      document.addEventListener('auxclick', (e) => {
-        if (e.button !== 1) return;
-        if (!overPreviewWorkspace(e.target)) return;
-        e.preventDefault();
-      }, true);
     })();
 
     //Initial scale by number of pages when opening/merging a file.
@@ -13207,7 +13186,7 @@
           } else if (!isTouchDevice && (loupeModeOn || interactionMode === 'nav')) {
             setMode('select');
           } else if (fitWidthToggleOn && interactionMode === 'select') {
-            // Same as middle-click / toolbar: leave fit-width while staying in select mode.
+            // Same as toolbar: leave fit-width while staying in select mode.
             toggleFitWidthScale({ anchor: 'viewport-center' });
           } else {
             deselectAllPages();
@@ -15133,6 +15112,10 @@
 
       div.addEventListener('click', (e) => {
         if (isTouchDevice) return; // selection on the touchscreen - in onPagePointerUp (difference between tap/scroll)
+        // Second click of a double-click (detail≥2): do not toggle select/deselect —
+        // dblclick handles fit-width instead. A slow second click has detail===1
+        // (new click sequence) and still selects/deselects as usual.
+        if (e.detail >= 2 && !e.shiftKey && !e.ctrlKey && !e.metaKey) return;
         if (suppressPageClickForTextSelect) {
           suppressPageClickForTextSelect = false;
           return;
@@ -18879,6 +18862,18 @@
 
         refreshCheckboxes();
         updateUIState();
+        return;
+      }
+      // Desktop: double-click a page → toggle fit-width.
+      // Slow spaced clicks never fire dblclick, so select/deselect stays unchanged.
+      if (isTouchDevice) return;
+      if (e.shiftKey || e.ctrlKey || e.metaKey) return;
+      if (isPageSecondaryControlTarget(e.target)) return;
+      if (e.target.closest && e.target.closest(
+        '.page-text-layer, .quick-actions, .selection-checkbox, button, a, input, textarea, select'
+      )) return;
+      if (typeof toggleFitWidthScale === 'function') {
+        toggleFitWidthScale({ clientX: e.clientX, clientY: e.clientY });
       }
     }
 
