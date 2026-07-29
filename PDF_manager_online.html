@@ -10310,10 +10310,17 @@
     // ═══════════════════════════════════════════════════════════════════
     //Reset HQ cache - call on ANY document change (insertion/deletion/
     //rotate/replace/merge/new file) so as not to render the outdated one.
+    let gridPdfPageImagesCache = new Map();
+
+    function gridClearPdfPageImagesCache() {
+      gridPdfPageImagesCache.clear();
+    }
+
     function invalidateHQ() {
       hqPdfjsToken++;
       hqPdfjsDoc = null;
       hqUpgraded.clear();
+      gridClearPdfPageImagesCache();
       if (typeof invalidatePageTextLayers === 'function') invalidatePageTextLayers();
     }
 
@@ -10324,6 +10331,7 @@
       hqPdfjsToken++;
       hqPdfjsDoc = null;
       hqUpgraded.clear();
+      gridClearPdfPageImagesCache();
     }
 
     //Lazy loading of cached pdf.js document from current pdfDoc.
@@ -10341,6 +10349,144 @@
       if (token !== hqPdfjsToken) return null;
       hqPdfjsDoc = doc;
       return doc;
+    }
+
+    /** Normalized (0..1, top-left) bounds of a PDF image drawn in the unit square. */
+    function gridPdfImageBoundsFrac(ctm, viewport) {
+      if (!pdfjsLib || !pdfjsLib.Util || !viewport) return null;
+      const U = pdfjsLib.Util;
+      const corners = [[0, 0], [1, 0], [1, 1], [0, 1]].map((p) => {
+        const u = U.applyTransform(p, ctm);
+        return U.applyTransform(u, viewport.transform);
+      });
+      let minX = Infinity;
+      let minY = Infinity;
+      let maxX = -Infinity;
+      let maxY = -Infinity;
+      corners.forEach(([x, y]) => {
+        minX = Math.min(minX, x);
+        maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y);
+        maxY = Math.max(maxY, y);
+      });
+      if (!isFinite(minX) || !(viewport.width > 0) || !(viewport.height > 0)) return null;
+      return {
+        x: minX / viewport.width,
+        y: minY / viewport.height,
+        w: (maxX - minX) / viewport.width,
+        h: (maxY - minY) / viewport.height
+      };
+    }
+
+    function gridPointInNormFrac(fx, fy, f) {
+      if (!f || !(f.w > 0) || !(f.h > 0)) return false;
+      return fx >= f.x && fx <= f.x + f.w && fy >= f.y && fy <= f.y + f.h;
+    }
+
+    /** Walk the page operator list and collect embedded image placements. */
+    async function gridLoadPdfPageImages(pageIdx) {
+      const token = hqPdfjsToken;
+      const cacheKey = pageIdx + ':' + token;
+      if (gridPdfPageImagesCache.has(cacheKey)) {
+        return gridPdfPageImagesCache.get(cacheKey);
+      }
+      const out = [];
+      gridPdfPageImagesCache.set(cacheKey, out);
+      try {
+        if (!pdfjsLib || !pdfjsLib.OPS || typeof getHQPdfjsDoc !== 'function') return out;
+        const doc = await getHQPdfjsDoc(token);
+        if (!doc || token !== hqPdfjsToken) return out;
+        const page = await doc.getPage(pageIdx + 1);
+        const rot = typeof page.rotate === 'number' ? page.rotate : 0;
+        const viewport = page.getViewport({ scale: 1, rotation: rot });
+        const opList = await page.getOperatorList({ intent: 'display' });
+        if (token !== hqPdfjsToken) return out;
+        const OPS = pdfjsLib.OPS;
+        const U = pdfjsLib.Util;
+        const ctmStack = [[1, 0, 0, 1, 0, 0]];
+        let ctm = ctmStack[ctmStack.length - 1];
+        const pending = [];
+        for (let i = 0; i < opList.fnArray.length; i++) {
+          const fn = opList.fnArray[i];
+          const args = opList.argsArray[i];
+          if (fn === OPS.save) {
+            ctmStack.push(ctm.slice());
+          } else if (fn === OPS.restore) {
+            ctmStack.pop();
+            ctm = (ctmStack[ctmStack.length - 1] || [1, 0, 0, 1, 0, 0]).slice();
+          } else if (fn === OPS.transform) {
+            ctm = U.transform(ctm, args);
+          } else if (fn === OPS.paintImageXObject || fn === OPS.paintJpegXObject) {
+            const bounds = gridPdfImageBoundsFrac(ctm, viewport);
+            if (bounds && bounds.w > 0.002 && bounds.h > 0.002) {
+              pending.push({ type: 'xobject', name: args[0], bounds });
+            }
+          } else if (fn === OPS.paintInlineImageXObject) {
+            const bounds = gridPdfImageBoundsFrac(ctm, viewport);
+            if (bounds && bounds.w > 0.002 && bounds.h > 0.002) {
+              pending.push({ type: 'inline', inlineData: args[0], bounds });
+            }
+          }
+        }
+        pending.forEach((p, index) => {
+          const entry = { index, bounds: p.bounds };
+          if (p.type === 'inline') {
+            entry.resolve = () => Promise.resolve(p.inlineData);
+          } else {
+            const name = p.name;
+            entry.resolve = () => page.objs.get(name);
+          }
+          out.push(entry);
+        });
+      } catch (err) {
+        console.warn('gridLoadPdfPageImages', pageIdx, err);
+      }
+      return out;
+    }
+
+    async function gridHitTestPdfImages(pageIdx, clientX, clientY) {
+      const pageDiv = document.querySelector('.page[data-index="' + pageIdx + '"]');
+      if (!pageDiv) return null;
+      const layer = pageDiv.querySelector('.img-wrapper') || pageDiv;
+      const r = layer.getBoundingClientRect();
+      if (!(r.width > 0) || !(r.height > 0)) return null;
+      const fx = (clientX - r.left) / r.width;
+      const fy = (clientY - r.top) / r.height;
+      if (fx < 0 || fy < 0 || fx > 1 || fy > 1) return null;
+      const images = await gridLoadPdfPageImages(pageIdx);
+      for (let i = images.length - 1; i >= 0; i--) {
+        if (gridPointInNormFrac(fx, fy, images[i].bounds)) return images[i];
+      }
+      return null;
+    }
+
+    async function gridCopyPdfImageToSystemClipboard(pageIdx, imageIndex) {
+      if (pageIdx == null || imageIndex == null) return false;
+      try {
+        const images = await gridLoadPdfPageImages(pageIdx);
+        const entry = images[imageIndex];
+        if (!entry || typeof entry.resolve !== 'function') return false;
+        const imgData = await entry.resolve();
+        const blob = typeof pdfImageDataToPngBlob === 'function'
+          ? await pdfImageDataToPngBlob(imgData) : null;
+        if (!blob) return false;
+        if (navigator.clipboard && navigator.clipboard.write && typeof ClipboardItem !== 'undefined') {
+          await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+          return true;
+        }
+      } catch (e) {
+        console.warn('gridCopyPdfImageToSystemClipboard', e);
+      }
+      return false;
+    }
+
+    window.gridLoadPdfPageImages = gridLoadPdfPageImages;
+    window.gridHitTestPdfImages = gridHitTestPdfImages;
+    window.gridCopyPdfImageToSystemClipboard = gridCopyPdfImageToSystemClipboard;
+
+    function gridSchedulePdfPageImagesWarm(pageIdx) {
+      if (pageIdx == null || Number.isNaN(pageIdx)) return;
+      void gridLoadPdfPageImages(pageIdx).catch(() => {});
     }
 
     function scheduleHQUpgrade(opts) {
@@ -27072,8 +27218,9 @@ function editSelectedPage() {
   let textCopyCtxRange = null;
   let textCopyCtxPageIdx = null;
   let textCopyCtxFracs = null;
-  let textCopyCtxKind = 'page'; // 'page' | 'markup-obj' | 'editor-image'
+  let textCopyCtxKind = 'page'; // 'page' | 'markup-obj' | 'editor-image' | 'pdf-image'
   let textCopyCtxImageId = null;
+  let textCopyCtxPdfImageIndex = null;
 
   function blurIfInside(el) {
     if (el && document.activeElement && el.contains(document.activeElement)) {
@@ -27211,6 +27358,7 @@ function editSelectedPage() {
     textCopyCtxFracs = null;
     textCopyCtxKind = 'page';
     textCopyCtxImageId = null;
+    textCopyCtxPdfImageIndex = null;
     if (typeof peSyncTextSelMenuActive === 'function') {
       peSyncTextSelMenuActive(new Set(), textCopyMenu);
     }
@@ -27240,6 +27388,8 @@ function editSelectedPage() {
     textCopyCtxKind = options.kind || 'page';
     textCopyCtxImageId = (textCopyCtxKind === 'editor-image' && options.imageId != null)
       ? options.imageId : null;
+    textCopyCtxPdfImageIndex = (textCopyCtxKind === 'pdf-image' && options.pdfImageIndex != null)
+      ? options.pdfImageIndex : null;
     let fracs = options.fracs || null;
     if ((!fracs || !fracs.length) && range && pageIdx != null) {
       try { fracs = gridTextSelRangeToPageFracs(range, pageIdx); } catch (_) { fracs = []; }
@@ -27248,7 +27398,7 @@ function editSelectedPage() {
     syncPreviewTextCopyMenuActive(textCopyCtxFracs, pageIdx);
 
     const hideCopy = textCopyCtxKind === 'markup-obj';
-    const isImageCopy = textCopyCtxKind === 'editor-image';
+    const isImageCopy = textCopyCtxKind === 'editor-image' || textCopyCtxKind === 'pdf-image';
     const copyBtn = textCopyMenu.querySelector('.pe-text-sel-copy');
     if (copyBtn) {
       copyBtn.style.display = hideCopy ? 'none' : '';
@@ -27589,7 +27739,7 @@ function editSelectedPage() {
     if (typeof updateFitWidthBtnUI === 'function') updateFitWidthBtnUI();
   }
 
-  document.addEventListener('contextmenu', (e) => {
+  document.addEventListener('contextmenu', async (e) => {
     if (!pdfDoc || isLoading) { hideMenu(); hideTextCopyMenu(); return; }
     if (typeof isDragActive !== 'undefined' && isDragActive) { hideMenu(); hideTextCopyMenu(); return; }
     if (typeof loupeState !== 'undefined' && loupeState) { hideMenu(); hideTextCopyMenu(); return; }
@@ -27712,6 +27862,16 @@ function editSelectedPage() {
       if (imgHit) {
         e.preventDefault();
         showTextCopyMenu(e, '', null, idx, { kind: 'editor-image', imageId: imgHit.id });
+        return;
+      }
+    }
+
+    // RMB on an embedded PDF image (operator-list hit-test + objs.get).
+    if (!isTouchDevice && typeof gridHitTestPdfImages === 'function') {
+      const pdfHit = await gridHitTestPdfImages(idx, e.clientX, e.clientY);
+      if (pdfHit) {
+        e.preventDefault();
+        showTextCopyMenu(e, '', null, idx, { kind: 'pdf-image', pdfImageIndex: pdfHit.index });
         return;
       }
     }
@@ -28511,9 +28671,18 @@ function editSelectedPage() {
       }
       if (action === 'copy-image') {
         const pageIdx = textCopyCtxPageIdx;
+        const kind = textCopyCtxKind;
         const imageId = textCopyCtxImageId;
+        const pdfImageIndex = textCopyCtxPdfImageIndex;
         hideTextCopyMenu();
-        if (pageIdx == null || imageId == null) return;
+        if (pageIdx == null) return;
+        if (kind === 'pdf-image') {
+          if (pdfImageIndex != null && typeof gridCopyPdfImageToSystemClipboard === 'function') {
+            void gridCopyPdfImageToSystemClipboard(pageIdx, pdfImageIndex);
+          }
+          return;
+        }
+        if (imageId == null) return;
         const objects = (typeof peHydrateEditorObjects === 'function')
           ? peHydrateEditorObjects(peLoadPageEditorObjects(pageIdx), pageIdx)
           : peLoadPageEditorObjects(pageIdx);
@@ -41517,7 +41686,7 @@ function peResolveEditorImageDataUrl(o, pageIdx) {
   return url || null;
 }
 
-function peDataUrlToPngBlob(dataUrl) {
+async function peDataUrlToPngBlob(dataUrl) {
   return new Promise((resolve, reject) => {
     const im = new Image();
     im.onload = () => {
@@ -41533,6 +41702,76 @@ function peDataUrlToPngBlob(dataUrl) {
     };
     im.onerror = () => reject(new Error('image load failed'));
     im.src = dataUrl;
+  });
+}
+
+function pdfImageDataToCanvas(imgData) {
+  if (!imgData) return null;
+  if (imgData.bitmap) {
+    const canvas = document.createElement('canvas');
+    canvas.width = imgData.bitmap.width;
+    canvas.height = imgData.bitmap.height;
+    canvas.getContext('2d').drawImage(imgData.bitmap, 0, 0);
+    return canvas;
+  }
+  const w = imgData.width;
+  const h = imgData.height;
+  if (!(w > 0) || !(h > 0)) return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  const src = imgData.data;
+  if (!src) return null;
+  const imgd = ctx.createImageData(w, h);
+  const kind = imgData.kind;
+  const len = w * h;
+  if (kind === 3 || (src.length === len * 4)) {
+    imgd.data.set(src.length === len * 4 ? src : src.subarray(0, len * 4));
+  } else if (kind === 2 || src.length === len * 3) {
+    for (let i = 0, j = 0; i < len; i++, j += 4) {
+      const k = i * 3;
+      imgd.data[j] = src[k];
+      imgd.data[j + 1] = src[k + 1];
+      imgd.data[j + 2] = src[k + 2];
+      imgd.data[j + 3] = 255;
+    }
+  } else if (kind === 1 && src.length >= ((len + 7) >> 3)) {
+    for (let i = 0; i < len; i++) {
+      const bit = (src[i >> 3] >> (7 - (i & 7))) & 1;
+      const v = bit ? 255 : 0;
+      const j = i * 4;
+      imgd.data[j] = imgd.data[j + 1] = imgd.data[j + 2] = v;
+      imgd.data[j + 3] = 255;
+    }
+  } else if (src.length === len) {
+    for (let i = 0; i < len; i++) {
+      const v = src[i];
+      const j = i * 4;
+      imgd.data[j] = imgd.data[j + 1] = imgd.data[j + 2] = v;
+      imgd.data[j + 3] = 255;
+    }
+  } else {
+    return null;
+  }
+  ctx.putImageData(imgd, 0, 0);
+  return canvas;
+}
+
+async function pdfImageDataToPngBlob(imgData) {
+  if (!imgData) return null;
+  if (imgData.src) {
+    try {
+      return await peDataUrlToPngBlob(imgData.src);
+    } catch (_) { /* fall through */ }
+  }
+  const canvas = pdfImageDataToCanvas(imgData);
+  if (!canvas) return null;
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (blob) resolve(blob);
+      else reject(new Error('toBlob failed'));
+    }, 'image/png');
   });
 }
 
