@@ -27864,23 +27864,27 @@ function editSelectedPage() {
       }
     }
 
-    // RMB on an editor-inserted image (baked into preview raster; hit-test metadata).
-    if (!isTouchDevice && typeof gridHitTestEditorImages === 'function') {
-      const imgHit = gridHitTestEditorImages(idx, e.clientX, e.clientY);
-      if (imgHit) {
-        e.preventDefault();
-        showTextCopyMenu(e, '', null, idx, { kind: 'editor-image', imageId: imgHit.id });
-        return;
+    // Preview image copy only above 400% zoom (same threshold as HQ raster).
+    // Page editor keeps image copy at any zoom via peStage hit-test.
+    if (!isTouchDevice && currentScale > HQ_SCALE_THRESHOLD) {
+      // RMB on an editor-inserted image (baked into preview raster; hit-test metadata).
+      if (typeof gridHitTestEditorImages === 'function') {
+        const imgHit = gridHitTestEditorImages(idx, e.clientX, e.clientY);
+        if (imgHit) {
+          e.preventDefault();
+          showTextCopyMenu(e, '', null, idx, { kind: 'editor-image', imageId: imgHit.id });
+          return;
+        }
       }
-    }
 
-    // RMB on an embedded PDF image (operator-list hit-test + objs.get).
-    if (!isTouchDevice && typeof gridHitTestPdfImages === 'function') {
-      const pdfHit = await gridHitTestPdfImages(idx, e.clientX, e.clientY);
-      if (pdfHit) {
-        e.preventDefault();
-        showTextCopyMenu(e, '', null, idx, { kind: 'pdf-image', pdfImageIndex: pdfHit.index });
-        return;
+      // RMB on an embedded PDF image (operator-list hit-test + objs.get).
+      if (typeof gridHitTestPdfImages === 'function') {
+        const pdfHit = await gridHitTestPdfImages(idx, e.clientX, e.clientY);
+        if (pdfHit) {
+          e.preventDefault();
+          showTextCopyMenu(e, '', null, idx, { kind: 'pdf-image', pdfImageIndex: pdfHit.index });
+          return;
+        }
       }
     }
 
