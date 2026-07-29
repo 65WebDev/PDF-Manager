@@ -6094,6 +6094,7 @@
   <!--Context menu for selected page text in preview mode (desktop, >400% zoom) - same options as the page editor's-->
   <div id="pageTextCopyMenu" aria-hidden="true">
     <button type="button" class="pe-text-sel-copy" data-action="copy-text">Копировать</button>
+    <button type="button" class="pe-text-sel-copy pe-text-sel-save-as" data-action="save-image-as" hidden style="display:none">Сохранить как</button>
     <div class="pe-text-sel-sep" aria-hidden="true"></div>
     <div class="pe-text-sel-icons">
       <button type="button" data-action="highlight" title="Подсветить текст" aria-label="Подсветить текст">
@@ -6379,6 +6380,7 @@
   </div>
   <div id="peObjCtxMenu" aria-hidden="true">
     <button type="button" data-action="copy">Скопировать</button>
+    <button type="button" data-action="save-image-as" hidden style="display:none">Сохранить как</button>
     <button type="button" data-action="cut">Вырезать</button>
     <button type="button" data-action="paste">Вставить</button>
     <button type="button" data-action="edit-text" hidden style="display:none">Редактировать</button>
@@ -10478,15 +10480,20 @@
       return gridHitTestPdfImagesAt(pageIdx, clientX, clientY, r);
     }
 
+    async function gridResolvePdfImagePngBlob(pageIdx, imageIndex) {
+      if (pageIdx == null || imageIndex == null) return null;
+      const images = await gridLoadPdfPageImages(pageIdx);
+      const entry = images[imageIndex];
+      if (!entry || typeof entry.resolve !== 'function') return null;
+      const imgData = await entry.resolve();
+      if (typeof pdfImageDataToPngBlob !== 'function') return null;
+      return pdfImageDataToPngBlob(imgData);
+    }
+
     async function gridCopyPdfImageToSystemClipboard(pageIdx, imageIndex) {
       if (pageIdx == null || imageIndex == null) return false;
       try {
-        const images = await gridLoadPdfPageImages(pageIdx);
-        const entry = images[imageIndex];
-        if (!entry || typeof entry.resolve !== 'function') return false;
-        const imgData = await entry.resolve();
-        const blob = typeof pdfImageDataToPngBlob === 'function'
-          ? await pdfImageDataToPngBlob(imgData) : null;
+        const blob = await gridResolvePdfImagePngBlob(pageIdx, imageIndex);
         if (!blob) return false;
         if (navigator.clipboard && navigator.clipboard.write && typeof ClipboardItem !== 'undefined') {
           await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
@@ -10498,9 +10505,78 @@
       return false;
     }
 
+    function suggestImageSaveFileName(pageIdx) {
+      const raw = (typeof currentFileName === 'string' && currentFileName)
+        ? currentFileName.replace(/\.[^.]+$/i, '') : 'image';
+      const safe = (raw || 'image').replace(/[\\/:*?"<>|]+/g, '_').trim() || 'image';
+      const pagePart = (pageIdx != null && !Number.isNaN(pageIdx)) ? ('-p' + (pageIdx + 1)) : '';
+      return safe + pagePart + '.png';
+    }
+
+    /** Open OS save dialog (or download fallback) and write a PNG blob. */
+    async function savePngBlobWithPicker(getBlobFn, suggestedName) {
+      if (typeof getBlobFn !== 'function') return false;
+      let handle = null;
+      let writable = null;
+      try {
+        const name = suggestedName || 'image.png';
+        if (window.showSaveFilePicker) {
+          try {
+            const opts = {
+              suggestedName: name,
+              types: [{ description: 'PNG изображение', accept: { 'image/png': ['.png'] } }]
+            };
+            if (typeof resolveSavePickerStartIn === 'function') {
+              const startIn = await resolveSavePickerStartIn();
+              if (startIn) opts.startIn = startIn;
+            }
+            handle = await window.showSaveFilePicker(opts);
+            writable = await handle.createWritable();
+          } catch (e) {
+            if (e && e.name === 'AbortError') return false;
+            handle = null;
+            writable = null;
+          }
+        }
+        const blob = await getBlobFn();
+        if (!blob) {
+          if (writable) try { await writable.abort(); } catch (_) {}
+          return false;
+        }
+        if (writable) {
+          await writable.write(blob);
+          await writable.close();
+          if (typeof rememberFileHandleLocation === 'function') rememberFileHandleLocation(handle);
+          return true;
+        }
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = name;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 2500);
+        return true;
+      } catch (e) {
+        if (writable) try { await writable.abort(); } catch (_) {}
+        if (e && e.name === 'AbortError') return false;
+        console.warn('savePngBlobWithPicker', e);
+        return false;
+      }
+    }
+
+    async function gridSavePdfImageAs(pageIdx, imageIndex) {
+      return savePngBlobWithPicker(
+        () => gridResolvePdfImagePngBlob(pageIdx, imageIndex),
+        suggestImageSaveFileName(pageIdx)
+      );
+    }
+
     window.gridLoadPdfPageImages = gridLoadPdfPageImages;
     window.gridHitTestPdfImages = gridHitTestPdfImages;
     window.gridCopyPdfImageToSystemClipboard = gridCopyPdfImageToSystemClipboard;
+    window.gridSavePdfImageAs = gridSavePdfImageAs;
+    window.savePngBlobWithPicker = savePngBlobWithPicker;
+    window.suggestImageSaveFileName = suggestImageSaveFileName;
 
     /** Blue frame over the image about to be copied (preview or page editor). */
     function showPdfImageCopyHighlight(containerRect, bounds, rotDeg) {
@@ -27419,11 +27495,17 @@ function editSelectedPage() {
       el.hidden = true;
       el.style.display = 'none';
     });
-    const copyBtn = textCopyMenu.querySelector('.pe-text-sel-copy');
+    const copyBtn = textCopyMenu.querySelector('.pe-text-sel-copy[data-action="copy-text"], .pe-text-sel-copy[data-action="copy-image"]')
+      || textCopyMenu.querySelector('.pe-text-sel-copy:not(.pe-text-sel-save-as)');
     if (copyBtn) {
       copyBtn.style.display = '';
       copyBtn.textContent = 'Копировать';
       copyBtn.dataset.action = 'copy-text';
+    }
+    const saveAsBtn = textCopyMenu.querySelector('[data-action="save-image-as"]');
+    if (saveAsBtn) {
+      saveAsBtn.hidden = true;
+      saveAsBtn.style.display = 'none';
     }
     const sep = textCopyMenu.querySelector('.pe-text-sel-sep');
     if (sep) sep.style.display = '';
@@ -27458,11 +27540,16 @@ function editSelectedPage() {
     } else if (typeof hidePdfImageCopyHighlight === 'function') {
       hidePdfImageCopyHighlight();
     }
-    const copyBtn = textCopyMenu.querySelector('.pe-text-sel-copy');
+    const copyBtn = textCopyMenu.querySelector('.pe-text-sel-copy:not(.pe-text-sel-save-as)');
     if (copyBtn) {
       copyBtn.style.display = hideCopy ? 'none' : '';
       copyBtn.textContent = isImageCopy ? 'Копировать изображение' : 'Копировать';
       copyBtn.dataset.action = isImageCopy ? 'copy-image' : 'copy-text';
+    }
+    const saveAsBtn = textCopyMenu.querySelector('[data-action="save-image-as"]');
+    if (saveAsBtn) {
+      saveAsBtn.hidden = !isImageCopy;
+      saveAsBtn.style.display = isImageCopy ? '' : 'none';
     }
     const sep = textCopyMenu.querySelector('.pe-text-sel-sep');
     const hideMarkup = textCopyCtxKind !== 'page';
@@ -28766,6 +28853,29 @@ function editSelectedPage() {
         const img = (objects || []).find(o => o && o.id === imageId);
         if (img && typeof peCopyEditorImageToSystemClipboard === 'function') {
           void peCopyEditorImageToSystemClipboard(img, pageIdx);
+        }
+        return;
+      }
+      if (action === 'save-image-as') {
+        const pageIdx = textCopyCtxPageIdx;
+        const kind = textCopyCtxKind;
+        const imageId = textCopyCtxImageId;
+        const pdfImageIndex = textCopyCtxPdfImageIndex;
+        hideTextCopyMenu();
+        if (pageIdx == null) return;
+        if (kind === 'pdf-image') {
+          if (pdfImageIndex != null && typeof gridSavePdfImageAs === 'function') {
+            void gridSavePdfImageAs(pageIdx, pdfImageIndex);
+          }
+          return;
+        }
+        if (imageId == null) return;
+        const objects = (typeof peHydrateEditorObjects === 'function')
+          ? peHydrateEditorObjects(peLoadPageEditorObjects(pageIdx), pageIdx)
+          : peLoadPageEditorObjects(pageIdx);
+        const img = (objects || []).find(o => o && o.id === imageId);
+        if (img && typeof peSaveEditorImageAs === 'function') {
+          void peSaveEditorImageAs(img, pageIdx);
         }
         return;
       }
@@ -35357,6 +35467,14 @@ function peHideObjCtxMenu() {
     delete copyBtn.dataset._pdfImgIndex;
     if (copyBtn.textContent === 'Копировать изображение') copyBtn.textContent = 'Скопировать';
   }
+  const saveAsBtn = menu.querySelector('[data-action="save-image-as"]');
+  if (saveAsBtn) {
+    saveAsBtn.hidden = true;
+    saveAsBtn.style.display = 'none';
+    delete saveAsBtn.dataset._pdfImgPageIdx;
+    delete saveAsBtn.dataset._pdfImgIndex;
+    delete saveAsBtn.dataset._editorImgId;
+  }
 }
 
 function peHidePageToolsCtxMenu() {
@@ -36881,6 +36999,15 @@ function peShowPdfImageCopyMenu(clientX, clientY, pageIdx, imageIndex, bounds) {
     copyBtn.dataset._pdfImgPageIdx = pageIdx;
     copyBtn.dataset._pdfImgIndex = imageIndex;
   }
+  const saveAsBtn = menu.querySelector('[data-action="save-image-as"]');
+  if (saveAsBtn) {
+    saveAsBtn.style.display = '';
+    saveAsBtn.hidden = false;
+    saveAsBtn.disabled = false;
+    saveAsBtn.dataset._pdfImgPageIdx = pageIdx;
+    saveAsBtn.dataset._pdfImgIndex = imageIndex;
+    delete saveAsBtn.dataset._editorImgId;
+  }
   const peStage = document.getElementById('peStage');
   if (bounds && peStage && typeof showPdfImageCopyHighlight === 'function') {
     showPdfImageCopyHighlight(peStage.getBoundingClientRect(), bounds, 0);
@@ -36905,7 +37032,12 @@ function peShowObjCtxMenu(clientX, clientY, overlapObjs) {
   if (!menu) return;
   peHidePageToolsCtxMenu();
   if (typeof hidePdfImageCopyHighlight === 'function') hidePdfImageCopyHighlight();
+  // Restore buttons that peShowPdfImageCopyMenu may have hidden.
+  menu.querySelectorAll(':scope > button, :scope > hr').forEach(el => {
+    el.style.display = '';
+  });
   const sel = peGetSelectedObjects();
+  const sole = sel.length === 1 ? sel[0] : null;
   const copyBtn = menu.querySelector('[data-action="copy"]');
   const cutBtn = menu.querySelector('[data-action="cut"]');
   const pasteBtn = menu.querySelector('[data-action="paste"]');
@@ -36916,6 +37048,17 @@ function peShowObjCtxMenu(clientX, clientY, overlapObjs) {
     delete copyBtn.dataset._pdfImgPageIdx;
     delete copyBtn.dataset._pdfImgIndex;
   }
+  const saveAsBtn = menu.querySelector('[data-action="save-image-as"]');
+  if (saveAsBtn) {
+    const showSave = !!(sole && sole.type === 'image');
+    saveAsBtn.style.display = showSave ? '' : 'none';
+    saveAsBtn.hidden = !showSave;
+    saveAsBtn.disabled = !showSave;
+    delete saveAsBtn.dataset._pdfImgPageIdx;
+    delete saveAsBtn.dataset._pdfImgIndex;
+    if (showSave) saveAsBtn.dataset._editorImgId = String(sole.id);
+    else delete saveAsBtn.dataset._editorImgId;
+  }
   if (cutBtn) {
     cutBtn.style.display = '';
     cutBtn.disabled = !sel.length;
@@ -36924,7 +37067,11 @@ function peShowObjCtxMenu(clientX, clientY, overlapObjs) {
     pasteBtn.style.display = '';
     pasteBtn.disabled = false;
   }
-  menu.querySelector('[data-action="delete"]').disabled = !sel.length;
+  const deleteBtn = menu.querySelector('[data-action="delete"]');
+  if (deleteBtn) {
+    deleteBtn.style.display = '';
+    deleteBtn.disabled = !sel.length;
+  }
   const hlCommentBtn = menu.querySelector('[data-action="hl-comment"]');
   if (hlCommentBtn) hlCommentBtn.style.display = 'none';
   const editTextBtn = menu.querySelector('[data-action="edit-text"]');
@@ -39660,6 +39807,10 @@ function peObjMouseDown(e, o) {
     e.preventDefault();
     e.stopPropagation();
     const action = btn.dataset.action;
+    // Capture image-save/copy context before peHideObjCtxMenu clears datasets.
+    const pdfImgPageIdx = btn.dataset._pdfImgPageIdx;
+    const pdfImgIndex = btn.dataset._pdfImgIndex;
+    const editorImgId = btn.dataset._editorImgId;
     peHideObjCtxMenu();
     if (action === 'delete') {
       peDeleteSelected();
@@ -39675,17 +39826,30 @@ function peObjMouseDown(e, o) {
       if (o) peSelect(o);
     } else if (action === 'copy') {
       // PDF native image copy path (set by peShowPdfImageCopyMenu)
-      if (btn.dataset._pdfImgIndex != null) {
-        const pi = parseInt(btn.dataset._pdfImgPageIdx, 10);
-        const ii = parseInt(btn.dataset._pdfImgIndex, 10);
-        delete btn.dataset._pdfImgPageIdx;
-        delete btn.dataset._pdfImgIndex;
+      if (pdfImgIndex != null) {
+        const pi = parseInt(pdfImgPageIdx, 10);
+        const ii = parseInt(pdfImgIndex, 10);
         btn.textContent = 'Скопировать';
         if (typeof gridCopyPdfImageToSystemClipboard === 'function') {
           void gridCopyPdfImageToSystemClipboard(pi, ii);
         }
       } else {
         peCopySelectedObjects();
+      }
+    } else if (action === 'save-image-as') {
+      if (pdfImgIndex != null) {
+        const pi = parseInt(pdfImgPageIdx, 10);
+        const ii = parseInt(pdfImgIndex, 10);
+        if (typeof gridSavePdfImageAs === 'function') {
+          void gridSavePdfImageAs(pi, ii);
+        }
+      } else if (editorImgId != null) {
+        const id = parseInt(editorImgId, 10);
+        const o = peState.objects.find(x => x.id === id);
+        const pageIdx = peState.idx != null ? peState.idx : peState.pageIdx;
+        if (o && typeof peSaveEditorImageAs === 'function') {
+          void peSaveEditorImageAs(o, pageIdx);
+        }
       }
     } else if (action === 'cut') {
       peCutSelectedObjects();
@@ -41944,11 +42108,23 @@ async function peCopyEditorImageToSystemClipboard(o, pageIdx) {
   return peCopyImageDataUrlToSystemClipboard(url);
 }
 
+async function peSaveEditorImageAs(o, pageIdx) {
+  if (!o || o.type !== 'image') return false;
+  if (typeof savePngBlobWithPicker !== 'function') return false;
+  const suggested = (typeof suggestImageSaveFileName === 'function')
+    ? suggestImageSaveFileName(pageIdx) : 'image.png';
+  return savePngBlobWithPicker(async () => {
+    const url = peResolveEditorImageDataUrl(o, pageIdx);
+    if (!url) return null;
+    return peDataUrlToPngBlob(url);
+  }, suggested);
+}
+
 async function peCopySelectedImageToSystemClipboard() {
   if (!peState) return false;
   const objs = peGetSelectedObjects();
   if (objs.length !== 1 || objs[0].type !== 'image') return false;
-  return peCopyEditorImageToSystemClipboard(objs[0], peState.pageIdx);
+  return peCopyEditorImageToSystemClipboard(objs[0], peState.idx != null ? peState.idx : peState.pageIdx);
 }
 
 function peCopyPageEditorImagesToDoc(sourcePageIdx, targetPageIdx, targetDoc, objects) {
