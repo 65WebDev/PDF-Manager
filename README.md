@@ -8,15 +8,15 @@
 |--------|--------|
 | **Скачать онлайн-версию** | https://github.com/5451165-bot/PDF-Manager/releases/latest/download/PDF_manager_online.html |
 | **Скачать офлайн-версию** | https://github.com/5451165-bot/PDF-Manager/releases/latest/download/PDF_manager_offline.html |
-| **Windows: установщик** | https://github.com/5451165-bot/PDF-Manager/releases/download/windows-v0.1.10/PDF.Manager_0.1.10_x64-setup.exe |
-| **Windows: portable `.exe`** | https://github.com/5451165-bot/PDF-Manager/releases/download/windows-v0.1.10/pdf-manager.exe |
+| **Windows: установщик** | https://github.com/5451165-bot/PDF-Manager/releases/download/windows-v0.1.11/PDF.Manager_0.1.11_x64-setup.exe |
+| **Windows: portable `.exe`** | https://github.com/5451165-bot/PDF-Manager/releases/download/windows-v0.1.11/pdf-manager.exe |
 | **Страница релизов (HTML)** | https://github.com/5451165-bot/PDF-Manager/releases/latest |
-| **Релиз Windows** | https://github.com/5451165-bot/PDF-Manager/releases/tag/windows-v0.1.10 |
+| **Релиз Windows** | https://github.com/5451165-bot/PDF-Manager/releases/tag/windows-v0.1.11 |
 | **Открыть онлайн (GitHub Pages)** | https://5451165-bot.github.io/PDF-Manager/ |
 
 После скачивания HTML откройте файл в браузере. Онлайн-версия подгружает библиотеки из CDN; офлайн-версия содержит все зависимости внутри файла.
 
-Десктопная сборка для Windows — **отдельный** релиз (`windows-v…`), не смешивается с автоматическими `build-N`. Актуальная версия сейчас: [windows-v0.1.10](https://github.com/5451165-bot/PDF-Manager/releases/tag/windows-v0.1.10).
+Десктопная сборка для Windows — **отдельный** релиз (`windows-v…`), не смешивается с автоматическими `build-N`. Актуальная версия сейчас: [windows-v0.1.11](https://github.com/5451165-bot/PDF-Manager/releases/tag/windows-v0.1.11).
 
 ## Как это работает
 
