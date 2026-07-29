@@ -36783,6 +36783,31 @@ function peShouldIgnoreCtxMenuOutside() {
   return performance.now() < peCtxMenuIgnoreOutsideUntil;
 }
 
+function peShowPdfImageCopyMenu(clientX, clientY, pageIdx, imageIndex) {
+  const menu = document.getElementById('peObjCtxMenu');
+  if (!menu) return;
+  peHidePageToolsCtxMenu();
+  menu.querySelectorAll('button, hr, div').forEach(el => { el.style.display = 'none'; });
+  const copyBtn = menu.querySelector('[data-action="copy"]');
+  if (copyBtn) {
+    copyBtn.style.display = '';
+    copyBtn.disabled = false;
+    copyBtn.textContent = 'Копировать изображение';
+    copyBtn.dataset._pdfImgPageIdx = pageIdx;
+    copyBtn.dataset._pdfImgIndex = imageIndex;
+  }
+  menu.classList.add('visible');
+  const w = menu.offsetWidth;
+  const h = menu.offsetHeight;
+  let x = clientX;
+  let y = clientY;
+  if (x + w > window.innerWidth - 6) x = window.innerWidth - w - 6;
+  if (y + h > window.innerHeight - 6) y = window.innerHeight - h - 6;
+  menu.style.left = x + 'px';
+  menu.style.top = y + 'px';
+  peArmCtxMenuIgnoreOutside();
+}
+
 function peShowObjCtxMenu(clientX, clientY, overlapObjs) {
   const menu = document.getElementById('peObjCtxMenu');
   if (!menu) return;
@@ -39553,7 +39578,19 @@ function peObjMouseDown(e, o) {
       const o = peState.objects.find(x => x.id === id);
       if (o) peSelect(o);
     } else if (action === 'copy') {
-      peCopySelectedObjects();
+      // PDF native image copy path (set by peShowPdfImageCopyMenu)
+      if (btn.dataset._pdfImgIndex != null) {
+        const pi = parseInt(btn.dataset._pdfImgPageIdx, 10);
+        const ii = parseInt(btn.dataset._pdfImgIndex, 10);
+        delete btn.dataset._pdfImgPageIdx;
+        delete btn.dataset._pdfImgIndex;
+        btn.textContent = 'Скопировать';
+        if (typeof gridCopyPdfImageToSystemClipboard === 'function') {
+          void gridCopyPdfImageToSystemClipboard(pi, ii);
+        }
+      } else {
+        peCopySelectedObjects();
+      }
     } else if (action === 'cut') {
       peCutSelectedObjects();
     } else if (action === 'paste') {
@@ -39588,7 +39625,7 @@ function peObjMouseDown(e, o) {
     peOnPageToolsCtxAction(btn.dataset.action);
   });
 
-  stage.addEventListener('contextmenu', (e) => {
+  stage.addEventListener('contextmenu', async (e) => {
     if (!peState) return;
     // Crop mode keeps its own confirm menu over the crop box.
     if (peState.tool === 'crop') {
@@ -39615,6 +39652,22 @@ function peObjMouseDown(e, o) {
     }
     // Selected / hit object → object menu (handled on peObjLayer).
     if (e.target.closest && e.target.closest('.pe-obj')) return;
+
+    // RMB on a native PDF embedded image on the page canvas → copy menu.
+    if (peState.objSelectMode && typeof gridHitTestPdfImages === 'function') {
+      const idx = peState.idx != null ? peState.idx : (peState.pageIdx != null ? peState.pageIdx : null);
+      if (idx != null) {
+        const hit = await gridHitTestPdfImages(idx, e.clientX, e.clientY);
+        if (hit) {
+          e.preventDefault();
+          e.stopPropagation();
+          peHidePageToolsCtxMenu();
+          peHideObjCtxMenu();
+          peShowPdfImageCopyMenu(e.clientX, e.clientY, idx, hit.index);
+          return;
+        }
+      }
+    }
 
     e.preventDefault();
     e.stopPropagation();
