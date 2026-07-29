@@ -12694,6 +12694,8 @@
       if (e.button !== 0) return false;
       if (document.querySelector('.modal-overlay-active')) return false;
       if (insertMenuOpen) return false;
+      // Page-nav auto-scroll reserves LMB for hand/pan (see navPanStart autoHandPan).
+      if (typeof pmNavAutoDir !== 'undefined' && pmNavAutoDir && !pmNavAutoPaused) return false;
       const t = e.target;
       if (t.closest('.page')) {
         if (!e.altKey) return false;
@@ -12753,6 +12755,8 @@
       if (interactionMode !== 'select' || isLoading || !pdfDoc) return false;
       if (document.querySelector('.modal-overlay-active')) return false;
       if (insertMenuOpen) return false;
+      // Same as mouse: auto-scroll mode uses drag for pan, not rubber select.
+      if (typeof pmNavAutoDir !== 'undefined' && pmNavAutoDir && !pmNavAutoPaused) return false;
       const el = target && target.closest ? target : null;
       if (!el) return true;
       // We block only on menus/counters/buttons/indicators - but NOT on .page
