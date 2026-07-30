@@ -1398,6 +1398,8 @@
       font-size: 12.5px; color: #2c3e50; border-radius: 5px; cursor: pointer; text-align: left;
       white-space: nowrap; box-sizing: border-box;
     }
+    #pePageToolsCtxMenu > button[hidden],
+    #pePageToolsCtxMenu > hr[hidden] { display: none !important; }
     #pePageToolsCtxMenu > button:hover:not(:disabled),
     #pePageToolsCtxMenu .pe-page-tools-shape-item:hover > .pe-page-tools-shape-btn,
     #pePageToolsCtxMenu .pe-page-tools-shape-btn:hover:not(:disabled) { background: #eef4fa; }
@@ -36464,6 +36466,15 @@ function peShowPageToolsCtxMenu(clientX, clientY) {
   if (undoBtn) undoBtn.disabled = !canUndo;
   if (redoBtn) redoBtn.disabled = !canRedo;
 
+  // Already in object-select: hide that item (and its trailing hr) — no-op otherwise.
+  const objSelectActive = !!(peState.objSelectMode && peState.tool === 'select');
+  const objSelectBtn = menu.querySelector('[data-action="obj-select"]');
+  if (objSelectBtn) {
+    objSelectBtn.hidden = objSelectActive;
+    const sep = objSelectBtn.nextElementSibling;
+    if (sep && sep.tagName === 'HR') sep.hidden = objSelectActive;
+  }
+
   const shapeItem = document.getElementById('pePageToolsShapeItem');
   shapeItem?.classList.remove('open');
   const sub = document.getElementById('pePageToolsShapeSub');
@@ -41959,8 +41970,9 @@ function peShapeArrowMarkup(color, wPx, hPx, strokePx, obj) {
   // Tip size follows stroke thickness, not bend-inflated bbox height.
   const tipH = peVectorShapeThicknessPx(obj && obj.shape ? obj : { shape: 'arrow', strokePx: obj && obj.strokePx });
   const tip = peArrowTipSizePx(tipH, sw);
-  const tipFill = 'fill="' + c + '" stroke="' + c + '" stroke-width="' + Math.max(0.5, sw * 0.35) +
-    '" stroke-linejoin="round"';
+  // Fill-only tip: a stroke on the acute apex sticks out past the point
+  // (looks like a nub/line once thickness is ≥ ~4).
+  const tipFill = 'fill="' + c + '" stroke="none"';
   const bent = Math.abs(peVectorBend(obj)) >= 1e-4 || Math.abs(peVectorBendAlong(obj)) >= 1e-4;
   // End tangent of Q(P0,C,P1) is P1−C — rotate the tip with the curve.
   let tux = 1, tuy = 0;
@@ -41981,14 +41993,18 @@ function peShapeArrowMarkup(color, wPx, hPx, strokePx, obj) {
   const w1y = baseY + puy * tip.half;
   const w2x = baseX - pux * tip.half;
   const w2y = baseY - puy * tip.half;
+  // Overlap shaft slightly into the tip so AA does not leave a hairline gap.
+  const shaftIntoTip = Math.min(tip.len * 0.4, Math.max(sw * 0.55, 1));
+  const shaftEndX = tipX - tux * (tip.len - shaftIntoTip);
+  const shaftEndY = tipY - tuy * (tip.len - shaftIntoTip);
   let markup;
   if (!bent) {
-    markup = '<line x1="' + g.x1 + '" y1="' + g.y1 + '" x2="' + baseX + '" y2="' + baseY +
-      '" fill="none" stroke="' + c + '" stroke-width="' + sw + '" stroke-linecap="round"/>';
+    markup = '<line x1="' + g.x1 + '" y1="' + g.y1 + '" x2="' + shaftEndX + '" y2="' + shaftEndY +
+      '" fill="none" stroke="' + c + '" stroke-width="' + sw + '" stroke-linecap="butt"/>';
   } else {
-    // Shaft follows the same quadratic; tip polygon covers the tip end.
+    // End at the tip base (not the apex) so a thick stroke cannot poke past the point.
     markup = '<path d="M ' + g.x1 + ' ' + g.y1 + ' Q ' + g.ctrlX + ' ' + g.ctrlY + ' ' +
-      tipX + ' ' + tipY + '" fill="none" stroke="' + c + '" stroke-width="' + sw +
+      shaftEndX + ' ' + shaftEndY + '" fill="none" stroke="' + c + '" stroke-width="' + sw +
       '" stroke-linecap="butt"/>';
   }
   markup += '<polygon points="' + tipX + ',' + tipY + ' ' + w1x + ',' + w1y + ' ' +
