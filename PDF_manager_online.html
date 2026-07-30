@@ -6657,7 +6657,7 @@
       </svg>
     </button>
     <div id="pmAutoScrollSpeed" title="Скорость прокрутки (колесико мыши)" aria-label="Скорость прокрутки (колесико мыши)">
-      <input id="pmAutoScrollSpeedRange" type="range" min="0" max="200" value="100" step="1" />
+      <input id="pmAutoScrollSpeedRange" type="range" min="0" max="200" value="0" step="1" />
     </div>
     <button id="pmAutoScrollPauseBtn" type="button"
       title="Остановить прокрутку (ПКМ / Esc)" aria-label="Остановить прокрутку (ПКМ / Esc)">
@@ -11769,6 +11769,8 @@
       if (!dir) return;
       // Switching direction (or re-arming the same side) resets visual state.
       const prevDir = pmNavAutoDir;
+      // Fresh enable (not just flipping direction) → start at minimum speed.
+      const freshStart = !prevDir;
       if (prevDir && prevDir !== dir) pmStopPageNavAutoScroll();
 
       const btn = pmNavBtnForDir(dir);
@@ -11781,6 +11783,11 @@
         pmNavSetIcon(other, dir < 0 ? PM_NAV_ICON_NEXT : PM_NAV_ICON_PREV);
         other.title = dir < 0 ? pmNavTitleNext() : pmNavTitlePrev();
         other.setAttribute('aria-label', other.title);
+      }
+
+      if (freshStart) {
+        const range = document.getElementById('pmAutoScrollSpeedRange');
+        if (range) range.value = '0';
       }
 
       pmNavAutoDir = dir;
