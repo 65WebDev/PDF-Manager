@@ -41963,18 +41963,15 @@ function peShapeLineMarkup(color, wPx, hPx, strokePx, obj) {
     '" stroke-linecap="round"/>';
 }
 
-function peShapeArrowMarkup(color, wPx, hPx, strokePx, obj) {
-  const c = color || PE_SHAPE_PRESET_DEFAULTS.color;
+/** Shared arrow tip/shaft geometry (live SVG + preview/print canvas bake). */
+function peArrowDrawGeom(obj, wPx, hPx, strokePx, tipH) {
   const g = peVectorLocalGeometry(obj || {}, wPx, hPx, strokePx);
   const sw = g.sw;
-  // Tip size follows stroke thickness, not bend-inflated bbox height.
-  const tipH = peVectorShapeThicknessPx(obj && obj.shape ? obj : { shape: 'arrow', strokePx: obj && obj.strokePx });
-  const tip = peArrowTipSizePx(tipH, sw);
-  // Fill-only tip: a stroke on the acute apex sticks out past the point
-  // (looks like a nub/line once thickness is ≥ ~4).
-  const tipFill = 'fill="' + c + '" stroke="none"';
+  const tip = peArrowTipSizePx(
+    tipH != null ? tipH : peVectorShapeThicknessPx(obj && obj.shape ? obj : { shape: 'arrow', strokePx: obj && obj.strokePx }),
+    sw
+  );
   const bent = Math.abs(peVectorBend(obj)) >= 1e-4 || Math.abs(peVectorBendAlong(obj)) >= 1e-4;
-  // End tangent of Q(P0,C,P1) is P1−C — rotate the tip with the curve.
   let tux = 1, tuy = 0;
   if (bent) {
     const tx = g.x2 - g.ctrlX;
@@ -41989,26 +41986,38 @@ function peShapeArrowMarkup(color, wPx, hPx, strokePx, obj) {
   const baseY = tipY - tuy * tip.len;
   const pux = -tuy;
   const puy = tux;
-  const w1x = baseX + pux * tip.half;
-  const w1y = baseY + puy * tip.half;
-  const w2x = baseX - pux * tip.half;
-  const w2y = baseY - puy * tip.half;
   // Overlap shaft slightly into the tip so AA does not leave a hairline gap.
+  // Never end at the apex: a thick round/butt stroke would poke past the point.
   const shaftIntoTip = Math.min(tip.len * 0.4, Math.max(sw * 0.55, 1));
   const shaftEndX = tipX - tux * (tip.len - shaftIntoTip);
   const shaftEndY = tipY - tuy * (tip.len - shaftIntoTip);
+  return {
+    g, sw, bent, tip, tux, tuy,
+    tipX, tipY, baseX, baseY,
+    w1x: baseX + pux * tip.half,
+    w1y: baseY + puy * tip.half,
+    w2x: baseX - pux * tip.half,
+    w2y: baseY - puy * tip.half,
+    shaftEndX, shaftEndY
+  };
+}
+
+function peShapeArrowMarkup(color, wPx, hPx, strokePx, obj) {
+  const c = color || PE_SHAPE_PRESET_DEFAULTS.color;
+  const a = peArrowDrawGeom(obj, wPx, hPx, strokePx);
+  // Fill-only tip: a stroke on the acute apex sticks out past the point
+  // (looks like a nub/line once thickness is ≥ ~4).
   let markup;
-  if (!bent) {
-    markup = '<line x1="' + g.x1 + '" y1="' + g.y1 + '" x2="' + shaftEndX + '" y2="' + shaftEndY +
-      '" fill="none" stroke="' + c + '" stroke-width="' + sw + '" stroke-linecap="butt"/>';
+  if (!a.bent) {
+    markup = '<line x1="' + a.g.x1 + '" y1="' + a.g.y1 + '" x2="' + a.shaftEndX + '" y2="' + a.shaftEndY +
+      '" fill="none" stroke="' + c + '" stroke-width="' + a.sw + '" stroke-linecap="butt"/>';
   } else {
-    // End at the tip base (not the apex) so a thick stroke cannot poke past the point.
-    markup = '<path d="M ' + g.x1 + ' ' + g.y1 + ' Q ' + g.ctrlX + ' ' + g.ctrlY + ' ' +
-      shaftEndX + ' ' + shaftEndY + '" fill="none" stroke="' + c + '" stroke-width="' + sw +
+    markup = '<path d="M ' + a.g.x1 + ' ' + a.g.y1 + ' Q ' + a.g.ctrlX + ' ' + a.g.ctrlY + ' ' +
+      a.shaftEndX + ' ' + a.shaftEndY + '" fill="none" stroke="' + c + '" stroke-width="' + a.sw +
       '" stroke-linecap="butt"/>';
   }
-  markup += '<polygon points="' + tipX + ',' + tipY + ' ' + w1x + ',' + w1y + ' ' +
-    w2x + ',' + w2y + '" ' + tipFill + '/>';
+  markup += '<polygon points="' + a.tipX + ',' + a.tipY + ' ' + a.w1x + ',' + a.w1y + ' ' +
+    a.w2x + ',' + a.w2y + '" fill="' + c + '" stroke="none"/>';
   return markup;
 }
 
@@ -42481,35 +42490,25 @@ function peBakeDrawShape(ctx, o, canvas, renderScale) {
     }
     ctx.stroke();
   } else if (kind === 'arrow') {
-    const g = peVectorLocalGeometry(o, w, h, strokeW);
-    const tip = peArrowTipSizePx(Math.max(22 * S, strokeW * 5), strokeW);
-    const bent = Math.abs(peVectorBend(o)) >= 1e-4 || Math.abs(peVectorBendAlong(o)) >= 1e-4;
-    let tux = 1, tuy = 0;
-    if (bent) {
-      const tx = g.x2 - g.ctrlX;
-      const ty = g.y2 - g.ctrlY;
-      const tlen = Math.hypot(tx, ty) || 1;
-      tux = tx / tlen;
-      tuy = ty / tlen;
-    }
-    const tipX = x + g.x2;
-    const tipY = y + g.y2;
-    const baseX = tipX - tux * tip.len;
-    const baseY = tipY - tuy * tip.len;
-    const pux = -tuy;
-    const puy = tux;
+    // Same geometry as peShapeArrowMarkup (preview/print/save bake path).
+    const a = peArrowDrawGeom(o, w, h, strokeW, Math.max(22 * S, strokeW * 5));
+    const tipX = x + a.tipX;
+    const tipY = y + a.tipY;
+    const shaftEndX = x + a.shaftEndX;
+    const shaftEndY = y + a.shaftEndY;
+    ctx.lineCap = 'butt';
     ctx.beginPath();
-    ctx.moveTo(x + g.x1, y + g.y1);
-    if (!bent) {
-      ctx.lineTo(baseX, baseY);
+    ctx.moveTo(x + a.g.x1, y + a.g.y1);
+    if (!a.bent) {
+      ctx.lineTo(shaftEndX, shaftEndY);
     } else {
-      ctx.quadraticCurveTo(x + g.ctrlX, y + g.ctrlY, tipX, tipY);
+      ctx.quadraticCurveTo(x + a.g.ctrlX, y + a.g.ctrlY, shaftEndX, shaftEndY);
     }
     ctx.stroke();
     ctx.beginPath();
     ctx.moveTo(tipX, tipY);
-    ctx.lineTo(baseX + pux * tip.half, baseY + puy * tip.half);
-    ctx.lineTo(baseX - pux * tip.half, baseY - puy * tip.half);
+    ctx.lineTo(x + a.w1x, y + a.w1y);
+    ctx.lineTo(x + a.w2x, y + a.w2y);
     ctx.closePath();
     ctx.fill();
   } else if (kind === 'plus') {
