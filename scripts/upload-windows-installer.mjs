@@ -11,6 +11,9 @@
  *   - commits/pushes those meta files (unless SKIP_META_COMMIT=1)
  *   - updates the GitHub repository description with the current Windows tag
  *   - rewrites the release notes body and drops leftover setup assets from older versions
+ *   - keeps GitHub "Latest" on the newest HTML build-* release (so
+ *     /releases/latest/download/PDF_manager_*.html keeps working; Windows
+ *     tags use --latest=false because semver would otherwise steal Latest)
  *
  * Requirements:
  *   - GitHub CLI (`gh`) installed and authenticated (`gh auth login`)
@@ -457,6 +460,67 @@ function updateRepoDescription(ghBin, version, tag) {
   }
 }
 
+/**
+ * GitHub allows only one "Latest" release. `gh release create` may mark a new
+ * windows-v* tag as Latest (semver vs build-N), which breaks
+ * /releases/latest/download/PDF_manager_online.html (404 — no HTML assets).
+ * Always leave Latest on the newest non-draft build-* HTML release.
+ */
+function ensureHtmlBuildIsLatest(ghBin, windowsTag) {
+  const unpin = runGh(ghBin, ['release', 'edit', windowsTag, '--latest=false'], {
+    stdio: 'inherit',
+  });
+  if (unpin.status !== 0) {
+    console.warn(`WARN: could not clear Latest on ${windowsTag}`);
+  }
+
+  const list = runGh(ghBin, [
+    'release',
+    'list',
+    '--limit',
+    '100',
+    '--json',
+    'tagName,isDraft,isPrerelease',
+  ]);
+  if (list.status !== 0 || !list.stdout) {
+    console.warn('WARN: could not list releases to restore HTML Latest.');
+    return;
+  }
+  let releases = [];
+  try {
+    releases = JSON.parse(list.stdout);
+  } catch (err) {
+    console.warn('WARN: bad release list JSON:', err && err.message ? err.message : err);
+    return;
+  }
+
+  let bestTag = null;
+  let bestNum = -1;
+  for (const rel of releases) {
+    if (!rel || rel.isDraft) continue;
+    const m = /^build-(\d+)$/i.exec(String(rel.tagName || ''));
+    if (!m) continue;
+    const n = Number(m[1]) || 0;
+    if (n > bestNum) {
+      bestNum = n;
+      bestTag = rel.tagName;
+    }
+  }
+  if (!bestTag) {
+    console.warn('WARN: no build-* HTML release found — Latest left unset on Windows tag.');
+    return;
+  }
+
+  const pin = runGh(ghBin, ['release', 'edit', bestTag, '--latest'], {
+    stdio: 'inherit',
+  });
+  if (pin.status === 0) {
+    console.log(`OK  GitHub Latest → ${bestTag} (HTML online/offline downloads).`);
+  } else {
+    console.warn(`WARN: could not mark ${bestTag} as Latest.`);
+  }
+}
+
 function main() {
   if (skipUpload()) {
     console.log('TAURI_SKIP_UPLOAD set — пропускаю загрузку на GitHub.');
@@ -522,6 +586,8 @@ function main() {
           title,
           '--notes-file',
           notesPath,
+          // Do not steal /releases/latest from HTML build-* tags.
+          '--latest=false',
         ],
         { stdio: 'inherit' },
       );
@@ -537,7 +603,16 @@ function main() {
 
       runGh(
         ghBin,
-        ['release', 'edit', tag, '--title', title, '--notes-file', notesPath],
+        [
+          'release',
+          'edit',
+          tag,
+          '--title',
+          title,
+          '--notes-file',
+          notesPath,
+          '--latest=false',
+        ],
         { stdio: 'inherit' },
       );
     }
@@ -546,6 +621,9 @@ function main() {
       if (existsSync(notesPath)) unlinkSync(notesPath);
     } catch { /* ignore */ }
   }
+
+  // Belt-and-suspenders: after any Windows publish, re-pin Latest to HTML.
+  ensureHtmlBuildIsLatest(ghBin, tag);
 
   const view = runGh(ghBin, ['release', 'view', tag, '--json', 'url']);
   let finalReleaseUrl = releaseUrl;
