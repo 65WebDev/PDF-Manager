@@ -7024,6 +7024,221 @@
     const PM_NAV_HOLD_ARM_MS = 300;   // touch-only long-press arm
     const PM_NAV_HOLD_RING_MS = 500;  // touch-only ring fill
     const PM_NAV_RING_LEN = 100; // matches pathLength on the SVG circle
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // I18N (ru / en). Locale: localStorage pmLocale → navigator.language → ru.
+    // Flag button in logo popup toggles; static UI uses data-i18n* attributes.
+    // ═══════════════════════════════════════════════════════════════════════
+    const PM_LOCALE_KEY = 'pmLocale';
+    const PM_I18N = {
+      ru: {
+        appTitle: 'Менеджер документов PDF',
+        menuToggle: 'Скрыть/показать меню', menuToggleHide: 'Скрыть меню', menuToggleShow: 'Показать меню',
+        themeDark: 'Тёмный режим', themeLight: 'Светлый режим',
+        about: 'О программе', restoreHelp: 'Вернуть подсказку по горячим клавишам',
+        langSwitchToEn: 'English', langSwitchToRu: 'Русский',
+        selectFile: 'Выбрать файл', selectFiles: 'Выбрать файлы',
+        selectFilesTitle: 'Выбрать один или несколько файлов (F)',
+        merge: 'Объединить',
+        readMode: 'Режим чтения', readModeKey: 'Режим чтения (R)', loupeMode: 'Режим увеличения (Z)',
+        selectMode: 'Режим выбора (C)', navMode: 'Режим навигации (H)',
+        rotateLeftSelected: 'Повернуть выбранные страницы против часовой стрелки (Q)',
+        rotateRightSelected: 'Повернуть выбранные страницы по часовой стрелке (W)',
+        editPage: 'Редактировать страницу',
+        deleteSelectedPages: 'Удалить выбранные страницы (Del)',
+        deletedPagesHidden: 'Скрыты страницы помеченные на удаление (Shift+H)',
+        deletedPagesShown: 'Отображаются страницы помеченные на удаление (Shift+H)',
+        multiSelectMode: 'Режим выделения нескольких страниц',
+        printDocument: 'Печать документа (P)', printSelectedPages: 'Печать выделенных страниц',
+        replace: 'Заменить', replaceSelectedPages: 'Заменить выбранные страницы (Shift+C)',
+        export: 'Экспорт', exportSelectedPages: 'Экспорт выделенных страниц в один PDF (Shift+E)',
+        exportAsImages: 'Экспорт как изображения',
+        exportAsImagesHint: 'Экспорт как изображения\n(экспорт выделенных страниц в PDF, где страницы сохранены как изображения)',
+        save: 'Сохранить', saveFinalFile: 'Сохранить итоговый файл (S)',
+        saveAsImages: 'Сохранить как изображения',
+        saveAsImagesHint: 'Сохранить как изображения\n(сохранение файла в PDF, где страницы сохранены как изображения)',
+        scale: 'Масштаб:', pin: 'Закрепить', unpin: 'Открепить', pages: 'Страниц:',
+        dropZoneDesktop: 'Нажмите здесь или перетащите в эту область один или несколько файлов для открытия',
+        dropZoneMobile: 'Нажмите здесь для выбора одного или нескольких файлов',
+        dropZoneFormats: 'Поддерживаются: PDF, Word (.docx), Excel (.xls, .xlsx), изображения (PNG, JPEG, BMP, GIF, WEBP, TIFF)',
+        helpHotkeys: 'Горячие клавиши', helpHideToggle: 'Скрыть подсказку', helpClickToHide: 'Нажмите для скрытия окна',
+        helpTitle: 'Основные горячие клавиши',
+        helpSubtitlePages: 'Работа со страницами:', helpSubtitleGeneral: 'Общие:',
+        helpSubtitleNav: 'Навигация по документу:', helpSubtitleTabs: 'Вкладки:',
+        helpQ: '<span class="hk">Q</span> — Повернуть выбранные страницы против часовой стрелки',
+        helpW: '<span class="hk">W</span> — Повернуть выбранные страницы по часовой стрелке',
+        helpDel: '<span class="hk">Del</span> — Удалить выбранные страницы',
+        helpCtrlC: '<span class="hk">Ctrl + C</span> — копировать выделенные страницы',
+        helpCtrlX: '<span class="hk">Ctrl + X</span> — вырезать выделенные страницы',
+        helpCtrlV: '<span class="hk">Ctrl + V</span> — вставить страницы из буфера',
+        helpShiftSelect: 'Удерживайте <span class="hk">Shift</span> — выделить диапазон страниц',
+        helpCtrlSelect: 'Удерживайте <span class="hk">Ctrl</span> — выделить отдельные страницы',
+        helpP: '<span class="hk">P</span> — Печать', helpS: '<span class="hk">S</span> — Сохранить документ',
+        helpCtrlF: '<span class="hk">Ctrl + F</span> — поиск по документу',
+        helpCtrlZ: '<span class="hk">Ctrl + Z</span> — вернуть на шаг назад',
+        helpCtrlY: '<span class="hk">Ctrl + Y</span> — отмена возврата',
+        helpC: '<span class="hk">C</span> — режим выбора', helpH: '<span class="hk">H</span> — режим навигации',
+        helpR: '<span class="hk">R</span> — режим чтения', helpZ: '<span class="hk">Z</span> — режим увеличения',
+        helpAltWheel: '<span class="hk">Alt + колесико мыши</span> — изменение масштаба',
+        helpDblClickFit: '<span class="hk">Двойной клик по странице</span> — по ширине страницы',
+        helpTabLeft: '<span class="hk">Ctrl + стрелка влево</span> — выбрать вкладку слева',
+        helpTabRight: '<span class="hk">Ctrl + стрелка вправо</span> — выбрать вкладку справа',
+        helpTabClose: '<span class="hk">Ctrl + Del</span> — закрыть вкладку',
+        aboutDesktop: 'Десктопное приложение для работы с PDF-документами.',
+        aboutWeb: 'Веб-приложение для работы с PDF-документами. Вся обработка выполняется в браузере.',
+        aboutVersion: 'Версия {ver}', aboutEditor: 'Редактор: {build}', aboutEditorFrom: ' от {date}',
+        aboutVersionUnknownApp: 'Версия приложения неизвестна',
+        aboutVersionUnknown: 'Версия неизвестна (сборка не через релизный пайплайн)',
+        aboutLibraries: 'Библиотеки:',
+        aboutNetworkOffline: 'Все библиотеки встроены в код веб-приложения. Обращение к сети отсутствует.',
+        aboutNetworkCdn: 'Библиотеки подгружаются из CDN при первом запуске. Офлайн-версия содержит их прямо в файле, без обращений к сети.',
+        aboutAiAuthorship: 'Значительная часть кода написана с использованием искусственного интеллекта по техническому заданию и под контролем разработчика.',
+        aboutDeveloper: 'Разработчик: <b>Евгений Кутьин</b>.',
+        aboutClose: 'Закрыть', aboutShaComputing: 'SHA-256: считаю…',
+        aboutShaUnavailable: 'SHA-256: недоступно в этом контексте',
+        aboutUpdateFail: 'Не удалось проверить обновления (нет доступа к списку версий).',
+        aboutUpdateApp: 'Вышла обновлённая версия приложения {ver}',
+        aboutUpdateEditor: 'Доступен обновлённый редактор {build}',
+        aboutUpdateWeb: 'Вышла обновлённая версия {build}',
+        pagePrevDesktop: 'Предыдущая страница (ПКМ - автопрокрутка)',
+        pagePrevTouch: 'Предыдущая страница. Удерживание - автопрокрутка',
+        pageNextDesktop: 'Следующая страница (ПКМ - автопрокрутка)',
+        pageNextTouch: 'Следующая страница. Удерживание - автопрокрутка',
+        scrollSpeedDesktop: 'Скорость прокрутки (колесико мыши)', scrollSpeedTouch: 'Скорость прокрутки',
+        scrollPauseDesktop: 'Остановить прокрутку (ПКМ / Esc)', scrollPauseTouch: 'Остановить прокрутку',
+        scrollResumeDesktop: 'Продолжить прокрутку (ПКМ); Esc — выход', scrollResumeTouch: 'Продолжить прокрутку',
+        loadingPages: 'Загрузка страниц...', cancelLoading: 'Отменить загрузку',
+        readModeEsc: 'ESC для выхода из режима чтения', loupeWheelHint: 'Изменение масштаба колесиком мыши',
+        searchPlaceholder: 'Поиск по документу', searchFind: 'Найти (Enter)',
+        searchPrev: 'Предыдущее совпадение (Shift+Enter)', searchNext: 'Следующее совпадение (Enter)',
+        searchClose: 'Закрыть (Esc)', searchAllTabs: 'Искать по всем вкладкам',
+        newDocumentHint: 'Будет создан новый документ', openInNewTabs: 'Откроется в новых вкладках',
+        tabClose: 'Закрыть вкладку', tabCloseOthers: 'Закрыть другие вкладки', tabCloseRight: 'Закрыть вкладки справа',
+        peInsertText: 'Вставить текст', peInsertImage: 'Вставить изображение', peAddShapes: 'Добавить фигуры',
+        peShapeRect: 'Прямоугольник', peShapeEllipse: 'Круг / овал', peShapeArrow: 'Стрелка',
+        peShapeLine: 'Линия', peShapePlus: 'Плюс', peShapeFreehand: 'Свободная форма', peShapeStar: 'Звезда',
+        peCancel: 'Отмена', peSave: 'Сохранить', peCropHint: 'Выделите область кадрирования',
+        undoMobile: 'Вернуть на шаг назад', redoMobile: 'Отмена возврата'
+      },
+      en: {
+        appTitle: 'PDF Document Manager',
+        menuToggle: 'Hide/show menu', menuToggleHide: 'Hide menu', menuToggleShow: 'Show menu',
+        themeDark: 'Dark mode', themeLight: 'Light mode',
+        about: 'About', restoreHelp: 'Restore keyboard shortcuts hint',
+        langSwitchToEn: 'English', langSwitchToRu: 'Русский',
+        selectFile: 'Select file', selectFiles: 'Select files',
+        selectFilesTitle: 'Select one or more files (F)',
+        merge: 'Merge',
+        readMode: 'Reading mode', readModeKey: 'Reading mode (R)', loupeMode: 'Magnifier mode (Z)',
+        selectMode: 'Selection mode (C)', navMode: 'Navigation mode (H)',
+        rotateLeftSelected: 'Rotate selected pages counter-clockwise (Q)',
+        rotateRightSelected: 'Rotate selected pages clockwise (W)',
+        editPage: 'Edit page',
+        deleteSelectedPages: 'Delete selected pages (Del)',
+        deletedPagesHidden: 'Pages marked for deletion are hidden (Shift+H)',
+        deletedPagesShown: 'Pages marked for deletion are shown (Shift+H)',
+        multiSelectMode: 'Multi-page selection mode',
+        printDocument: 'Print document (P)', printSelectedPages: 'Print selected pages',
+        replace: 'Replace', replaceSelectedPages: 'Replace selected pages (Shift+C)',
+        export: 'Export', exportSelectedPages: 'Export selected pages to a single PDF (Shift+E)',
+        exportAsImages: 'Export as images',
+        exportAsImagesHint: 'Export as images\n(export selected pages to PDF with pages saved as images)',
+        save: 'Save', saveFinalFile: 'Save final file (S)',
+        saveAsImages: 'Save as images',
+        saveAsImagesHint: 'Save as images\n(save file as PDF with pages saved as images)',
+        scale: 'Scale:', pin: 'Pin', unpin: 'Unpin', pages: 'Pages:',
+        dropZoneDesktop: 'Click here or drag one or more files into this area to open',
+        dropZoneMobile: 'Tap here to select one or more files',
+        dropZoneFormats: 'Supported: PDF, Word (.docx), Excel (.xls, .xlsx), images (PNG, JPEG, BMP, GIF, WEBP, TIFF)',
+        helpHotkeys: 'Keyboard shortcuts', helpHideToggle: 'Hide hint', helpClickToHide: 'Click to hide',
+        helpTitle: 'Main keyboard shortcuts',
+        helpSubtitlePages: 'Working with pages:', helpSubtitleGeneral: 'General:',
+        helpSubtitleNav: 'Document navigation:', helpSubtitleTabs: 'Tabs:',
+        helpQ: '<span class="hk">Q</span> — Rotate selected pages counter-clockwise',
+        helpW: '<span class="hk">W</span> — Rotate selected pages clockwise',
+        helpDel: '<span class="hk">Del</span> — Delete selected pages',
+        helpCtrlC: '<span class="hk">Ctrl + C</span> — copy selected pages',
+        helpCtrlX: '<span class="hk">Ctrl + X</span> — cut selected pages',
+        helpCtrlV: '<span class="hk">Ctrl + V</span> — paste pages from clipboard',
+        helpShiftSelect: 'Hold <span class="hk">Shift</span> — select a range of pages',
+        helpCtrlSelect: 'Hold <span class="hk">Ctrl</span> — select individual pages',
+        helpP: '<span class="hk">P</span> — Print', helpS: '<span class="hk">S</span> — Save document',
+        helpCtrlF: '<span class="hk">Ctrl + F</span> — search in document',
+        helpCtrlZ: '<span class="hk">Ctrl + Z</span> — undo',
+        helpCtrlY: '<span class="hk">Ctrl + Y</span> — redo',
+        helpC: '<span class="hk">C</span> — selection mode', helpH: '<span class="hk">H</span> — navigation mode',
+        helpR: '<span class="hk">R</span> — reading mode', helpZ: '<span class="hk">Z</span> — magnifier mode',
+        helpAltWheel: '<span class="hk">Alt + mouse wheel</span> — change scale',
+        helpDblClickFit: '<span class="hk">Double-click page</span> — fit page width',
+        helpTabLeft: '<span class="hk">Ctrl + left arrow</span> — select tab to the left',
+        helpTabRight: '<span class="hk">Ctrl + right arrow</span> — select tab to the right',
+        helpTabClose: '<span class="hk">Ctrl + Del</span> — close tab',
+        aboutDesktop: 'Desktop application for working with PDF documents.',
+        aboutWeb: 'Web application for working with PDF documents. All processing is done in the browser.',
+        aboutVersion: 'Version {ver}', aboutEditor: 'Editor: {build}', aboutEditorFrom: ' from {date}',
+        aboutVersionUnknownApp: 'Application version unknown',
+        aboutVersionUnknown: 'Version unknown (not built via release pipeline)',
+        aboutLibraries: 'Libraries:',
+        aboutNetworkOffline: 'All libraries are embedded in the web application. No network access.',
+        aboutNetworkCdn: 'Libraries load from CDN on first launch. The offline version embeds them in the file with no network access.',
+        aboutAiAuthorship: 'A significant portion of the code was written using artificial intelligence based on a technical specification and under developer supervision.',
+        aboutDeveloper: 'Developer: <b>Evgeniy Kutyin</b>.',
+        aboutClose: 'Close', aboutShaComputing: 'SHA-256: computing…',
+        aboutShaUnavailable: 'SHA-256: unavailable in this context',
+        aboutUpdateFail: 'Could not check for updates (no access to version list).',
+        aboutUpdateApp: 'An updated application version {ver} is available',
+        aboutUpdateEditor: 'An updated editor {build} is available',
+        aboutUpdateWeb: 'An updated version {build} is available',
+        pagePrevDesktop: 'Previous page (RMB — auto-scroll)',
+        pagePrevTouch: 'Previous page. Hold — auto-scroll',
+        pageNextDesktop: 'Next page (RMB — auto-scroll)',
+        pageNextTouch: 'Next page. Hold — auto-scroll',
+        scrollSpeedDesktop: 'Scroll speed (mouse wheel)', scrollSpeedTouch: 'Scroll speed',
+        scrollPauseDesktop: 'Stop scrolling (RMB / Esc)', scrollPauseTouch: 'Stop scrolling',
+        scrollResumeDesktop: 'Resume scrolling (RMB); Esc — exit', scrollResumeTouch: 'Resume scrolling',
+        loadingPages: 'Loading pages...', cancelLoading: 'Cancel loading',
+        readModeEsc: 'ESC to exit reading mode', loupeWheelHint: 'Change scale with mouse wheel',
+        searchPlaceholder: 'Search in document', searchFind: 'Find (Enter)',
+        searchPrev: 'Previous match (Shift+Enter)', searchNext: 'Next match (Enter)',
+        searchClose: 'Close (Esc)', searchAllTabs: 'Search all tabs',
+        newDocumentHint: 'A new document will be created', openInNewTabs: 'Will open in new tabs',
+        tabClose: 'Close tab', tabCloseOthers: 'Close other tabs', tabCloseRight: 'Close tabs to the right',
+        peInsertText: 'Insert text', peInsertImage: 'Insert image', peAddShapes: 'Add shapes',
+        peShapeRect: 'Rectangle', peShapeEllipse: 'Circle / oval', peShapeArrow: 'Arrow',
+        peShapeLine: 'Line', peShapePlus: 'Plus', peShapeFreehand: 'Freeform', peShapeStar: 'Star',
+        peCancel: 'Cancel', peSave: 'Save', peCropHint: 'Select crop area',
+        undoMobile: 'Undo', redoMobile: 'Redo'
+      }
+    };
+
+    let pmLocale = 'ru';
+    function pmDetectLocale() {
+      try {
+        const saved = localStorage.getItem(PM_LOCALE_KEY);
+        if (saved === 'en' || saved === 'ru') return saved;
+      } catch (_) {}
+      try {
+        const langs = (navigator.languages && navigator.languages.length)
+          ? navigator.languages : [navigator.language || navigator.userLanguage || ''];
+        for (let i = 0; i < langs.length; i++) {
+          const l = String(langs[i] || '').toLowerCase();
+          if (l.startsWith('en')) return 'en';
+          if (l.startsWith('ru')) return 'ru';
+        }
+      } catch (_) {}
+      return 'ru';
+    }
+    function t(key, vars) {
+      const pack = PM_I18N[pmLocale] || PM_I18N.ru;
+      let s = (pack && pack[key] != null) ? pack[key]
+        : ((PM_I18N.ru && PM_I18N.ru[key] != null) ? PM_I18N.ru[key] : key);
+      if (vars && typeof s === 'string') {
+        s = s.replace(/\{(\w+)\}/g, (_, k) => (vars[k] != null ? String(vars[k]) : ''));
+      }
+      return s;
+    }
+    pmLocale = pmDetectLocale();
+
     function pmNavTitlePrev() {
       return isTouchDevice ? t('pagePrevTouch') : t('pagePrevDesktop');
     }
@@ -8026,218 +8241,6 @@
     }
 
 
-    // ═══════════════════════════════════════════════════════════════════════
-    // I18N (ru / en). Locale: localStorage pmLocale → navigator.language → ru.
-    // Flag button in logo popup toggles; static UI uses data-i18n* attributes.
-    // ═══════════════════════════════════════════════════════════════════════
-    const PM_LOCALE_KEY = 'pmLocale';
-    const PM_I18N = {
-      ru: {
-        appTitle: 'Менеджер документов PDF',
-        menuToggle: 'Скрыть/показать меню', menuToggleHide: 'Скрыть меню', menuToggleShow: 'Показать меню',
-        themeDark: 'Тёмный режим', themeLight: 'Светлый режим',
-        about: 'О программе', restoreHelp: 'Вернуть подсказку по горячим клавишам',
-        langSwitchToEn: 'English', langSwitchToRu: 'Русский',
-        selectFile: 'Выбрать файл', selectFiles: 'Выбрать файлы',
-        selectFilesTitle: 'Выбрать один или несколько файлов (F)',
-        merge: 'Объединить',
-        readMode: 'Режим чтения', readModeKey: 'Режим чтения (R)', loupeMode: 'Режим увеличения (Z)',
-        selectMode: 'Режим выбора (C)', navMode: 'Режим навигации (H)',
-        rotateLeftSelected: 'Повернуть выбранные страницы против часовой стрелки (Q)',
-        rotateRightSelected: 'Повернуть выбранные страницы по часовой стрелке (W)',
-        editPage: 'Редактировать страницу',
-        deleteSelectedPages: 'Удалить выбранные страницы (Del)',
-        deletedPagesHidden: 'Скрыты страницы помеченные на удаление (Shift+H)',
-        deletedPagesShown: 'Отображаются страницы помеченные на удаление (Shift+H)',
-        multiSelectMode: 'Режим выделения нескольких страниц',
-        printDocument: 'Печать документа (P)', printSelectedPages: 'Печать выделенных страниц',
-        replace: 'Заменить', replaceSelectedPages: 'Заменить выбранные страницы (Shift+C)',
-        export: 'Экспорт', exportSelectedPages: 'Экспорт выделенных страниц в один PDF (Shift+E)',
-        exportAsImages: 'Экспорт как изображения',
-        exportAsImagesHint: 'Экспорт как изображения\n(экспорт выделенных страниц в PDF, где страницы сохранены как изображения)',
-        save: 'Сохранить', saveFinalFile: 'Сохранить итоговый файл (S)',
-        saveAsImages: 'Сохранить как изображения',
-        saveAsImagesHint: 'Сохранить как изображения\n(сохранение файла в PDF, где страницы сохранены как изображения)',
-        scale: 'Масштаб:', pin: 'Закрепить', unpin: 'Открепить', pages: 'Страниц:',
-        dropZoneDesktop: 'Нажмите здесь или перетащите в эту область один или несколько файлов для открытия',
-        dropZoneMobile: 'Нажмите здесь для выбора одного или нескольких файлов',
-        dropZoneFormats: 'Поддерживаются: PDF, Word (.docx), Excel (.xls, .xlsx), изображения (PNG, JPEG, BMP, GIF, WEBP, TIFF)',
-        helpHotkeys: 'Горячие клавиши', helpHideToggle: 'Скрыть подсказку', helpClickToHide: 'Нажмите для скрытия окна',
-        helpTitle: 'Основные горячие клавиши',
-        helpSubtitlePages: 'Работа со страницами:', helpSubtitleGeneral: 'Общие:',
-        helpSubtitleNav: 'Навигация по документу:', helpSubtitleTabs: 'Вкладки:',
-        helpQ: '<span class="hk">Q</span> — Повернуть выбранные страницы против часовой стрелки',
-        helpW: '<span class="hk">W</span> — Повернуть выбранные страницы по часовой стрелке',
-        helpDel: '<span class="hk">Del</span> — Удалить выбранные страницы',
-        helpCtrlC: '<span class="hk">Ctrl + C</span> — копировать выделенные страницы',
-        helpCtrlX: '<span class="hk">Ctrl + X</span> — вырезать выделенные страницы',
-        helpCtrlV: '<span class="hk">Ctrl + V</span> — вставить страницы из буфера',
-        helpShiftSelect: 'Удерживайте <span class="hk">Shift</span> — выделить диапазон страниц',
-        helpCtrlSelect: 'Удерживайте <span class="hk">Ctrl</span> — выделить отдельные страницы',
-        helpP: '<span class="hk">P</span> — Печать', helpS: '<span class="hk">S</span> — Сохранить документ',
-        helpCtrlF: '<span class="hk">Ctrl + F</span> — поиск по документу',
-        helpCtrlZ: '<span class="hk">Ctrl + Z</span> — вернуть на шаг назад',
-        helpCtrlY: '<span class="hk">Ctrl + Y</span> — отмена возврата',
-        helpC: '<span class="hk">C</span> — режим выбора', helpH: '<span class="hk">H</span> — режим навигации',
-        helpR: '<span class="hk">R</span> — режим чтения', helpZ: '<span class="hk">Z</span> — режим увеличения',
-        helpAltWheel: '<span class="hk">Alt + колесико мыши</span> — изменение масштаба',
-        helpDblClickFit: '<span class="hk">Двойной клик по странице</span> — по ширине страницы',
-        helpTabLeft: '<span class="hk">Ctrl + стрелка влево</span> — выбрать вкладку слева',
-        helpTabRight: '<span class="hk">Ctrl + стрелка вправо</span> — выбрать вкладку справа',
-        helpTabClose: '<span class="hk">Ctrl + Del</span> — закрыть вкладку',
-        aboutDesktop: 'Десктопное приложение для работы с PDF-документами.',
-        aboutWeb: 'Веб-приложение для работы с PDF-документами. Вся обработка выполняется в браузере.',
-        aboutVersion: 'Версия {ver}', aboutEditor: 'Редактор: {build}', aboutEditorFrom: ' от {date}',
-        aboutVersionUnknownApp: 'Версия приложения неизвестна',
-        aboutVersionUnknown: 'Версия неизвестна (сборка не через релизный пайплайн)',
-        aboutLibraries: 'Библиотеки:',
-        aboutNetworkOffline: 'Все библиотеки встроены в код веб-приложения. Обращение к сети отсутствует.',
-        aboutNetworkCdn: 'Библиотеки подгружаются из CDN при первом запуске. Офлайн-версия содержит их прямо в файле, без обращений к сети.',
-        aboutAiAuthorship: 'Значительная часть кода написана с использованием искусственного интеллекта по техническому заданию и под контролем разработчика.',
-        aboutDeveloper: 'Разработчик: <b>Евгений Кутьин</b>.',
-        aboutClose: 'Закрыть', aboutShaComputing: 'SHA-256: считаю…',
-        aboutShaUnavailable: 'SHA-256: недоступно в этом контексте',
-        aboutUpdateFail: 'Не удалось проверить обновления (нет доступа к списку версий).',
-        aboutUpdateApp: 'Вышла обновлённая версия приложения {ver}',
-        aboutUpdateEditor: 'Доступен обновлённый редактор {build}',
-        aboutUpdateWeb: 'Вышла обновлённая версия {build}',
-        pagePrevDesktop: 'Предыдущая страница (ПКМ - автопрокрутка)',
-        pagePrevTouch: 'Предыдущая страница. Удерживание - автопрокрутка',
-        pageNextDesktop: 'Следующая страница (ПКМ - автопрокрутка)',
-        pageNextTouch: 'Следующая страница. Удерживание - автопрокрутка',
-        scrollSpeedDesktop: 'Скорость прокрутки (колесико мыши)', scrollSpeedTouch: 'Скорость прокрутки',
-        scrollPauseDesktop: 'Остановить прокрутку (ПКМ / Esc)', scrollPauseTouch: 'Остановить прокрутку',
-        scrollResumeDesktop: 'Продолжить прокрутку (ПКМ); Esc — выход', scrollResumeTouch: 'Продолжить прокрутку',
-        loadingPages: 'Загрузка страниц...', cancelLoading: 'Отменить загрузку',
-        readModeEsc: 'ESC для выхода из режима чтения', loupeWheelHint: 'Изменение масштаба колесиком мыши',
-        searchPlaceholder: 'Поиск по документу', searchFind: 'Найти (Enter)',
-        searchPrev: 'Предыдущее совпадение (Shift+Enter)', searchNext: 'Следующее совпадение (Enter)',
-        searchClose: 'Закрыть (Esc)', searchAllTabs: 'Искать по всем вкладкам',
-        newDocumentHint: 'Будет создан новый документ', openInNewTabs: 'Откроется в новых вкладках',
-        tabClose: 'Закрыть вкладку', tabCloseOthers: 'Закрыть другие вкладки', tabCloseRight: 'Закрыть вкладки справа',
-        peInsertText: 'Вставить текст', peInsertImage: 'Вставить изображение', peAddShapes: 'Добавить фигуры',
-        peShapeRect: 'Прямоугольник', peShapeEllipse: 'Круг / овал', peShapeArrow: 'Стрелка',
-        peShapeLine: 'Линия', peShapePlus: 'Плюс', peShapeFreehand: 'Свободная форма', peShapeStar: 'Звезда',
-        peCancel: 'Отмена', peSave: 'Сохранить', peCropHint: 'Выделите область кадрирования',
-        undoMobile: 'Вернуть на шаг назад', redoMobile: 'Отмена возврата'
-      },
-      en: {
-        appTitle: 'PDF Document Manager',
-        menuToggle: 'Hide/show menu', menuToggleHide: 'Hide menu', menuToggleShow: 'Show menu',
-        themeDark: 'Dark mode', themeLight: 'Light mode',
-        about: 'About', restoreHelp: 'Restore keyboard shortcuts hint',
-        langSwitchToEn: 'English', langSwitchToRu: 'Русский',
-        selectFile: 'Select file', selectFiles: 'Select files',
-        selectFilesTitle: 'Select one or more files (F)',
-        merge: 'Merge',
-        readMode: 'Reading mode', readModeKey: 'Reading mode (R)', loupeMode: 'Magnifier mode (Z)',
-        selectMode: 'Selection mode (C)', navMode: 'Navigation mode (H)',
-        rotateLeftSelected: 'Rotate selected pages counter-clockwise (Q)',
-        rotateRightSelected: 'Rotate selected pages clockwise (W)',
-        editPage: 'Edit page',
-        deleteSelectedPages: 'Delete selected pages (Del)',
-        deletedPagesHidden: 'Pages marked for deletion are hidden (Shift+H)',
-        deletedPagesShown: 'Pages marked for deletion are shown (Shift+H)',
-        multiSelectMode: 'Multi-page selection mode',
-        printDocument: 'Print document (P)', printSelectedPages: 'Print selected pages',
-        replace: 'Replace', replaceSelectedPages: 'Replace selected pages (Shift+C)',
-        export: 'Export', exportSelectedPages: 'Export selected pages to a single PDF (Shift+E)',
-        exportAsImages: 'Export as images',
-        exportAsImagesHint: 'Export as images\n(export selected pages to PDF with pages saved as images)',
-        save: 'Save', saveFinalFile: 'Save final file (S)',
-        saveAsImages: 'Save as images',
-        saveAsImagesHint: 'Save as images\n(save file as PDF with pages saved as images)',
-        scale: 'Scale:', pin: 'Pin', unpin: 'Unpin', pages: 'Pages:',
-        dropZoneDesktop: 'Click here or drag one or more files into this area to open',
-        dropZoneMobile: 'Tap here to select one or more files',
-        dropZoneFormats: 'Supported: PDF, Word (.docx), Excel (.xls, .xlsx), images (PNG, JPEG, BMP, GIF, WEBP, TIFF)',
-        helpHotkeys: 'Keyboard shortcuts', helpHideToggle: 'Hide hint', helpClickToHide: 'Click to hide',
-        helpTitle: 'Main keyboard shortcuts',
-        helpSubtitlePages: 'Working with pages:', helpSubtitleGeneral: 'General:',
-        helpSubtitleNav: 'Document navigation:', helpSubtitleTabs: 'Tabs:',
-        helpQ: '<span class="hk">Q</span> — Rotate selected pages counter-clockwise',
-        helpW: '<span class="hk">W</span> — Rotate selected pages clockwise',
-        helpDel: '<span class="hk">Del</span> — Delete selected pages',
-        helpCtrlC: '<span class="hk">Ctrl + C</span> — copy selected pages',
-        helpCtrlX: '<span class="hk">Ctrl + X</span> — cut selected pages',
-        helpCtrlV: '<span class="hk">Ctrl + V</span> — paste pages from clipboard',
-        helpShiftSelect: 'Hold <span class="hk">Shift</span> — select a range of pages',
-        helpCtrlSelect: 'Hold <span class="hk">Ctrl</span> — select individual pages',
-        helpP: '<span class="hk">P</span> — Print', helpS: '<span class="hk">S</span> — Save document',
-        helpCtrlF: '<span class="hk">Ctrl + F</span> — search in document',
-        helpCtrlZ: '<span class="hk">Ctrl + Z</span> — undo',
-        helpCtrlY: '<span class="hk">Ctrl + Y</span> — redo',
-        helpC: '<span class="hk">C</span> — selection mode', helpH: '<span class="hk">H</span> — navigation mode',
-        helpR: '<span class="hk">R</span> — reading mode', helpZ: '<span class="hk">Z</span> — magnifier mode',
-        helpAltWheel: '<span class="hk">Alt + mouse wheel</span> — change scale',
-        helpDblClickFit: '<span class="hk">Double-click page</span> — fit page width',
-        helpTabLeft: '<span class="hk">Ctrl + left arrow</span> — select tab to the left',
-        helpTabRight: '<span class="hk">Ctrl + right arrow</span> — select tab to the right',
-        helpTabClose: '<span class="hk">Ctrl + Del</span> — close tab',
-        aboutDesktop: 'Desktop application for working with PDF documents.',
-        aboutWeb: 'Web application for working with PDF documents. All processing is done in the browser.',
-        aboutVersion: 'Version {ver}', aboutEditor: 'Editor: {build}', aboutEditorFrom: ' from {date}',
-        aboutVersionUnknownApp: 'Application version unknown',
-        aboutVersionUnknown: 'Version unknown (not built via release pipeline)',
-        aboutLibraries: 'Libraries:',
-        aboutNetworkOffline: 'All libraries are embedded in the web application. No network access.',
-        aboutNetworkCdn: 'Libraries load from CDN on first launch. The offline version embeds them in the file with no network access.',
-        aboutAiAuthorship: 'A significant portion of the code was written using artificial intelligence based on a technical specification and under developer supervision.',
-        aboutDeveloper: 'Developer: <b>Evgeniy Kutyin</b>.',
-        aboutClose: 'Close', aboutShaComputing: 'SHA-256: computing…',
-        aboutShaUnavailable: 'SHA-256: unavailable in this context',
-        aboutUpdateFail: 'Could not check for updates (no access to version list).',
-        aboutUpdateApp: 'An updated application version {ver} is available',
-        aboutUpdateEditor: 'An updated editor {build} is available',
-        aboutUpdateWeb: 'An updated version {build} is available',
-        pagePrevDesktop: 'Previous page (RMB — auto-scroll)',
-        pagePrevTouch: 'Previous page. Hold — auto-scroll',
-        pageNextDesktop: 'Next page (RMB — auto-scroll)',
-        pageNextTouch: 'Next page. Hold — auto-scroll',
-        scrollSpeedDesktop: 'Scroll speed (mouse wheel)', scrollSpeedTouch: 'Scroll speed',
-        scrollPauseDesktop: 'Stop scrolling (RMB / Esc)', scrollPauseTouch: 'Stop scrolling',
-        scrollResumeDesktop: 'Resume scrolling (RMB); Esc — exit', scrollResumeTouch: 'Resume scrolling',
-        loadingPages: 'Loading pages...', cancelLoading: 'Cancel loading',
-        readModeEsc: 'ESC to exit reading mode', loupeWheelHint: 'Change scale with mouse wheel',
-        searchPlaceholder: 'Search in document', searchFind: 'Find (Enter)',
-        searchPrev: 'Previous match (Shift+Enter)', searchNext: 'Next match (Enter)',
-        searchClose: 'Close (Esc)', searchAllTabs: 'Search all tabs',
-        newDocumentHint: 'A new document will be created', openInNewTabs: 'Will open in new tabs',
-        tabClose: 'Close tab', tabCloseOthers: 'Close other tabs', tabCloseRight: 'Close tabs to the right',
-        peInsertText: 'Insert text', peInsertImage: 'Insert image', peAddShapes: 'Add shapes',
-        peShapeRect: 'Rectangle', peShapeEllipse: 'Circle / oval', peShapeArrow: 'Arrow',
-        peShapeLine: 'Line', peShapePlus: 'Plus', peShapeFreehand: 'Freeform', peShapeStar: 'Star',
-        peCancel: 'Cancel', peSave: 'Save', peCropHint: 'Select crop area',
-        undoMobile: 'Undo', redoMobile: 'Redo'
-      }
-    };
-
-    let pmLocale = 'ru';
-    function pmDetectLocale() {
-      try {
-        const saved = localStorage.getItem(PM_LOCALE_KEY);
-        if (saved === 'en' || saved === 'ru') return saved;
-      } catch (_) {}
-      try {
-        const langs = (navigator.languages && navigator.languages.length)
-          ? navigator.languages : [navigator.language || navigator.userLanguage || ''];
-        for (let i = 0; i < langs.length; i++) {
-          const l = String(langs[i] || '').toLowerCase();
-          if (l.startsWith('en')) return 'en';
-          if (l.startsWith('ru')) return 'ru';
-        }
-      } catch (_) {}
-      return 'ru';
-    }
-    function t(key, vars) {
-      const pack = PM_I18N[pmLocale] || PM_I18N.ru;
-      let s = (pack && pack[key] != null) ? pack[key]
-        : ((PM_I18N.ru && PM_I18N.ru[key] != null) ? PM_I18N.ru[key] : key);
-      if (vars && typeof s === 'string') {
-        s = s.replace(/\{(\w+)\}/g, (_, k) => (vars[k] != null ? String(vars[k]) : ''));
-      }
-      return s;
-    }
     function pmUpdateLangToggleUI() {
       const btn = document.getElementById('langToggleBtn');
       const flag = document.getElementById('langToggleFlag');
@@ -8307,8 +8310,6 @@
     function pmToggleLocale() {
       pmSetLocale(pmLocale === 'en' ? 'ru' : 'en', true);
     }
-    pmLocale = pmDetectLocale();
-
     // Sync the toggle button's icon/title with whatever <head> already applied.
     pmUpdateThemeToggleUI(pmCurrentTheme());
     pmApplyI18n();
