@@ -501,6 +501,17 @@ Function .onInit
 
   !if "${DISPLAYLANGUAGESELECTOR}" == "true"
     !insertmacro MUI_LANGDLL_DISPLAY
+  !else
+    ; No language dialog: prefer a remembered choice, else the OS UI language.
+    ; If that LANGID is not bundled, NSIS falls back to the first MUI_LANGUAGE
+    ; (English in tauri.conf.json). Matches Tauri's documented default behavior.
+    ReadRegStr $0 "${MUI_LANGDLL_REGISTRY_ROOT}" "${MUI_LANGDLL_REGISTRY_KEY}" "${MUI_LANGDLL_REGISTRY_VALUENAME}"
+    ${If} $0 != ""
+      StrCpy $LANGUAGE $0
+    ${Else}
+      System::Call 'kernel32::GetUserDefaultUILanguage() i .r0'
+      StrCpy $LANGUAGE $0
+    ${EndIf}
   !endif
 
   !insertmacro SetContext
