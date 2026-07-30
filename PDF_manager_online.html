@@ -319,9 +319,9 @@
       transform: translateY(-6px);
       pointer-events: none;
       transition: opacity 0.15s, transform 0.15s, background 0.15s;
-      font-size: 13px;
+      font-size: 20px;
       font-weight: 700;
-      letter-spacing: 0.06em;
+      letter-spacing: 0.04em;
       line-height: 1;
     }
     #langToggleFlag {
@@ -333,6 +333,13 @@
       opacity: 1;
       transform: translateY(0);
       pointer-events: auto;
+    }
+    /* While the logo popup is open/hovered, ignore insert-indicator hits
+       under the column so blue gap highlights do not flash behind buttons. */
+    body:has(#logoMenuArea.expanded) #insertIndicator,
+    body:has(#logoMenuArea:hover) #insertIndicator {
+      visibility: hidden !important;
+      pointer-events: none !important;
     }
     /*"About" button - under language toggle.*/
     #aboutBtn {
@@ -6686,7 +6693,7 @@
   <div class="main" id="scrollContainer">
     <div class="content-header">
       <div id="headerPageCount" class="header-page-count" style="display:none;" aria-hidden="true">
-        <span class="header-page-count-label">Страниц:</span>
+        <span class="header-page-count-label" data-i18n="pages">Страниц:</span>
         <span id="headerPageCountValue" class="header-page-count-value">0</span>
       </div>
       <div id="info" class="info" style="display:none;"></div>
@@ -6696,9 +6703,9 @@
     <div id="pagesContainer" class="pages"></div>
     <div id="insertIndicator"></div>
     <div id="insertMenu">
-      <button id="insertFromFileBtn"><span class="ins-ico">📄</span>Вставка из файла</button>
-      <button id="insertBlankBtn"><span class="ins-ico">➕</span>Вставка пустой страницы</button>
-      <button id="insertFromClipboardBtn"><span class="ins-ico">📋</span>Вставить из буфера обмена</button>
+      <button id="insertFromFileBtn"><span class="ins-ico">📄</span><span data-i18n="insertFromFile">Вставка из файла</span></button>
+      <button id="insertBlankBtn"><span class="ins-ico">➕</span><span data-i18n="insertBlankPage">Вставка пустой страницы</span></button>
+      <button id="insertFromClipboardBtn"><span class="ins-ico">📋</span><span data-i18n="insertFromClipboard">Вставить из буфера обмена</span></button>
     </div>
     <div id="selectionRect"></div>
     <div id="rubberCursorBadge" aria-hidden="true"></div>
@@ -7213,6 +7220,44 @@
         peMobileKbDone: 'Готово',
         peSwipePrev: 'Предыдущая страница',
         peSwipeNext: 'Следующая страница',
+        tabClosePlural: 'Закрыть вкладки',
+        loadingOpeningFiles: 'Открытие файлов...',
+        loadingOpenEditor: 'Открытие редактора страницы...',
+        loadingPagesProgress: 'Загрузка страниц... {cur} из {total}',
+        loadingPreparingDoc: 'Подготовка документа...',
+        insertFromFile: 'Вставка из файла',
+        insertBlankPage: 'Вставка пустой страницы',
+        insertFromClipboard: 'Вставить из буфера обмена',
+        pwdTitle: 'Файл защищён паролем',
+        pwdBody: '{file}: введите пароль, чтобы открыть документ.',
+        pwdBodyFile: 'Файл',
+        pwdWrong: 'Неверный пароль. Попробуйте ещё раз.',
+        pwdPlaceholder: 'Пароль',
+        pwdOpen: 'Открыть',
+        pwdCancel: 'Отмена',
+        imgSaveExportTitle: 'Экспорт как изображение',
+        imgSaveSaveTitle: 'Сохранить как изображение',
+        imgSaveJpegTitle: 'Качество JPEG',
+        imgSavePages: 'Страниц: {n}',
+        imgSaveDocsPages: 'Документов: {docs}, страниц: {pages}',
+        imgSaveAllDocs: 'Сохранить все открытые документы ({n})',
+        imgSaveDpi: 'Разрешение (DPI):',
+        imgSaveDpiHint: 'Меньше DPI — меньше файл, ниже детализация',
+        imgSaveQuality: 'Качество JPEG:',
+        imgSaveFileSize: 'Размер файла:',
+        imgSaveTotalSize: 'Общий размер файлов:',
+        imgSaveEstimating: 'расчёт…',
+        imgSaveContinue: 'Продолжить',
+        imgSaveCancel: 'Отмена',
+        mergeOrderTitle: 'Порядок объединения файлов',
+        mergeOrderHelp: 'Перетаскивайте строки для изменения порядка или файлы из проводника в список — место вставки подсвечивается синей полосой. Кнопка «×» исключает файл из списка.',
+        mergeOrderCancel: 'Отмена',
+        mergeOrderConfirm: 'Подтвердить объединение',
+        mergeOrderEmpty: 'Нет файлов в списке',
+        mergeOrderPages: '{n} стр.',
+        mergeOrderUnavailable: 'Файл недоступен для открытия',
+        mergeOrderPassword: 'пароль',
+        mergeOrderRemove: 'Удалить из списка',
         undoMobile: 'Вернуть на шаг назад', redoMobile: 'Отмена возврата'
       },
       en: {
@@ -7222,7 +7267,7 @@
         about: 'About', restoreHelp: 'Restore keyboard shortcuts hint',
         langSwitchToEn: 'English', langSwitchToRu: 'Русский',
         selectFile: 'Select file', selectFiles: 'Select files',
-        selectFilesTitle: 'Select one or more files (F)',
+        selectFilesTitle: 'Open files (F)',
         merge: 'Merge',
         readMode: 'Reading mode', readModeKey: 'Reading mode (R)', loupeMode: 'Magnifier mode (Z)',
         selectMode: 'Selection mode (C)', navMode: 'Navigation mode (H)',
@@ -7296,17 +7341,17 @@
         searchPlaceholder: 'Search in document', searchFind: 'Find (Enter)',
         searchPrev: 'Previous match (Shift+Enter)', searchNext: 'Next match (Enter)',
         searchClose: 'Close (Esc)', searchAllTabs: 'Search all tabs',
-        newDocumentHint: 'A new document will be created', openInNewTabs: 'Will open in new tabs',
+        newDocumentHint: 'A new document will be created', openInNewTabs: 'Open in new tabs',
         tabClose: 'Close tab', tabCloseOthers: 'Close other tabs', tabCloseRight: 'Close tabs to the right',
         peInsertText: 'Insert text', peInsertImage: 'Insert image', peAddShapes: 'Add shapes',
         peShapeRect: 'Rectangle', peShapeEllipse: 'Circle / oval', peShapeArrow: 'Arrow',
         peShapeLine: 'Line', peShapePlus: 'Plus', peShapeFreehand: 'Freeform', peShapeStar: 'Star',
         peCancel: 'Cancel', peSave: 'Save', peCropHint: 'Select crop area',
-        mergeTitleWithDoc: 'Merge several files into one and add to the current document (M)',
-        mergeTitleNoDoc: 'Merge several files into one (M)',
+        mergeTitleWithDoc: 'Merge files and add to the document (M)',
+        mergeTitleNoDoc: 'Merge files (M)',
         mergeDropHint: 'Merge selected files into one',
         mergeOrderDropHint: 'Add file for merging',
-        openInNewTab: 'Will open in a new tab',
+        openInNewTab: 'Open in a new tab',
         quickRotateLeft: 'Rotate counter-clockwise',
         quickRotateRight: 'Rotate clockwise',
         quickDeletePage: 'Delete page',
@@ -7391,6 +7436,44 @@
         peMobileKbDone: 'Done',
         peSwipePrev: 'Previous page',
         peSwipeNext: 'Next page',
+        tabClosePlural: 'Close tabs',
+        loadingOpeningFiles: 'Opening files...',
+        loadingOpenEditor: 'Opening page editor...',
+        loadingPagesProgress: 'Loading pages... {cur} of {total}',
+        loadingPreparingDoc: 'Preparing document...',
+        insertFromFile: 'Insert from file',
+        insertBlankPage: 'Insert blank page',
+        insertFromClipboard: 'Paste from clipboard',
+        pwdTitle: 'File is password protected',
+        pwdBody: '{file}: enter the password to open the document.',
+        pwdBodyFile: 'File',
+        pwdWrong: 'Incorrect password. Try again.',
+        pwdPlaceholder: 'Password',
+        pwdOpen: 'Open',
+        pwdCancel: 'Cancel',
+        imgSaveExportTitle: 'Export as image',
+        imgSaveSaveTitle: 'Save as image',
+        imgSaveJpegTitle: 'JPEG quality',
+        imgSavePages: 'Pages: {n}',
+        imgSaveDocsPages: 'Documents: {docs}, pages: {pages}',
+        imgSaveAllDocs: 'Save all open documents ({n})',
+        imgSaveDpi: 'Resolution (DPI):',
+        imgSaveDpiHint: 'Lower DPI — smaller file, less detail',
+        imgSaveQuality: 'JPEG quality:',
+        imgSaveFileSize: 'File size:',
+        imgSaveTotalSize: 'Total file size:',
+        imgSaveEstimating: 'calculating…',
+        imgSaveContinue: 'Continue',
+        imgSaveCancel: 'Cancel',
+        mergeOrderTitle: 'File merge order',
+        mergeOrderHelp: 'Drag rows to change order, or drop files from Explorer into the list — the insert position is highlighted with a blue line. The «×» button excludes a file from the list.',
+        mergeOrderCancel: 'Cancel',
+        mergeOrderConfirm: 'Confirm merge',
+        mergeOrderEmpty: 'No files in the list',
+        mergeOrderPages: '{n} pg.',
+        mergeOrderUnavailable: 'File cannot be opened',
+        mergeOrderPassword: 'password',
+        mergeOrderRemove: 'Remove from list',
         undoMobile: 'Undo', redoMobile: 'Redo'
       }
     };
@@ -7971,7 +8054,8 @@
     document.addEventListener('dragend', stopAutoScroll);
     document.addEventListener('drop', stopAutoScroll);
 
-    function showLoading(text = "Загрузка страниц...") {
+    function showLoading(text) {
+      if (text == null || text === '') text = t('loadingPages');
       isLoading = true;
       //wasCreatingNewDocument is set explicitly in calling functions
       loadingText.textContent = text;
@@ -8231,7 +8315,8 @@
       if (!box) return;
       pageCountPinned = !pageCountPinned;
       box.classList.toggle('unpinned', !pageCountPinned);
-      box.title = pageCountPinned ? 'Открепить' : 'Закрепить';
+      box.title = pageCountPinned ? t('unpin') : t('pin');
+      box.setAttribute('data-i18n-title', pageCountPinned ? 'unpin' : 'pin');
       refreshPageCountVisibility();
       if (isTouchDevice) updateMobileQuickActions();
     }
@@ -11642,7 +11727,7 @@
           : formatFileNameForDisplay(currentFileName);
         const countHtml = isTouchDevice ? '' :
           '<span class="sticky-page-count" aria-hidden="false">' +
-          '<span class="sticky-page-count-label">Страниц:</span> ' +
+          '<span class="sticky-page-count-label">' + escapeHtml(t('pages')) + '</span> ' +
           '<span id="stickyPageCountValue" class="sticky-page-count-value">' +
           (pdfDoc.getPageCount() - markedForDeletion.size) +
           '</span></span>';
@@ -14879,7 +14964,7 @@
       if (scaleSlider) scaleSlider.value = 100;
       applyScale();
 
-      showLoading('Открытие файлов...');
+      showLoading(t('loadingOpeningFiles'));
       historyPushSuspended = true;
       try {
         const newDoc = await PDFLib.PDFDocument.create();
@@ -14952,7 +15037,7 @@
           showLoading(`Импорт изображения ${file.name}...`);
           pdfBytes = new Uint8Array(await convertImageToPdfBytes(file));
         } else {
-          showLoading("Подготовка документа...");
+          showLoading(t('loadingPreparingDoc'));
           pdfBytes = new Uint8Array(await file.arrayBuffer());
         }
 
@@ -15502,7 +15587,7 @@
           pdfjsDoc = await openPdfjsForThumbs(originalFileBytes).promise;
         }
 
-        showLoading(`Загрузка страниц... 0 из ${numPages}`);
+        showLoading(t('loadingPagesProgress', { cur: 0, total: numPages }));
 
         await renderThumbnailsLazy(pdfjsDoc, numPages, true);
 
@@ -15597,7 +15682,7 @@
       if (typeof schedulePageTextLayerBuild === 'function') schedulePageTextLayerBuild();
 
       if (isLoading && !isLoadingCancelled && lazyThumbNumPages) {
-        showLoading(`Загрузка страниц... ${lazyThumbLoaded.size} из ${lazyThumbNumPages}`);
+        showLoading(t('loadingPagesProgress', { cur: lazyThumbLoaded.size, total: lazyThumbNumPages }));
       }
     }
 
@@ -18317,9 +18402,23 @@
     let insertMenuOpen = false;
     let pendingInsert = null; // fixed position when opening menu
 
+    function isPointOverLogoMenu(clientX, clientY) {
+      const area = document.getElementById('logoMenuArea');
+      if (!area) return false;
+      if (!(area.classList.contains('expanded') || area.matches(':hover'))) return false;
+      const r = area.getBoundingClientRect();
+      const pad = 8;
+      return clientX >= r.left - pad && clientX <= r.right + pad
+        && clientY >= r.top - pad && clientY <= r.bottom + pad;
+    }
+
     // Global mousemove for insertion indicator (selection mode)
     document.addEventListener('mousemove', (e) => {
       if (insertMenuOpen) return; // while the menu is open, we do not recalculate
+      if (isPointOverLogoMenu(e.clientX, e.clientY)) {
+        clearHoverInsert();
+        return;
+      }
       if (isPointOverPageCtxMenu(e.clientX, e.clientY)) {
         clearHoverInsert();
         return;
@@ -21076,28 +21175,28 @@
           ? '<label id="jpegSaveAllWrap" style="display:flex;align-items:flex-start;gap:10px;' +
               'font-size:14px;color:#444;margin-bottom:16px;cursor:pointer;text-align:left;">' +
               `<input type="checkbox" id="jpegSaveAllCheck" style="margin-top:3px;">` +
-              `<span>Сохранить все открытые документы (${tabSources.length})</span></label>`
+              `<span>${escapeHtml(t('imgSaveAllDocs', { n: tabSources.length }))}</span></label>`
           : '';
         box.innerHTML =
-          `<div style="font-size:17px;color:#2c3e50;margin-bottom:6px;font-weight:600;">${escapeHtml(title || 'Качество JPEG')}</div>` +
-          `<div id="jpegPageInfo" style="font-size:13px;color:#666;margin-bottom:18px;">Страниц: ${pageCount}</div>` +
+          `<div style="font-size:17px;color:#2c3e50;margin-bottom:6px;font-weight:600;">${escapeHtml(title || t('imgSaveJpegTitle'))}</div>` +
+          `<div id="jpegPageInfo" style="font-size:13px;color:#666;margin-bottom:18px;">${escapeHtml(t('imgSavePages', { n: pageCount }))}</div>` +
           saveAllHtml +
-          '<label style="display:block;font-size:14px;color:#444;margin-bottom:8px;">Разрешение (DPI): ' +
+          '<label style="display:block;font-size:14px;color:#444;margin-bottom:8px;">' + escapeHtml(t('imgSaveDpi')) + ' ' +
             `<span id="jpegDpiVal">${DEFAULT_RASTER_DPI}</span></label>` +
           `<input id="jpegDpiSlider" type="range" min="${MIN_RASTER_DPI}" max="${MAX_RASTER_DPI}" ` +
             `value="${DEFAULT_RASTER_DPI}" step="12" style="width:100%;margin-bottom:4px;">` +
-          '<div style="font-size:12px;color:#888;margin-bottom:14px;">Меньше DPI — меньше файл, ниже детализация</div>' +
-          '<label style="display:block;font-size:14px;color:#444;margin-bottom:8px;">Качество JPEG: ' +
+          '<div style="font-size:12px;color:#888;margin-bottom:14px;">' + escapeHtml(t('imgSaveDpiHint')) + '</div>' +
+          '<label style="display:block;font-size:14px;color:#444;margin-bottom:8px;">' + escapeHtml(t('imgSaveQuality')) + ' ' +
             '<span id="jpegQualityVal">92</span>%</label>' +
           '<input id="jpegQualitySlider" type="range" min="40" max="100" value="92" step="1" ' +
             'style="width:100%;margin-bottom:14px;">' +
-          '<div style="font-size:14px;color:#444;margin-bottom:20px;"><span id="jpegSizeLabel">Размер файла:</span> ' +
-            '<strong id="jpegSizeEst">расчёт…</strong></div>' +
+          '<div style="font-size:14px;color:#444;margin-bottom:20px;"><span id="jpegSizeLabel">' + escapeHtml(t('imgSaveFileSize')) + '</span> ' +
+            '<strong id="jpegSizeEst">' + escapeHtml(t('imgSaveEstimating')) + '</strong></div>' +
           '<div style="display:flex;gap:12px;justify-content:center;">' +
             '<button id="jpegOk" style="padding:10px 28px;border:none;border-radius:6px;background:#3498db;' +
-              'color:#fff;font-weight:bold;cursor:pointer;font-size:15px;">Продолжить</button>' +
+              'color:#fff;font-weight:bold;cursor:pointer;font-size:15px;">' + escapeHtml(t('imgSaveContinue')) + '</button>' +
             '<button id="jpegCancel" style="padding:10px 28px;border:1px solid #ccc;border-radius:6px;' +
-              'background:#fff;color:#333;cursor:pointer;font-size:15px;">Отмена</button>' +
+              'background:#fff;color:#333;cursor:pointer;font-size:15px;">' + escapeHtml(t('imgSaveCancel')) + '</button>' +
           '</div>';
         overlay.appendChild(box);
         document.body.appendChild(overlay);
@@ -21121,11 +21220,11 @@
           if (saveAllCheck && saveAllCheck.checked) {
             const totalPages = tabSources.reduce((sum, s) => sum + s.pageCount, 0);
             pageInfoEl.textContent =
-              `Документов: ${tabSources.length}, страниц: ${totalPages}`;
-            if (sizeLabelEl) sizeLabelEl.textContent = 'Общий размер файлов:';
+              t('imgSaveDocsPages', { docs: tabSources.length, pages: totalPages });
+            if (sizeLabelEl) sizeLabelEl.textContent = t('imgSaveTotalSize');
           } else {
-            pageInfoEl.textContent = `Страниц: ${pageCount}`;
-            if (sizeLabelEl) sizeLabelEl.textContent = 'Размер файла:';
+            pageInfoEl.textContent = t('imgSavePages', { n: pageCount });
+            if (sizeLabelEl) sizeLabelEl.textContent = t('imgSaveFileSize');
           }
         };
 
@@ -21148,7 +21247,7 @@
 
         const runEstimate = async () => {
           const token = ++estimateToken;
-          sizeEl.textContent = 'расчёт…';
+          sizeEl.textContent = t('imgSaveEstimating');
           try {
             const sources = (saveAllCheck && saveAllCheck.checked)
               ? tabSources
@@ -21239,7 +21338,7 @@
     function showPdfPasswordDialog(fileName, opts) {
       opts = opts || {};
       const wrongPassword = !!opts.wrongPassword;
-      const label = fileName ? escapeHtml('«' + fileName + '»') : 'Файл';
+      const fileLabel = fileName ? ('«' + fileName + '»') : t('pwdBodyFile');
       return new Promise((resolve) => {
         const overlay = document.createElement('div');
         overlay.className = 'modal-overlay-active';
@@ -21253,23 +21352,23 @@
           box-shadow: 0 10px 30px rgba(0,0,0,0.3); text-align: left; min-width: min(340px, 92vw);`;
         box.innerHTML = `
           <div style="font-size:17px; color:#2c3e50; margin-bottom:8px; font-weight:600; line-height:1.35;">
-            Файл защищён паролем
+            ${escapeHtml(t('pwdTitle'))}
           </div>
           <div style="font-size:14px; color:#555; margin-bottom:14px; line-height:1.45;">
-            ${label}: введите пароль, чтобы открыть документ.
+            ${escapeHtml(t('pwdBody', { file: fileLabel }))}
           </div>
           <div id="pdfPwdErr" style="display:${wrongPassword ? 'block' : 'none'}; font-size:13px; color:#c0392b; margin-bottom:10px;">
-            Неверный пароль. Попробуйте ещё раз.
+            ${escapeHtml(t('pwdWrong'))}
           </div>
           <input id="pdfPwdInput" type="password" autocomplete="current-password"
-            placeholder="Пароль"
+            placeholder="${escapeHtml(t('pwdPlaceholder'))}"
             style="width:100%; box-sizing:border-box; padding:10px 12px; font-size:16px;
               border:1px solid #ccc; border-radius:6px; margin-bottom:18px;" />
           <div style="display:flex; gap:12px; justify-content:flex-end; flex-wrap:wrap;">
             <button type="button" id="pdfPwdCancel" style="padding:10px 20px; border:1px solid #ccc; border-radius:6px;
-              background:#fff; color:#333; cursor:pointer; font-size:15px;">Отмена</button>
+              background:#fff; color:#333; cursor:pointer; font-size:15px;">${escapeHtml(t('pwdCancel'))}</button>
             <button type="button" id="pdfPwdOk" style="padding:10px 24px; border:none; border-radius:6px;
-              background:#2980b9; color:#fff; font-weight:bold; cursor:pointer; font-size:15px;">Открыть</button>
+              background:#2980b9; color:#fff; font-weight:bold; cursor:pointer; font-size:15px;">${escapeHtml(t('pwdOpen'))}</button>
           </div>`;
         overlay.appendChild(box);
         document.body.appendChild(overlay);
@@ -21417,7 +21516,7 @@
           const previewBytes = await previewDoc.save();
           hideLoading();
           const opts = await showImageSaveOptionsDialog(
-            previewBytes, indicesToExport.length, 'Экспорт как изображение');
+            previewBytes, indicesToExport.length, t('imgSaveExportTitle'));
           if (!opts) return;
           jpegQuality = opts.jpegQuality;
           rasterScale = opts.scale;
@@ -21622,7 +21721,7 @@
 
           hideLoading();
           const opts = await showImageSaveOptionsDialog(
-            previewBytes, pageCount, 'Сохранить как изображение', {
+            previewBytes, pageCount, t('imgSaveSaveTitle'), {
               allowSaveAll: !!(tabSources && tabSources.length > 1),
               tabSources
             });
@@ -21741,7 +21840,7 @@
         const loadingTask = pdfjsLib.getDocument({ data: pdfBytes });
         const pdfjsDoc = await loadingTask.promise;
 
-        if (!silent) showLoading(`Загрузка страниц... 0 из ${numPages}`);
+        if (!silent) showLoading(t('loadingPagesProgress', { cur: 0, total: numPages }));
 
         await renderThumbnailsLazy(pdfjsDoc, numPages);
 
@@ -21969,15 +22068,14 @@
       `;
 
       content.innerHTML = `
-        <h3 style="margin: 0 0 16px 0; color: #2c3e50;">Порядок объединения файлов</h3>
+        <h3 style="margin: 0 0 16px 0; color: #2c3e50;">${escapeHtml(t('mergeOrderTitle'))}</h3>
         <p style="margin: 0 0 16px 0; color: #555; font-size: 14px;">
-          Перетаскивайте строки для изменения порядка или файлы из проводника в список —
-          место вставки подсвечивается синей полосой. Кнопка «×» исключает файл из списка.
+          ${escapeHtml(t('mergeOrderHelp'))}
         </p>
         <div id="fileList" style="max-height: 320px; overflow-y: auto; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 20px;"></div>
         <div style="display: flex; gap: 12px; justify-content: flex-end;">
-          <button id="cancelBtn" style="padding: 10px 20px; border-radius: 6px; border: 1px solid #ccc; background: white; cursor: pointer;">Отмена</button>
-          <button id="confirmBtn" style="padding: 10px 24px; border-radius: 6px; border: none; background: #27ae60; color: white; cursor: pointer; font-weight: bold;">Подтвердить объединение</button>
+          <button id="cancelBtn" style="padding: 10px 20px; border-radius: 6px; border: 1px solid #ccc; background: white; cursor: pointer;">${escapeHtml(t('mergeOrderCancel'))}</button>
+          <button id="confirmBtn" style="padding: 10px 24px; border-radius: 6px; border: none; background: #27ae60; color: white; cursor: pointer; font-weight: bold;">${escapeHtml(t('mergeOrderConfirm'))}</button>
         </div>
       `;
 
@@ -22006,7 +22104,7 @@
           } catch (e) {
             // Page count unknown until the user enters the password during merge.
             if (pdfLoadLooksPasswordProtected(e)) {
-              return { file, pageCount: 'пароль' };
+              return { file, pageCount: t('mergeOrderPassword') };
             }
             throw e;
           }
@@ -22043,7 +22141,7 @@
         listContainer.innerHTML = '';
         if (!currentOrder.length) {
           listContainer.innerHTML =
-            '<div style="padding:20px;text-align:center;color:#888;font-size:14px;">Нет файлов в списке</div>';
+            '<div style="padding:20px;text-align:center;color:#888;font-size:14px;">' + escapeHtml(t('mergeOrderEmpty')) + '</div>';
           updateConfirmBtn();
           return;
         }
@@ -22068,8 +22166,10 @@
           const pageLabel = isOfficeFile
             ? `<span style="color:#fff; background:${typeColor}; font-size:11px; font-weight:bold; padding:2px 7px; border-radius:4px;">${typeLabel}</span>`
             : (pageCount === '—'
-                ? `<span title="Файл недоступен для открытия" style="color:#888; font-size:13px; white-space:nowrap;">—</span>`
-                : `<span style="color: #666; font-size: 13px; white-space: nowrap;">${pageCount} стр.</span>`);
+                ? `<span title="${escapeHtml(t('mergeOrderUnavailable'))}" style="color:#888; font-size:13px; white-space:nowrap;">—</span>`
+                : (pageCount === t('mergeOrderPassword')
+                    ? `<span style="color:#666; font-size:13px; white-space:nowrap;">${escapeHtml(String(pageCount))}</span>`
+                    : `<span style="color: #666; font-size: 13px; white-space: nowrap;">${escapeHtml(t('mergeOrderPages', { n: pageCount }))}</span>`));
 
           row.innerHTML = `
             <span style="color: #888; width: 24px; text-align: right; flex-shrink: 0;">${index + 1}.</span>
@@ -22080,8 +22180,8 @@
           const removeBtn = document.createElement('button');
           removeBtn.type = 'button';
           removeBtn.className = 'merge-file-remove';
-          removeBtn.title = 'Удалить из списка';
-          removeBtn.setAttribute('aria-label', 'Удалить из списка');
+          removeBtn.title = t('mergeOrderRemove');
+          removeBtn.setAttribute('aria-label', t('mergeOrderRemove'));
           removeBtn.textContent = '×';
           removeBtn.addEventListener('mousedown', (ev) => ev.stopPropagation());
           removeBtn.addEventListener('pointerdown', (ev) => ev.stopPropagation());
@@ -23796,7 +23896,7 @@
     // The file selection button tooltip is the same for desktop and mobile
     (function initSelectFileTooltip() {
       const btn = document.getElementById('selectFileBtn');
-      if (btn) btn.title = 'Выбрать один или несколько файлов (F)';
+      if (btn) btn.title = t('selectFilesTitle');
     })();
 
     (function initDeletedVisibilityToggle() {
@@ -23936,7 +24036,8 @@
         const box = document.getElementById('pageCountBox');
         if (box) {
           box.classList.toggle('unpinned', !pageCountPinned);
-          box.title = pageCountPinned ? 'Открепить' : 'Закрепить';
+          box.title = pageCountPinned ? t('unpin') : t('pin');
+          box.setAttribute('data-i18n-title', pageCountPinned ? 'unpin' : 'pin');
         }
       }
       updateMergeButtonTooltip();
@@ -24537,7 +24638,11 @@ function pmOpenTabMenu(clientX, clientY, tabId) {
   const closeBtn = menu.querySelector('[data-action="close"]');
   const othersBtn = menu.querySelector('[data-action="close-others"]');
   const rightBtn = menu.querySelector('[data-action="close-right"]');
-  if (closeBtn) closeBtn.textContent = selCount > 1 ? 'Закрыть вкладки' : 'Закрыть вкладку';
+  if (closeBtn) {
+    const closeKey = selCount > 1 ? 'tabClosePlural' : 'tabClose';
+    closeBtn.textContent = t(closeKey);
+    closeBtn.setAttribute('data-i18n', closeKey);
+  }
   if (othersBtn) othersBtn.disabled = selCount >= pmTabs.length;
   const rightRefIdx = selCount > 1 ? pmRightmostSelectedIndex() : idx;
   if (rightBtn) rightBtn.disabled = rightRefIdx < 0 || rightRefIdx >= pmTabs.length - 1;
@@ -29755,7 +29860,7 @@ async function openPageEditor(idx, restoreSelection) {
   if (idx < 0 || idx >= pdfDoc.getPageCount()) return;
   try {
     peSavePageSelectionForRestore(restoreSelection);
-    showLoading('Открытие редактора страницы...');
+    showLoading(t('loadingOpenEditor'));
     // We commit uncommitted edits to edit the current state
     await commitHistoryPushForce();
     let bytes = (docHistoryIndex >= 0 && docHistory[docHistoryIndex])
