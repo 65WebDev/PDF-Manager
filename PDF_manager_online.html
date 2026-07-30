@@ -319,7 +319,7 @@
       transform: translateY(-6px);
       pointer-events: none;
       transition: opacity 0.15s, transform 0.15s, background 0.15s;
-      font-size: 20px;
+      font-size: 17px;
       font-weight: 700;
       letter-spacing: 0.04em;
       line-height: 1;
@@ -7258,6 +7258,30 @@
         mergeOrderUnavailable: 'Файл недоступен для открытия',
         mergeOrderPassword: 'пароль',
         mergeOrderRemove: 'Удалить из списка',
+        recoveryFound: 'Найдена несохранённая работа: <b>{name}</b>',
+        recoveryPages: ' ({n} стр.)',
+        recoveryFrom: 'от {dt}',
+        recoveryExtraOne: 'и ещё {n} несохранённый сеанс',
+        recoveryExtraMany: 'и ещё {n} несохранённых сеанса(ов)',
+        recoveryAsk: 'Восстановить эту работу?',
+        recoveryRestore: 'Восстановить',
+        recoveryDelete: 'Удалить',
+        recoveryDefaultName: 'документ.pdf',
+        recoveryFail: 'Не удалось восстановить документ: ',
+        peAspectSnapSquare: 'Соотношение 1:1',
+        confirmYes: 'Да',
+        confirmNo: 'Нет',
+        confirmDeletePage: 'Удалить выбранную страницу?',
+        confirmDeletePages: 'Удалить выбранные страницы?',
+        confirmOpenReplace: 'Документ не сохранён.<br>При открытии новый документ будет заменён на текущий.',
+        confirmOpenReplaceYes: 'Подтвердить',
+        confirmOpenReplaceNo: 'Отменить',
+        confirmCloseTab: 'Документ «{name}» не сохранён.<br>Закрыть вкладку?',
+        confirmCloseTabYes: 'Закрыть',
+        confirmCloseTabNo: 'Отмена',
+        docUnsaved: 'Документ не сохранён',
+        searchNotFound: 'Не найдено',
+        searchNoMatches: 'Совпадений не найдено',
         undoMobile: 'Вернуть на шаг назад', redoMobile: 'Отмена возврата'
       },
       en: {
@@ -7322,7 +7346,7 @@
         aboutNetworkOffline: 'All libraries are embedded in the web application. No network access.',
         aboutNetworkCdn: 'Libraries load from CDN on first launch. The offline version embeds them in the file with no network access.',
         aboutAiAuthorship: 'A significant portion of the code was written using artificial intelligence based on a technical specification and under developer supervision.',
-        aboutDeveloper: 'Developer: <b>Evgeniy Kutyin</b>.',
+        aboutDeveloper: 'Developer: <b>Evgeniy Kutin</b>.',
         aboutClose: 'Close', aboutShaComputing: 'SHA-256: computing…',
         aboutShaUnavailable: 'SHA-256: unavailable in this context',
         aboutUpdateFail: 'Could not check for updates (no access to version list).',
@@ -7474,6 +7498,30 @@
         mergeOrderUnavailable: 'File cannot be opened',
         mergeOrderPassword: 'password',
         mergeOrderRemove: 'Remove from list',
+        recoveryFound: 'Unsaved document found: <b>{name}</b>',
+        recoveryPages: ' ({n} pg.)',
+        recoveryFrom: 'from {dt}',
+        recoveryExtraOne: 'and {n} more unsaved session',
+        recoveryExtraMany: 'and {n} more unsaved sessions',
+        recoveryAsk: 'Restore this document?',
+        recoveryRestore: 'Restore',
+        recoveryDelete: 'Delete',
+        recoveryDefaultName: 'document.pdf',
+        recoveryFail: 'Could not restore document: ',
+        peAspectSnapSquare: '1:1 aspect ratio',
+        confirmYes: 'Yes',
+        confirmNo: 'No',
+        confirmDeletePage: 'Delete the selected page?',
+        confirmDeletePages: 'Delete the selected pages?',
+        confirmOpenReplace: 'The document is unsaved.<br>Opening a new document will replace the current one.',
+        confirmOpenReplaceYes: 'Confirm',
+        confirmOpenReplaceNo: 'Cancel',
+        confirmCloseTab: 'Document “{name}” is unsaved.<br>Close the tab?',
+        confirmCloseTabYes: 'Close',
+        confirmCloseTabNo: 'Cancel',
+        docUnsaved: 'Document unsaved',
+        searchNotFound: 'Not found',
+        searchNoMatches: 'No matches found',
         undoMobile: 'Undo', redoMobile: 'Redo'
       }
     };
@@ -8446,7 +8494,7 @@
     //HTML marker for unsaved changes (red asterisk) or empty line
     function dirtyStarHtml() {
       return documentDirty
-        ? '<span class="dirty-star" title="Документ не сохранён">*</span>'
+        ? ('<span class="dirty-star" title="' + escapeHtml(t('docUnsaved')) + '">*</span>')
         : '';
     }
 
@@ -8552,6 +8600,14 @@
       pmUpdateLangToggleUI();
       try { if (typeof updateMergeButtonTooltip === 'function') updateMergeButtonTooltip(); } catch (_) {}
       try { if (typeof updateFitWidthDefaultUI === 'function') updateFitWidthDefaultUI(); } catch (_) {}
+      try {
+        const box = document.getElementById('pageCountBox');
+        if (box && typeof pageCountPinned !== 'undefined') {
+          box.title = pageCountPinned ? t('unpin') : t('pin');
+          box.setAttribute('data-i18n-title', pageCountPinned ? 'unpin' : 'pin');
+        }
+      } catch (_) {}
+      try { if (typeof updateStickyFileBar === 'function') updateStickyFileBar(); } catch (_) {}
       if (typeof pmNavApplyStaticTooltips === 'function') {
         try { pmNavApplyStaticTooltips(); } catch (_) {}
       }
@@ -8771,13 +8827,24 @@
       const top = rows[0];
       const extra = rows.length - 1;
       let dtStr = '';
-      try { dtStr = new Date(top.savedAt || Date.now()).toLocaleString('ru-RU'); } catch (e) {}
-      const msg = `Найдена несохранённая работа: <b>${escapeHtml(top.fileName || 'документ.pdf')}</b>` +
-        (top.pageCount ? ` (${top.pageCount} стр.)` : '') +
-        (dtStr ? `<br>от ${escapeHtml(dtStr)}` : '') +
-        (extra > 0 ? `<br><span style="font-size:13px;color:#888;">и ещё ${extra} несохранён${extra === 1 ? 'ный сеанс' : 'ных сеанса(ов)'}</span>` : '') +
-        `<br><br>Восстановить эту работу?`;
-      const ok = await showConfirmDialog(msg, { html: true, yesText: 'Восстановить', noText: 'Удалить' });
+      try {
+        dtStr = new Date(top.savedAt || Date.now()).toLocaleString(pmLocale === 'en' ? 'en-GB' : 'ru-RU');
+      } catch (e) {}
+      const recName = escapeHtml(top.fileName || t('recoveryDefaultName'));
+      const msg = t('recoveryFound', { name: recName }) +
+        (top.pageCount ? escapeHtml(t('recoveryPages', { n: top.pageCount })) : '') +
+        (dtStr ? `<br>${escapeHtml(t('recoveryFrom', { dt: dtStr }))}` : '') +
+        (extra > 0
+          ? `<br><span style="font-size:13px;color:#888;">${escapeHtml(
+              extra === 1 ? t('recoveryExtraOne', { n: extra }) : t('recoveryExtraMany', { n: extra })
+            )}</span>`
+          : '') +
+        `<br><br>${escapeHtml(t('recoveryAsk'))}`;
+      const ok = await showConfirmDialog(msg, {
+        html: true,
+        yesText: t('recoveryRestore'),
+        noText: t('recoveryDelete')
+      });
       if (ok) {
         try {
           const file = new File([top.pdfBytes], top.fileName || 'document.pdf', { type: 'application/pdf' });
@@ -8792,7 +8859,7 @@
           }
         } catch (e) {
           console.error(e);
-          alert('Не удалось восстановить документ: ' + (e.message || e));
+          alert(t('recoveryFail') + (e.message || e));
         }
       } else {
         await pmIdbDelete(PM_RECOVERY_STORE, top.slot);
@@ -14878,8 +14945,8 @@
       // If a document with unsaved changes is opened, we warn you about replacement
       if (!pmTabsEnabled() && pdfDoc && documentDirty) {
         const ok = await showConfirmDialog(
-          'Документ не сохранён.<br>При открытии новый документ будет заменён на текущий.',
-          { html: true, yesText: 'Подтвердить', noText: 'Отменить' });
+          t('confirmOpenReplace'),
+          { html: true, yesText: t('confirmOpenReplaceYes'), noText: t('confirmOpenReplaceNo') });
         if (!ok) return;
       }
 
@@ -20427,7 +20494,7 @@
       if (isLoading || markedForDeletion.has(idx)) return;
 
       // One page deletion confirmation
-      const confirmed = await showConfirmDialog('Удалить выбранную страницу?');
+      const confirmed = await showConfirmDialog(t('confirmDeletePage'));
       if (!confirmed) return;
 
       const div = document.querySelector(`.page[data-index="${idx}"]`);
@@ -20453,8 +20520,8 @@
     // Universal modal confirmation window "Yes/No"
     function showConfirmDialog(message, opts) {
       opts = opts || {};
-      const yesText = opts.yesText || 'Да';
-      const noText  = opts.noText  || 'Нет';
+      const yesText = opts.yesText || t('confirmYes');
+      const noText  = opts.noText  || t('confirmNo');
       // opts.html === true → message is inserted as HTML (for multiline text)
       const msgHtml = opts.html ? message : escapeHtml(message);
       return new Promise((resolve) => {
@@ -20907,7 +20974,7 @@
       box.innerHTML = `
         <div style="font-size:15px; font-weight:700; margin-bottom:10px;">Provenance</div>
         <div style="font-size:12.5px; line-height:1.5; text-align:left; word-break:break-all;">
-          <div>Author: <b>Евгений Кутьин</b> (Evgeniy Kutyin)</div>
+          <div>Author: <b>Евгений Кутьин</b> (Evgeniy Kutin)</div>
           <div>Repo: github.com/5451165-bot/PDF-Manager</div>
           <div>Build: ${escapeHtml(PDF_MANAGER_BUILD_VERSION)} / ${escapeHtml(PDF_MANAGER_BUILD_DATE)}</div>
           <div id="pmProvenanceHash" style="margin-top:8px; color:#9db4c9;">SHA-256: считаю…</div>
@@ -20931,7 +20998,7 @@
       const hash = await pdfManagerHashSelfScript();
       const hashEl = document.getElementById('pmProvenanceHash');
       if (hashEl) hashEl.textContent = hash ? ('SHA-256: ' + hash) : 'SHA-256: недоступно в этом контексте';
-      console.log('[PDF Document Manager] author=Евгений Кутьин repo=github.com/5451165-bot/PDF-Manager build=' +
+      console.log('[PDF Document Manager] author=Евгений Кутьин (Evgeniy Kutin) repo=github.com/5451165-bot/PDF-Manager build=' +
         PDF_MANAGER_BUILD_VERSION + ' date=' + PDF_MANAGER_BUILD_DATE + (hash ? (' sha256=' + hash) : ''));
     }
 
@@ -21475,7 +21542,7 @@
       if (isLoading || selectedPages.size === 0) return;
 
       // Deletion confirmation
-      const confirmed = await showConfirmDialog('Удалить выбранные страницы?');
+      const confirmed = await showConfirmDialog(t('confirmDeletePages'));
       if (!confirmed) return;
 
       // We mark only pages without a deletion mark and deselect them
@@ -24471,13 +24538,13 @@ function pmShowMergeOrderDropHint(show, x, y) {
 async function pmCloseTab(id) {
   const idx = pmTabs.findIndex(x => x.id === id);
   if (idx < 0) return;
-  const t = pmTabs[idx];
+  const tab = pmTabs[idx];
   const isActive = (id === pmActiveId);
-  const dirty = isActive ? documentDirty : t.dirty;
+  const dirty = isActive ? documentDirty : tab.dirty;
   if (dirty) {
     const ok = await showConfirmDialog(
-      'Документ «' + escapeHtml(t.fileName || '') + '» не сохранён.<br>Закрыть вкладку?',
-      { html: true, yesText: 'Закрыть', noText: 'Отмена' });
+      t('confirmCloseTab', { name: escapeHtml(tab.fileName || '') }),
+      { html: true, yesText: t('confirmCloseTabYes'), noText: t('confirmCloseTabNo') });
     if (!ok) return;
   }
   if (typeof pmClearRecoverySnapshot === 'function') pmClearRecoverySnapshot('tab:' + id).catch(() => {});
@@ -26216,7 +26283,7 @@ function pmSearchRenderStatus() {
   const input = document.getElementById('pmSearchInput');
   const n = pmSearchState.results.length;
   const hasQuery = !!(input && input.value.trim());
-  if (countEl) countEl.textContent = n ? ((pmSearchState.activeResultIdx + 1) + ' / ' + n) : (hasQuery ? 'Не найдено' : '');
+  if (countEl) countEl.textContent = n ? ((pmSearchState.activeResultIdx + 1) + ' / ' + n) : (hasQuery ? t('searchNotFound') : '');
   if (prevBtn) prevBtn.disabled = n === 0;
   if (nextBtn) nextBtn.disabled = n === 0;
   if (statusEl) {
@@ -26226,7 +26293,7 @@ function pmSearchRenderStatus() {
       statusEl.textContent = tabPrefix + 'стр. ' + (r.pageIdx + 1) + ': ' + r.snippet;
       statusEl.classList.add('has-content');
     } else if (hasQuery) {
-      statusEl.textContent = 'Совпадений не найдено';
+      statusEl.textContent = t('searchNoMatches');
       statusEl.classList.add('has-content');
     } else {
       statusEl.textContent = '';
@@ -35127,8 +35194,8 @@ function peShapeAspectMagnetMode(o) {
 }
 
 function peAspectSnapTipText(o) {
-  if (peShapeAspectMagnetMode(o) === 'square') return 'Соотношение 1:1';
-  return 'Оригинальное соотношение';
+  if (peShapeAspectMagnetMode(o) === 'square') return t('peAspectSnapSquare');
+  return t('peAspectSnap');
 }
 
 /**
@@ -45498,7 +45565,7 @@ function pePdfNumValue(doc, v) {
 
 // Regional-redaction engine (width-exact glyph scrub, below) - original
 // implementation for PDF Document Manager, github.com/5451165-bot/PDF-Manager
-// (author: Evgeniy Kutyin).
+// (author: Evgeniy Kutin).
 // PDF name tokens may contain #XX escapes in the content stream.
 function peDecodePdfNameToken(raw) {
   return raw.replace(/#([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
