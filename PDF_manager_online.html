@@ -36464,6 +36464,15 @@ function peShowPageToolsCtxMenu(clientX, clientY) {
   if (undoBtn) undoBtn.disabled = !canUndo;
   if (redoBtn) redoBtn.disabled = !canRedo;
 
+  // Already in object-select: hide that item (and its trailing hr) — no-op otherwise.
+  const objSelectActive = !!(peState.objSelectMode && peState.tool === 'select');
+  const objSelectBtn = menu.querySelector('[data-action="obj-select"]');
+  if (objSelectBtn) {
+    objSelectBtn.hidden = objSelectActive;
+    const sep = objSelectBtn.nextElementSibling;
+    if (sep && sep.tagName === 'HR') sep.hidden = objSelectActive;
+  }
+
   const shapeItem = document.getElementById('pePageToolsShapeItem');
   shapeItem?.classList.remove('open');
   const sub = document.getElementById('pePageToolsShapeSub');
