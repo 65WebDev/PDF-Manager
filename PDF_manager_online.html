@@ -32,8 +32,6 @@
 
   <!--pdf-lib: PDF assembly/editing (pages, rotations, merging, saving)-->
   <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
-  <!--@pdf-lib/fontkit: custom Unicode fonts for selectable email text layers-->
-  <script src="https://unpkg.com/@pdf-lib/fontkit@1.1.1/dist/fontkit.umd.min.js"></script>
   <!--pdf.js: render PDF pages to canvas (thumbnails, preview)-->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <!--mammoth: Convert DOCX to HTML when importing Word documents-->
@@ -20694,7 +20692,6 @@
       ['postal-mime', '2.7.5'],
       ['@kenjiuno/msgreader-web-ng', '0.2.0-alpha1'],
       ['@kenjiuno/decompressrtf', '0.1.4'],
-      ['@pdf-lib/fontkit', '1.1.1'],
       ['@cantoo/pdf-lib', '2.7.4']
     ];
 
@@ -24414,150 +24411,6 @@
       return nodes.some((el) => !pmEmailBlockIsEmpty(el));
     }
 
-    // ── Selectable text layer for rasterized email pages ──
-    // Online: fetch Noto Sans (Cyrillic+Latin). Offline build inlines the bytes
-    // by replacing PM_UNICODE_FONT_LOAD (scripts/build-offline.mjs).
-    const PM_UNICODE_FONT_URLS = [
-      'assets/NotoSans-Regular.ttf',
-      'https://cdn.jsdelivr.net/gh/googlefonts/noto-fonts@main/hinted/ttf/NotoSans/NotoSans-Regular.ttf',
-    ];
-    let pmUnicodeFontBytesPromise = null;
-
-    function pmUnicodeFontLoad() {
-      // PM_UNICODE_FONT_LOAD
-      if (window.__pmUnicodeFontBytes) {
-        return Promise.resolve(window.__pmUnicodeFontBytes);
-      }
-      if (!pmUnicodeFontBytesPromise) {
-        pmUnicodeFontBytesPromise = (async () => {
-          let lastErr = null;
-          for (const url of PM_UNICODE_FONT_URLS) {
-            try {
-              const res = await fetch(url);
-              if (!res.ok) throw new Error('HTTP ' + res.status);
-              const buf = new Uint8Array(await res.arrayBuffer());
-              if (buf.length < 1000) throw new Error('font too small');
-              window.__pmUnicodeFontBytes = buf;
-              return buf;
-            } catch (err) {
-              lastErr = err;
-            }
-          }
-          throw lastErr || new Error('Unicode font load failed');
-        })().catch((err) => {
-          pmUnicodeFontBytesPromise = null;
-          throw err;
-        });
-      }
-      return pmUnicodeFontBytesPromise;
-    }
-
-    async function pmEmailEmbedUnicodeFont(pdfDoc) {
-      const fk = window.fontkit || (window.Fontkit && (window.Fontkit.default || window.Fontkit));
-      if (!fk || typeof pdfDoc.registerFontkit !== 'function') return null;
-      try {
-        pdfDoc.registerFontkit(fk);
-        const bytes = await pmUnicodeFontLoad();
-        return await pdfDoc.embedFont(bytes, { subset: true });
-      } catch (err) {
-        console.warn('email selectable font unavailable', err);
-        return null;
-      }
-    }
-
-    /**
-     * Collect laid-out text runs (CSS px, origin = top-left of rootEl) for an
-     * invisible PDF text layer that pdf.js can select/copy.
-     */
-    function pmEmailHarvestTextRuns(rootEl) {
-      const runs = [];
-      if (!rootEl) return runs;
-      const pageRect = rootEl.getBoundingClientRect();
-      const walker = document.createTreeWalker(rootEl, NodeFilter.SHOW_TEXT, {
-        acceptNode(node) {
-          if (!node || !node.nodeValue || !/\S/.test(node.nodeValue)) return NodeFilter.FILTER_REJECT;
-          const p = node.parentElement;
-          if (!p) return NodeFilter.FILTER_REJECT;
-          const tag = p.tagName;
-          if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'NOSCRIPT') return NodeFilter.FILTER_REJECT;
-          const st = window.getComputedStyle(p);
-          if (st && (st.visibility === 'hidden' || st.display === 'none')) return NodeFilter.FILTER_REJECT;
-          return NodeFilter.FILTER_ACCEPT;
-        },
-      });
-      let node;
-      while ((node = walker.nextNode())) {
-        const raw = node.nodeValue;
-        const parent = node.parentElement;
-        const cs = parent ? window.getComputedStyle(parent) : null;
-        const fontSize = Math.max(6, parseFloat(cs && cs.fontSize) || 13);
-        const re = /\S+|\s+/g;
-        let m;
-        while ((m = re.exec(raw))) {
-          const token = m[0];
-          if (!/\S/.test(token)) continue;
-          const range = document.createRange();
-          try {
-            range.setStart(node, m.index);
-            range.setEnd(node, m.index + token.length);
-          } catch (_) {
-            continue;
-          }
-          const rects = range.getClientRects();
-          for (let ri = 0; ri < rects.length; ri++) {
-            const r = rects[ri];
-            if (!r || r.width < 0.4 || r.height < 0.4) continue;
-            // Skip rects clearly outside the page box (clipped overflow).
-            const x = r.left - pageRect.left;
-            const y = r.top - pageRect.top;
-            if (y + r.height < -2 || x + r.width < -2) continue;
-            if (y > pageRect.height + 2 || x > pageRect.width + 2) continue;
-            runs.push({
-              text: token,
-              x: x,
-              y: y,
-              w: r.width,
-              h: r.height,
-              fontSize: fontSize,
-            });
-          }
-        }
-      }
-      return runs;
-    }
-
-    /** Draw harvested runs as invisible selectable text on a pdf-lib page. */
-    function pmEmailDrawInvisibleText(pdfPage, runs, font, pageHpt) {
-      if (!pdfPage || !font || !runs || !runs.length) return;
-      const rgb = PDFLib.rgb;
-      for (let i = 0; i < runs.length; i++) {
-        const run = runs[i];
-        const text = String(run.text || '');
-        if (!text) continue;
-        let sizePt = Math.max(4, (run.fontSize || 13) * PX_TO_PT);
-        // Fit glyph size to measured box height when the CSS size is off.
-        if (run.h > 0) {
-          const byBox = run.h * PX_TO_PT * 0.92;
-          if (byBox > 3 && byBox < sizePt * 1.35) sizePt = byBox;
-        }
-        const xPt = run.x * PX_TO_PT;
-        // Approximate baseline from the top of the glyph box.
-        const yPt = pageHpt - (run.y + run.h * 0.82) * PX_TO_PT;
-        try {
-          pdfPage.drawText(text, {
-            x: xPt,
-            y: yPt,
-            size: sizePt,
-            font: font,
-            color: rgb(0, 0, 0),
-            opacity: 0,
-          });
-        } catch (_) {
-          // Skip glyphs the embedded subset cannot encode.
-        }
-      }
-    }
-
     /**
      * Rasterize an oversized leaf that cannot be DOM-split: capture A4 viewports
      * one page at a time (never one giant canvas — that hung on large marketing mails).
@@ -24622,10 +24475,6 @@
           const jpg = await newPdf.embedJpg(bytes);
           const pg = newPdf.addPage([pageWpt, pageHpt]);
           pg.drawImage(jpg, { x: 0, y: 0, width: pageWpt, height: pageHpt });
-          if (opts.font) {
-            const runs = pmEmailHarvestTextRuns(stage);
-            pmEmailDrawInvisibleText(pg, runs, opts.font, pageHpt);
-          }
           y += A4H;
         }
       } finally {
@@ -24768,28 +24617,24 @@
           job.page.style.overflow = 'hidden';
         });
 
-        // 2) Emit PDF pages in order (JPEG visual + invisible selectable text).
+        // 2) Emit PDF pages in order.
         const newPdf = await PDFLib.PDFDocument.create();
         const pageWpt = A4W * PX_TO_PT;
         const pageHpt = A4H * PX_TO_PT;
-        const emailFont = await pmEmailEmbedUnicodeFont(newPdf);
-        const sliceOpts = { A4W, A4H, PAD_Y, PAD_X, pageWpt, pageHpt, host, font: emailFont };
+        const sliceOpts = { A4W, A4H, PAD_Y, PAD_X, pageWpt, pageHpt, host };
 
         for (const job of emitJobs) {
           if (job.type === 'dom') {
             const page = job.page;
-            await waitForImagesIn(page, 5000);
-            await new Promise((r) => setTimeout(r, 0));
+            await waitForImagesIn(page);
             const canvas = await html2canvas(page, {
               scale: OFFICE_RENDER_SCALE,
               useCORS: true,
-              allowTaint: true,
               backgroundColor: '#ffffff',
               width: A4W,
               height: A4H,
               windowWidth: A4W,
               windowHeight: A4H,
-              imageTimeout: 4000,
               logging: false,
               letterRendering: true,
             });
@@ -24797,10 +24642,6 @@
             const jpg = await newPdf.embedJpg(bytes);
             const pg = newPdf.addPage([pageWpt, pageHpt]);
             pg.drawImage(jpg, { x: 0, y: 0, width: pageWpt, height: pageHpt });
-            if (emailFont) {
-              const runs = pmEmailHarvestTextRuns(page);
-              pmEmailDrawInvisibleText(pg, runs, emailFont, pageHpt);
-            }
           } else if (job.type === 'slice') {
             await pmEmailSliceElementToPdf(newPdf, job.node, styleHtml, sliceOpts, {
               headHtml: job.withHead && head ? head.outerHTML : '',
