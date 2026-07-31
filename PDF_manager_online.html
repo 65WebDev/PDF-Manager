@@ -3866,6 +3866,10 @@
     }
     body.os-file-dragging .page .quick-actions { display: none !important; }
     .page.selected { border-color: #007bff !important; box-shadow: 0 0 0 4px rgba(0,123,255,0.2); }
+    /* RMB context menu target: subtle white halo showing which page the menu
+       applies to. An outline (not border-color/box-shadow) so it doesn't
+       fight with .selected's blue ring when both apply at once. */
+    .page.ctx-menu-target { outline: 2px solid rgba(255,255,255,0.85); outline-offset: 2px; }
 
     .page.to-delete { 
       opacity: 0.45; 
@@ -29954,6 +29958,11 @@ function editSelectedPage() {
     }
   }
 
+  function clearCtxMenuTargetHighlight() {
+    const el = pagesContainer && pagesContainer.querySelector('.page.ctx-menu-target');
+    if (el) el.classList.remove('ctx-menu-target');
+  }
+
   function hideMenu() {
     // If a menu button still has focus when the menu is hidden (its
     // ancestor gets aria-hidden, e.g. right before opening the page
@@ -29967,6 +29976,7 @@ function editSelectedPage() {
     if (readMenu) readMenu.classList.remove('visible');
     if (navMenu) navMenu.classList.remove('visible');
     if (loupeMenu) loupeMenu.classList.remove('visible');
+    clearCtxMenuTargetHighlight();
     ctxPageIdx = null;
     pageCtxSelectionSnapshot = null;
   }
@@ -30722,6 +30732,8 @@ function editSelectedPage() {
     if (loupeMenu) loupeMenu.classList.remove('visible');
     updatePageCtxMenuState();
     positionCtxMenu(menu, e.clientX, e.clientY);
+    clearCtxMenuTargetHighlight();
+    pageDiv.classList.add('ctx-menu-target');
   });
 
   menu.addEventListener('click', (e) => {
@@ -30732,9 +30744,12 @@ function editSelectedPage() {
     const selSnapshot = pageCtxSelectionSnapshot;
 
     // Sync selection before hideMenu() clears ctxPageIdx. Undo/redo/read/edit/nav
-    // must not change selection (RMB itself also must not).
+    // must not change selection (RMB itself also must not). Rotate is handled
+    // in its own switch case below instead of syncing here: unlike the other
+    // actions, rotating a page that ISN'T part of the current multi-selection
+    // must not collapse that selection down to just the rotated page.
     let selOk = true;
-    if (action === 'rot-right' || action === 'rot-left' || action === 'replace' || action === 'cut' || action === 'delete') {
+    if (action === 'replace' || action === 'cut' || action === 'delete') {
       selOk = syncSelectionToCtxTargets();
     } else if (action === 'export' || action === 'copy' || action === 'print') {
       selOk = syncSelectionToCtxTargets({ notify: true });
@@ -30760,10 +30775,23 @@ function editSelectedPage() {
         if (typeof toggleFitWidthScale === 'function') toggleFitWidthScale();
         break;
       case 'rot-right':
-        if (selOk) rotateSelected(90);
+      case 'rot-left': {
+        const degrees = action === 'rot-right' ? 90 : -90;
+        const targets = ctxMenuTargetPages();
+        if (!targets.length) break;
+        // Rotating the page(s) already in the selection can just use the
+        // normal selected-pages path. Rotating a page reached via RMB that
+        // ISN'T part of the current selection must rotate only that page,
+        // without pulling it into (and so replacing) the real selection.
+        const matchesSelection = targets.length === selSnapshot.selected.length &&
+          targets.every(i => selSnapshot.selected.includes(i));
+        if (matchesSelection) {
+          rotateSelected(degrees);
+        } else {
+          targets.forEach(i => rotateSinglePage(i, degrees));
+        }
         break;
-      case 'rot-left':
-        if (selOk) rotateSelected(-90);
+      }
         break;
       case 'edit': {
         let editIdx = anchorIdx;
