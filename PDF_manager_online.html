@@ -19207,6 +19207,14 @@
         const insertAt = Math.max(0, Math.min(pdfDoc.getPageCount(), resolveInsertIndex(insert)));
         // A4 in points: 595.28 x 841.89
         pdfDoc.insertPage(insertAt, [595.28, 841.89]);
+        // Page-editor object metadata lives in the doc catalog keyed by page
+        // index (see peReadAllEditorMeta) - pdf-lib's insertPage has no idea
+        // it exists, so without this the entry that used to describe the
+        // page now shifted to insertAt+1 stays keyed under insertAt, and the
+        // new blank page (which lands at insertAt) picks it up instead.
+        if (typeof peRemapEditorMetaOnPageInsert === 'function') {
+          peRemapEditorMetaOnPageInsert(pdfDoc, insertAt, 1);
+        }
         setDocumentDirty(true);
         invalidateHQ();   // document has been modified - HD cache is invalid
 
