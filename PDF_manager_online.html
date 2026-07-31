@@ -20618,14 +20618,37 @@
         overlay.appendChild(box);
         document.body.appendChild(overlay);
 
-        const close = (result) => { document.body.removeChild(overlay); resolve(result); };
-        box.querySelector('#cfmYes').onclick = () => close(true);
-        box.querySelector('#cfmNo').onclick  = () => close(false);
-        overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
-        // Enter = Yes, Esc = No
+        let settled = false;
+        const close = (result) => {
+          if (settled) return;
+          settled = true;
+          document.removeEventListener('keydown', onKey, true);
+          if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+          resolve(result);
+        };
+        // Prevent the Yes/No click from falling through to the drop-zone / page
+        // underneath once the overlay is removed (which aborted email import).
+        const bindBtn = (sel, value) => {
+          const btn = box.querySelector(sel);
+          if (!btn) return;
+          btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            close(value);
+          });
+        };
+        bindBtn('#cfmYes', true);
+        bindBtn('#cfmNo', false);
+        overlay.addEventListener('click', (e) => {
+          if (e.target === overlay) {
+            e.preventDefault();
+            e.stopPropagation();
+            close(false);
+          }
+        });
         const onKey = (e) => {
-          if (e.key === 'Enter')  { e.preventDefault(); document.removeEventListener('keydown', onKey, true); close(true); }
-          if (e.key === 'Escape') { e.preventDefault(); document.removeEventListener('keydown', onKey, true); close(false); }
+          if (e.key === 'Enter')  { e.preventDefault(); e.stopPropagation(); close(true); }
+          if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(false); }
         };
         document.addEventListener('keydown', onKey, true);
       });
@@ -23678,16 +23701,51 @@
       if (disp === 'inline') return false;
       const name = att.filename || att.fileName || '';
       const ext = (name.split('.').pop() || '').toLowerCase();
-      if (!ext || ext === 'eml' || ext === 'msg') return false;
-      return ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'eml'].includes(ext) || isImageExt(ext);
+      if (ext === 'eml' || ext === 'msg') return false;
+      if (['pdf', 'doc', 'docx', 'xls', 'xlsx'].includes(ext) || isImageExt(ext)) return true;
+      const mime = String(att.mimeType || '').toLowerCase();
+      if (mime === 'application/pdf') return true;
+      if (mime === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') return true;
+      if (mime === 'application/vnd.ms-excel') return true;
+      if (mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return true;
+      if (mime.indexOf('image/') === 0) return true;
+      return false;
     }
 
     function pmAttachmentToFile(att) {
-      const name = att.filename || att.fileName || 'attachment.bin';
       const mime = att.mimeType || 'application/octet-stream';
-      const content = att.content;
-      const blob = new Blob([content], { type: mime });
-      return new File([blob], name, { type: mime });
+      let name = att.filename || att.fileName || '';
+      if (!name || !/\.[a-z0-9]+$/i.test(name)) {
+        // Invent an extension from MIME when the part has no usable filename.
+        let ext = 'bin';
+        if (/pdf/i.test(mime)) ext = 'pdf';
+        else if (/spreadsheetml\.sheet/i.test(mime)) ext = 'xlsx';
+        else if (/ms-excel/i.test(mime)) ext = 'xls';
+        else if (/wordprocessingml\.document/i.test(mime)) ext = 'docx';
+        else if (/^image\//i.test(mime)) ext = (mime.split('/')[1] || 'png').split(';')[0];
+        name = (name || 'attachment') + '.' + ext;
+      }
+      const raw = att.content;
+      let u8;
+      if (raw instanceof Uint8Array) u8 = raw;
+      else if (raw instanceof ArrayBuffer) u8 = new Uint8Array(raw);
+      else if (ArrayBuffer.isView(raw)) u8 = new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
+      else u8 = new Uint8Array(0);
+      // Copy so ExcelJS/pdf-lib never see a detached/transferred buffer.
+      const copy = u8.slice(0);
+      return new File([copy], name, { type: mime });
+    }
+
+    function pmAttachmentExt(file, att) {
+      const fromName = ((file && file.name) || '').split('.').pop().toLowerCase();
+      if (fromName && fromName !== 'bin') return fromName;
+      const mime = String((att && att.mimeType) || (file && file.type) || '').toLowerCase();
+      if (mime === 'application/pdf') return 'pdf';
+      if (mime.indexOf('spreadsheetml.sheet') >= 0) return 'xlsx';
+      if (mime.indexOf('ms-excel') >= 0) return 'xls';
+      if (mime.indexOf('wordprocessingml.document') >= 0) return 'docx';
+      if (mime.indexOf('image/') === 0) return mime.split('/')[1].split(';')[0] || 'png';
+      return fromName || '';
     }
 
     function pmBuildEmailLetterHtml(parsed) {
@@ -23703,7 +23761,7 @@
         bodyHtml = pmResolveEmailCidImages(pmSanitizeEmailHtml(parsed.html), parsed.attachments);
       } else {
         const text = String(parsed.text || '').replace(/\r\n/g, '\n');
-        bodyHtml = '<pre style="white-space:pre-wrap;font-family:Segoe UI,Arial,sans-serif;font-size:13px;margin:0;">'
+        bodyHtml = '<pre class="pm-eml-pre" style="white-space:pre-wrap;font-family:Segoe UI,Arial,sans-serif;font-size:13px;margin:0;">'
           + escapeHtml(text) + '</pre>';
       }
       const row = (label, val) => val
@@ -23723,6 +23781,7 @@
             .pm-eml-body img { max-width: 100% !important; height: auto !important; }
             .pm-eml-body table { border-collapse: collapse; max-width: 100%; }
             .pm-eml-body td, .pm-eml-body th { word-break: break-word; }
+            .pm-eml-page { background: #fff; overflow: hidden; }
           </style>
           <div class="pm-eml-head">
             <div class="pm-eml-subject">${escapeHtml(subject)}</div>
@@ -23735,54 +23794,216 @@
         </div>`;
     }
 
+    function pmEmailIsAtomicBlock(el) {
+      if (!el || el.nodeType !== 1) return false;
+      const tag = el.tagName;
+      return /^(TABLE|P|PRE|UL|OL|H[1-6]|HR|IMG|BLOCKQUOTE|ADDRESS)$/i.test(tag);
+    }
+
+    /** Flatten email body into pagination units (prefer block boundaries over mid-text cuts). */
+    function pmEmailCollectBlocks(bodyEl) {
+      if (!bodyEl) return [];
+      const out = [];
+      const walk = (el) => {
+        const kids = Array.from(el.children || []);
+        if (!kids.length) {
+          if ((el.textContent || '').replace(/\u00A0/g, ' ').trim()) out.push(el);
+          return;
+        }
+        for (const kid of kids) {
+          if (pmEmailIsAtomicBlock(kid)) {
+            out.push(kid);
+            continue;
+          }
+          if (/^(DIV|SECTION|ARTICLE|CENTER|FONT|SPAN|TD|TH|TBODY|THEAD|TFOOT)$/i.test(kid.tagName)) {
+            const childEls = Array.from(kid.children || []);
+            const useful = childEls.filter((c) => pmEmailIsAtomicBlock(c) ||
+              /^(DIV|SECTION|ARTICLE|CENTER|TABLE)$/i.test(c.tagName));
+            if (useful.length >= 1 && useful.length === childEls.length) {
+              walk(kid);
+            } else if (useful.length >= 2) {
+              walk(kid);
+            } else {
+              out.push(kid);
+            }
+            continue;
+          }
+          out.push(kid);
+        }
+      };
+      walk(bodyEl);
+      return out.length ? out : (bodyEl.childNodes.length ? [bodyEl] : []);
+    }
+
+    /** Split a table that is taller than maxH into several tables by rows. */
+    function pmEmailSplitTableByHeight(table, maxH) {
+      if (!table || table.tagName !== 'TABLE' || maxH < 40) return [table];
+      const rows = Array.from(table.querySelectorAll(':scope > tbody > tr, :scope > tr'));
+      if (rows.length < 2) return [table];
+      // Measure rows while still in layout.
+      const heights = rows.map((r) => Math.max(1, r.getBoundingClientRect().height || r.offsetHeight || 1));
+      const parts = [];
+      let acc = [];
+      let used = 0;
+      const flush = () => {
+        if (!acc.length) return;
+        const t = table.cloneNode(false);
+        // Keep caption/colgroup once on first piece only.
+        if (!parts.length) {
+          Array.from(table.children).forEach((ch) => {
+            if (/^(CAPTION|COLGROUP)$/i.test(ch.tagName)) t.appendChild(ch.cloneNode(true));
+          });
+        }
+        const body = document.createElement('tbody');
+        acc.forEach((r) => body.appendChild(r.cloneNode(true)));
+        t.appendChild(body);
+        // Copy basic attributes that affect layout.
+        Array.from(table.attributes || []).forEach((a) => {
+          try { t.setAttribute(a.name, a.value); } catch (_) {}
+        });
+        parts.push(t);
+        acc = [];
+        used = 0;
+      };
+      for (let i = 0; i < rows.length; i++) {
+        const rh = heights[i];
+        if (acc.length && used + rh > maxH) flush();
+        acc.push(rows[i]);
+        used += rh;
+        // Single row taller than page: still emit alone (better than mixing).
+        if (acc.length === 1 && used > maxH) flush();
+      }
+      flush();
+      return parts.length ? parts : [table];
+    }
+
     async function pmRasterHtmlToA4PdfBytes(html) {
-      const A4W = 794;
-      const A4H = 1123;
-      const container = document.createElement('div');
-      container.style.cssText = `
-        width: ${A4W}px; padding: 40px 44px; background: #fff;
-        position: fixed; left: -9999px; top: 0; box-sizing: border-box;`;
-      container.innerHTML = html;
-      document.body.appendChild(container);
+      const A4W = 794;   // A4 width @ 96dpi
+      const A4H = 1123;  // A4 height @ 96dpi
+      const PAD_Y = 40;
+      const PAD_X = 44;
+      const contentH = A4H - PAD_Y * 2;
+
+      const host = document.createElement('div');
+      host.style.cssText = 'position:fixed;left:-99999px;top:0;background:#fff;z-index:-1;';
+      document.body.appendChild(host);
+
       try {
-        await waitForImagesIn(container);
+        // 1) Measure full letter to collect head + body blocks.
+        const measure = document.createElement('div');
+        measure.style.cssText = 'width:' + A4W + 'px;padding:' + PAD_Y + 'px ' + PAD_X +
+          'px;box-sizing:border-box;background:#fff;';
+        measure.innerHTML = html;
+        host.appendChild(measure);
+        await waitForImagesIn(measure);
         if (document.fonts && document.fonts.ready) {
           try { await document.fonts.ready; } catch (_) {}
         }
         await new Promise((r) => setTimeout(r, 40));
-        const canvas = await html2canvas(container, {
-          scale: OFFICE_RENDER_SCALE,
-          useCORS: true,
-          backgroundColor: '#ffffff',
-          width: A4W,
-          logging: false,
-          windowWidth: A4W + 88,
-          letterRendering: true,
-        });
+
+        const letter = measure.querySelector('.pm-eml-letter') || measure;
+        const styleEl = letter.querySelector('style');
+        const head = letter.querySelector('.pm-eml-head');
+        const body = letter.querySelector('.pm-eml-body');
+        const styleHtml = styleEl ? styleEl.outerHTML : '';
+        const headH = head ? Math.ceil(head.getBoundingClientRect().height || head.offsetHeight || 0) : 0;
+        let blocks = body ? pmEmailCollectBlocks(body) : [];
+        // Expand oversized tables into row-groups before packing.
+        const expanded = [];
+        for (const b of blocks) {
+          const bh = Math.ceil(b.getBoundingClientRect().height || b.offsetHeight || 0);
+          if (b.tagName === 'TABLE' && bh > contentH - 8) {
+            pmEmailSplitTableByHeight(b, Math.max(80, contentH - 8)).forEach((p) => expanded.push(p));
+          } else {
+            expanded.push(b);
+          }
+        }
+        blocks = expanded;
+
+        const makePage = () => {
+          const page = document.createElement('div');
+          page.className = 'pm-eml-page';
+          page.style.cssText = 'width:' + A4W + 'px;height:' + A4H + 'px;min-height:' + A4H +
+            'px;max-height:' + A4H + 'px;padding:' + PAD_Y + 'px ' + PAD_X +
+            'px;box-sizing:border-box;background:#fff;overflow:hidden;';
+          const inner = document.createElement('div');
+          inner.className = 'pm-eml-letter';
+          if (styleHtml) inner.innerHTML = styleHtml;
+          page.appendChild(inner);
+          host.appendChild(page);
+          return { page, inner };
+        };
+
+        const pageEls = [];
+        let cur = makePage();
+        pageEls.push(cur.page);
+        let used = 0;
+
+        if (head) {
+          const headClone = head.cloneNode(true);
+          cur.inner.appendChild(headClone);
+          used = Math.ceil(headClone.getBoundingClientRect().height || headH || 0) + 8;
+        }
+
+        const startNewPage = () => {
+          cur = makePage();
+          pageEls.push(cur.page);
+          used = 0;
+        };
+
+        for (const block of blocks) {
+          // Move live nodes from the measure tree; clones for already-split tables.
+          const node = block.parentNode ? block : block;
+          cur.inner.appendChild(node);
+          const bh = Math.ceil(node.getBoundingClientRect().height || node.offsetHeight || 1);
+          if (used > 0 && used + bh > contentH) {
+            cur.inner.removeChild(node);
+            startNewPage();
+            cur.inner.appendChild(node);
+            used = Math.ceil(node.getBoundingClientRect().height || node.offsetHeight || 1);
+          } else {
+            used += bh;
+          }
+        }
+
+        // If body was empty, still keep the header page.
+        if (!blocks.length && !head) {
+          // nothing to draw
+        }
+
+        host.removeChild(measure);
+
+        // 2) Rasterize each page at full A4 — never shrink the last page
+        // (a short page with width > height looked landscape in the viewer).
         const newPdf = await PDFLib.PDFDocument.create();
         const pageWpt = A4W * PX_TO_PT;
         const pageHpt = A4H * PX_TO_PT;
-        const sliceCssH = A4H;
-        const scale = OFFICE_RENDER_SCALE;
-        const slicePx = Math.round(sliceCssH * scale);
-        let y = 0;
-        while (y < canvas.height) {
-          const h = Math.min(slicePx, canvas.height - y);
-          const bytes = canvasRegionToJpegBytes(canvas, 0, y, canvas.width, h);
+        for (const page of pageEls) {
+          await waitForImagesIn(page);
+          const canvas = await html2canvas(page, {
+            scale: OFFICE_RENDER_SCALE,
+            useCORS: true,
+            backgroundColor: '#ffffff',
+            width: A4W,
+            height: A4H,
+            windowWidth: A4W,
+            windowHeight: A4H,
+            logging: false,
+            letterRendering: true,
+          });
+          const bytes = canvasRegionToJpegBytes(canvas, 0, 0, canvas.width, canvas.height);
           const jpg = await newPdf.embedJpg(bytes);
-          const pageH = (h / scale) * PX_TO_PT;
-          const pg = newPdf.addPage([pageWpt, pageH > 1 ? pageH : pageHpt]);
-          pg.drawImage(jpg, { x: 0, y: 0, width: pageWpt, height: pageH > 1 ? pageH : pageHpt });
-          y += h;
+          const pg = newPdf.addPage([pageWpt, pageHpt]);
+          pg.drawImage(jpg, { x: 0, y: 0, width: pageWpt, height: pageHpt });
         }
         return await newPdf.save();
       } finally {
-        document.body.removeChild(container);
+        if (host.parentNode) host.parentNode.removeChild(host);
       }
     }
 
-    async function pmConvertSupportedAttachmentToPdfBytes(file) {
-      const ext = (file.name.split('.').pop() || '').toLowerCase();
+    async function pmConvertSupportedAttachmentToPdfBytes(file, att) {
+      const ext = pmAttachmentExt(file, att);
       if (['doc', 'docx', 'xls', 'xlsx'].includes(ext)) return await convertOfficeToPdfBytes(file);
       if (isImageExt(ext)) return await convertImageToPdfBytes(file);
       if (ext === 'pdf') {
@@ -23795,10 +24016,13 @@
     }
 
     async function pmAppendPdfBytes(targetPdf, srcBytes) {
-      if (!srcBytes) return;
+      if (!srcBytes || !srcBytes.length) return 0;
       const src = await PDFLib.PDFDocument.load(srcBytes);
-      const pages = await targetPdf.copyPages(src, src.getPageIndices());
+      const idxs = src.getPageIndices();
+      if (!idxs.length) return 0;
+      const pages = await targetPdf.copyPages(src, idxs);
       pages.forEach((p) => targetPdf.addPage(p));
+      return pages.length;
     }
 
     async function convertEmailToPdfBytes(file) {
@@ -23815,28 +24039,42 @@
       const msg = t('confirmEmailAttachments')
         .replace('{n}', String(candidates.length))
         .replace('{list}', listHtml);
-      // Hide loading while the modal is up so the user can click.
-      hideLoading();
+      // Keep isLoading=true while the dialog is open (do NOT hideLoading):
+      // otherwise the Yes-click falls through onto the drop-zone and aborts
+      // the in-flight import. The dialog sits above the loader (z-index).
       const addAttachments = await showConfirmDialog(msg, {
         html: true,
         yesText: t('emailAttachmentsYes'),
         noText: t('emailAttachmentsNo'),
       });
-      showLoading(t('emailImportLoading'));
       if (!addAttachments) return emailBytes;
 
-      const out = await PDFLib.PDFDocument.create();
-      await pmAppendPdfBytes(out, emailBytes);
-      for (const att of candidates) {
-        try {
-          const attFile = pmAttachmentToFile(att);
-          const attPdf = await pmConvertSupportedAttachmentToPdfBytes(attFile);
-          if (attPdf) await pmAppendPdfBytes(out, attPdf);
-        } catch (err) {
-          console.warn('email attachment import skipped:', att && att.filename, err);
+      try {
+        const out = await PDFLib.PDFDocument.create();
+        await pmAppendPdfBytes(out, emailBytes);
+        for (let i = 0; i < candidates.length; i++) {
+          const att = candidates[i];
+          const label = att.filename || att.fileName || ('attachment ' + (i + 1));
+          try {
+            showLoading(t('emailImportLoading') + ' (' + (i + 1) + '/' + candidates.length + ': ' + label + ')');
+            const attFile = pmAttachmentToFile(att);
+            if (!attFile.size) {
+              console.warn('email attachment empty, skipped:', label);
+              continue;
+            }
+            const attPdf = await pmConvertSupportedAttachmentToPdfBytes(attFile, att);
+            if (attPdf) await pmAppendPdfBytes(out, attPdf);
+          } catch (err) {
+            console.warn('email attachment import skipped:', label, err);
+          }
         }
+        showLoading(t('emailImportLoading'));
+        return await out.save();
+      } catch (err) {
+        // Never lose the letter if merging attachments blows up.
+        console.error('email attachment merge failed; returning letter only', err);
+        return emailBytes;
       }
-      return await out.save();
     }
 
     // Universally gets PDF bytes from any supported file:
