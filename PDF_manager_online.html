@@ -1004,9 +1004,12 @@
     }
     .top-menu .img-save-btn svg { width: 22px; height: 22px; display: block; }
     .top-menu .img-save-btn:hover:not(:disabled) { background: #3498db; }
-    /*The “drag” button was removed from this wrapper earlier (export by dragging is disabled) -
-       There is only one popup button left “like images”, it uses
-       standard centering (left: 50%) from the general .img-save-btn rule above.*/
+    /*Two popup buttons side by side (e.g. "as images" + "encrypt") - offset each
+       42px-wide button 24px either side of the wrapper's own center, leaving the
+       6px gap the --multi bridge above already accounts for. A wrapper with a
+       single popup button (no --left/--right) keeps the plain centered left:50%.*/
+    .top-menu .img-save-btn--left { left: calc(50% - 24px); }
+    .top-menu .img-save-btn--right { left: calc(50% + 24px); }
     /*Shown state - managed from JS*/
     .top-menu .img-save-btn.show {
       opacity: 1;
@@ -6095,9 +6098,15 @@
     html[data-theme="dark"] .pm-modal-box #cfmNo,
     html[data-theme="dark"] .pm-modal-box #jpegCancel,
     html[data-theme="dark"] .pm-modal-box #pdfPwdCancel,
+    html[data-theme="dark"] .pm-modal-box #encPwdCancel,
     html[data-theme="dark"] .pm-modal-box #cancelBtn {
       background: #333a44 !important; border-color: #4a5058 !important;
     }
+    /* Encrypt-password dialog: hover feedback on both buttons (light + dark). */
+    #encPwdCancel:hover { background: #f0f0f0 !important; }
+    #encPwdOk:hover { background: #2471a3 !important; }
+    html[data-theme="dark"] .pm-modal-box #encPwdCancel:hover { background: #3d4550 !important; }
+    html[data-theme="dark"] .pm-modal-box #encPwdOk:hover { background: #1f618d !important; }
     html[data-theme="dark"] .pm-modal-box input[type="password"],
     html[data-theme="dark"] .pm-modal-box input[type="text"] {
       background: #1c2128 !important; border-color: #4a5058 !important;
@@ -6215,11 +6224,13 @@
         <button id="replaceBtn" class="compact-btn" onclick="replaceSelectedPages()" disabled title="Заменить выбранные страницы (Shift+C)" data-i18n-title="replaceSelectedPages"><span class="btn-ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></span><span class="btn-label" data-i18n="replace">Заменить</span></button>
         <div class="img-save-wrapper img-save-wrapper--multi">
           <button id="exportBtn" class="compact-btn" onclick="exportSelectedPages()" disabled title="Экспорт выделенных страниц в один PDF (Shift+E)" data-i18n-title="exportSelectedPages"><span class="btn-ico">📥</span><span class="btn-label" data-i18n="export">Экспорт</span></button>
-          <button class="img-save-btn img-save-btn--images" onclick="exportSelectedPages(true)" title="Экспорт как изображения&#10;(экспорт выделенных страниц в PDF, где страницы сохранены как изображения)" aria-label="Экспорт как изображения" data-i18n-title="exportAsImagesHint" data-i18n-aria="exportAsImages"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></button>
+          <button class="img-save-btn img-save-btn--images img-save-btn--left" onclick="exportSelectedPages(true)" title="Экспорт как изображения&#10;(экспорт выделенных страниц в PDF, где страницы сохранены как изображения)" aria-label="Экспорт как изображения" data-i18n-title="exportAsImagesHint" data-i18n-aria="exportAsImages"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></button>
+          <button class="img-save-btn img-save-btn--encrypt img-save-btn--right" onclick="exportSelectedPages('encrypt')" title="Зашифровать файл паролем" aria-label="Зашифровать файл паролем" data-i18n-title="encryptFileTooltip" data-i18n-aria="encryptFileTooltip"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></button>
         </div>
-        <div class="img-save-wrapper">
+        <div class="img-save-wrapper img-save-wrapper--multi">
           <button id="saveBtn" onclick="savePDF()" class="save-btn compact-btn" title="Сохранить итоговый файл (S)" data-i18n-title="saveFinalFile"><span class="btn-ico">💾</span><span class="btn-label" data-i18n="save">Сохранить</span></button>
-          <button class="img-save-btn" onclick="savePDF(true)" title="Сохранить как изображения&#10;(сохранение файла в PDF, где страницы сохранены как изображения)" aria-label="Сохранить как изображения" data-i18n-title="saveAsImagesHint" data-i18n-aria="saveAsImages"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></button>
+          <button class="img-save-btn img-save-btn--left" onclick="savePDF(true)" title="Сохранить как изображения&#10;(сохранение файла в PDF, где страницы сохранены как изображения)" aria-label="Сохранить как изображения" data-i18n-title="saveAsImagesHint" data-i18n-aria="saveAsImages"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></button>
+          <button class="img-save-btn img-save-btn--encrypt img-save-btn--right" onclick="savePDF('encrypt')" title="Зашифровать файл паролем" aria-label="Зашифровать файл паролем" data-i18n-title="encryptFileTooltip" data-i18n-aria="encryptFileTooltip"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></button>
         </div>
         <button id="mobileReadModeBtn" class="compact-btn" onclick="enterReadMode()" disabled title="Режим чтения" data-i18n-title="readMode"><span class="btn-ico"><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span></button>
       </div>
@@ -7391,6 +7402,16 @@
         pwdPlaceholder: 'Пароль',
         pwdOpen: 'Открыть',
         pwdCancel: 'Отмена',
+        encryptFileTooltip: 'Зашифровать файл паролем',
+        encryptPwdTitle: 'Зашифровать файл паролем',
+        encryptPwdBody: 'Этот пароль потребуется, чтобы открыть сохранённый PDF.',
+        encryptPwdPlaceholder: 'Пароль',
+        encryptPwdConfirmPlaceholder: 'Повторите пароль',
+        encryptPwdOk: 'Зашифровать',
+        encryptPwdEmpty: 'Введите пароль',
+        encryptPwdMismatch: 'Пароли не совпадают',
+        encryptError: 'Ошибка при шифровании файла',
+        imgSaveEncrypt: 'Зашифровать файл',
         imgSaveExportTitle: 'Экспорт как изображение',
         imgSaveSaveTitle: 'Сохранить как изображение',
         imgSaveJpegTitle: 'Качество JPEG',
@@ -7643,6 +7664,16 @@
         pwdPlaceholder: 'Password',
         pwdOpen: 'Open',
         pwdCancel: 'Cancel',
+        encryptFileTooltip: 'Encrypt file with a password',
+        encryptPwdTitle: 'Encrypt file with a password',
+        encryptPwdBody: 'This password will be required to open the saved PDF.',
+        encryptPwdPlaceholder: 'Password',
+        encryptPwdConfirmPlaceholder: 'Repeat password',
+        encryptPwdOk: 'Encrypt',
+        encryptPwdEmpty: 'Enter a password',
+        encryptPwdMismatch: 'Passwords do not match',
+        encryptError: 'Error encrypting the file',
+        imgSaveEncrypt: 'Encrypt file',
         imgSaveExportTitle: 'Export as image',
         imgSaveSaveTitle: 'Save as image',
         imgSaveJpegTitle: 'JPEG quality',
@@ -21639,7 +21670,7 @@
       tab.dirty = false;
     }
 
-    async function saveAllOpenTabsAsImage(jpegQuality, rasterScale, tabSources) {
+    async function saveAllOpenTabsAsImage(jpegQuality, rasterScale, tabSources, encryptPassword) {
       pmCaptureActive();
 
       let dirHandle = null;
@@ -21670,9 +21701,13 @@
           const vectorBytes = await buildBytesFromSnapshot(snap);
 
           showLoading(`Сохранение ${i + 1} из ${tabSources.length}: подготовка изображений…`);
-          const fileBytes = await rasterizePdfBytesToImagePdf(
+          let fileBytes = await rasterizePdfBytesToImagePdf(
             vectorBytes, rasterScale,
             `Сохранение документа ${i + 1} из ${tabSources.length}…`, jpegQuality);
+          if (encryptPassword) {
+            showLoading(`Сохранение ${i + 1} из ${tabSources.length}: шифрование…`);
+            fileBytes = await encryptPdfBytesWithPassword(fileBytes, encryptPassword);
+          }
 
           const suggestedName = suggestPdfSaveFileName(t.fileName);
 
@@ -21763,6 +21798,17 @@
             'style="width:100%;margin-bottom:14px;">' +
           '<div style="font-size:14px;color:#444;margin-bottom:20px;"><span id="jpegSizeLabel">' + escapeHtml(t('imgSaveFileSize')) + '</span> ' +
             '<strong id="jpegSizeEst">' + escapeHtml(t('imgSaveEstimating')) + '</strong></div>' +
+          '<label id="jpegEncryptToggle" style="display:flex;align-items:center;gap:8px;' +
+            'font-size:14px;color:#444;margin-bottom:14px;cursor:pointer;">' +
+            '<input type="checkbox" id="jpegEncryptCheck">' +
+            '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" ' +
+              'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+              '<rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>' +
+            `<span>${escapeHtml(t('imgSaveEncrypt'))}</span></label>` +
+          '<input id="jpegEncryptPwd" type="password" autocomplete="new-password" ' +
+            `placeholder="${escapeHtml(t('encryptPwdPlaceholder'))}" ` +
+            'style="display:none;width:100%;box-sizing:border-box;padding:10px 12px;font-size:14px;' +
+              'border:1px solid #ccc;border-radius:6px;margin-bottom:14px;">' +
           '<div style="display:flex;gap:12px;justify-content:center;">' +
             '<button id="jpegOk" style="padding:10px 28px;border:none;border-radius:6px;background:#3498db;' +
               'color:#fff;font-weight:bold;cursor:pointer;font-size:15px;">' + escapeHtml(t('imgSaveContinue')) + '</button>' +
@@ -21780,6 +21826,13 @@
         const pageInfoEl = box.querySelector('#jpegPageInfo');
         const saveAllCheck = box.querySelector('#jpegSaveAllCheck');
         const sizeLabelEl = box.querySelector('#jpegSizeLabel');
+        const encryptCheck = box.querySelector('#jpegEncryptCheck');
+        const encryptPwdInput = box.querySelector('#jpegEncryptPwd');
+        encryptCheck.onchange = () => {
+          encryptPwdInput.style.display = encryptCheck.checked ? 'block' : 'none';
+          encryptPwdInput.style.borderColor = '#ccc';
+          if (encryptCheck.checked) setTimeout(() => { try { encryptPwdInput.focus(); } catch (_) {} }, 0);
+        };
         let estimateToken = 0;
         let debounceTimer = null;
         let closed = false;
@@ -21852,12 +21905,18 @@
         }
 
         box.querySelector('#jpegOk').onclick = () => {
+          if (encryptCheck.checked && !encryptPwdInput.value) {
+            encryptPwdInput.style.borderColor = '#c0392b';
+            encryptPwdInput.focus();
+            return;
+          }
           const dpi = parseInt(dpiSlider.value, 10);
           close({
             jpegQuality: getQuality(),
             scale: dpiToPdfScale(dpi),
             dpi,
-            saveAllTabs: !!(saveAllCheck && saveAllCheck.checked)
+            saveAllTabs: !!(saveAllCheck && saveAllCheck.checked),
+            encryptPassword: encryptCheck.checked ? encryptPwdInput.value : null
           });
         };
         box.querySelector('#jpegCancel').onclick = () => close(null);
@@ -21943,6 +22002,105 @@
       // Re-save so the main pdf-lib build can load the result normally.
       const out = await doc.save();
       return out instanceof Uint8Array ? out : new Uint8Array(out);
+    }
+
+    /** Encrypt already-finished PDF bytes with a single password (used for
+     *  both opening and full/owner access - "protect with a password", not
+     *  a two-tier permissions scheme). Returns new, encrypted bytes. */
+    async function encryptPdfBytesWithPassword(bytes, password) {
+      const mod = await loadPdfPasswordLib();
+      const doc = await mod.PDFDocument.load(bytes.slice());
+      // The security handler revision is picked from the PDF's own header
+      // version (see @cantoo/pdf-lib's PDFSecurity.initialize): a normal
+      // "1.7" document (what pdf-lib writes) selects revision 4, whose
+      // password padding (processPasswordR2R3R4) only accepts PDFDocEncoding
+      // - a Latin-only charset - and throws "Password contains one or more
+      // invalid characters" for a Cyrillic password, which this app's users
+      // overwhelmingly type first. Faking the header as "1.7ext3" selects
+      // revision 6 (AES-256) instead, whose password handling is UTF-8/
+      // SASLprep and accepts any Unicode password; it's also the stronger,
+      // more modern cipher. PDFSecurity reads the header synchronously
+      // inside encrypt() itself, so the header can be restored to a
+      // standard "1.7" right after - the saved file's own header stays
+      // normal for every other PDF reader; only the encryption revision
+      // picked during this call is affected.
+      doc.context.header.major = '1';
+      doc.context.header.minor = '7ext3';
+      doc.encrypt({ userPassword: password, ownerPassword: password });
+      doc.context.header.major = '1';
+      doc.context.header.minor = '7';
+      const out = await doc.save();
+      return out instanceof Uint8Array ? out : new Uint8Array(out);
+    }
+
+    /**
+     * Modal: ask the user to set a NEW password to encrypt a PDF being saved.
+     * Resolves to the entered password string, or null if the user cancels.
+     */
+    function showSetPdfPasswordDialog() {
+      return new Promise((resolve) => {
+        const overlay = document.createElement('div');
+        overlay.className = 'modal-overlay-active';
+        overlay.style.cssText = `
+          position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+          display: flex; align-items: center; justify-content: center; z-index: 100001;`;
+        const box = document.createElement('div');
+        box.className = 'pm-modal-box';
+        box.style.cssText = `
+          background: #fff; border-radius: 12px; padding: 24px 28px; max-width: 92vw;
+          box-shadow: 0 10px 30px rgba(0,0,0,0.3); text-align: left; min-width: min(340px, 92vw);`;
+        box.innerHTML = `
+          <div style="font-size:17px; color:#2c3e50; margin-bottom:8px; font-weight:600; line-height:1.35;">
+            ${escapeHtml(t('encryptPwdTitle'))}
+          </div>
+          <div style="font-size:14px; color:#555; margin-bottom:14px; line-height:1.45;">
+            ${escapeHtml(t('encryptPwdBody'))}
+          </div>
+          <input id="encPwdInput" type="password" autocomplete="new-password"
+            placeholder="${escapeHtml(t('encryptPwdPlaceholder'))}"
+            style="width:100%; box-sizing:border-box; padding:10px 12px; font-size:16px;
+              border:1px solid #ccc; border-radius:6px; margin-bottom:10px;" />
+          <input id="encPwdInput2" type="password" autocomplete="new-password"
+            placeholder="${escapeHtml(t('encryptPwdConfirmPlaceholder'))}"
+            style="width:100%; box-sizing:border-box; padding:10px 12px; font-size:16px;
+              border:1px solid #ccc; border-radius:6px; margin-bottom:8px;" />
+          <div id="encPwdErr" style="display:none; font-size:13px; color:#c0392b; margin-bottom:10px;"></div>
+          <div style="display:flex; gap:12px; justify-content:flex-end; flex-wrap:wrap;">
+            <button type="button" id="encPwdCancel" style="padding:10px 20px; border:1px solid #ccc; border-radius:6px;
+              background:#fff; color:#333; cursor:pointer; font-size:15px;">${escapeHtml(t('pwdCancel'))}</button>
+            <button type="button" id="encPwdOk" style="padding:10px 24px; border:none; border-radius:6px;
+              background:#2980b9; color:#fff; font-weight:bold; cursor:pointer; font-size:15px;">${escapeHtml(t('encryptPwdOk'))}</button>
+          </div>`;
+        overlay.appendChild(box);
+        document.body.appendChild(overlay);
+
+        const input1 = box.querySelector('#encPwdInput');
+        const input2 = box.querySelector('#encPwdInput2');
+        const errEl = box.querySelector('#encPwdErr');
+        const close = (result) => {
+          document.removeEventListener('keydown', onKey, true);
+          if (overlay.parentNode) document.body.removeChild(overlay);
+          resolve(result);
+        };
+        const showErr = (msg) => { errEl.textContent = msg; errEl.style.display = 'block'; };
+        const submit = () => {
+          const p1 = input1.value;
+          const p2 = input2.value;
+          if (!p1) { showErr(t('encryptPwdEmpty')); input1.focus(); return; }
+          if (p1 !== p2) { showErr(t('encryptPwdMismatch')); input2.focus(); input2.select(); return; }
+          close(p1);
+        };
+        box.querySelector('#encPwdOk').onclick = submit;
+        box.querySelector('#encPwdCancel').onclick = () => close(null);
+        // No click-outside-to-close: this dialog holds a password the user
+        // is mid-typing, and a stray click shouldn't discard it silently.
+        const onKey = (e) => {
+          if (e.key === 'Escape') { e.preventDefault(); close(null); }
+          else if (e.key === 'Enter') { e.preventDefault(); submit(); }
+        };
+        document.addEventListener('keydown', onKey, true);
+        setTimeout(() => { try { input1.focus(); } catch (_) {} }, 0);
+      });
     }
 
     /**
@@ -22112,14 +22270,19 @@
       updateUIState();
     }
 
-    async function exportSelectedPages(asImage) {
+    // mode: true/'images' = "export as images", 'encrypt' = prompt for a
+    // password and encrypt the exported PDF, falsy = plain export.
+    async function exportSelectedPages(mode) {
       if (isLoading || selectedPages.size === 0) return;
+      const asImage = mode === true || mode === 'images';
+      const encryptOnly = mode === 'encrypt';
 
       const indicesToExport = getExportSelectedIndices();
       if (indicesToExport.length === 0) return;
 
       let jpegQuality = 0.92;
       let rasterScale = dpiToPdfScale(DEFAULT_RASTER_DPI);
+      let encryptPassword = null;
 
       if (asImage) {
         showLoading('Подготовка…');
@@ -22134,12 +22297,16 @@
           if (!opts) return;
           jpegQuality = opts.jpegQuality;
           rasterScale = opts.scale;
+          encryptPassword = opts.encryptPassword || null;
         } catch (e) {
           hideLoading();
           console.error(e);
           alert('Ошибка при подготовке экспорта');
           return;
         }
+      } else if (encryptOnly) {
+        encryptPassword = await showSetPdfPasswordDialog();
+        if (encryptPassword == null) return;
       }
 
       let suggestedName = buildExportFileName(indicesToExport);
@@ -22163,6 +22330,18 @@
           bytes = await rasterizePdfBytesToImagePdf(
             bytes, rasterScale, 'Экспорт страниц как изображений...', jpegQuality);
         }
+        if (encryptPassword) {
+          showLoading('Шифрование файла...');
+          try {
+            bytes = await encryptPdfBytesWithPassword(bytes, encryptPassword);
+          } catch (e) {
+            console.error(e);
+            alert(t('encryptError') + (e.message ? ': ' + e.message : ''));
+            hideLoading();
+            if (pmTabsEnabled() && pmActiveId != null) pmCaptureActive();
+            return;
+          }
+        }
 
         if (saveHandle) {
           const writable = await saveHandle.createWritable();
@@ -22180,7 +22359,7 @@
         }
       } catch (e) {
         console.error(e);
-        alert('Ошибка при экспорте страниц');
+        alert('Ошибка при экспорте страниц' + (e.message ? ': ' + e.message : ''));
       }
 
       hideLoading();
@@ -22304,11 +22483,16 @@
       }
     }
 
-    async function savePDF(asImage) {
+    // mode: true/'images' = "save as images", 'encrypt' = prompt for a
+    // password and encrypt the saved PDF, falsy = plain save.
+    async function savePDF(mode) {
       if (isLoading || !pdfDoc) return alert('Нет документа');
+      const asImage = mode === true || mode === 'images';
+      const encryptOnly = mode === 'encrypt';
 
       let jpegQuality = 0.92;
       let rasterScale = dpiToPdfScale(DEFAULT_RASTER_DPI);
+      let encryptPassword = null;
 
       if (asImage) {
         showLoading('Подготовка…');
@@ -22342,9 +22526,10 @@
           if (!opts) return;
           jpegQuality = opts.jpegQuality;
           rasterScale = opts.scale;
+          encryptPassword = opts.encryptPassword || null;
 
           if (opts.saveAllTabs && tabSources && tabSources.length > 1) {
-            await saveAllOpenTabsAsImage(jpegQuality, rasterScale, tabSources);
+            await saveAllOpenTabsAsImage(jpegQuality, rasterScale, tabSources, encryptPassword);
             return;
           }
         } catch (e) {
@@ -22353,6 +22538,9 @@
           alert('Ошибка при подготовке сохранения');
           return;
         }
+      } else if (encryptOnly) {
+        encryptPassword = await showSetPdfPasswordDialog();
+        if (encryptPassword == null) return;
       }
 
       // The default name is with the extension .pdf
@@ -22401,6 +22589,16 @@
           showLoading('Подготовка изображений...');
           bytes = await rasterizePdfBytesToImagePdf(
             bytes, rasterScale, 'Сохранение страниц как изображений...', jpegQuality);
+        }
+        if (encryptPassword) {
+          showLoading('Шифрование файла...');
+          try {
+            bytes = await encryptPdfBytesWithPassword(bytes, encryptPassword);
+          } catch (e) {
+            console.error(e);
+            alert(t('encryptError') + (e.message ? ': ' + e.message : ''));
+            return;
+          }
         }
 
         if (saveTarget) {
