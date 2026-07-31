@@ -2400,6 +2400,16 @@
     #peObjLayer.pe-objlayer-passthrough { pointer-events: none; }
     #pageEditModal.pe-obj-select-mode #peObjLayer .pe-obj,
     #peObjLayer.pe-objlayer-passthrough .pe-obj { pointer-events: auto; }
+    /* A text-selection drag already in progress must keep extending through
+       objects stacked on top of the text - otherwise an object re-enabling
+       pointer-events (rule above) becomes the hit-test target under the
+       cursor and the native selection can never reach the text behind it.
+       Starting a drag ON an object is unaffected: that mousedown lands on
+       the object first and never sets textLayerDrag / this class. */
+    #pageEditModal.pe-textsel-passthrough #peObjLayer .pe-obj,
+    #pageEditModal.pe-textsel-passthrough #peObjLayer .pe-obj-callout-box {
+      pointer-events: none !important;
+    }
     .pe-obj-marquee {
       position: absolute; border: 1px solid #3498db;
       background: rgba(52, 152, 219, .12); pointer-events: none; z-index: 5;
@@ -3856,6 +3866,10 @@
     }
     body.os-file-dragging .page .quick-actions { display: none !important; }
     .page.selected { border-color: #007bff !important; box-shadow: 0 0 0 4px rgba(0,123,255,0.2); }
+    /* RMB context menu target: subtle white halo showing which page the menu
+       applies to. An outline (not border-color/box-shadow) so it doesn't
+       fight with .selected's blue ring when both apply at once. */
+    .page.ctx-menu-target { outline: 2px solid rgba(255,255,255,0.85); outline-offset: 2px; }
 
     .page.to-delete { 
       opacity: 0.45; 
@@ -5804,11 +5818,15 @@
         width: calc(var(--pm-menu-ctrl-h) * 0.524);
         height: calc(var(--pm-menu-ctrl-h) * 0.524);
       }
-      /* Cursor mode glyph is naturally ~30×30 inside the 42×42 hit target */
-      .main-row.menu-shrink #selectModeBtn svg {
-        width: calc(var(--pm-menu-ctrl-h) * 0.714);
-        height: calc(var(--pm-menu-ctrl-h) * 0.714);
-      }
+      /* 0.524 = 22/42: at the full (unshrunk) --pm-menu-ctrl-h, every icon-btn
+         svg above lands back on the pre-shrink 22px baseline, so entering
+         menu-shrink is a no-op in size until --pm-menu-ctrl-h itself starts
+         dropping toward its 28px floor - only then do icons visibly shrink,
+         all together. The cursor glyph previously used its own 0.714 ratio
+         (matched to its ~30px natural size instead of the 22px baseline),
+         which made it jump up in size the instant menu-shrink activated
+         while every other icon stayed put; it now follows the same 0.524
+         rule as the rest. */
       /* Desktop rotate glyph ~22px at full size (same as other tool icons) */
       .main-row.menu-shrink button#rotateLeftBtn .rotate-glyph,
       .main-row.menu-shrink button#rotateRightBtn .rotate-glyph {
@@ -17225,6 +17243,8 @@
         document.querySelectorAll('.page-text-layer-inner.textLayer')
           .forEach(resetTextLayerEndGuard);
         prevRange = null;
+        const peModal = document.getElementById('pageEditModal');
+        if (peModal) peModal.classList.remove('pe-textsel-passthrough');
       };
       document.addEventListener('pointerup', endDrag);
       window.addEventListener('blur', endDrag);
@@ -17543,6 +17563,12 @@
               // the browser's own anchor entirely instead.
               wordMode: e.detail >= 2
             };
+            // Page editor: let this drag extend through objects stacked on
+            // top of the text (see .pe-textsel-passthrough CSS).
+            if (layer.id === 'peTextLayer') {
+              const peModal = document.getElementById('pageEditModal');
+              if (peModal) peModal.classList.add('pe-textsel-passthrough');
+            }
             // Hide Copy/markup menu while the selection (or its handles) is
             // being adjusted; it returns on pointerup if a selection remains.
             if (layer.id === 'peTextLayer' && typeof peBeginTextSelHandleDrag === 'function') {
@@ -17721,13 +17747,45 @@
           return r.bottom > host.top - 240 && r.top < host.bottom + 240;
         });
 
+      // A wheel-scroll during an in-progress selection drag can carry the
+      // selected page outside the viewport buffer above. Tearing down its
+      // text layer would delete the DOM nodes the native Selection anchors
+      // to, collapsing it instantly - so any page still holding part of a
+      // live (non-collapsed) selection is kept regardless of visibility.
+      const keep = new Set(visible);
+      const selPages = new Set();
+      const liveSel = window.getSelection();
+      if (liveSel && liveSel.rangeCount && !liveSel.isCollapsed) {
+        try {
+          for (let i = 0; i < liveSel.rangeCount; i++) {
+            const r = liveSel.getRangeAt(i);
+            pagesContainer.querySelectorAll('.page').forEach(p => {
+              if (p.querySelector('.page-text-layer') && r.intersectsNode(p)) {
+                keep.add(p);
+                selPages.add(p);
+              }
+            });
+          }
+        } catch (_) {}
+      }
+
       for (const div of visible) {
         if (token !== pageTextLayerToken) return;
+        // Still mid-drag: a scroll can also trigger an unrelated rebuild of
+        // an already-visible page (e.g. its raster image just finished its
+        // HQ upgrade). buildPageTextLayer would tear down and replace that
+        // page's glyph spans - if this page is part of the CURRENT
+        // selection, that destroys the Range's anchor/focus nodes out from
+        // under the drag, and a multi-page selection can't be recovered by
+        // the capture/restore below (capturePreviewPageTextSelAnchor only
+        // handles a selection confined to one page). Defer the rebuild
+        // until the drag ends instead.
+        if (textLayerDrag && selPages.has(div)) continue;
         await buildPageTextLayer(div, doc, token);
       }
 
       pagesContainer.querySelectorAll('.page').forEach(p => {
-        if (!visible.includes(p)) {
+        if (!keep.has(p)) {
           const layer = p.querySelector('.page-text-layer');
           if (layer) layer.remove();
         }
@@ -17737,6 +17795,19 @@
         requestAnimationFrame(() => {
           if (token !== pageTextLayerToken) return;
           if (!isZoomTextSelect()) return;
+          // savedSel was captured at the START of this (possibly slow, and
+          // possibly one of several overlapping) rebuild - by the time this
+          // runs, the user may well have kept dragging/scrolling and grown
+          // the live selection past a single page (which capturePreview-
+          // PageTextSelAnchor can no longer describe) or scrolled it onto a
+          // different page entirely. Forcing the stale single-page range
+          // back in that case would collapse the CURRENT, still-valid
+          // selection to the OLD, smaller one - this restore exists only to
+          // recover from an actual destruction (rebuild tore the anchor's
+          // DOM out from under it, leaving no selection at all), so skip it
+          // whenever a live selection already exists.
+          const cur = window.getSelection();
+          if (cur && cur.rangeCount && !cur.isCollapsed) return;
           restorePreviewPageTextSelAnchor(savedSel);
         });
       }
@@ -19149,6 +19220,14 @@
         const insertAt = Math.max(0, Math.min(pdfDoc.getPageCount(), resolveInsertIndex(insert)));
         // A4 in points: 595.28 x 841.89
         pdfDoc.insertPage(insertAt, [595.28, 841.89]);
+        // Page-editor object metadata lives in the doc catalog keyed by page
+        // index (see peReadAllEditorMeta) - pdf-lib's insertPage has no idea
+        // it exists, so without this the entry that used to describe the
+        // page now shifted to insertAt+1 stays keyed under insertAt, and the
+        // new blank page (which lands at insertAt) picks it up instead.
+        if (typeof peRemapEditorMetaOnPageInsert === 'function') {
+          peRemapEditorMetaOnPageInsert(pdfDoc, insertAt, 1);
+        }
         setDocumentDirty(true);
         invalidateHQ();   // document has been modified - HD cache is invalid
 
@@ -28540,6 +28619,23 @@ async function peBuildTextLayer(st, gen) {
   const container = document.getElementById('peTextLayer');
   if (!container || !st || !st.page || !st.viewport) return;
   if (typeof pdfjsLib === 'undefined' || !pdfjsLib.renderTextLayer) return;
+  // A rebuild for a different page must never carry the previous page's
+  // selection into this one: peRestorePageTextSelAnchor re-applies plain
+  // character OFFSETS, so on the new page's unrelated text those offsets
+  // would just land on whatever span happens to sit at a similar position
+  // instead of being dropped, which is what made a selection appear to
+  // "jump" across a page switch. Only a rebuild of the SAME page (pinch/
+  // zoom, redact confirm, etc.) is allowed to restore it.
+  const samePage = container.dataset.peTlPageIdx === String(st.idx);
+  if (!samePage) {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount && !sel.isCollapsed) {
+      let n = sel.anchorNode;
+      if (n && n.nodeType === 3) n = n.parentElement;
+      if (n && n.closest && n.closest('#peTextLayer')) sel.removeAllRanges();
+    }
+  }
+  container.dataset.peTlPageIdx = String(st.idx);
   // Text selection on a 90/270-rotated page is unreliable (pdf.js lays the
   // glyph spans out in the page's own unrotated coordinate space and relies
   // on the viewport transform to rotate them into place, which the
@@ -28550,8 +28646,8 @@ async function peBuildTextLayer(st, gen) {
     container.innerHTML = '';
     return;
   }
-  // Pinch/zoom rebuilds this DOM — keep the user's page-text selection.
-  const savedSel = peCapturePageTextSelAnchor();
+  // Pinch/zoom rebuilds this DOM — keep the user's page-text selection (same page only).
+  const savedSel = samePage ? peCapturePageTextSelAnchor() : null;
   if (typeof shieldPageTextLayerEvents === 'function') shieldPageTextLayerEvents(container);
   const builtW = Math.round(st.viewport.width);
   const builtH = Math.round(st.viewport.height);
@@ -29883,6 +29979,11 @@ function editSelectedPage() {
     }
   }
 
+  function clearCtxMenuTargetHighlight() {
+    const el = pagesContainer && pagesContainer.querySelector('.page.ctx-menu-target');
+    if (el) el.classList.remove('ctx-menu-target');
+  }
+
   function hideMenu() {
     // If a menu button still has focus when the menu is hidden (its
     // ancestor gets aria-hidden, e.g. right before opening the page
@@ -29896,6 +29997,7 @@ function editSelectedPage() {
     if (readMenu) readMenu.classList.remove('visible');
     if (navMenu) navMenu.classList.remove('visible');
     if (loupeMenu) loupeMenu.classList.remove('visible');
+    clearCtxMenuTargetHighlight();
     ctxPageIdx = null;
     pageCtxSelectionSnapshot = null;
   }
@@ -30651,6 +30753,8 @@ function editSelectedPage() {
     if (loupeMenu) loupeMenu.classList.remove('visible');
     updatePageCtxMenuState();
     positionCtxMenu(menu, e.clientX, e.clientY);
+    clearCtxMenuTargetHighlight();
+    pageDiv.classList.add('ctx-menu-target');
   });
 
   menu.addEventListener('click', (e) => {
@@ -30661,9 +30765,12 @@ function editSelectedPage() {
     const selSnapshot = pageCtxSelectionSnapshot;
 
     // Sync selection before hideMenu() clears ctxPageIdx. Undo/redo/read/edit/nav
-    // must not change selection (RMB itself also must not).
+    // must not change selection (RMB itself also must not). Rotate is handled
+    // in its own switch case below instead of syncing here: unlike the other
+    // actions, rotating a page that ISN'T part of the current multi-selection
+    // must not collapse that selection down to just the rotated page.
     let selOk = true;
-    if (action === 'rot-right' || action === 'rot-left' || action === 'replace' || action === 'cut' || action === 'delete') {
+    if (action === 'replace' || action === 'cut' || action === 'delete') {
       selOk = syncSelectionToCtxTargets();
     } else if (action === 'export' || action === 'copy' || action === 'print') {
       selOk = syncSelectionToCtxTargets({ notify: true });
@@ -30689,10 +30796,34 @@ function editSelectedPage() {
         if (typeof toggleFitWidthScale === 'function') toggleFitWidthScale();
         break;
       case 'rot-right':
-        if (selOk) rotateSelected(90);
+      case 'rot-left': {
+        const degrees = action === 'rot-right' ? 90 : -90;
+        // Must NOT call ctxMenuTargetPages() here: hideMenu() above already
+        // reset ctxPageIdx to null, so it would always fall back to the
+        // live selection - rotating a non-selected page reached via RMB
+        // would then wrongly rotate the whole current selection instead.
+        // Recompute the same targeting logic from the values captured
+        // BEFORE hideMenu() ran.
+        const selectedNd = selSnapshot.selected.filter(i => !markedForDeletion.has(i));
+        const targets = (anchorIdx != null && selectedNd.includes(anchorIdx))
+          ? selectedNd
+          : (anchorIdx != null && !markedForDeletion.has(anchorIdx))
+            ? [anchorIdx]
+            : selectedNd;
+        if (!targets.length) break;
+        // Rotating the page(s) already in the selection can just use the
+        // normal selected-pages path. Rotating a page reached via RMB that
+        // ISN'T part of the current selection must rotate only that page,
+        // without pulling it into (and so replacing) the real selection.
+        const matchesSelection = targets.length === selectedNd.length &&
+          targets.every(i => selectedNd.includes(i));
+        if (matchesSelection) {
+          rotateSelected(degrees);
+        } else {
+          targets.forEach(i => rotateSinglePage(i, degrees));
+        }
         break;
-      case 'rot-left':
-        if (selOk) rotateSelected(-90);
+      }
         break;
       case 'edit': {
         let editIdx = anchorIdx;
