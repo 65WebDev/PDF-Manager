@@ -17795,6 +17795,19 @@
         requestAnimationFrame(() => {
           if (token !== pageTextLayerToken) return;
           if (!isZoomTextSelect()) return;
+          // savedSel was captured at the START of this (possibly slow, and
+          // possibly one of several overlapping) rebuild - by the time this
+          // runs, the user may well have kept dragging/scrolling and grown
+          // the live selection past a single page (which capturePreview-
+          // PageTextSelAnchor can no longer describe) or scrolled it onto a
+          // different page entirely. Forcing the stale single-page range
+          // back in that case would collapse the CURRENT, still-valid
+          // selection to the OLD, smaller one - this restore exists only to
+          // recover from an actual destruction (rebuild tore the anchor's
+          // DOM out from under it, leaving no selection at all), so skip it
+          // whenever a live selection already exists.
+          const cur = window.getSelection();
+          if (cur && cur.rangeCount && !cur.isCollapsed) return;
           restorePreviewPageTextSelAnchor(savedSel);
         });
       }
