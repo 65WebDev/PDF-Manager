@@ -58,6 +58,12 @@ const CANTOO_IMPORT =
 const POSTAL_MIME_IMPORT =
   "import('https://cdn.jsdelivr.net/npm/postal-mime@2.7.5/+esm')";
 
+const MSG_READER_IMPORT =
+  "import('https://cdn.jsdelivr.net/npm/@kenjiuno/msgreader-web-ng@0.2.0-alpha1/+esm')";
+
+const DECOMPRESS_RTF_IMPORT =
+  "import('https://cdn.jsdelivr.net/npm/@kenjiuno/decompressrtf@0.1.4/+esm')";
+
 async function fetchText(url) {
   const res = await fetch(url);
   if (!res.ok) {
@@ -187,12 +193,23 @@ async function bundlePostalMime() {
   return result.outputFiles[0].text;
 }
 
-function replacePostalMimeImport(html, bundledEsm) {
-  if (!html.includes(POSTAL_MIME_IMPORT)) {
-    throw new Error('Could not find postal-mime dynamic import');
-  }
+async function bundleMsgLibs() {
+  const result = await esbuild.build({
+    entryPoints: [join(root, 'scripts/msg-libs-entry.mjs')],
+    bundle: true,
+    format: 'esm',
+    platform: 'browser',
+    write: false,
+    minify: true,
+    target: ['es2020'],
+    logLevel: 'silent',
+  });
+  return result.outputFiles[0].text;
+}
+
+function blobImportIIFE(bundledEsm) {
   const moduleB64 = toBase64(bundledEsm);
-  const replacement = [
+  return [
     '(function () {',
     `  var moduleB64 = '${moduleB64}';`,
     "  var binary = atob(moduleB64);",
@@ -203,8 +220,31 @@ function replacePostalMimeImport(html, bundledEsm) {
     '  return import(moduleUrl);',
     '})()',
   ].join('\n          ');
-  // postalMimeLibPromise = import('...').then(...).catch(...)
-  return html.replace(POSTAL_MIME_IMPORT, replacement);
+}
+
+function replacePostalMimeImport(html, bundledEsm) {
+  if (!html.includes(POSTAL_MIME_IMPORT)) {
+    throw new Error('Could not find postal-mime dynamic import');
+  }
+  return html.replace(POSTAL_MIME_IMPORT, blobImportIIFE(bundledEsm));
+}
+
+/**
+ * Online loadMsgLibs does two CDN imports. Offline replaces them with one
+ * combo blob that exports { MsgReader, decompressRTF }.
+ */
+function replaceMsgLibsImports(html, bundledEsm) {
+  if (!html.includes(MSG_READER_IMPORT) || !html.includes(DECOMPRESS_RTF_IMPORT)) {
+    throw new Error('Could not find msgreader/decompressrtf dynamic imports');
+  }
+  const combo = blobImportIIFE(bundledEsm);
+  // After first import resolves to the combo module, skip the second CDN import.
+  let out = html.replace(MSG_READER_IMPORT, combo);
+  out = out.replace(
+    DECOMPRESS_RTF_IMPORT,
+    'Promise.resolve(msgMod)',
+  );
+  return out;
 }
 
 function addOfflineBanner(html) {
@@ -248,12 +288,16 @@ async function main() {
   console.log('Bundling postal-mime...');
   const postalMimeBundle = await bundlePostalMime();
 
+  console.log('Bundling msgreader + decompressrtf...');
+  const msgLibsBundle = await bundleMsgLibs();
+
   html = addOfflineBanner(html);
   html = setOfflineFlag(html);
   html = replaceHeadScripts(html, inlinedBlocks);
   html = replacePdfJsWorker(html, workerCode);
   html = replaceCantooImport(html, cantooBundle);
   html = replacePostalMimeImport(html, postalMimeBundle);
+  html = replaceMsgLibsImports(html, msgLibsBundle);
 
   writeFileSync(outputPath, html, 'utf8');
   const sizeMb = (Buffer.byteLength(html, 'utf8') / (1024 * 1024)).toFixed(2);

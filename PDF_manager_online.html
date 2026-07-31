@@ -46,7 +46,7 @@
   <script src="https://cdn.jsdelivr.net/npm/docx-preview@0.3.7/dist/docx-preview.min.js"></script>
   <!--ExcelJS: Read XLSX with styles and print options for pagination when converting to PDF-->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
-  <!--postal-mime is loaded on demand via dynamic import (see loadPostalMime) -->
+  <!-- postal-mime / msgreader are loaded on demand (see loadPostalMime, loadMsgLibs) -->
 
   <style>
     html, body { height: 100%; }
@@ -6702,7 +6702,7 @@
       <div id="info" class="info" style="display:none;"></div>
       <h1>Менеджер документов PDF</h1>
     </div>
-    <div id="dropZone" class="drop-zone"><span class="dz-desktop" data-i18n="dropZoneDesktop">Нажмите здесь или перетащите в эту область один или несколько файлов для открытия</span><span class="dz-mobile" data-i18n="dropZoneMobile">Нажмите здесь для выбора одного или нескольких файлов</span><br><span data-i18n="dropZoneFormats" style="font-size:14px;color:#888;margin-top:8px;display:block;">Поддерживаются: PDF, Word (.docx), Excel (.xls, .xlsx), письма (.eml), изображения (PNG, JPEG, BMP, GIF, WEBP, TIFF)</span></div>
+    <div id="dropZone" class="drop-zone"><span class="dz-desktop" data-i18n="dropZoneDesktop">Нажмите здесь или перетащите в эту область один или несколько файлов для открытия</span><span class="dz-mobile" data-i18n="dropZoneMobile">Нажмите здесь для выбора одного или нескольких файлов</span><br><span data-i18n="dropZoneFormats" style="font-size:14px;color:#888;margin-top:8px;display:block;">Поддерживаются: PDF, Word (.docx), Excel (.xls, .xlsx), письма (.eml, .msg), изображения (PNG, JPEG, BMP, GIF, WEBP, TIFF)</span></div>
     <div id="pagesContainer" class="pages"></div>
     <div id="insertIndicator"></div>
     <div id="insertMenu">
@@ -7076,7 +7076,7 @@
         scale: 'Масштаб:', pin: 'Закрепить', unpin: 'Открепить', pages: 'Страниц:',
         dropZoneDesktop: 'Нажмите здесь или перетащите в эту область один или несколько файлов для открытия',
         dropZoneMobile: 'Нажмите здесь для выбора одного или нескольких файлов',
-        dropZoneFormats: 'Поддерживаются: PDF, Word (.docx), Excel (.xls, .xlsx), письма (.eml), изображения (PNG, JPEG, BMP, GIF, WEBP, TIFF)',
+        dropZoneFormats: 'Поддерживаются: PDF, Word (.docx), Excel (.xls, .xlsx), письма (.eml, .msg), изображения (PNG, JPEG, BMP, GIF, WEBP, TIFF)',
         confirmEmailAttachments: 'Письмо содержит вложения, которые можно добавить отдельными страницами ({n}):<br><br>{list}<br><br>Добавить вложения следующими страницами?',
         emailImportLoading: 'Импорт письма...',
         emailAttachmentsYes: 'Добавить вложения',
@@ -7328,7 +7328,7 @@
         scale: 'Scale:', pin: 'Pin', unpin: 'Unpin', pages: 'Pages:',
         dropZoneDesktop: 'Click here or drag one or more files into this area to open',
         dropZoneMobile: 'Tap here to select one or more files',
-        dropZoneFormats: 'Supported: PDF, Word (.docx), Excel (.xls, .xlsx), email (.eml), images (PNG, JPEG, BMP, GIF, WEBP, TIFF)',
+        dropZoneFormats: 'Supported: PDF, Word (.docx), Excel (.xls, .xlsx), email (.eml, .msg), images (PNG, JPEG, BMP, GIF, WEBP, TIFF)',
         confirmEmailAttachments: 'This email has attachments that can be added as separate pages ({n}):<br><br>{list}<br><br>Add attachments as following pages?',
         emailImportLoading: 'Importing email...',
         emailAttachmentsYes: 'Add attachments',
@@ -14959,7 +14959,7 @@
       if (fileInput) return;
       fileInput = document.createElement('input');
       fileInput.type = 'file';
-      fileInput.accept = '.pdf,.docx,.xls,.xlsx,.eml,.png,.jpg,.jpeg,.bmp,.gif,.webp,.tif,.tiff';
+      fileInput.accept = '.pdf,.docx,.xls,.xlsx,.eml,.msg,.png,.jpg,.jpeg,.bmp,.gif,.webp,.tif,.tiff';
       fileInput.style.display = 'none';
       document.body.appendChild(fileInput);
       fileInput.addEventListener('change', e => e.target.files[0] && loadPDF(e.target.files[0]));
@@ -14995,6 +14995,7 @@
                 'application/vnd.ms-excel': ['.xls'],
                 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
                 'message/rfc822': ['.eml'],
+                'application/vnd.ms-outlook': ['.msg'],
                 'image/png': ['.png'],
                 'image/jpeg': ['.jpg', '.jpeg'],
                 'image/bmp': ['.bmp'],
@@ -15025,7 +15026,7 @@
           const inp = document.createElement('input');
           inp.type = 'file';
           inp.multiple = multi;
-          inp.accept = '.pdf,.docx,.xls,.xlsx,.eml,.png,.jpg,.jpeg,.bmp,.gif,.webp,.tif,.tiff';
+          inp.accept = '.pdf,.docx,.xls,.xlsx,.eml,.msg,.png,.jpg,.jpeg,.bmp,.gif,.webp,.tif,.tiff';
           inp.onchange = () => resolve(inp.files && inp.files.length ? Array.from(inp.files) : null);
           inp.click();
         });
@@ -15080,7 +15081,7 @@
         invalidateHQ();
         // Name from the first file, extension → .pdf
         currentFileName = (firstName || 'документ.pdf')
-          .replace(/\.(docx?|xlsx?|eml|png|jpe?g|bmp|gif|webp|tiff?)$/i, '.pdf');
+          .replace(/\.(docx?|xlsx?|eml|msg|png|jpe?g|bmp|gif|webp|tiff?)$/i, '.pdf');
         if (!/\.pdf$/i.test(currentFileName)) currentFileName += '.pdf';
 
         dropZone.style.display = 'none';
@@ -15161,7 +15162,7 @@
         preparedPdfLibDoc = null;
         invalidateHQ();
         currentFileName = (isOffice || isImage || isEmail)
-          ? file.name.replace(/\.(docx?|xlsx?|eml|png|jpe?g|bmp|gif|webp|tiff?)$/i, '.pdf')
+          ? file.name.replace(/\.(docx?|xlsx?|eml|msg|png|jpe?g|bmp|gif|webp|tiff?)$/i, '.pdf')
           : file.name;
 
         dropZone.style.display = 'none';
@@ -18943,6 +18944,7 @@
                 'application/vnd.ms-excel': ['.xls'],
                 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
                 'message/rfc822': ['.eml'],
+                'application/vnd.ms-outlook': ['.msg'],
                 'image/png': ['.png'],
                 'image/jpeg': ['.jpg', '.jpeg'],
                 'image/bmp': ['.bmp'],
@@ -18970,7 +18972,7 @@
           const inp = document.createElement('input');
           inp.type = 'file';
           inp.multiple = true;
-          inp.accept = '.pdf,.docx,.xls,.xlsx,.eml,.png,.jpg,.jpeg,.bmp,.gif,.webp,.tif,.tiff';
+          inp.accept = '.pdf,.docx,.xls,.xlsx,.eml,.msg,.png,.jpg,.jpeg,.bmp,.gif,.webp,.tif,.tiff';
           inp.onchange = () => resolve(inp.files && inp.files.length ? Array.from(inp.files) : null);
           inp.click();
         });
@@ -19132,6 +19134,7 @@
                 'application/vnd.ms-excel': ['.xls'],
                 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
                 'message/rfc822': ['.eml'],
+                'application/vnd.ms-outlook': ['.msg'],
                 'image/png': ['.png'],
                 'image/jpeg': ['.jpg', '.jpeg'],
                 'image/bmp': ['.bmp'],
@@ -19154,7 +19157,7 @@
         files = await new Promise((resolve) => {
           const inp = document.createElement('input');
           inp.type = 'file';
-          inp.accept = '.pdf,.docx,.xls,.xlsx,.eml,.png,.jpg,.jpeg,.bmp,.gif,.webp,.tif,.tiff';
+          inp.accept = '.pdf,.docx,.xls,.xlsx,.eml,.msg,.png,.jpg,.jpeg,.bmp,.gif,.webp,.tif,.tiff';
           inp.multiple = true;
           inp.onchange = () => resolve(Array.from(inp.files));
           inp.click();
@@ -20687,6 +20690,8 @@
       ['docx-preview', '0.3.7'],
       ['ExcelJS', '4.4.0'],
       ['postal-mime', '2.7.5'],
+      ['@kenjiuno/msgreader-web-ng', '0.2.0-alpha1'],
+      ['@kenjiuno/decompressrtf', '0.1.4'],
       ['@cantoo/pdf-lib', '2.7.4']
     ];
 
@@ -21207,7 +21212,7 @@
 
     function suggestPdfSaveFileName(fileName) {
       let suggestedName = (fileName || 'документ.pdf')
-        .replace(/\.(docx?|xlsx?|eml|png|jpe?g|bmp|gif|webp|tiff?)$/i, '.pdf');
+        .replace(/\.(docx?|xlsx?|eml|msg|png|jpe?g|bmp|gif|webp|tiff?)$/i, '.pdf');
       if (!/\.pdf$/i.test(suggestedName)) suggestedName += '.pdf';
       return suggestedName;
     }
@@ -21492,6 +21497,29 @@
           });
       }
       return postalMimeLibPromise;
+    }
+
+    // Outlook .msg: @kenjiuno/msgreader-web-ng + decompressrtf.
+    // Online: jsDelivr ESM. Offline build replaces MSG_LIBS_IMPORT (scripts/build-offline.mjs).
+    let msgLibsPromise = null;
+    async function loadMsgLibs() {
+      if (window.__pmMsgLibs) return window.__pmMsgLibs;
+      if (!msgLibsPromise) {
+        msgLibsPromise = import('https://cdn.jsdelivr.net/npm/@kenjiuno/msgreader-web-ng@0.2.0-alpha1/+esm')
+          .then(async (msgMod) => {
+            const decMod = await import('https://cdn.jsdelivr.net/npm/@kenjiuno/decompressrtf@0.1.4/+esm');
+            const MsgReader = msgMod && (msgMod.MsgReader || msgMod.default || msgMod);
+            const decompressRTF = decMod && (decMod.decompressRTF || (decMod.default && decMod.default.decompressRTF) || decMod.default);
+            const libs = { MsgReader, decompressRTF };
+            window.__pmMsgLibs = libs;
+            return libs;
+          })
+          .catch((err) => {
+            msgLibsPromise = null;
+            throw err;
+          });
+      }
+      return msgLibsPromise;
     }
 
     function pdfLoadLooksPasswordProtected(err) {
@@ -22116,6 +22144,7 @@
                 'application/vnd.ms-excel': ['.xls'],
                 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
                 'message/rfc822': ['.eml'],
+                'application/vnd.ms-outlook': ['.msg'],
                 'image/png': ['.png'],
                 'image/jpeg': ['.jpg', '.jpeg'],
                 'image/bmp': ['.bmp'],
@@ -22141,7 +22170,7 @@
       // Fallback: regular <input type="file">
       const input = document.createElement('input');
       input.type = 'file';
-      input.accept = '.pdf,.docx,.xls,.xlsx,.eml,.png,.jpg,.jpeg,.bmp,.gif,.webp,.tif,.tiff';
+      input.accept = '.pdf,.docx,.xls,.xlsx,.eml,.msg,.png,.jpg,.jpeg,.bmp,.gif,.webp,.tif,.tiff';
       input.multiple = true;
       input.onchange = async () => { await handleFiles(Array.from(input.files)); };
       input.click();
@@ -22278,7 +22307,7 @@
             const typeLabel = ext === 'docx' || ext === 'doc' ? 'Word' : 'Excel';
             return { file, pageCount: typeLabel, isOffice: true };
           }
-          if (ext === 'eml') {
+          if (ext === 'eml' || ext === 'msg') {
             return { file, pageCount: 'Email', isOffice: true };
           }
           if (typeof isImageExt === 'function' && isImageExt(ext)) {
@@ -22346,8 +22375,8 @@
           `;
 
           const ext = file.name.split('.').pop().toLowerCase();
-          const isOfficeFile = ['doc', 'docx', 'xls', 'xlsx', 'eml'].includes(ext);
-          const typeColors = { pdf: '#e74c3c', docx: '#2b579a', doc: '#2b579a', xlsx: '#217346', xls: '#217346', eml: '#8e44ad' };
+          const isOfficeFile = ['doc', 'docx', 'xls', 'xlsx', 'eml', 'msg'].includes(ext);
+          const typeColors = { pdf: '#e74c3c', docx: '#2b579a', doc: '#2b579a', xlsx: '#217346', xls: '#217346', eml: '#8e44ad', msg: '#8e44ad' };
           const typeColor = typeColors[ext] || '#888';
           const typeLabel = ext.toUpperCase();
           const pageLabel = isOfficeFile
@@ -23636,9 +23665,314 @@
       return await newPdf.save();
     }
 
-    // ── .eml (email) → PDF via postal-mime + html2canvas ──
+    // ── .eml / .msg (email) → PDF via postal-mime or msgreader + html2canvas ──
     function isEmailExt(ext) {
-      return (ext || '').toLowerCase() === 'eml';
+      const e = (ext || '').toLowerCase();
+      return e === 'eml' || e === 'msg';
+    }
+
+    function pmMsgCodePageLabel(cp) {
+      const map = {
+        1250: 'windows-1250', 1251: 'windows-1251', 1252: 'windows-1252',
+        1253: 'windows-1253', 1254: 'windows-1254', 1255: 'windows-1255',
+        1256: 'windows-1256', 1257: 'windows-1257', 866: 'ibm866',
+        20866: 'koi8-r', 21866: 'koi8-u', 65001: 'utf-8', 20127: 'ascii',
+        28591: 'iso-8859-1', 28595: 'iso-8859-5',
+      };
+      return map[Number(cp)] || 'utf-8';
+    }
+
+    function pmDecodeWithCodePage(u8, codePage) {
+      const bytes = u8 instanceof Uint8Array ? u8
+        : (u8 instanceof ArrayBuffer ? new Uint8Array(u8) : new Uint8Array(u8 || []));
+      const label = pmMsgCodePageLabel(codePage);
+      try { return new TextDecoder(label).decode(bytes); }
+      catch (_) {
+        try { return new TextDecoder('utf-8').decode(bytes); }
+        catch (__) { return ''; }
+      }
+    }
+
+    /**
+     * Extract encapsulated HTML from Outlook \fromhtml RTF (MS-OXRTFEX, best-effort).
+     * Preserves original tags/styles/tables when the MSG body was HTML.
+     */
+    function pmExtractHtmlFromOutlookRtf(rtf) {
+      if (!rtf || typeof rtf !== 'string') return null;
+      if (!/\\fromhtml\d?/i.test(rtf)) return null;
+
+      const ansiMatch = rtf.match(/\\ansicpg(\d+)/i);
+      const ansiCpg = ansiMatch ? parseInt(ansiMatch[1], 10) : 1252;
+      const label = pmMsgCodePageLabel(ansiCpg);
+
+      const decodeBytes = (arr) => {
+        try { return new TextDecoder(label).decode(Uint8Array.from(arr)); }
+        catch (_) { return new TextDecoder('utf-8').decode(Uint8Array.from(arr)); }
+      };
+
+      const decodeFrag = (s) => {
+        let out = '';
+        const bytes = [];
+        const flush = () => {
+          if (!bytes.length) return;
+          out += decodeBytes(bytes);
+          bytes.length = 0;
+        };
+        let i = 0;
+        while (i < s.length) {
+          if (s[i] === '\\' && i + 3 < s.length && s[i + 1] === "'" &&
+              /[0-9a-fA-F]{2}/.test(s.slice(i + 2, i + 4))) {
+            bytes.push(parseInt(s.slice(i + 2, i + 4), 16));
+            i += 4;
+            continue;
+          }
+          flush();
+          if (s[i] === '\\' && s[i + 1] === 'u') {
+            let j = i + 2;
+            let sign = 1;
+            if (s[j] === '-') { sign = -1; j++; }
+            let num = '';
+            while (j < s.length && /\d/.test(s[j])) num += s[j++];
+            if (num) {
+              let cp = sign * parseInt(num, 10);
+              if (cp < 0) cp += 65536;
+              out += String.fromCharCode(cp);
+              if (s[j] === '?') j++;
+              i = j;
+              continue;
+            }
+          }
+          if (s[i] === '\\' && (s[i + 1] === '\\' || s[i + 1] === '{' || s[i + 1] === '}')) {
+            out += s[i + 1];
+            i += 2;
+            continue;
+          }
+          if (s[i] === '\\') {
+            let j = i + 1;
+            if (j < s.length && /[a-zA-Z]/.test(s[j])) {
+              while (j < s.length && /[a-zA-Z]/.test(s[j])) j++;
+              if (s[j] === '-') j++;
+              while (j < s.length && /\d/.test(s[j])) j++;
+              if (s[j] === ' ') j++;
+              i = j;
+              continue;
+            }
+            i++;
+            continue;
+          }
+          out += s[i++];
+        }
+        flush();
+        return out;
+      };
+
+      let html = '';
+      let i = 0;
+      let htmlrtf = false;
+      const n = rtf.length;
+      while (i < n) {
+        if (rtf.startsWith('{\\*\\htmltag', i)) {
+          let j = i + '{\\*\\htmltag'.length;
+          while (j < n && /\d/.test(rtf[j])) j++;
+          if (j < n && rtf[j] === ' ') j++;
+          let depth = 1;
+          let k = j;
+          while (k < n && depth > 0) {
+            const ch = rtf[k];
+            if (ch === '{') depth++;
+            else if (ch === '}') {
+              depth--;
+              if (depth === 0) break;
+            } else if (ch === '\\' && (rtf[k + 1] === '{' || rtf[k + 1] === '}' || rtf[k + 1] === '\\')) {
+              k += 2;
+              continue;
+            }
+            k++;
+          }
+          html += decodeFrag(rtf.slice(j, k));
+          i = k + 1;
+          continue;
+        }
+        if (rtf.startsWith('\\htmlrtf0', i)) { htmlrtf = false; i += 9; continue; }
+        if (rtf.startsWith('\\htmlrtf', i)) { htmlrtf = true; i += 8; continue; }
+        if (rtf[i] === '{') {
+          // Find matching close so peeks cannot see past this group.
+          let depth = 1;
+          let k = i + 1;
+          while (k < n && depth > 0) {
+            if (rtf[k] === '{') depth++;
+            else if (rtf[k] === '}') depth--;
+            else if (rtf[k] === '\\' && (rtf[k + 1] === '{' || rtf[k + 1] === '}' || rtf[k + 1] === '\\')) {
+              k += 2; continue;
+            }
+            k++;
+          }
+          const inner = rtf.slice(i + 1, k);
+          // Always skip font/color tables (their text must not leak into HTML).
+          if (/^\\fonttbl/i.test(inner) || /^\\colortbl/i.test(inner) ||
+              /^\\\*\\generator/i.test(inner) || /^\\\*\\pnseclvl/i.test(inner)) {
+            i = k + 1;
+            continue;
+          }
+          if (inner.indexOf('htmltag') >= 0 || inner.indexOf('htmlrtf') >= 0) {
+            i += 1; // walk into group
+            continue;
+          }
+          i = k + 1;
+          continue;
+        }
+        if (rtf[i] === '}') { i++; continue; }
+        if (rtf[i] === '\\') {
+          let j = i + 1;
+          if (j < n && /[a-zA-Z]/.test(rtf[j])) {
+            while (j < n && /[a-zA-Z]/.test(rtf[j])) j++;
+            if (rtf[j] === '-') j++;
+            while (j < n && /\d/.test(rtf[j])) j++;
+            if (rtf[j] === ' ') j++;
+            i = j;
+            continue;
+          }
+          if (rtf[j] === "'" && /[0-9a-fA-F]{2}/.test(rtf.slice(j + 1, j + 3))) {
+            if (!htmlrtf) html += decodeFrag(rtf.slice(i, i + 4));
+            i += 4;
+            continue;
+          }
+          i += 2;
+          continue;
+        }
+        if (!htmlrtf) html += rtf[i];
+        i++;
+      }
+      html = html.replace(/^\s+/, '');
+      return html.trim() ? html : null;
+    }
+
+    /** Best-effort RTF → simple HTML when the body is not HTML-encapsulated. */
+    function pmBasicRtfToHtml(rtf) {
+      if (!rtf) return '';
+      let s = String(rtf);
+      s = s.replace(/\{\\fonttbl[\s\S]*?\}/gi, '');
+      s = s.replace(/\{\\colortbl[\s\S]*?\}/gi, '');
+      s = s.replace(/\{\\\*[^{}]*\}/g, '');
+      s = s.replace(/\\b\d?\s?/g, '<b>');
+      s = s.replace(/\\b0\s?/g, '</b>');
+      s = s.replace(/\\i\d?\s?/g, '<i>');
+      s = s.replace(/\\i0\s?/g, '</i>');
+      s = s.replace(/\\ul\d?\s?/g, '<u>');
+      s = s.replace(/\\ulnone\s?/g, '</u>');
+      s = s.replace(/\\par\d?\s?/g, '<br>');
+      s = s.replace(/\\tab\s?/g, '&nbsp;&nbsp;&nbsp;&nbsp;');
+      s = s.replace(/\\line\s?/g, '<br>');
+      s = s.replace(/\\'[0-9a-fA-F]{2}/g, '');
+      s = s.replace(/\\u(-?\d+)\??/g, (_, n) => {
+        let cp = parseInt(n, 10);
+        if (cp < 0) cp += 65536;
+        return '&#' + cp + ';';
+      });
+      s = s.replace(/\\[a-zA-Z]+-?\d*\s?/g, '');
+      s = s.replace(/[{}]/g, '');
+      s = s.replace(/\r\n/g, '');
+      return '<div style="white-space:pre-wrap;">' + s.trim() + '</div>';
+    }
+
+    async function pmParseMsgToEmailLike(file) {
+      const { MsgReader, decompressRTF } = await loadMsgLibs();
+      const buf = await file.arrayBuffer();
+      const reader = new MsgReader(buf);
+      const data = reader.getFileData() || {};
+      const codePage = data.internetCodepage || data.messageCodepage || 65001;
+
+      let html = '';
+      if (data.bodyHtml && String(data.bodyHtml).trim()) {
+        html = String(data.bodyHtml);
+      } else if (data.html && (data.html.byteLength || data.html.length)) {
+        html = pmDecodeWithCodePage(data.html, codePage);
+        // Some MSG store PidTagHtml as UTF-16LE.
+        if (!String(html).replace(/\0/g, '').trim()) {
+          try {
+            const u8 = data.html instanceof Uint8Array ? data.html : Uint8Array.from(data.html);
+            const u16 = new TextDecoder('utf-16le').decode(u8);
+            if (u16 && u16.replace(/\0/g, '').trim()) html = u16;
+          } catch (_) {}
+        }
+      } else if (data.compressedRtf && decompressRTF) {
+        try {
+          const raw = data.compressedRtf instanceof Uint8Array
+            ? data.compressedRtf
+            : Uint8Array.from(data.compressedRtf || []);
+          // decompressRTF accepts Array-like of bytes
+          const rtfBytes = decompressRTF(Array.from(raw));
+          const u8 = rtfBytes instanceof Uint8Array ? rtfBytes : Uint8Array.from(rtfBytes || []);
+          let rtfAscii = '';
+          for (let i = 0; i < u8.length; i++) rtfAscii += String.fromCharCode(u8[i]);
+          html = pmExtractHtmlFromOutlookRtf(rtfAscii);
+          if (!html) {
+            // Prefer plain PidTagBody over lossy RTF→HTML for fromtext messages.
+            if (data.body && String(data.body).trim()) {
+              html = '';
+            } else {
+              html = pmBasicRtfToHtml(rtfAscii);
+            }
+          }
+        } catch (err) {
+          console.warn('MSG RTF decompress/extract failed', err);
+        }
+      }
+      if (html) {
+        const hs = html.search(/<!DOCTYPE|<html[\s>]/i);
+        if (hs > 0) html = html.slice(hs);
+      }
+      if (!html && data.body) {
+        html = '<pre class="pm-eml-pre" style="white-space:pre-wrap;font-family:Segoe UI,Arial,sans-serif;font-size:13px;margin:0;">'
+          + escapeHtml(String(data.body)) + '</pre>';
+      }
+
+      const recipients = Array.isArray(data.recipients) ? data.recipients : [];
+      const to = recipients.filter((r) => !r.recipType || r.recipType === 'to')
+        .map((r) => ({ name: r.name || '', address: r.email || r.smtpAddress || '' }));
+      const cc = recipients.filter((r) => r.recipType === 'cc')
+        .map((r) => ({ name: r.name || '', address: r.email || r.smtpAddress || '' }));
+
+      const attachments = [];
+      (data.attachments || []).forEach((attMeta, idx) => {
+        try {
+          const got = reader.getAttachment(attMeta) || reader.getAttachment(idx) || {};
+          const content = got.content || attMeta.content;
+          if (!content) return;
+          let u8;
+          if (content instanceof Uint8Array) u8 = content;
+          else if (content instanceof ArrayBuffer) u8 = new Uint8Array(content);
+          else if (ArrayBuffer.isView(content)) u8 = new Uint8Array(content.buffer, content.byteOffset, content.byteLength);
+          else u8 = new Uint8Array(0);
+          const fileName = got.fileName || attMeta.fileName || attMeta.name || ('attachment-' + (idx + 1));
+          const cid = attMeta.pidContentId || attMeta.contentId || '';
+          const mime = attMeta.attachMimeTag || attMeta.mimeType || 'application/octet-stream';
+          const hidden = !!attMeta.attachmentHidden;
+          const inline = hidden || !!cid;
+          attachments.push({
+            filename: fileName,
+            fileName: fileName,
+            mimeType: mime,
+            content: u8.slice(0),
+            contentId: cid ? String(cid).replace(/^<|>$/g, '') : undefined,
+            disposition: inline ? 'inline' : 'attachment',
+          });
+        } catch (err) {
+          console.warn('MSG attachment read failed', idx, err);
+        }
+      });
+
+      const dateRaw = data.clientSubmitTime || data.messageDeliveryTime || data.creationTime || null;
+      return {
+        subject: data.subject || '',
+        from: { name: data.senderName || '', address: data.senderEmail || data.senderSmtpAddress || '' },
+        to,
+        cc,
+        date: dateRaw ? new Date(dateRaw) : null,
+        html,
+        text: data.body || '',
+        attachments,
+      };
     }
 
     function pmFormatEmailAddresses(list) {
@@ -24322,9 +24656,15 @@
     }
 
     async function convertEmailToPdfBytes(file) {
-      const PostalMime = await loadPostalMime();
-      const buf = await file.arrayBuffer();
-      const parsed = await PostalMime.parse(buf, { attachmentEncoding: 'arraybuffer' });
+      const ext = ((file && file.name) || '').split('.').pop().toLowerCase();
+      let parsed;
+      if (ext === 'msg') {
+        parsed = await pmParseMsgToEmailLike(file);
+      } else {
+        const PostalMime = await loadPostalMime();
+        const buf = await file.arrayBuffer();
+        parsed = await PostalMime.parse(buf, { attachmentEncoding: 'arraybuffer' });
+      }
       const letterHtml = pmBuildEmailLetterHtml(parsed || {});
       const emailBytes = await pmRasterHtmlToA4PdfBytes(letterHtml);
 
@@ -24376,7 +24716,7 @@
     // Universally gets PDF bytes from any supported file:
     // PDF - as is (preparePdfBytes asks for a password when the file requires one);
     // Office - via convertOfficeToPdfBytes; image - via convertImageToPdfBytes;
-    // Email (.eml) - via convertEmailToPdfBytes.
+    // Email (.eml / .msg) - via convertEmailToPdfBytes.
     // Returns null if the user cancels the password prompt or the file cannot be read.
     async function fileToPdfBytes(file, showLoad) {
       const ext = (file.name.split('.').pop() || '').toLowerCase();
@@ -25224,12 +25564,13 @@ function isOsFilesDrag(e) {
 function filterSupportedDroppedFiles(fileList) {
   const isSupported = (name) => {
     const ext = ((name || '').split('.').pop() || '').toLowerCase();
-    return ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'eml'].includes(ext) ||
+    return ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'eml', 'msg'].includes(ext) ||
            (typeof isImageExt === 'function' && isImageExt(ext));
   };
   return Array.from(fileList || []).filter(f =>
     f.type === 'application/pdf' ||
     f.type === 'message/rfc822' ||
+    f.type === 'application/vnd.ms-outlook' ||
     (f.type && f.type.startsWith('image/')) ||
     isSupported(f.name));
 }
