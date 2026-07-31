@@ -4149,7 +4149,9 @@
       pointer-events: auto;
       cursor: pointer;
     }
-    /*Mobile: wider pressing area, visual indicator the same*/
+    /*Mobile: wider pressing area, visual indicator the same.
+      --insert-ind-touch-hit-x shrinks when more than 2 pages fit across
+      (set from JS); floor is the blue indicator width.*/
     @media (pointer: coarse) {
       #insertIndicator.insert-clickable::before {
         content: '';
@@ -4158,7 +4160,7 @@
         bottom: 0;
         left: 50%;
         transform: translateX(-50%);
-        width: 52px;
+        width: var(--insert-ind-touch-hit-x, 52px);
       }
       /*One column (strong zoom): horizontal indicator - click zone above/below*/
       #insertIndicator.insert-ind-vertical.insert-clickable::before {
@@ -4167,7 +4169,7 @@
         bottom: auto;
         left: 0;
         width: auto;
-        height: 52px;
+        height: var(--insert-ind-touch-hit-y, 52px);
         transform: translateY(-50%);
       }
     }
@@ -6935,8 +6937,11 @@
     const INSERT_IND_WIDTH = 8 * 2 / 3;              //indicator thickness −1/3
     const INSERT_IND_VERT_FRAC = 1 - 2 * 0.05 / 3;   //vert. indent to square −2/3 (was 0.9)
     const INSERT_IND_EDGE = PAGE_GAP_MAX / 2;          //indentation of the indicator from the edge in the absence of a neighbor
+    // Mobile tap pad for the blue insert indicator (reference = 2 pages across).
+    // With 3+ pages across, hit shrinks toward INSERT_IND_WIDTH (see getInsertTouchHitX).
     const INSERT_IND_TOUCH_HIT_X = 28;
     const INSERT_IND_TOUCH_HIT_Y = 14;
+    const INSERT_IND_TOUCH_HIT_CSS = 52; // ::before total size at the 2-column reference
     // While dragging near the workspace bottom, the pointer often sits in empty
     // padding / auto-scroll zone just below the last row — 12px is too tight.
     const DRAG_INSERT_HIT_SLOP = 56;
@@ -10667,6 +10672,48 @@
       return 0;
     }
 
+    /** Pages that currently fit across the preview width (mobile insert hit scaling). */
+    function mobilePreviewColsForInsertHit() {
+      try {
+        const avail = getScrollAvailWidth();
+        if (avail > 0 && typeof currentScale === 'number') {
+          const math = mobileColsThatFit(currentScale, avail);
+          if (math > 0) return math;
+        }
+      } catch (_) {}
+      const dom = measureMobileDomCols();
+      return dom > 0 ? dom : 1;
+    }
+
+    /**
+     * Mobile horizontal tap pad into each page edge for the blue insert indicator.
+     * Full size at ≤2 columns; shrinks as 2/cols for 3+; never below indicator width.
+     */
+    function getInsertTouchHitX() {
+      if (!isTouchDevice) return 0;
+      const cols = mobilePreviewColsForInsertHit();
+      if (cols <= 2) return INSERT_IND_TOUCH_HIT_X;
+      return Math.max(INSERT_IND_WIDTH, INSERT_IND_TOUCH_HIT_X * (2 / cols));
+    }
+
+    /** Total CSS ::before hit size (px) for the insert indicator on touch. */
+    function getInsertTouchHitCssSize(axis) {
+      if (!isTouchDevice) return 0;
+      // One-column (vertical bar→horizontal hit): keep the comfortable full pad.
+      if (axis === 'y') return INSERT_IND_TOUCH_HIT_CSS;
+      const cols = mobilePreviewColsForInsertHit();
+      if (cols <= 2) return INSERT_IND_TOUCH_HIT_CSS;
+      return Math.max(INSERT_IND_WIDTH, INSERT_IND_TOUCH_HIT_CSS * (2 / cols));
+    }
+
+    function syncInsertTouchHitCss() {
+      if (!isTouchDevice) return;
+      const w = getInsertTouchHitCssSize('x');
+      const h = getInsertTouchHitCssSize('y');
+      document.documentElement.style.setProperty('--insert-ind-touch-hit-x', w + 'px');
+      document.documentElement.style.setProperty('--insert-ind-touch-hit-y', h + 'px');
+    }
+
     //After pinch: only when the column count CHANGED during the gesture,
     //settle to the exact fill-width scale for the new column count — so the
     //squares maximally occupy the working area width. If the column count
@@ -10822,6 +10869,7 @@
       const previewInset = computePreviewInset(scaleFactor, currentScale) + 'px';
       pagesContainer.style.setProperty('--preview-inset', previewInset);
       document.documentElement.style.setProperty('--insert-ind-width', INSERT_IND_WIDTH + 'px');
+      if (typeof syncInsertTouchHitCss === 'function') syncInsertTouchHitCss();
 
       const gap = pageGapForScale(currentScale);
       pagesContainer.style.setProperty('--page-gap', gap + 'px');
@@ -18243,12 +18291,20 @@
       if (ind.style.display === 'none') return false;
       const r = ind.getBoundingClientRect();
       if (r.width <= 0 || r.height <= 0) return false;
-      // Match the mobile ::before hit pad (52px) and a small desktop pad.
+      // Match the mobile ::before hit pad (--insert-ind-touch-hit-*) and a small desktop pad.
       const vertical = ind.classList.contains('insert-ind-vertical');
       let padX = 4, padY = 4;
       if (typeof isTouchDevice !== 'undefined' && isTouchDevice) {
-        if (vertical) { padX = 4; padY = 26; }
-        else { padX = 26; padY = 4; }
+        if (typeof syncInsertTouchHitCss === 'function') syncInsertTouchHitCss();
+        if (vertical) {
+          padX = 4;
+          padY = (typeof getInsertTouchHitCssSize === 'function'
+            ? getInsertTouchHitCssSize('y') : INSERT_IND_TOUCH_HIT_CSS) / 2;
+        } else {
+          padX = (typeof getInsertTouchHitCssSize === 'function'
+            ? getInsertTouchHitCssSize('x') : INSERT_IND_TOUCH_HIT_CSS) / 2;
+          padY = 4;
+        }
       }
       return clientX >= r.left - padX && clientX <= r.right + padX &&
              clientY >= r.top - padY && clientY <= r.bottom + padY;
@@ -18536,7 +18592,9 @@
       const pages = getVisiblePages();
       if (!pages.length) return null;
 
-      const hitX = isTouchDevice ? INSERT_IND_TOUCH_HIT_X : 0;
+      const hitX = isTouchDevice
+        ? (typeof getInsertTouchHitX === 'function' ? getInsertTouchHitX() : INSERT_IND_TOUCH_HIT_X)
+        : 0;
       const hitY = isTouchDevice ? INSERT_IND_TOUCH_HIT_Y : 0;
       const vertical = useVerticalInsertIndicator();
 
@@ -18567,6 +18625,8 @@
         return null;
       }
 
+      // Horizontal gaps: hitX shrinks when 3+ pages fit across (mobile).
+      if (isTouchDevice && typeof syncInsertTouchHitCss === 'function') syncInsertTouchHitCss();
       for (const page of pages) {
         const r = page.getBoundingClientRect();
         if (clientY < r.top - hitY || clientY > r.bottom + hitY) continue;
