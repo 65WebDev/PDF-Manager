@@ -30798,14 +30798,25 @@ function editSelectedPage() {
       case 'rot-right':
       case 'rot-left': {
         const degrees = action === 'rot-right' ? 90 : -90;
-        const targets = ctxMenuTargetPages();
+        // Must NOT call ctxMenuTargetPages() here: hideMenu() above already
+        // reset ctxPageIdx to null, so it would always fall back to the
+        // live selection - rotating a non-selected page reached via RMB
+        // would then wrongly rotate the whole current selection instead.
+        // Recompute the same targeting logic from the values captured
+        // BEFORE hideMenu() ran.
+        const selectedNd = selSnapshot.selected.filter(i => !markedForDeletion.has(i));
+        const targets = (anchorIdx != null && selectedNd.includes(anchorIdx))
+          ? selectedNd
+          : (anchorIdx != null && !markedForDeletion.has(anchorIdx))
+            ? [anchorIdx]
+            : selectedNd;
         if (!targets.length) break;
         // Rotating the page(s) already in the selection can just use the
         // normal selected-pages path. Rotating a page reached via RMB that
         // ISN'T part of the current selection must rotate only that page,
         // without pulling it into (and so replacing) the real selection.
-        const matchesSelection = targets.length === selSnapshot.selected.length &&
-          targets.every(i => selSnapshot.selected.includes(i));
+        const matchesSelection = targets.length === selectedNd.length &&
+          targets.every(i => selectedNd.includes(i));
         if (matchesSelection) {
           rotateSelected(degrees);
         } else {
