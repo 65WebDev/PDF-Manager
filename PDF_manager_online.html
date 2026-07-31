@@ -22818,11 +22818,30 @@
     const PX_TO_PT = 72 / 96;          // CSS pixels (96 dpi) → PDF points
 
     // Waits for all images inside the node to load (for html2canvas).
-    function waitForImagesIn(root) {
-      const imgs = Array.from(root.querySelectorAll('img'));
-      return Promise.all(imgs.map(img => (img.complete && img.naturalWidth)
-        ? Promise.resolve()
-        : new Promise(res => { img.onload = img.onerror = () => res(); })));
+    // Already-complete images (including broken ones with naturalWidth=0) must
+    // resolve immediately — otherwise onload/onerror never fire again and import hangs.
+    function waitForImagesIn(root, timeoutMs) {
+      const limit = typeof timeoutMs === 'number' ? timeoutMs : 6000;
+      const imgs = Array.from((root && root.querySelectorAll) ? root.querySelectorAll('img') : []);
+      if (!imgs.length) return Promise.resolve();
+      return Promise.all(imgs.map((img) => {
+        if (!img || img.complete) return Promise.resolve();
+        return new Promise((res) => {
+          let done = false;
+          const finish = () => {
+            if (done) return;
+            done = true;
+            try {
+              img.removeEventListener('load', finish);
+              img.removeEventListener('error', finish);
+            } catch (_) {}
+            res();
+          };
+          img.addEventListener('load', finish);
+          img.addEventListener('error', finish);
+          setTimeout(finish, limit);
+        });
+      }));
     }
 
     // Replacing Word fonts (Aptos, Calibri...) with the closest system fonts for Windows.
@@ -23770,7 +23789,9 @@
       let i = 0;
       let htmlrtf = false;
       const n = rtf.length;
-      while (i < n) {
+      let steps = 0;
+      const stepMax = Math.max(10000, n * 4);
+      while (i < n && steps++ < stepMax) {
         if (rtf.startsWith('{\\*\\htmltag', i)) {
           let j = i + '{\\*\\htmltag'.length;
           while (j < n && /\d/.test(rtf[j])) j++;
@@ -23790,7 +23811,7 @@
             k++;
           }
           html += decodeFrag(rtf.slice(j, k));
-          i = k + 1;
+          i = Math.max(i + 1, k + 1);
           continue;
         }
         if (rtf.startsWith('\\htmlrtf0', i)) { htmlrtf = false; i += 9; continue; }
@@ -23807,6 +23828,7 @@
             }
             k++;
           }
+          if (k <= i) { i++; continue; }
           const inner = rtf.slice(i + 1, k);
           // Always skip font/color tables (their text must not leak into HTML).
           if (/^\\fonttbl/i.test(inner) || /^\\colortbl/i.test(inner) ||
@@ -24347,9 +24369,16 @@
     function pmEmailExpandBlocks(blocks, maxH) {
       const out = [];
       const queue = (blocks || []).slice();
-      while (queue.length) {
+      const seen = typeof WeakSet !== 'undefined' ? new WeakSet() : null;
+      let guard = 0;
+      const guardMax = Math.max(800, queue.length * 40 + 100);
+      while (queue.length && guard++ < guardMax) {
         const b = queue.shift();
         if (!b || pmEmailBlockIsEmpty(b)) continue;
+        if (seen) {
+          if (seen.has(b)) { out.push(b); continue; }
+          seen.add(b);
+        }
         const h = pmEmailMeasureH(b);
         if (h <= maxH) {
           out.push(b);
@@ -24363,6 +24392,11 @@
         } else {
           for (let i = parts.length - 1; i >= 0; i--) queue.unshift(parts[i]);
         }
+      }
+      // Any leftovers after guard — keep as-is rather than hang.
+      while (queue.length) {
+        const b = queue.shift();
+        if (b && !pmEmailBlockIsEmpty(b)) out.push(b);
       }
       return out.filter((el) => !pmEmailBlockIsEmpty(el));
     }
@@ -24378,8 +24412,8 @@
     }
 
     /**
-     * Rasterize an oversized leaf that cannot be DOM-split: paint at full height,
-     * then cut into full A4 portrait JPEG pages (no content loss, no landscape stub).
+     * Rasterize an oversized leaf that cannot be DOM-split: capture A4 viewports
+     * one page at a time (never one giant canvas — that hung on large marketing mails).
      */
     async function pmEmailSliceElementToPdf(newPdf, el, styleHtml, opts, extra) {
       const A4W = opts.A4W;
@@ -24391,9 +24425,12 @@
       const host = opts.host;
       const headHtml = (extra && extra.headHtml) || '';
 
-      const wrap = document.createElement('div');
-      wrap.style.cssText = 'width:' + A4W + 'px;padding:' + PAD_Y + 'px ' + PAD_X +
-        'px;box-sizing:border-box;background:#fff;';
+      const stage = document.createElement('div');
+      stage.className = 'pm-eml-page';
+      stage.style.cssText = 'width:' + A4W + 'px;height:' + A4H + 'px;overflow:hidden;background:#fff;position:relative;';
+      const mover = document.createElement('div');
+      mover.style.cssText = 'width:' + A4W + 'px;padding:' + PAD_Y + 'px ' + PAD_X +
+        'px;box-sizing:border-box;background:#fff;will-change:transform;';
       const inner = document.createElement('div');
       inner.className = 'pm-eml-letter';
       if (styleHtml) inner.innerHTML = styleHtml;
@@ -24406,49 +24443,42 @@
       bodyWrap.className = 'pm-eml-body';
       bodyWrap.appendChild(el);
       inner.appendChild(bodyWrap);
-      wrap.appendChild(inner);
-      host.appendChild(wrap);
+      mover.appendChild(inner);
+      stage.appendChild(mover);
+      host.appendChild(stage);
       try {
-        await waitForImagesIn(wrap);
+        await waitForImagesIn(stage, 5000);
         await new Promise((r) => setTimeout(r, 20));
-        const fullH = Math.max(A4H, Math.ceil(wrap.scrollHeight || wrap.offsetHeight || A4H));
+        const totalH = Math.max(A4H, Math.ceil(mover.scrollHeight || mover.offsetHeight || A4H));
         const scale = OFFICE_RENDER_SCALE;
-        const canvas = await html2canvas(wrap, {
-          scale,
-          useCORS: true,
-          backgroundColor: '#ffffff',
-          width: A4W,
-          height: fullH,
-          windowWidth: A4W,
-          windowHeight: fullH,
-          logging: false,
-          letterRendering: true,
-        });
-        const slicePx = Math.round(A4H * scale);
         let y = 0;
-        while (y < canvas.height) {
-          const h = Math.min(slicePx, canvas.height - y);
-          // Paint slice onto a full-A4 white canvas so short tails stay portrait.
-          let bytes;
-          if (h === slicePx) {
-            bytes = canvasRegionToJpegBytes(canvas, 0, y, canvas.width, h);
-          } else {
-            const pageCanvas = document.createElement('canvas');
-            pageCanvas.width = canvas.width;
-            pageCanvas.height = slicePx;
-            const ctx = pageCanvas.getContext('2d');
-            ctx.fillStyle = '#ffffff';
-            ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
-            ctx.drawImage(canvas, 0, y, canvas.width, h, 0, 0, canvas.width, h);
-            bytes = canvasRegionToJpegBytes(pageCanvas, 0, 0, pageCanvas.width, pageCanvas.height);
-          }
+        let pageGuard = 0;
+        const pageGuardMax = Math.max(30, Math.ceil(totalH / A4H) + 5);
+        while (y < totalH && pageGuard++ < pageGuardMax) {
+          mover.style.transform = 'translateY(' + (-y) + 'px)';
+          // Yield so the loading spinner can paint and the UI stays responsive.
+          await new Promise((r) => setTimeout(r, 0));
+          const canvas = await html2canvas(stage, {
+            scale,
+            useCORS: true,
+            allowTaint: true,
+            backgroundColor: '#ffffff',
+            width: A4W,
+            height: A4H,
+            windowWidth: A4W,
+            windowHeight: A4H,
+            imageTimeout: 4000,
+            logging: false,
+            letterRendering: true,
+          });
+          const bytes = canvasRegionToJpegBytes(canvas, 0, 0, canvas.width, canvas.height);
           const jpg = await newPdf.embedJpg(bytes);
           const pg = newPdf.addPage([pageWpt, pageHpt]);
           pg.drawImage(jpg, { x: 0, y: 0, width: pageWpt, height: pageHpt });
-          y += h;
+          y += A4H;
         }
       } finally {
-        if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+        if (stage.parentNode) stage.parentNode.removeChild(stage);
       }
     }
 
