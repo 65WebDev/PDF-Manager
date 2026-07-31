@@ -11041,6 +11041,12 @@
       const gap = pageGapForScale(currentScale);
       pagesContainer.style.setProperty('--page-gap', gap + 'px');
 
+      // Every scale tick (slider drag, pinch, ...) resizes the page cards
+      // immediately; keep any built text layers (and an active selection)
+      // visually glued to the new size in the same tick instead of letting
+      // them lag until the debounced rebuild lands.
+      if (typeof syncPreviewTextLayersLiveScale === 'function') syncPreviewTextLayersLiveScale();
+
       if (pinchActive) {
         return;
       }
@@ -16931,6 +16937,53 @@
       };
     }
 
+    /**
+     * Scale changes (dragging the zoom slider, pinch, etc.) resize the page
+     * cards' CSS immediately, but the pdf.js text layer built into each one
+     * keeps its last-built pixel size/position until the debounced
+     * buildPageTextLayer rebuild catches up (it needs a fresh pdf.js
+     * viewport, not just a resize). Left alone, that gap makes an active
+     * selection - and the invisible layer it lives in - visibly drift out
+     * of sync with the page while the scale keeps changing, snapping back
+     * only once the rebuild lands. Mirrors peSyncTextLayerLiveZoom's fix for
+     * the same issue in the page editor: stretch each existing layer with a
+     * CSS transform to the CURRENT card size every tick, so it (and the
+     * custom selection highlight painted from its live geometry) visually
+     * tracks the page in real time; the eventual rebuild then swaps in the
+     * real glyph layout without any visible jump.
+     */
+    function syncPreviewTextLayersLiveScale() {
+      if (typeof isZoomTextSelect !== 'function' || !isZoomTextSelect()) return;
+      const layers = pagesContainer.querySelectorAll('.page .page-text-layer');
+      if (!layers.length) return;
+      let touchedSelection = false;
+      layers.forEach(layer => {
+        const builtW = parseFloat(layer.dataset.builtW);
+        const builtH = parseFloat(layer.dataset.builtH);
+        if (!(builtW > 0) || !(builtH > 0)) return;
+        const wrapper = layer.parentElement;
+        const img = wrapper ? wrapper.querySelector('img') : null;
+        if (!img || !img.naturalWidth || !img.naturalHeight) return;
+        const trueAspectRatio = parseFloat(layer.dataset.trueAspectRatio) || 0;
+        const metrics = getPageImgDisplayMetrics(img, wrapper, trueAspectRatio);
+        if (!metrics || !metrics.width || !metrics.height) return;
+        layer.style.left = metrics.left + 'px';
+        layer.style.top = metrics.top + 'px';
+        const sx = metrics.width / builtW;
+        const sy = metrics.height / builtH;
+        if (Math.abs(sx - 1) < 0.002 && Math.abs(sy - 1) < 0.002) {
+          if (layer.style.transform) layer.style.transform = '';
+        } else {
+          layer.style.transformOrigin = '0 0';
+          layer.style.transform = 'scale(' + sx + ', ' + sy + ')';
+          touchedSelection = true;
+        }
+      });
+      if (touchedSelection && typeof scheduleTextLayerHighlightRender === 'function') {
+        scheduleTextLayerHighlightRender();
+      }
+    }
+
     const PAGE_TEXT_LAYER_KEY = 'pdfjs-tl2';
 
     // ── Selection "gap guard" ─────────────────────────────────────────────
@@ -17068,7 +17121,8 @@
     // the hit-area padding-bottom), which shoved underlines/strikeouts
     // well below the ink. Top stays the measured glyph top so we track
     // the same alignment as the blue selection highlight.
-    function textLayerSelectionRectsIn(inner, range) {
+    function textLayerSelectionRectsIn(inner, range, liveScaleY) {
+      const scaleY = (liveScaleY > 0) ? liveScaleY : 1;
       const rects = [];
       const walker = document.createTreeWalker(inner, NodeFilter.SHOW_TEXT, {
         acceptNode(node) {
@@ -17113,7 +17167,15 @@
               if (sr && sr.height > 0) top = sr.top;
             }
           } catch (_) {}
-          const h = (fs > 0) ? fs : Math.min(r.height, Math.max(4, r.height * 0.75));
+          // fs (inline style or computed) and the r.height fallback are both
+          // the glyph's UNTRANSFORMED CSS size - r.top above already reads
+          // through any live transform on an ancestor (e.g. syncPreview-
+          // TextLayersLiveScale/peSyncTextLayerLiveZoom scaling the whole
+          // layer while a rebuild is pending), but a height derived from a
+          // static CSS value has to be scaled by the same factor explicitly
+          // or the selection highlight's bottom edge drifts from the glyph
+          // by an amount that grows with how far the live scale is from 1.
+          const h = ((fs > 0) ? fs : Math.min(r.height, Math.max(4, r.height * 0.75))) * scaleY;
           rects.push({
             left: r.left,
             right: r.right,
@@ -17197,30 +17259,13 @@
         const outer = inner.closest('.page-text-layer');
         if (!outer) return;
         let box = outer.querySelector(':scope > .tl-sel-highlight');
-        let rects = null;
-        if (hasSel) {
-          try {
-            for (let i = 0; i < selection.rangeCount; i++) {
-              const range = selection.getRangeAt(i);
-              if (!range.intersectsNode(inner)) continue;
-              const rs = textLayerSelectionRectsIn(inner, range);
-              rects = rects ? rects.concat(rs) : rs;
-            }
-          } catch (_) {}
-        }
-        if (!rects || !rects.length) {
-          if (box) box.textContent = '';
-          return;
-        }
-        if (!box) {
-          box = document.createElement('div');
-          box.className = 'tl-sel-highlight';
-          outer.appendChild(box);
-        }
-        const or = outer.getBoundingClientRect();
-        // When #peTextLayer is live-scaled (peSyncTextLayerLiveZoom), client
+        // When #peTextLayer/.page-text-layer is live-scaled
+        // (peSyncTextLayerLiveZoom / syncPreviewTextLayersLiveScale), client
         // rects are in screen space but highlight children are laid out in
-        // the layer's unscaled local px — divide by the CSS scale.
+        // the layer's unscaled local px — divide by the CSS scale. Read
+        // this BEFORE gathering rects: textLayerSelectionRectsIn also needs
+        // sy to scale the glyph-height-derived bottom edge it computes from
+        // a static (untransformed) font-size.
         let sx = 1, sy = 1;
         try {
           const tr = window.getComputedStyle(outer).transform;
@@ -17244,6 +17289,27 @@
             }
           }
         } catch (_) {}
+        let rects = null;
+        if (hasSel) {
+          try {
+            for (let i = 0; i < selection.rangeCount; i++) {
+              const range = selection.getRangeAt(i);
+              if (!range.intersectsNode(inner)) continue;
+              const rs = textLayerSelectionRectsIn(inner, range, sy);
+              rects = rects ? rects.concat(rs) : rs;
+            }
+          } catch (_) {}
+        }
+        if (!rects || !rects.length) {
+          if (box) box.textContent = '';
+          return;
+        }
+        if (!box) {
+          box = document.createElement('div');
+          box.className = 'tl-sel-highlight';
+          outer.appendChild(box);
+        }
+        const or = outer.getBoundingClientRect();
         const merged = textLayerMergeSelectionRects(rects);
         const frag = document.createDocumentFragment();
         for (const m of merged) {
@@ -17693,6 +17759,13 @@
       layer.style.top = metrics.top + 'px';
       layer.style.width = metrics.width + 'px';
       layer.style.height = metrics.height + 'px';
+      layer.style.transform = '';
+      // Let syncPreviewTextLayersLiveScale visually track the card's live
+      // CSS size between this build and the next one (e.g. while the scale
+      // slider is being dragged), without needing to know the glyph layout.
+      layer.dataset.builtW = String(metrics.width);
+      layer.dataset.builtH = String(metrics.height);
+      layer.dataset.trueAspectRatio = String(trueAspectRatio);
       layer.innerHTML = '';
 
       try {
