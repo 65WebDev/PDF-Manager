@@ -17554,7 +17554,11 @@
         if (token !== pageTextLayerToken || !isZoomTextSelect()) return;
 
         if (typeof tightenTextLayerLineGaps === 'function') {
-          tightenTextLayerLineGaps(inner);
+          // Touch: bridge line gaps fully (same as page editor). OS selection
+          // handles cannot be corrected as reliably as mouse drags, so dead
+          // inter-line zones cause whole-page jumps / vanished selections.
+          const touchTL = typeof isTouchDevice !== 'undefined' && isTouchDevice;
+          tightenTextLayerLineGaps(inner, touchTL ? Infinity : undefined);
         }
 
         inner.style.transform = 'none';
@@ -17573,7 +17577,8 @@
             requestAnimationFrame(() => {
               if (token !== pageTextLayerToken) return;
               if (!inner.isConnected) return;
-              tightenTextLayerLineGaps(inner);
+              const touchTL = typeof isTouchDevice !== 'undefined' && isTouchDevice;
+              tightenTextLayerLineGaps(inner, touchTL ? Infinity : undefined);
             });
           }
         }
@@ -38248,6 +38253,7 @@ function peSelectionEndpointSuspicious(node) {
   if (el.classList && el.classList.contains('endOfContent')) return true;
   if (el.closest && el.closest('.endOfContent')) return true;
   if (el.id === 'peTextLayer') return true;
+  if (el.classList && el.classList.contains('page-text-layer')) return true;
   if (el.classList && (el.classList.contains('textLayer')
       || el.classList.contains('page-text-layer-inner'))) return true;
   return false;
@@ -38402,6 +38408,293 @@ function peRepairTouchTextSelection() {
     peTextSelRepairing = false;
   }
 }
+
+/** Preview (grid) touch text-selection gap repair — mirrors peRepairTouchTextSelection
+ *  for `.page .page-text-layer` under zoom-text-select. OS handle drags through
+ *  word/line gaps otherwise jump to whole-page or collapse. */
+let previewTextSelRepairing = false;
+let previewTextSelLastGoodSel = null;
+let previewTextSelLastClientX = null;
+let previewTextSelLastClientY = null;
+let previewTextSelPointerDown = false;
+let previewTextSelGuardsBound = false;
+
+function previewTextSelNodeInLayer(node) {
+  if (!node) return false;
+  const el = node.nodeType === 3 ? node.parentElement : node;
+  return !!(el && el.closest && el.closest('#scrollContainer .page .page-text-layer')
+    && !el.closest('#pageEditModal'));
+}
+
+function previewTextLayerFromNode(node) {
+  if (!node) return null;
+  const el = node.nodeType === 3 ? node.parentElement : node;
+  return el && el.closest ? el.closest('#scrollContainer .page .page-text-layer') : null;
+}
+
+function previewTextLayerUnderPoint(clientX, clientY) {
+  const layers = document.querySelectorAll('#scrollContainer .page .page-text-layer');
+  let best = null, bestDist = Infinity;
+  for (let i = 0; i < layers.length; i++) {
+    const layer = layers[i];
+    if (!layer || !layer.isConnected) continue;
+    const r = layer.getBoundingClientRect();
+    if (!(r.width > 0) || !(r.height > 0)) continue;
+    const dx = clientX < r.left ? r.left - clientX : (clientX > r.right ? clientX - r.right : 0);
+    const dy = clientY < r.top ? r.top - clientY : (clientY > r.bottom ? clientY - r.bottom : 0);
+    const d = Math.hypot(dx, dy);
+    if (d < bestDist) { bestDist = d; best = layer; }
+  }
+  return best;
+}
+
+function previewTextLayerEndpointRect(node, offset) {
+  try {
+    const r = document.createRange();
+    r.setStart(node, offset);
+    r.collapse(true);
+    const rect = r.getClientRects()[0];
+    if (rect && (rect.width || rect.height)) return rect;
+  } catch (_) {}
+  const el = node && (node.nodeType === 3 ? node.parentElement : node);
+  return el && el.getBoundingClientRect ? el.getBoundingClientRect() : null;
+}
+
+function previewTextLayerCaretForPoint(clientX, clientY, maxDyPx) {
+  let layer = previewTextLayerUnderPoint(clientX, clientY);
+  if (!layer) {
+    try {
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount) {
+        layer = previewTextLayerFromNode(sel.anchorNode)
+          || previewTextLayerFromNode(sel.focusNode);
+      }
+    } catch (_) {}
+  }
+  const inner = layer && layer.querySelector('.page-text-layer-inner.textLayer');
+  if (!inner) return null;
+  const spans = inner.getElementsByTagName('span');
+  const probe = document.createRange();
+  let above = null, aboveDy = Infinity, aboveDx = Infinity;
+  let below = null, belowDy = Infinity, belowDx = Infinity;
+  for (let i = 0; i < spans.length; i++) {
+    const s = spans[i];
+    if (s.classList && s.classList.contains('endOfContent')) continue;
+    const t = s.firstChild;
+    if (!t || t.nodeType !== 3 || !t.nodeValue) continue;
+    let r;
+    try {
+      probe.selectNodeContents(t);
+      r = probe.getBoundingClientRect();
+    } catch (_) { continue; }
+    if (!r || !(r.width > 0) || !(r.height > 0)) continue;
+    const dx = clientX < r.left ? r.left - clientX : (clientX > r.right ? clientX - r.right : 0);
+    if (r.top <= clientY) {
+      const dy = clientY > r.bottom ? clientY - r.bottom : 0;
+      if (dy < aboveDy - 0.5 || (Math.abs(dy - aboveDy) <= 0.5 && dx < aboveDx)) {
+        aboveDy = dy; aboveDx = dx; above = { span: s, rect: r, text: t };
+      }
+    } else {
+      const dy = r.top - clientY;
+      if (dy < belowDy - 0.5 || (Math.abs(dy - belowDy) <= 0.5 && dx < belowDx)) {
+        belowDy = dy; belowDx = dx; below = { span: s, rect: r, text: t };
+      }
+    }
+  }
+  const best = above || below;
+  const bestDy = above ? aboveDy : belowDy;
+  if (!best) return null;
+  if (bestDy > (maxDyPx == null ? 36 : maxDyPx)) return null;
+  const r = best.rect;
+  const text = best.text;
+  const len = text.nodeValue.length;
+  let offset;
+  if (clientX <= r.left) offset = 0;
+  else if (clientX >= r.right) offset = len;
+  else offset = Math.max(0, Math.min(len, Math.round(len * (clientX - r.left) / Math.max(r.width, 1))));
+  return { node: text, offset, layer };
+}
+
+function repairPreviewTouchTextSelection() {
+  if (previewTextSelRepairing) return;
+  if (typeof isTouchDevice !== 'undefined' && !isTouchDevice) return;
+  if (typeof pinchActive !== 'undefined' && pinchActive) return;
+  if (typeof isZoomTextSelect === 'function' && !isZoomTextSelect()) return;
+  const peModal = document.getElementById('pageEditModal');
+  if (peModal && peModal.classList.contains('visible')) return;
+
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount || sel.isCollapsed) {
+    if (!previewTextSelPointerDown) previewTextSelLastGoodSel = null;
+    return;
+  }
+  const anchorIn = previewTextSelNodeInLayer(sel.anchorNode);
+  const focusIn = previewTextSelNodeInLayer(sel.focusNode);
+  if (!anchorIn && !focusIn) return;
+
+  const anchorBad = !anchorIn || peSelectionEndpointSuspicious(sel.anchorNode);
+  const focusBad = !focusIn || peSelectionEndpointSuspicious(sel.focusNode);
+
+  const ax = previewTextSelLastClientX, ay = previewTextSelLastClientY;
+  // Native selection handles sometimes deliver no touch samples. If the range
+  // jumped to layer-root / endOfContent, restore the last sane selection.
+  if (ax == null || ay == null) {
+    if ((anchorBad || focusBad) && previewTextSelLastGoodSel) {
+      const g = previewTextSelLastGoodSel;
+      const usable = (n) => n && n.isConnected && previewTextSelNodeInLayer(n) &&
+        !peSelectionEndpointSuspicious(n);
+      if (usable(g.anchorNode) && usable(g.focusNode) && typeof sel.setBaseAndExtent === 'function') {
+        previewTextSelRepairing = true;
+        try {
+          sel.setBaseAndExtent(g.anchorNode, g.anchorOffset, g.focusNode, g.focusOffset);
+          if (typeof scheduleTextLayerHighlightRender === 'function') scheduleTextLayerHighlightRender();
+        } catch (_) {
+        } finally {
+          previewTextSelRepairing = false;
+        }
+      }
+    }
+    return;
+  }
+
+  const layer = previewTextLayerFromNode(sel.focusNode)
+    || previewTextLayerFromNode(sel.anchorNode)
+    || previewTextLayerUnderPoint(ax, ay);
+  if (!layer) return;
+  const lr = layer.getBoundingClientRect();
+  const fingerInLayer = lr && lr.width > 0 && lr.height > 0 &&
+    ax >= lr.left - 24 && ax <= lr.right + 24 &&
+    ay >= lr.top - 24 && ay <= lr.bottom + 24;
+
+  const expected = previewTextLayerCaretForPoint(
+    ax, ay, fingerInLayer ? Math.max(lr.height, 400) : 36);
+
+  let jumped = false;
+  if (!anchorBad && !focusBad && previewTextSelPointerDown && fingerInLayer && expected) {
+    try {
+      const er = previewTextLayerEndpointRect(expected.node, expected.offset);
+      const ar = previewTextLayerEndpointRect(sel.anchorNode, sel.anchorOffset);
+      const fr = previewTextLayerEndpointRect(sel.focusNode, sel.focusOffset);
+      if (er) {
+        const ecy = (er.top + er.bottom) / 2;
+        const lh = Math.max(10, er.height || 0, ar ? ar.height : 0, fr ? fr.height : 0);
+        const off = (r) => r ? Math.abs((r.top + r.bottom) / 2 - ecy) : Infinity;
+        jumped = off(ar) > lh * 1.5 && off(fr) > lh * 1.5;
+      }
+    } catch (_) {}
+  }
+  if (!anchorBad && !focusBad && !jumped) {
+    previewTextSelLastGoodSel = {
+      anchorNode: sel.anchorNode, anchorOffset: sel.anchorOffset,
+      focusNode: sel.focusNode, focusOffset: sel.focusOffset
+    };
+    return;
+  }
+
+  const caret = expected;
+  if (!caret) {
+    try {
+      const text = (sel.toString() || '');
+      if (text.length > 80 || jumped) {
+        sel.removeAllRanges();
+        previewTextSelLastGoodSel = null;
+        if (typeof scheduleTextLayerHighlightRender === 'function') scheduleTextLayerHighlightRender();
+      }
+    } catch (_) {}
+    return;
+  }
+
+  let base = null;
+  if (!anchorBad && !jumped) {
+    base = { node: sel.anchorNode, offset: sel.anchorOffset };
+  } else {
+    const g = previewTextSelLastGoodSel;
+    const usable = (n) => n && n.isConnected && previewTextSelNodeInLayer(n) &&
+      !peSelectionEndpointSuspicious(n);
+    if (g && usable(g.anchorNode) && usable(g.focusNode)) {
+      try {
+        const ar = previewTextLayerEndpointRect(g.anchorNode, g.anchorOffset);
+        const fr = previewTextLayerEndpointRect(g.focusNode, g.focusOffset);
+        const da = ar ? Math.abs((ar.top + ar.bottom) / 2 - ay) : -1;
+        const df = fr ? Math.abs((fr.top + fr.bottom) / 2 - ay) : -1;
+        base = da >= df
+          ? { node: g.anchorNode, offset: g.anchorOffset }
+          : { node: g.focusNode, offset: g.focusOffset };
+      } catch (_) {}
+    }
+  }
+
+  previewTextSelRepairing = true;
+  try {
+    if (base && typeof sel.setBaseAndExtent === 'function') {
+      sel.setBaseAndExtent(base.node, base.offset, caret.node, caret.offset);
+      previewTextSelLastGoodSel = {
+        anchorNode: base.node, anchorOffset: base.offset,
+        focusNode: caret.node, focusOffset: caret.offset
+      };
+    } else if (typeof sel.setBaseAndExtent === 'function') {
+      sel.setBaseAndExtent(caret.node, caret.offset, caret.node, caret.offset);
+      previewTextSelLastGoodSel = null;
+    } else {
+      const r = document.createRange();
+      r.setStart(caret.node, caret.offset);
+      r.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(r);
+      previewTextSelLastGoodSel = null;
+    }
+    if (typeof scheduleTextLayerHighlightRender === 'function') scheduleTextLayerHighlightRender();
+  } catch (_) {
+  } finally {
+    previewTextSelRepairing = false;
+  }
+}
+
+function initPreviewTouchTextSelGuards() {
+  if (previewTextSelGuardsBound) return;
+  if (typeof isTouchDevice === 'undefined' || !isTouchDevice) return;
+  previewTextSelGuardsBound = true;
+
+  const onTouchStart = (e) => {
+    if (typeof isZoomTextSelect === 'function' && !isZoomTextSelect()) return;
+    if (!e.touches || !e.touches.length) return;
+    if (e.touches.length >= 2) {
+      previewTextSelPointerDown = false;
+      return;
+    }
+    const t = e.touches[0];
+    previewTextSelPointerDown = true;
+    previewTextSelLastClientX = t.clientX;
+    previewTextSelLastClientY = t.clientY;
+    // Fresh press away from an existing range — forget the previous fixed end.
+    try {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed) previewTextSelLastGoodSel = null;
+    } catch (_) { previewTextSelLastGoodSel = null; }
+  };
+  const onTouchMove = (e) => {
+    if (!e.touches || !e.touches.length) return;
+    if (e.touches.length >= 2) {
+      previewTextSelPointerDown = false;
+      return;
+    }
+    const t = e.touches[0];
+    previewTextSelLastClientX = t.clientX;
+    previewTextSelLastClientY = t.clientY;
+  };
+  const onTouchEnd = () => {
+    previewTextSelPointerDown = false;
+  };
+  document.addEventListener('touchstart', onTouchStart, { capture: true, passive: true });
+  document.addEventListener('touchmove', onTouchMove, { capture: true, passive: true });
+  document.addEventListener('touchend', onTouchEnd, { capture: true, passive: true });
+  document.addEventListener('touchcancel', onTouchEnd, { capture: true, passive: true });
+  document.addEventListener('selectionchange', () => {
+    if (typeof isZoomTextSelect === 'function' && !isZoomTextSelect()) return;
+    if (typeof repairPreviewTouchTextSelection === 'function') repairPreviewTouchTextSelection();
+  });
+}
+try { initPreviewTouchTextSelGuards(); } catch (_) {}
 
 /** After edge auto-scroll, re-extend the selection toward the frozen pointer. */
 function peExtendPageTextSelTowardPoint(clientX, clientY) {
