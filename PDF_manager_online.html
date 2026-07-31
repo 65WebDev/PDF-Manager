@@ -6098,9 +6098,15 @@
     html[data-theme="dark"] .pm-modal-box #cfmNo,
     html[data-theme="dark"] .pm-modal-box #jpegCancel,
     html[data-theme="dark"] .pm-modal-box #pdfPwdCancel,
+    html[data-theme="dark"] .pm-modal-box #encPwdCancel,
     html[data-theme="dark"] .pm-modal-box #cancelBtn {
       background: #333a44 !important; border-color: #4a5058 !important;
     }
+    /* Encrypt-password dialog: hover feedback on both buttons (light + dark). */
+    #encPwdCancel:hover { background: #f0f0f0 !important; }
+    #encPwdOk:hover { background: #2471a3 !important; }
+    html[data-theme="dark"] .pm-modal-box #encPwdCancel:hover { background: #3d4550 !important; }
+    html[data-theme="dark"] .pm-modal-box #encPwdOk:hover { background: #1f618d !important; }
     html[data-theme="dark"] .pm-modal-box input[type="password"],
     html[data-theme="dark"] .pm-modal-box input[type="text"] {
       background: #1c2128 !important; border-color: #4a5058 !important;
@@ -22004,7 +22010,25 @@
     async function encryptPdfBytesWithPassword(bytes, password) {
       const mod = await loadPdfPasswordLib();
       const doc = await mod.PDFDocument.load(bytes.slice());
+      // The security handler revision is picked from the PDF's own header
+      // version (see @cantoo/pdf-lib's PDFSecurity.initialize): a normal
+      // "1.7" document (what pdf-lib writes) selects revision 4, whose
+      // password padding (processPasswordR2R3R4) only accepts PDFDocEncoding
+      // - a Latin-only charset - and throws "Password contains one or more
+      // invalid characters" for a Cyrillic password, which this app's users
+      // overwhelmingly type first. Faking the header as "1.7ext3" selects
+      // revision 6 (AES-256) instead, whose password handling is UTF-8/
+      // SASLprep and accepts any Unicode password; it's also the stronger,
+      // more modern cipher. PDFSecurity reads the header synchronously
+      // inside encrypt() itself, so the header can be restored to a
+      // standard "1.7" right after - the saved file's own header stays
+      // normal for every other PDF reader; only the encryption revision
+      // picked during this call is affected.
+      doc.context.header.major = '1';
+      doc.context.header.minor = '7ext3';
       doc.encrypt({ userPassword: password, ownerPassword: password });
+      doc.context.header.major = '1';
+      doc.context.header.minor = '7';
       const out = await doc.save();
       return out instanceof Uint8Array ? out : new Uint8Array(out);
     }
@@ -22068,7 +22092,8 @@
         };
         box.querySelector('#encPwdOk').onclick = submit;
         box.querySelector('#encPwdCancel').onclick = () => close(null);
-        overlay.addEventListener('click', (e) => { if (e.target === overlay) close(null); });
+        // No click-outside-to-close: this dialog holds a password the user
+        // is mid-typing, and a stray click shouldn't discard it silently.
         const onKey = (e) => {
           if (e.key === 'Escape') { e.preventDefault(); close(null); }
           else if (e.key === 'Enter') { e.preventDefault(); submit(); }
