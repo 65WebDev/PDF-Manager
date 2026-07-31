@@ -6759,7 +6759,7 @@
       <div class="help-row" data-i18n-html="helpDel"><span class="hk">Del</span> — Удалить выбранные страницы</div>
       <div class="help-row" data-i18n-html="helpCtrlC"><span class="hk">Ctrl + C</span> — копировать выделенные страницы</div>
       <div class="help-row" data-i18n-html="helpCtrlX"><span class="hk">Ctrl + X</span> — вырезать выделенные страницы</div>
-      <div class="help-row" data-i18n-html="helpCtrlV"><span class="hk">Ctrl + V</span> — вставить страницы из буфера</div>
+      <div class="help-row" data-i18n-html="helpCtrlV"><span class="hk">Ctrl + V</span> — вставить страницы или изображение из буфера</div>
       <div class="help-row" data-i18n-html="helpShiftSelect">Удерживайте <span class="hk">Shift</span> — выделить диапазон страниц</div>
       <div class="help-row" data-i18n-html="helpCtrlSelect">Удерживайте <span class="hk">Ctrl</span> — выделить отдельные страницы</div>
       <hr>
@@ -7085,7 +7085,7 @@
         helpDel: '<span class="hk">Del</span> — Удалить выбранные страницы',
         helpCtrlC: '<span class="hk">Ctrl + C</span> — копировать выделенные страницы',
         helpCtrlX: '<span class="hk">Ctrl + X</span> — вырезать выделенные страницы',
-        helpCtrlV: '<span class="hk">Ctrl + V</span> — вставить страницы из буфера',
+        helpCtrlV: '<span class="hk">Ctrl + V</span> — вставить страницы или изображение из буфера',
         helpShiftSelect: 'Удерживайте <span class="hk">Shift</span> — выделить диапазон страниц',
         helpCtrlSelect: 'Удерживайте <span class="hk">Ctrl</span> — выделить отдельные страницы',
         helpP: '<span class="hk">P</span> — Печать', helpS: '<span class="hk">S</span> — Сохранить документ',
@@ -7331,7 +7331,7 @@
         helpDel: '<span class="hk">Del</span> — delete selected pages',
         helpCtrlC: '<span class="hk">Ctrl + C</span> — copy selected pages',
         helpCtrlX: '<span class="hk">Ctrl + X</span> — cut selected pages',
-        helpCtrlV: '<span class="hk">Ctrl + V</span> — paste pages from clipboard',
+        helpCtrlV: '<span class="hk">Ctrl + V</span> — paste pages or an image from the clipboard',
         helpShiftSelect: 'Hold <span class="hk">Shift</span> — select a range of pages',
         helpCtrlSelect: 'Hold <span class="hk">Ctrl</span> — select individual pages',
         helpP: '<span class="hk">P</span> — print', helpS: '<span class="hk">S</span> — save',
@@ -14224,9 +14224,9 @@
             cutSelectedPagesToClipboard();
             return;
           }
-          if (!e.shiftKey && e.code === 'KeyV' && pmPageClipboard) {
+          if (!e.shiftKey && e.code === 'KeyV') {
             e.preventDefault();
-            pastePagesFromClipboard();
+            void pasteFromClipboardSmart();
             return;
           }
         }
@@ -18681,9 +18681,6 @@
       });
       document.getElementById('insertFromClipboardBtn').addEventListener('click', async (e) => {
         e.stopPropagation();
-        const btn = e.currentTarget;
-        if (btn && btn.disabled) return;
-        if (!(pmPageClipboard && pmPageClipboard.pdfBytes)) return;
         const pos = pendingInsert;
         closeInsertMenu();
         await insertFromClipboard(pos);
@@ -18722,7 +18719,8 @@
       const hostRect = host.getBoundingClientRect();
       const clipBtn = document.getElementById('insertFromClipboardBtn');
       if (clipBtn) {
-        clipBtn.disabled = !(pmPageClipboard && pmPageClipboard.pdfBytes);
+        // Pages buffer and/or OS image clipboard — try on click.
+        clipBtn.disabled = false;
       }
       insertMenuOpen = true;
       insertMenuOpenedAt = Date.now();  // protection against instant closing with the same tap
@@ -18845,26 +18843,66 @@
       }
     }
 
-    // Pastes pages from the clipboard (copied/cut earlier) to the specified position.
+    // Pastes pages from the app page buffer, or an OS clipboard image as a new page.
     async function insertFromClipboard(insert) {
       if (!pdfDoc || !insert) return;
-      if (!pmPageClipboard || !pmPageClipboard.pdfBytes) {
-        alert('Буфер обмена пуст. Сначала скопируйте или вырежьте страницы (Ctrl+C / Ctrl+X).');
+      const insertAt = resolveInsertIndex(insert);
+
+      if (pmPageClipboard && pmPageClipboard.pdfBytes) {
+        const wasCut = pmPageClipboard.mode === 'cut';
+        try {
+          await insertPagesFromPdfBytes(pmPageClipboard.pdfBytes, insertAt);
+          if (wasCut) pmPageClipboard = null;
+        } catch (err) {
+          console.error(err);
+          alert('Ошибка вставки из буфера обмена: ' + (err.message || err));
+        }
         return;
       }
 
-      const insertAt = resolveInsertIndex(insert);
-      const wasCut = pmPageClipboard.mode === 'cut';
-
       try {
-        await insertPagesFromPdfBytes(pmPageClipboard.pdfBytes, insertAt);
-
-        if (wasCut) {
-          pmPageClipboard = null;
+        const ok = await insertClipboardImageAt(insertAt);
+        if (!ok) {
+          alert('Буфер обмена пуст. Скопируйте страницы (Ctrl+C / Ctrl+X) или изображение.');
         }
       } catch (err) {
         console.error(err);
-        alert('Ошибка вставки из буфера обмена: ' + (err.message || err));
+        alert('Ошибка вставки изображения из буфера: ' + (err.message || err));
+      }
+    }
+
+    /** Insert OS clipboard image as a one-page PDF at insertAt. Returns false if none. */
+    async function insertClipboardImageAt(insertAt) {
+      if (!pdfDoc) return false;
+      const clip = await pmReadSystemClipboardImage();
+      if (!clip) return false;
+      const file = pmClipboardImageToFile(clip);
+      if (!file) return false;
+      showLoading(typeof t === 'function' ? t('loadingPages') : 'Вставка изображения...');
+      try {
+        const bytes = await convertImageToPdfBytes(file);
+        const n = await insertPagesFromPdfBytes(bytes, insertAt, { skipLoading: true });
+        return n > 0;
+      } finally {
+        hideLoading();
+      }
+    }
+
+    /** Ctrl+V in preview: app page buffer first, else OS clipboard image as a new page. */
+    async function pasteFromClipboardSmart() {
+      if (!pdfDoc) return;
+      if (pmPageClipboard && pmPageClipboard.pdfBytes) {
+        await pastePagesFromClipboard();
+        return;
+      }
+      let insertAt = getDefaultPasteInsertAt();
+      if (hoverInsert) insertAt = resolveInsertIndex(hoverInsert);
+      else if (pendingInsert) insertAt = resolveInsertIndex(pendingInsert);
+      try {
+        await insertClipboardImageAt(insertAt);
+      } catch (err) {
+        console.error(err);
+        alert('Ошибка вставки изображения из буфера: ' + (err.message || err));
       }
     }
 
@@ -36265,21 +36303,57 @@ function peCloneObjectFromData(data) {
   return peRehydrateImageObject(copy);
 }
 
+/** Read an image from the system clipboard (PNG/JPEG/WebP/…). Null if none/denied. */
+async function pmReadSystemClipboardImage() {
+  if (!navigator.clipboard || !navigator.clipboard.read) return null;
+  try {
+    const items = await navigator.clipboard.read();
+    for (const item of items) {
+      const types = Array.from(item.types || []);
+      const preferred = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+      const mime = preferred.find(t => types.includes(t))
+        || types.find(t => /^image\//i.test(t));
+      if (!mime) continue;
+      const blob = await item.getType(mime);
+      if (blob) return { blob, mime };
+    }
+  } catch (_) { /* permission denied or empty */ }
+  return null;
+}
+
+function pmClipboardImageToFile(clip) {
+  if (!clip || !clip.blob) return null;
+  const mime = clip.mime || clip.blob.type || 'image/png';
+  let ext = 'png';
+  if (/jpeg|jpg/i.test(mime)) ext = 'jpg';
+  else if (/webp/i.test(mime)) ext = 'webp';
+  else if (/gif/i.test(mime)) ext = 'gif';
+  else if (/bmp/i.test(mime)) ext = 'bmp';
+  return new File([clip.blob], 'clipboard.' + ext, { type: mime });
+}
+
+async function pmClipboardImageToDataUrl(clip) {
+  if (!clip || !clip.blob) return null;
+  return await new Promise((resolve, reject) => {
+    const rd = new FileReader();
+    rd.onload = () => resolve(rd.result);
+    rd.onerror = reject;
+    rd.readAsDataURL(clip.blob);
+  });
+}
+
 async function peReadSystemClipboardForPaste() {
+  const img = await pmReadSystemClipboardImage();
+  if (img) {
+    try {
+      const dataUrl = await pmClipboardImageToDataUrl(img);
+      if (dataUrl) return { kind: 'image', dataUrl };
+    } catch (_) {}
+  }
   if (navigator.clipboard && navigator.clipboard.read) {
     try {
       const items = await navigator.clipboard.read();
       for (const item of items) {
-        if (item.types.includes('image/png')) {
-          const blob = await item.getType('image/png');
-          const dataUrl = await new Promise((resolve, reject) => {
-            const rd = new FileReader();
-            rd.onload = () => resolve(rd.result);
-            rd.onerror = reject;
-            rd.readAsDataURL(blob);
-          });
-          return { kind: 'image', dataUrl };
-        }
         if (item.types.includes('text/plain')) {
           const text = (await (await item.getType('text/plain')).text()).trim();
           if (text) return { kind: 'text', text };
@@ -36372,7 +36446,10 @@ async function pePasteAtStage(stageX, stageY) {
       x: targetX, y: targetY, w: wFrac, h: Math.min(hFrac, 0.9), rot: 0
     };
     peState.objects.push(o);
+    // Match peImgInput: land in Object-select so the image can be moved.
+    peState.modeBeforeTool = null;
     peSelect(o);
+    peEnterObjSelectKeepingSelection();
     peCommitEditorHistory();
     return true;
   }
