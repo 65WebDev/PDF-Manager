@@ -3161,8 +3161,9 @@
         left: 0;
         overflow: hidden;
         pointer-events: none;
-        user-select: text;
-        -webkit-user-select: text;
+        user-select: text !important;
+        -webkit-user-select: text !important;
+        -webkit-touch-callout: default !important;
         z-index: 2;
         touch-action: manipulation;
       }
@@ -3176,8 +3177,8 @@
         text-size-adjust: none;
         forced-color-adjust: none;
         transform-origin: 0 0;
-        user-select: text;
-        -webkit-user-select: text;
+        user-select: text !important;
+        -webkit-user-select: text !important;
         pointer-events: none;
       }
       body.zoom-text-select-active:not(.nav-mode-active) .page .textLayer :is(span, br) {
@@ -3188,8 +3189,9 @@
         white-space: pre;
         cursor: text;
         transform-origin: 0% 0%;
-        user-select: text;
-        -webkit-user-select: text;
+        user-select: text !important;
+        -webkit-user-select: text !important;
+        -webkit-touch-callout: default !important;
         pointer-events: auto;
         touch-action: manipulation;
       }
@@ -5289,6 +5291,21 @@
         user-select: none !important;
         -webkit-touch-callout: none !important;
       }
+      /* High-zoom preview text layer must override the lock above — otherwise
+         native long-press selection never starts (page editor is fine because
+         #peTextLayer is not under .page). */
+      body.zoom-text-select-active:not(.nav-mode-active) .page .page-text-layer,
+      body.zoom-text-select-active:not(.nav-mode-active) .page .page-text-layer *:not(.endOfContent) {
+        -webkit-user-select: text !important;
+        user-select: text !important;
+        -webkit-touch-callout: default !important;
+      }
+      body.zoom-text-select-active:not(.nav-mode-active) .page .page-text-layer .endOfContent {
+        -webkit-user-select: none !important;
+        user-select: none !important;
+        -webkit-touch-callout: none !important;
+        pointer-events: none !important;
+      }
       body.page-touch-armed .page.page-press-pending {
         touch-action: none;
       }
@@ -5903,10 +5920,20 @@
       -webkit-user-select: none;
       user-select: none;
     }
+    body.zoom-text-select-active:not(.nav-mode-active) .page .page-text-layer,
+    body.zoom-text-select-active:not(.nav-mode-active) .page .page-text-layer *:not(.endOfContent) {
+      -webkit-touch-callout: default;
+      -webkit-user-select: text;
+      user-select: text;
+    }
     /*Page cards on the touch - disable native browser gestures on them,
        so that long-press confidently triggers drag-and-drop rather than selection/menu.*/
     @media (pointer: coarse) {
       .page { -webkit-touch-callout: none; }
+      body.zoom-text-select-active:not(.nav-mode-active) .page .page-text-layer,
+      body.zoom-text-select-active:not(.nav-mode-active) .page .page-text-layer *:not(.endOfContent) {
+        -webkit-touch-callout: default;
+      }
     }
 
     /*Tooltip on long press (for touch devices)*/
