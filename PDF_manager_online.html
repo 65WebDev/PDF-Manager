@@ -17755,18 +17755,6 @@
         shieldPageTextLayerEvents(layer);
       }
       layer.dataset.layerKey = layerKey;
-      layer.style.left = metrics.left + 'px';
-      layer.style.top = metrics.top + 'px';
-      layer.style.width = metrics.width + 'px';
-      layer.style.height = metrics.height + 'px';
-      layer.style.transform = '';
-      // Let syncPreviewTextLayersLiveScale visually track the card's live
-      // CSS size between this build and the next one (e.g. while the scale
-      // slider is being dragged), without needing to know the glyph layout.
-      layer.dataset.builtW = String(metrics.width);
-      layer.dataset.builtH = String(metrics.height);
-      layer.dataset.trueAspectRatio = String(trueAspectRatio);
-      layer.innerHTML = '';
 
       try {
         // Layer in screen pixels (as object-fit: contain shows the image),
@@ -17812,6 +17800,29 @@
             });
           }
         }
+
+        // Only now swap the new, fully-ready spans in and reset the layer's
+        // own geometry/transform to match - doing this earlier (before the
+        // awaits above) tore out the OLD spans and the selection highlight
+        // painted from them immediately, leaving the highlight visibly
+        // blinked out for the whole async duration above even though the
+        // OLD layout (and any syncPreviewTextLayersLiveScale/
+        // peSyncTextLayerLiveZoom transform tracking it) was still fully
+        // consistent and correct right up until this point.
+        layer.style.left = metrics.left + 'px';
+        layer.style.top = metrics.top + 'px';
+        layer.style.width = metrics.width + 'px';
+        layer.style.height = metrics.height + 'px';
+        layer.style.transform = '';
+        // Let syncPreviewTextLayersLiveScale visually track the card's live
+        // CSS size between this build and the next one (e.g. while the scale
+        // slider is being dragged), without needing to know the glyph layout.
+        layer.dataset.builtW = String(metrics.width);
+        layer.dataset.builtH = String(metrics.height);
+        layer.dataset.trueAspectRatio = String(trueAspectRatio);
+        Array.from(layer.children).forEach(child => {
+          if (child !== inner && child.classList.contains('page-text-layer-inner')) child.remove();
+        });
       } catch (e) {
         console.error('Text layer error for page', idx, e);
         layer.remove();
