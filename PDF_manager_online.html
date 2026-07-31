@@ -3139,7 +3139,8 @@
       color: transparent !important;
       forced-color-adjust: none !important;
     }
-    /*Zoom ≥threshold (mobile): pan as navigation, no interaction with pages*/
+    /*Zoom ≥threshold (mobile): former forced pan lock removed.
+       High-zoom text selection uses zoom-text-select-active (see below).*/
     @media (pointer: coarse) {
       body.zoom-pan-active:not(.nav-mode-active) #scrollContainer { cursor: grab; }
       body.zoom-pan-active:not(.nav-mode-active) .page { pointer-events: none; }
@@ -3149,6 +3150,90 @@
       }
       body.zoom-pan-active:not(.nav-mode-active) .page .quick-actions {
         pointer-events: auto;
+      }
+      /* Preview text selection at high zoom (mirrors page-editor coarse rules). */
+      body.zoom-text-select-active:not(.nav-mode-active) .page .img-wrapper {
+        position: relative;
+      }
+      body.zoom-text-select-active:not(.nav-mode-active) .page .page-text-layer {
+        position: absolute;
+        top: 0;
+        left: 0;
+        overflow: hidden;
+        pointer-events: none;
+        user-select: text;
+        -webkit-user-select: text;
+        z-index: 2;
+        touch-action: manipulation;
+      }
+      body.zoom-text-select-active:not(.nav-mode-active) .page .page-text-layer-inner.textLayer {
+        position: absolute;
+        left: 0;
+        top: 0;
+        text-align: initial;
+        overflow: hidden;
+        line-height: 1;
+        text-size-adjust: none;
+        forced-color-adjust: none;
+        transform-origin: 0 0;
+        user-select: text;
+        -webkit-user-select: text;
+        pointer-events: none;
+      }
+      body.zoom-text-select-active:not(.nav-mode-active) .page .textLayer :is(span, br) {
+        color: rgba(0, 0, 0, 0);
+        -webkit-text-fill-color: transparent;
+        forced-color-adjust: none;
+        position: absolute;
+        white-space: pre;
+        cursor: text;
+        transform-origin: 0% 0%;
+        user-select: text;
+        -webkit-user-select: text;
+        pointer-events: auto;
+        touch-action: manipulation;
+      }
+      body.zoom-text-select-active:not(.nav-mode-active) .page .textLayer span.markedContent {
+        top: 0;
+        height: 0;
+      }
+      body.zoom-text-select-active:not(.nav-mode-active) .page .textLayer span:not(.markedContent) {
+        padding-bottom: 2px;
+        padding-right: 3px;
+      }
+      body.zoom-text-select-active:not(.nav-mode-active) .page .textLayer br::selection {
+        background: transparent;
+      }
+      body.zoom-text-select-active:not(.nav-mode-active) .page .textLayer .endOfContent {
+        display: block;
+        position: absolute;
+        left: 0; right: 0; top: 100%; bottom: 0;
+        z-index: -1;
+        cursor: default;
+        user-select: none;
+        -webkit-user-select: none;
+        pointer-events: none;
+      }
+      body.zoom-text-select-active:not(.nav-mode-active) .page .textLayer .endOfContent.active {
+        top: 100%;
+        pointer-events: none;
+      }
+      body.zoom-text-select-active:not(.nav-mode-active) .page .textLayer ::selection {
+        color: rgba(0, 0, 0, 0);
+        -webkit-text-fill-color: transparent;
+        forced-color-adjust: none;
+        background: transparent;
+      }
+      body.zoom-text-select-active:not(.nav-mode-active) .page .page-text-layer .tl-sel-highlight {
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        overflow: hidden;
+      }
+      body.zoom-text-select-active:not(.nav-mode-active) .page .page-text-layer .tl-sel-highlight > div {
+        position: absolute;
+        background: rgba(0, 120, 215, 0.32);
+        forced-color-adjust: none;
       }
     }
     /*Disable text selection while dragging*/
@@ -6916,11 +7001,17 @@
     function isZoomPanMode() {
       return currentScale >= getZoomPanThreshold();
     }
-    function isDesktopZoomTextSelect() {
-      return !isTouchDevice && isZoomPanMode() && interactionMode === 'select';
+    /** High-zoom text selection in select mode (preview), desktop and mobile. */
+    function isZoomTextSelect() {
+      return isZoomPanMode() && interactionMode === 'select';
     }
+    /** Desktop-only helpers (blank-area pan, RMB image copy, etc.). */
+    function isDesktopZoomTextSelect() {
+      return !isTouchDevice && isZoomTextSelect();
+    }
+    /** Former mobile forced hand/pan lock at high zoom — removed as redundant. */
     function isMobileZoomPan() {
-      return isTouchDevice && isZoomPanMode();
+      return false;
     }
     const HQ_RENDER_SCALE = 2.0;      //high quality render scale
     let hqPdfjsDoc = null;            //pdf.js document cache for single-page rendering
@@ -13134,11 +13225,10 @@
     function updateZoomPanHandBadge() {
       const el = document.getElementById('zoomPanHandBadge');
       if (!el) return;
-      const show = isTouchDevice && pdfDoc && isZoomPanMode() && interactionMode === 'select';
-      if (!show) cancelZoomPanHandBadgePress();
-      el.classList.toggle('visible', show);
-      el.setAttribute('aria-hidden', show ? 'false' : 'true');
-      if (show) positionZoomPanHandBadge();
+      // Mobile high-zoom palm lock removed — never show the badge.
+      cancelZoomPanHandBadgePress();
+      el.classList.remove('visible');
+      el.setAttribute('aria-hidden', 'true');
     }
 
     function onZoomPanHandBadgePointerDown(e) {
@@ -13238,7 +13328,6 @@
     function preventSelectDuringTouch(e) { e.preventDefault(); }
 
     function startPageTouchDrag() {
-      if (isZoomPanMode()) return;
       if (!dragSourceDiv || pagePointerId === null) return;
       dragSourceDiv.classList.remove('page-press-pending');
       pagesContainer.querySelectorAll('.page.page-press-pending').forEach(p => {
@@ -13271,6 +13360,11 @@
       if (isPageSecondaryControlTarget(e.target)) return;
       if (rubberArmed || rubberActive || pinchActive || isDragActive) return;
       if (isPointInMobileQuickActions(e.clientX, e.clientY)) return;
+      // High-zoom text select: let native long-press select glyphs (do not arm page drag).
+      if (typeof isZoomTextSelect === 'function' && isZoomTextSelect() &&
+          e.target.closest && e.target.closest('.page-text-layer span, .page-text-layer br')) {
+        return;
+      }
       if (computeInsertAt(e.clientX, e.clientY)) {
         e.preventDefault();
         e.stopPropagation();
@@ -13292,25 +13386,23 @@
       pageTouchScrollY = scrollContainer.scrollTop;
 
       const pageIdx = parseInt(dragSourceDiv.dataset.index, 10);
-      // On the selected page, we block native Android text selection until drag starts.
-      if (selectedPages.has(pageIdx) && !isZoomPanMode()) {
+      // Block native OS selection on the card chrome / blank raster (avoids
+      // empty caret-width “selections”). Glyph long-press returns earlier.
+      if (selectedPages.has(pageIdx)) {
         e.preventDefault();
       }
 
-      if (!isZoomPanMode()) {
-        dragSourceDiv.classList.add('page-press-pending');
-        clearTimeout(longPressTimer);
-        longPressTimer = setTimeout(() => {
-          longPressTimer = null;
-          if (!dragSourceDiv || pagePointerId === null) return;
-          if (isZoomPanMode()) return;
-          if (rubberArmed || rubberActive || pinchActive) return;
-          const dx = touchLastX - dragStartX;
-          const dy = touchLastY - dragStartY;
-          if (Math.hypot(dx, dy) > LONG_PRESS_MOVE) return;
-          startPageTouchDrag();
-        }, LONG_PRESS_MS);
-      }
+      dragSourceDiv.classList.add('page-press-pending');
+      clearTimeout(longPressTimer);
+      longPressTimer = setTimeout(() => {
+        longPressTimer = null;
+        if (!dragSourceDiv || pagePointerId === null) return;
+        if (rubberArmed || rubberActive || pinchActive) return;
+        const dx = touchLastX - dragStartX;
+        const dy = touchLastY - dragStartY;
+        if (Math.hypot(dx, dy) > LONG_PRESS_MOVE) return;
+        startPageTouchDrag();
+      }, LONG_PRESS_MS);
 
       document.addEventListener('pointermove', onPagePointerMove, pagePointerOpts);
       document.addEventListener('pointerup', onPagePointerUp, pagePointerOpts);
@@ -13380,11 +13472,30 @@
       if (longPressActive) {
         onDragMouseUp({ clientX: e.clientX, clientY: e.clientY });
       } else {
-        if (isTap && !isLoading && interactionMode !== 'nav' &&
+        let textSelBlocksTap = false;
+        if (typeof isZoomTextSelect === 'function' && isZoomTextSelect()) {
+          try {
+            const sel = window.getSelection();
+            if (sel && !sel.isCollapsed && (sel.toString() || '').trim()) {
+              const layer = pageDiv.querySelector('.page-text-layer');
+              if (layer) {
+                const range = sel.getRangeAt(0);
+                if (layer.contains(range.commonAncestorContainer) ||
+                    (range.commonAncestorContainer.nodeType === 3 &&
+                     layer.contains(range.commonAncestorContainer.parentNode))) {
+                  textSelBlocksTap = true;
+                }
+              }
+            }
+          } catch (_) {}
+        }
+        if (isTap && !textSelBlocksTap && !suppressPageClickForTextSelect && !isLoading &&
+            interactionMode !== 'nav' &&
             !isPointInMobileQuickActions(e.clientX, e.clientY) &&
             !computeInsertAt(e.clientX, e.clientY)) {
           handlePageClick(parseInt(pageDiv.dataset.index), pageDiv, e);
         }
+        suppressPageClickForTextSelect = false;
         dragSourceDiv = null;
         isDragActive = false;
       }
@@ -16300,7 +16411,7 @@
           suppressPageClickForTextSelect = false;
           return;
         }
-        if (isDesktopZoomTextSelect()) {
+        if (typeof isZoomTextSelect === 'function' && isZoomTextSelect()) {
           const sel = window.getSelection();
           if (sel && !sel.isCollapsed && sel.toString().trim()) {
             const layer = div.querySelector('.page-text-layer');
@@ -17346,7 +17457,7 @@
     }
 
     async function buildPageTextLayer(pageDiv, pdfjsDoc, token) {
-      if (!isDesktopZoomTextSelect()) return;
+      if (!isZoomTextSelect()) return;
       const idx = parseInt(pageDiv.dataset.index, 10);
       if (Number.isNaN(idx)) return;
       const wrapper = pageDiv.querySelector('.img-wrapper');
@@ -17356,7 +17467,7 @@
       let page, baseVp, effectiveRotation;
       try {
         page = await pdfjsDoc.getPage(idx + 1);
-        if (token !== pageTextLayerToken || !isDesktopZoomTextSelect()) return;
+        if (token !== pageTextLayerToken || !isZoomTextSelect()) return;
         effectiveRotation = typeof page.rotate === 'number' ? page.rotate : 0;
         baseVp = page.getViewport({ scale: 1, rotation: effectiveRotation });
       } catch (e) {
@@ -17407,13 +17518,13 @@
         const viewport = page.getViewport({ scale: displayScale, rotation: effectiveRotation });
         let textContent = await page.getTextContent();
         textContent = peFilterRedactedTextItems(textContent, idx, baseVp);
-        if (token !== pageTextLayerToken || !isDesktopZoomTextSelect()) return;
+        if (token !== pageTextLayerToken || !isZoomTextSelect()) return;
 
         const inner = document.createElement('div');
         layer.appendChild(inner);
 
         await renderPdfjsTextLayer(inner, textContent, viewport);
-        if (token !== pageTextLayerToken || !isDesktopZoomTextSelect()) return;
+        if (token !== pageTextLayerToken || !isZoomTextSelect()) return;
 
         if (typeof tightenTextLayerLineGaps === 'function') {
           tightenTextLayerLineGaps(inner);
@@ -17446,7 +17557,7 @@
     }
 
     function schedulePageTextLayerBuild() {
-      if (!isDesktopZoomTextSelect()) {
+      if (!isZoomTextSelect()) {
         invalidatePageTextLayers();
         return;
       }
@@ -17455,7 +17566,7 @@
     }
 
     async function runPageTextLayerBuild() {
-      if (!isDesktopZoomTextSelect() || !pdfDoc) {
+      if (!isZoomTextSelect() || !pdfDoc) {
         invalidatePageTextLayers();
         return;
       }
@@ -17491,14 +17602,10 @@
 
     function updateZoomPanMode() {
       const on = isZoomPanMode();
-      const textSelect = isDesktopZoomTextSelect();
-      if (isTouchDevice) {
-        document.body.classList.toggle('zoom-pan-active', on);
-        document.body.classList.remove('zoom-text-select-active');
-      } else {
-        document.body.classList.toggle('zoom-text-select-active', textSelect);
-        document.body.classList.remove('zoom-pan-active');
-      }
+      const textSelect = isZoomTextSelect();
+      // Mobile forced hand/pan lock removed; both platforms use text-select at high zoom.
+      document.body.classList.remove('zoom-pan-active');
+      document.body.classList.toggle('zoom-text-select-active', textSelect);
       updateNavModeZoomHint();
       updateZoomPanHandBadge();
       if (textSelect) {
@@ -17506,12 +17613,14 @@
       } else if (typeof invalidatePageTextLayers === 'function') {
         invalidatePageTextLayers();
       }
-      if (on) {
+      if (textSelect) {
         cancelRubberGesture();
-        cancelPageTouchDrag();
-        cancelDesktopPageDrag();
         clearHoverInsert();
         clearInsertIndicators();
+      }
+      // Desktop still blocks page reorder at high zoom; mobile allows blank-area drag.
+      if (on && !isTouchDevice) {
+        cancelDesktopPageDrag();
       }
     }
 
@@ -17519,7 +17628,20 @@
       if (typeof schedulePageTextLayerBuild === 'function') schedulePageTextLayerBuild();
     }, { passive: true });
 
-    if (!isTouchDevice) {
+    if (isTouchDevice) {
+      document.addEventListener('touchend', (e) => {
+        if (!isZoomTextSelect()) return;
+        const t = e.changedTouches && e.changedTouches[0];
+        if (!t) return;
+        const layer = document.elementFromPoint(t.clientX, t.clientY);
+        const inLayer = layer && layer.closest && layer.closest('.page-text-layer');
+        if (!inLayer) return;
+        const sel = window.getSelection();
+        if (sel && !sel.isCollapsed && sel.toString().trim()) {
+          suppressPageClickForTextSelect = true;
+        }
+      }, true);
+    } else {
       document.addEventListener('mouseup', (e) => {
         if (!isDesktopZoomTextSelect()) return;
         const layer = e.target.closest && e.target.closest('.page-text-layer');
@@ -29552,7 +29674,6 @@ function editSelectedPage() {
 
 // ── Page context menu ───────────────────── ─────────────────────
 (function initPageCtxMenu() {
-  if (isTouchDevice) return;
   const menu = document.getElementById('pageCtxMenu');
   const readMenu = document.getElementById('readModeCtxMenu');
   const navMenu = document.getElementById('navModeCtxMenu');
@@ -29944,7 +30065,7 @@ function editSelectedPage() {
   function getActivePageTextSelection() {
     const peTextActive = typeof peState !== 'undefined' && peState && peState.objSelectMode;
     if (!peTextActive &&
-        (typeof isDesktopZoomTextSelect !== 'function' || !isDesktopZoomTextSelect())) return '';
+        (typeof isZoomTextSelect !== 'function' || !isZoomTextSelect())) return '';
     const sel = window.getSelection();
     if (!sel || sel.isCollapsed) return '';
     const text = normalizePageSelectionText(sel.toString());
@@ -30106,7 +30227,77 @@ function editSelectedPage() {
     if (typeof updateFitWidthBtnUI === 'function') updateFitWidthBtnUI();
   }
 
+  // Mobile preview: after a text selection settles, show the format/copy menu
+  // (desktop uses RMB). Hide while the selection is still being adjusted.
+  if (isTouchDevice && textCopyMenu) {
+    let mobilePreviewTextSelTimer = null;
+    let mobilePreviewTextSelSig = '';
+    function mobilePreviewTextSelSignature() {
+      try {
+        const sel = window.getSelection();
+        if (!sel || !sel.rangeCount || sel.isCollapsed) return '';
+        const r = sel.getRangeAt(0);
+        return (sel.toString() || '') + '|' +
+          (r.startContainer && r.startContainer.nodeValue ? r.startOffset : '') + '|' +
+          (r.endContainer && r.endContainer.nodeValue ? r.endOffset : '');
+      } catch (_) { return ''; }
+    }
+    function scheduleMobilePreviewTextSelMenu() {
+      clearTimeout(mobilePreviewTextSelTimer);
+      mobilePreviewTextSelTimer = setTimeout(() => {
+        mobilePreviewTextSelTimer = null;
+        if (typeof isZoomTextSelect !== 'function' || !isZoomTextSelect()) {
+          hideTextCopyMenu();
+          return;
+        }
+        // Page editor has its own menu.
+        const peModal = document.getElementById('pageEditModal');
+        if (peModal && peModal.classList.contains('visible')) return;
+        const sel = window.getSelection();
+        if (!sel || sel.isCollapsed) {
+          hideTextCopyMenu();
+          return;
+        }
+        let range = null;
+        try { range = sel.getRangeAt(0); } catch (_) { return; }
+        const layer = getSelectionPageTextLayer(range);
+        if (!layer || !scrollContainer.contains(layer)) return;
+        const pageDiv = layer.closest('.page');
+        if (!pageDiv) return;
+        const text = getSelectedPageText(pageDiv);
+        if (!text || !text.trim()) {
+          hideTextCopyMenu();
+          return;
+        }
+        const sig = mobilePreviewTextSelSignature();
+        if (sig && sig === mobilePreviewTextSelSig && textCopyMenu.classList.contains('visible')) {
+          return;
+        }
+        mobilePreviewTextSelSig = sig;
+        let x = 40, y = 40;
+        try {
+          const rects = range.getClientRects();
+          const r = (rects && rects.length) ? rects[rects.length - 1] : range.getBoundingClientRect();
+          x = Math.min(Math.max(6, r.left + r.width / 2), window.innerWidth - 6);
+          y = Math.min(Math.max(6, r.bottom + 10), window.innerHeight - 6);
+        } catch (_) {}
+        let captured = null;
+        try { captured = range.cloneRange(); } catch (_) {}
+        showTextCopyMenu({ clientX: x, clientY: y }, text, captured, parseInt(pageDiv.dataset.index, 10));
+      }, 420);
+    }
+    document.addEventListener('selectionchange', () => {
+      if (typeof isZoomTextSelect !== 'function' || !isZoomTextSelect()) return;
+      const peModal = document.getElementById('pageEditModal');
+      if (peModal && peModal.classList.contains('visible')) return;
+      if (textCopyMenu.classList.contains('visible')) hideTextCopyMenu();
+      scheduleMobilePreviewTextSelMenu();
+    });
+  }
+
   document.addEventListener('contextmenu', async (e) => {
+    // Mobile: format menu is shown from selection settle (below), not RMB.
+    if (isTouchDevice) return;
     if (!pdfDoc || isLoading) { hideMenu(); hideTextCopyMenu(); return; }
     if (typeof isDragActive !== 'undefined' && isDragActive) { hideMenu(); hideTextCopyMenu(); return; }
     if (typeof loupeState !== 'undefined' && loupeState) { hideMenu(); hideTextCopyMenu(); return; }
@@ -30197,7 +30388,7 @@ function editSelectedPage() {
     const idx = parseInt(pageDiv.dataset.index, 10);
     if (Number.isNaN(idx)) { hideMenu(); hideTextCopyMenu(); return; }
 
-    if (typeof isDesktopZoomTextSelect === 'function' && isDesktopZoomTextSelect()) {
+    if (typeof isZoomTextSelect === 'function' && isZoomTextSelect()) {
       const selectedText = getSelectedPageText(pageDiv);
       if (selectedText) {
         e.preventDefault();
