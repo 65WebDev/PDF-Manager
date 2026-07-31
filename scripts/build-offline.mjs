@@ -20,6 +20,10 @@ const HEAD_SCRIPTS = [
     url: 'https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js',
   },
   {
+    comment: '@pdf-lib/fontkit: custom Unicode fonts for selectable email text layers',
+    url: 'https://unpkg.com/@pdf-lib/fontkit@1.1.1/dist/fontkit.umd.min.js',
+  },
+  {
     comment: 'pdf.js: render PDF pages to canvas (thumbnails, preview)',
     url: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
   },
@@ -84,6 +88,47 @@ function wrapInlineScript(code, comment) {
 
 function toBase64(text) {
   return Buffer.from(text, 'utf8').toString('base64');
+}
+
+function toBase64Bytes(u8) {
+  return Buffer.from(u8).toString('base64');
+}
+
+/**
+ * Replace the online font fetch with an inlined base64 Noto Sans payload so
+ * offline email imports still get a selectable Cyrillic/Latin text layer.
+ */
+function replaceUnicodeFontLoad(html, fontBytes) {
+  const marker = '// PM_UNICODE_FONT_LOAD';
+  if (!html.includes(marker)) {
+    throw new Error('Could not find PM_UNICODE_FONT_LOAD marker');
+  }
+  const b64 = toBase64Bytes(fontBytes);
+  const replacement = [
+    marker,
+    '(function () {',
+    `  var fontB64 = '${b64}';`,
+    '  var binary = atob(fontB64);',
+    '  var bytes = new Uint8Array(binary.length);',
+    '  for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);',
+    '  window.__pmUnicodeFontBytes = bytes;',
+    '  return Promise.resolve(bytes);',
+    '})();',
+  ].join('\n      ');
+  // Replace the whole pmUnicodeFontLoad function body start through its closing
+  // by swapping the fetch implementation that follows the marker.
+  const start = html.indexOf(marker);
+  const fnStart = html.lastIndexOf('function pmUnicodeFontLoad()', start);
+  const fnEnd = html.indexOf('\n    async function pmEmailEmbedUnicodeFont', start);
+  if (fnStart < 0 || fnEnd < 0) {
+    throw new Error('Could not locate pmUnicodeFontLoad function bounds');
+  }
+  const newFn = [
+    'function pmUnicodeFontLoad() {',
+    '      ' + replacement,
+    '    }',
+  ].join('\n    ');
+  return html.slice(0, fnStart) + newFn + html.slice(fnEnd);
 }
 
 async function bundleCantooPdfLib() {
@@ -298,6 +343,18 @@ async function main() {
   html = replaceCantooImport(html, cantooBundle);
   html = replacePostalMimeImport(html, postalMimeBundle);
   html = replaceMsgLibsImports(html, msgLibsBundle);
+
+  const fontPath = join(root, 'assets', 'NotoSans-Regular.ttf');
+  try {
+    const fontBytes = readFileSync(fontPath);
+    html = replaceUnicodeFontLoad(html, fontBytes);
+    console.log(`Inlined Unicode font (${fontBytes.length} bytes)`);
+  } catch (err) {
+    console.warn(
+      'Unicode font missing; online fetch path kept:',
+      err && err.message ? err.message : err,
+    );
+  }
 
   writeFileSync(outputPath, html, 'utf8');
   const sizeMb = (Buffer.byteLength(html, 'utf8') / (1024 * 1024)).toFixed(2);
