@@ -17745,14 +17745,16 @@
       // to, collapsing it instantly - so any page still holding part of a
       // live (non-collapsed) selection is kept regardless of visibility.
       const keep = new Set(visible);
+      const selPages = new Set();
       const liveSel = window.getSelection();
       if (liveSel && liveSel.rangeCount && !liveSel.isCollapsed) {
         try {
           for (let i = 0; i < liveSel.rangeCount; i++) {
             const r = liveSel.getRangeAt(i);
             pagesContainer.querySelectorAll('.page').forEach(p => {
-              if (!keep.has(p) && p.querySelector('.page-text-layer') && r.intersectsNode(p)) {
+              if (p.querySelector('.page-text-layer') && r.intersectsNode(p)) {
                 keep.add(p);
+                selPages.add(p);
               }
             });
           }
@@ -17761,6 +17763,16 @@
 
       for (const div of visible) {
         if (token !== pageTextLayerToken) return;
+        // Still mid-drag: a scroll can also trigger an unrelated rebuild of
+        // an already-visible page (e.g. its raster image just finished its
+        // HQ upgrade). buildPageTextLayer would tear down and replace that
+        // page's glyph spans - if this page is part of the CURRENT
+        // selection, that destroys the Range's anchor/focus nodes out from
+        // under the drag, and a multi-page selection can't be recovered by
+        // the capture/restore below (capturePreviewPageTextSelAnchor only
+        // handles a selection confined to one page). Defer the rebuild
+        // until the drag ends instead.
+        if (textLayerDrag && selPages.has(div)) continue;
         await buildPageTextLayer(div, doc, token);
       }
 
