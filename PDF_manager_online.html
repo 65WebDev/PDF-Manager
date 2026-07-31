@@ -23797,7 +23797,9 @@
     function pmEmailIsAtomicBlock(el) {
       if (!el || el.nodeType !== 1) return false;
       const tag = el.tagName;
-      return /^(TABLE|P|PRE|UL|OL|H[1-6]|HR|IMG|BLOCKQUOTE|ADDRESS)$/i.test(tag);
+      // BLOCKQUOTE intentionally excluded: long reply chains are nested quotes and
+      // must be splittable across pages (otherwise only the first screen is kept).
+      return /^(TABLE|P|PRE|UL|OL|H[1-6]|HR|IMG|ADDRESS)$/i.test(tag);
     }
 
     function pmEmailBlockIsEmpty(el) {
@@ -23805,6 +23807,11 @@
       if (/^(IMG|HR|TABLE)$/i.test(el.tagName)) return false;
       if (el.querySelector('img, table, svg, video, canvas')) return false;
       return !(el.textContent || '').replace(/\u00A0/g, ' ').trim();
+    }
+
+    function pmEmailMeasureH(el) {
+      if (!el) return 0;
+      return Math.ceil(el.getBoundingClientRect().height || el.offsetHeight || 0);
     }
 
     /** True when an element has non-whitespace direct text (not only element children). */
@@ -23823,14 +23830,14 @@
      */
     function pmEmailNormalizeMixedContent(root) {
       if (!root) return;
-      const targets = [root, ...Array.from(root.querySelectorAll('div, section, article, center, td, th'))];
+      const targets = [root, ...Array.from(root.querySelectorAll('div, section, article, center, td, th, blockquote'))];
       for (const el of targets) {
         if (!pmEmailHasDirectText(el) && !Array.from(el.children || []).some((c) => c.tagName === 'BR')) {
           continue;
         }
         const childEls = Array.from(el.children || []);
         const useful = childEls.filter((c) => pmEmailIsAtomicBlock(c) ||
-          /^(DIV|SECTION|ARTICLE|CENTER|TABLE)$/i.test(c.tagName));
+          /^(DIV|SECTION|ARTICLE|CENTER|TABLE|BLOCKQUOTE)$/i.test(c.tagName));
         // Only normalize when element children look like split candidates AND there
         // is also a text/BR run that walk() would otherwise skip.
         if (useful.length < 1) continue;
@@ -23848,7 +23855,7 @@
         };
         for (const n of nodes) {
           if (n.nodeType === 1 && (pmEmailIsAtomicBlock(n) ||
-              /^(DIV|SECTION|ARTICLE|CENTER|TABLE)$/i.test(n.tagName))) {
+              /^(DIV|SECTION|ARTICLE|CENTER|TABLE|BLOCKQUOTE)$/i.test(n.tagName))) {
             flushRun();
             frag.appendChild(n);
           } else {
@@ -23877,10 +23884,10 @@
             out.push(kid);
             continue;
           }
-          if (/^(DIV|SECTION|ARTICLE|CENTER|FONT|SPAN|TD|TH|TBODY|THEAD|TFOOT)$/i.test(kid.tagName)) {
+          if (/^(DIV|SECTION|ARTICLE|CENTER|FONT|SPAN|TD|TH|TBODY|THEAD|TFOOT|BLOCKQUOTE)$/i.test(kid.tagName)) {
             const childEls = Array.from(kid.children || []);
             const useful = childEls.filter((c) => pmEmailIsAtomicBlock(c) ||
-              /^(DIV|SECTION|ARTICLE|CENTER|TABLE)$/i.test(c.tagName));
+              /^(DIV|SECTION|ARTICLE|CENTER|TABLE|BLOCKQUOTE)$/i.test(c.tagName));
             // After normalizeMixedContent, text/BR runs are wrapped — safe to split
             // only when every child is a useful block and no direct text remains.
             const safeToSplit = !pmEmailHasDirectText(kid) &&
@@ -23946,6 +23953,86 @@
       return parts.length ? parts : [table];
     }
 
+    /**
+     * Break a block taller than maxH into smaller units. Prefers structural splits
+     * (table rows, children). Returns [el] when it cannot split further.
+     */
+    function pmEmailSplitOversized(el, maxH, depth) {
+      depth = depth || 0;
+      if (!el || el.nodeType !== 1) return [];
+      if (depth > 14) return [el];
+      const h = pmEmailMeasureH(el);
+      if (h > 0 && h <= maxH) return [el];
+
+      if (el.tagName === 'TABLE') {
+        const parts = pmEmailSplitTableByHeight(el, maxH);
+        if (parts.length > 1) {
+          const out = [];
+          parts.forEach((p) => {
+            // Detached clones need a layout parent for further measurement; caller
+            // attaches them during packing. Recurse only on live/measurable nodes.
+            out.push(p);
+          });
+          return out;
+        }
+        // Single oversized row (typical Outlook wrapper): unwrap cell children.
+        const cells = Array.from(el.querySelectorAll(':scope > tbody > tr > td, :scope > tbody > tr > th, :scope > tr > td, :scope > tr > th'));
+        const cellKids = [];
+        cells.forEach((cell) => {
+          Array.from(cell.children || []).forEach((c) => {
+            if (!pmEmailBlockIsEmpty(c)) cellKids.push(c);
+          });
+        });
+        if (cellKids.length > 1) {
+          const out = [];
+          cellKids.forEach((c) => pmEmailSplitOversized(c, maxH, depth + 1).forEach((x) => out.push(x)));
+          return out.length ? out : [el];
+        }
+        if (cellKids.length === 1) return pmEmailSplitOversized(cellKids[0], maxH, depth + 1);
+        return [el];
+      }
+
+      const kids = Array.from(el.children || []).filter((c) => !pmEmailBlockIsEmpty(c));
+      if (kids.length > 1) {
+        const out = [];
+        kids.forEach((c) => pmEmailSplitOversized(c, maxH, depth + 1).forEach((x) => out.push(x)));
+        return out.length ? out : [el];
+      }
+      if (kids.length === 1) {
+        const sub = pmEmailSplitOversized(kids[0], maxH, depth + 1);
+        // Unwrapping a single child only helps when it actually splits.
+        if (sub.length > 1) return sub;
+        if (sub.length === 1 && sub[0] !== el && pmEmailMeasureH(sub[0]) < h) return sub;
+      }
+
+      // Leaf (or unsplittable): keep as-is — caller may canvas-slice it.
+      return [el];
+    }
+
+    /** Expand collected blocks so none (that we can split) exceed one page. */
+    function pmEmailExpandBlocks(blocks, maxH) {
+      const out = [];
+      const queue = (blocks || []).slice();
+      while (queue.length) {
+        const b = queue.shift();
+        if (!b || pmEmailBlockIsEmpty(b)) continue;
+        const h = pmEmailMeasureH(b);
+        if (h <= maxH) {
+          out.push(b);
+          continue;
+        }
+        const parts = pmEmailSplitOversized(b, maxH, 0);
+        if (parts.length <= 1 && parts[0] === b) {
+          out.push(b); // unsplittable — pack/slice later
+        } else if (parts.length <= 1) {
+          queue.unshift(parts[0]);
+        } else {
+          for (let i = parts.length - 1; i >= 0; i--) queue.unshift(parts[i]);
+        }
+      }
+      return out.filter((el) => !pmEmailBlockIsEmpty(el));
+    }
+
     function pmEmailPageHasBodyContent(page) {
       if (!page) return false;
       const inner = page.querySelector('.pm-eml-letter') || page;
@@ -23954,6 +24041,81 @@
       const nodes = Array.from(scope.children || []).filter((el) =>
         el.tagName !== 'STYLE' && !el.classList.contains('pm-eml-head'));
       return nodes.some((el) => !pmEmailBlockIsEmpty(el));
+    }
+
+    /**
+     * Rasterize an oversized leaf that cannot be DOM-split: paint at full height,
+     * then cut into full A4 portrait JPEG pages (no content loss, no landscape stub).
+     */
+    async function pmEmailSliceElementToPdf(newPdf, el, styleHtml, opts, extra) {
+      const A4W = opts.A4W;
+      const A4H = opts.A4H;
+      const PAD_Y = opts.PAD_Y;
+      const PAD_X = opts.PAD_X;
+      const pageWpt = opts.pageWpt;
+      const pageHpt = opts.pageHpt;
+      const host = opts.host;
+      const headHtml = (extra && extra.headHtml) || '';
+
+      const wrap = document.createElement('div');
+      wrap.style.cssText = 'width:' + A4W + 'px;padding:' + PAD_Y + 'px ' + PAD_X +
+        'px;box-sizing:border-box;background:#fff;';
+      const inner = document.createElement('div');
+      inner.className = 'pm-eml-letter';
+      if (styleHtml) inner.innerHTML = styleHtml;
+      if (headHtml) {
+        const headHold = document.createElement('div');
+        headHold.innerHTML = headHtml;
+        while (headHold.firstChild) inner.appendChild(headHold.firstChild);
+      }
+      const bodyWrap = document.createElement('div');
+      bodyWrap.className = 'pm-eml-body';
+      bodyWrap.appendChild(el);
+      inner.appendChild(bodyWrap);
+      wrap.appendChild(inner);
+      host.appendChild(wrap);
+      try {
+        await waitForImagesIn(wrap);
+        await new Promise((r) => setTimeout(r, 20));
+        const fullH = Math.max(A4H, Math.ceil(wrap.scrollHeight || wrap.offsetHeight || A4H));
+        const scale = OFFICE_RENDER_SCALE;
+        const canvas = await html2canvas(wrap, {
+          scale,
+          useCORS: true,
+          backgroundColor: '#ffffff',
+          width: A4W,
+          height: fullH,
+          windowWidth: A4W,
+          windowHeight: fullH,
+          logging: false,
+          letterRendering: true,
+        });
+        const slicePx = Math.round(A4H * scale);
+        let y = 0;
+        while (y < canvas.height) {
+          const h = Math.min(slicePx, canvas.height - y);
+          // Paint slice onto a full-A4 white canvas so short tails stay portrait.
+          let bytes;
+          if (h === slicePx) {
+            bytes = canvasRegionToJpegBytes(canvas, 0, y, canvas.width, h);
+          } else {
+            const pageCanvas = document.createElement('canvas');
+            pageCanvas.width = canvas.width;
+            pageCanvas.height = slicePx;
+            const ctx = pageCanvas.getContext('2d');
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+            ctx.drawImage(canvas, 0, y, canvas.width, h, 0, 0, canvas.width, h);
+            bytes = canvasRegionToJpegBytes(pageCanvas, 0, 0, pageCanvas.width, pageCanvas.height);
+          }
+          const jpg = await newPdf.embedJpg(bytes);
+          const pg = newPdf.addPage([pageWpt, pageHpt]);
+          pg.drawImage(jpg, { x: 0, y: 0, width: pageWpt, height: pageHpt });
+          y += h;
+        }
+      } finally {
+        if (wrap.parentNode) wrap.parentNode.removeChild(wrap);
+      }
     }
 
     async function pmRasterHtmlToA4PdfBytes(html) {
@@ -23986,20 +24148,9 @@
         const body = letter.querySelector('.pm-eml-body');
         const styleHtml = styleEl ? styleEl.outerHTML : '';
         let blocks = body ? pmEmailCollectBlocks(body) : [];
-        // Expand oversized tables into row-groups before packing.
-        const expanded = [];
-        for (const b of blocks) {
-          const bh = Math.ceil(b.getBoundingClientRect().height || b.offsetHeight || 0);
-          if (b.tagName === 'TABLE' && bh > contentH - 8) {
-            pmEmailSplitTableByHeight(b, Math.max(80, contentH - 8)).forEach((p) => expanded.push(p));
-          } else {
-            expanded.push(b);
-          }
-        }
-        blocks = expanded.filter((el) => !pmEmailBlockIsEmpty(el));
+        // Explode oversized tables / thread wrappers into page-sized units.
+        blocks = pmEmailExpandBlocks(blocks, Math.max(80, contentH - 8));
 
-        // Pack without clipping so scrollHeight reflects full content; lock to A4
-        // only right before html2canvas.
         const makePage = () => {
           const page = document.createElement('div');
           page.className = 'pm-eml-page';
@@ -24015,82 +24166,132 @@
           return { page, inner, bodyWrap };
         };
 
-        const pageEls = [];
+        // Ordered emit list: DOM-packed pages and canvas-slice jobs interleaved.
+        const emitJobs = []; // { type:'dom', page } | { type:'slice', node, withHead?:boolean }
         let cur = makePage();
-        pageEls.push(cur.page);
-
+        let headPlaced = false;
         if (head) {
           cur.inner.appendChild(head.cloneNode(true));
+          headPlaced = true;
         }
         cur.inner.appendChild(cur.bodyWrap);
         let dest = cur.bodyWrap;
+        let pageOpen = true;
 
-        const startNewPage = () => {
-          cur = makePage();
-          pageEls.push(cur.page);
-          cur.inner.appendChild(cur.bodyWrap);
-          dest = cur.bodyWrap;
+        const flushDomPage = () => {
+          if (!pageOpen) return;
+          if (pmEmailPageHasBodyContent(cur.page) || (head && cur.page.querySelector('.pm-eml-head'))) {
+            emitJobs.push({ type: 'dom', page: cur.page });
+          } else if (cur.page.parentNode) {
+            cur.page.parentNode.removeChild(cur.page);
+          }
+          pageOpen = false;
         };
 
-        // Content height of the letter inner (excludes page padding).
+        const startNewPage = () => {
+          flushDomPage();
+          cur = makePage();
+          cur.inner.appendChild(cur.bodyWrap);
+          dest = cur.bodyWrap;
+          pageOpen = true;
+        };
+
         const innerHeight = () => Math.ceil(cur.inner.scrollHeight || cur.inner.offsetHeight || 0);
 
-        for (const block of blocks) {
-          if (pmEmailBlockIsEmpty(block)) continue;
-          const node = block;
-          dest.appendChild(node);
-          // Prefer real laid-out height over summed estimates (margins/line-boxes).
-          if (innerHeight() > contentH + 2) {
-            // Doesn't fit on this page — move to the next one (unless it's the
-            // only body node here, in which case it stays and may clip).
-            if (dest.children.length > 1) {
-              dest.removeChild(node);
-              startNewPage();
-              dest.appendChild(node);
-            }
+        const queue = blocks.slice();
+        let guard = 0;
+        const guardMax = Math.max(2000, queue.length * 20 + 100);
+        while (queue.length && guard++ < guardMax) {
+          const node = queue.shift();
+          if (!node || pmEmailBlockIsEmpty(node)) continue;
+          if (!pageOpen) {
+            cur = makePage();
+            cur.inner.appendChild(cur.bodyWrap);
+            dest = cur.bodyWrap;
+            pageOpen = true;
           }
+          dest.appendChild(node);
+          if (innerHeight() <= contentH + 2) continue;
+
+          // Overflows current page.
+          if (dest.children.length > 1) {
+            dest.removeChild(node);
+            startNewPage();
+            dest.appendChild(node);
+            if (innerHeight() <= contentH + 2) continue;
+          }
+
+          // Alone on a page and still taller than one screen — split or slice.
+          dest.removeChild(node);
+          const parts = pmEmailSplitOversized(node, Math.max(80, contentH - 8), 0);
+          if (parts.length > 1 || (parts.length === 1 && parts[0] !== node)) {
+            for (let i = parts.length - 1; i >= 0; i--) queue.unshift(parts[i]);
+            continue;
+          }
+
+          // Unsplittable leaf: canvas-slice so nothing is clipped away.
+          // Close any in-progress DOM page first (may only have the letter head).
+          flushDomPage();
+          emitJobs.push({
+            type: 'slice',
+            node: node,
+            withHead: !headPlaced && !!head,
+          });
+          if (!headPlaced && head) headPlaced = true;
         }
 
-        // Drop trailing blank pages (e.g. spacer forced a new page).
-        while (pageEls.length > 1) {
-          const last = pageEls[pageEls.length - 1];
-          if (pmEmailPageHasBodyContent(last)) break;
-          pageEls.pop();
-          if (last.parentNode) last.parentNode.removeChild(last);
-        }
+        flushDomPage();
 
         if (measure.parentNode) host.removeChild(measure);
 
-        // Lock every page to full A4 portrait before rasterizing.
-        for (const page of pageEls) {
-          page.style.height = A4H + 'px';
-          page.style.minHeight = A4H + 'px';
-          page.style.maxHeight = A4H + 'px';
-          page.style.overflow = 'hidden';
-        }
+        // Lock DOM pages to full A4 portrait before rasterizing.
+        emitJobs.forEach((job) => {
+          if (job.type !== 'dom' || !job.page) return;
+          job.page.style.height = A4H + 'px';
+          job.page.style.minHeight = A4H + 'px';
+          job.page.style.maxHeight = A4H + 'px';
+          job.page.style.overflow = 'hidden';
+        });
 
-        // 2) Rasterize each page at full A4 portrait.
+        // 2) Emit PDF pages in order.
         const newPdf = await PDFLib.PDFDocument.create();
         const pageWpt = A4W * PX_TO_PT;
         const pageHpt = A4H * PX_TO_PT;
-        for (const page of pageEls) {
-          await waitForImagesIn(page);
-          const canvas = await html2canvas(page, {
-            scale: OFFICE_RENDER_SCALE,
-            useCORS: true,
-            backgroundColor: '#ffffff',
-            width: A4W,
-            height: A4H,
-            windowWidth: A4W,
-            windowHeight: A4H,
-            logging: false,
-            letterRendering: true,
-          });
-          const bytes = canvasRegionToJpegBytes(canvas, 0, 0, canvas.width, canvas.height);
-          const jpg = await newPdf.embedJpg(bytes);
-          const pg = newPdf.addPage([pageWpt, pageHpt]);
-          pg.drawImage(jpg, { x: 0, y: 0, width: pageWpt, height: pageHpt });
+        const sliceOpts = { A4W, A4H, PAD_Y, PAD_X, pageWpt, pageHpt, host };
+
+        for (const job of emitJobs) {
+          if (job.type === 'dom') {
+            const page = job.page;
+            await waitForImagesIn(page);
+            const canvas = await html2canvas(page, {
+              scale: OFFICE_RENDER_SCALE,
+              useCORS: true,
+              backgroundColor: '#ffffff',
+              width: A4W,
+              height: A4H,
+              windowWidth: A4W,
+              windowHeight: A4H,
+              logging: false,
+              letterRendering: true,
+            });
+            const bytes = canvasRegionToJpegBytes(canvas, 0, 0, canvas.width, canvas.height);
+            const jpg = await newPdf.embedJpg(bytes);
+            const pg = newPdf.addPage([pageWpt, pageHpt]);
+            pg.drawImage(jpg, { x: 0, y: 0, width: pageWpt, height: pageHpt });
+          } else if (job.type === 'slice') {
+            await pmEmailSliceElementToPdf(newPdf, job.node, styleHtml, sliceOpts, {
+              headHtml: job.withHead && head ? head.outerHTML : '',
+            });
+          }
         }
+
+        // Safety: if nothing was emitted, slice the whole letter body.
+        if (newPdf.getPageCount() === 0 && body) {
+          await pmEmailSliceElementToPdf(newPdf, body.cloneNode(true), styleHtml, sliceOpts, {
+            headHtml: head ? head.outerHTML : '',
+          });
+        }
+
         return await newPdf.save();
       } finally {
         if (host.parentNode) host.parentNode.removeChild(host);
