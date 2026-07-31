@@ -20618,14 +20618,37 @@
         overlay.appendChild(box);
         document.body.appendChild(overlay);
 
-        const close = (result) => { document.body.removeChild(overlay); resolve(result); };
-        box.querySelector('#cfmYes').onclick = () => close(true);
-        box.querySelector('#cfmNo').onclick  = () => close(false);
-        overlay.addEventListener('click', (e) => { if (e.target === overlay) close(false); });
-        // Enter = Yes, Esc = No
+        let settled = false;
+        const close = (result) => {
+          if (settled) return;
+          settled = true;
+          document.removeEventListener('keydown', onKey, true);
+          if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+          resolve(result);
+        };
+        // Prevent the Yes/No click from falling through to the drop-zone / page
+        // underneath once the overlay is removed (which aborted email import).
+        const bindBtn = (sel, value) => {
+          const btn = box.querySelector(sel);
+          if (!btn) return;
+          btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            close(value);
+          });
+        };
+        bindBtn('#cfmYes', true);
+        bindBtn('#cfmNo', false);
+        overlay.addEventListener('click', (e) => {
+          if (e.target === overlay) {
+            e.preventDefault();
+            e.stopPropagation();
+            close(false);
+          }
+        });
         const onKey = (e) => {
-          if (e.key === 'Enter')  { e.preventDefault(); document.removeEventListener('keydown', onKey, true); close(true); }
-          if (e.key === 'Escape') { e.preventDefault(); document.removeEventListener('keydown', onKey, true); close(false); }
+          if (e.key === 'Enter')  { e.preventDefault(); e.stopPropagation(); close(true); }
+          if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(false); }
         };
         document.addEventListener('keydown', onKey, true);
       });
@@ -23678,16 +23701,51 @@
       if (disp === 'inline') return false;
       const name = att.filename || att.fileName || '';
       const ext = (name.split('.').pop() || '').toLowerCase();
-      if (!ext || ext === 'eml' || ext === 'msg') return false;
-      return ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'eml'].includes(ext) || isImageExt(ext);
+      if (ext === 'eml' || ext === 'msg') return false;
+      if (['pdf', 'doc', 'docx', 'xls', 'xlsx'].includes(ext) || isImageExt(ext)) return true;
+      const mime = String(att.mimeType || '').toLowerCase();
+      if (mime === 'application/pdf') return true;
+      if (mime === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') return true;
+      if (mime === 'application/vnd.ms-excel') return true;
+      if (mime === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') return true;
+      if (mime.indexOf('image/') === 0) return true;
+      return false;
     }
 
     function pmAttachmentToFile(att) {
-      const name = att.filename || att.fileName || 'attachment.bin';
       const mime = att.mimeType || 'application/octet-stream';
-      const content = att.content;
-      const blob = new Blob([content], { type: mime });
-      return new File([blob], name, { type: mime });
+      let name = att.filename || att.fileName || '';
+      if (!name || !/\.[a-z0-9]+$/i.test(name)) {
+        // Invent an extension from MIME when the part has no usable filename.
+        let ext = 'bin';
+        if (/pdf/i.test(mime)) ext = 'pdf';
+        else if (/spreadsheetml\.sheet/i.test(mime)) ext = 'xlsx';
+        else if (/ms-excel/i.test(mime)) ext = 'xls';
+        else if (/wordprocessingml\.document/i.test(mime)) ext = 'docx';
+        else if (/^image\//i.test(mime)) ext = (mime.split('/')[1] || 'png').split(';')[0];
+        name = (name || 'attachment') + '.' + ext;
+      }
+      const raw = att.content;
+      let u8;
+      if (raw instanceof Uint8Array) u8 = raw;
+      else if (raw instanceof ArrayBuffer) u8 = new Uint8Array(raw);
+      else if (ArrayBuffer.isView(raw)) u8 = new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
+      else u8 = new Uint8Array(0);
+      // Copy so ExcelJS/pdf-lib never see a detached/transferred buffer.
+      const copy = u8.slice(0);
+      return new File([copy], name, { type: mime });
+    }
+
+    function pmAttachmentExt(file, att) {
+      const fromName = ((file && file.name) || '').split('.').pop().toLowerCase();
+      if (fromName && fromName !== 'bin') return fromName;
+      const mime = String((att && att.mimeType) || (file && file.type) || '').toLowerCase();
+      if (mime === 'application/pdf') return 'pdf';
+      if (mime.indexOf('spreadsheetml.sheet') >= 0) return 'xlsx';
+      if (mime.indexOf('ms-excel') >= 0) return 'xls';
+      if (mime.indexOf('wordprocessingml.document') >= 0) return 'docx';
+      if (mime.indexOf('image/') === 0) return mime.split('/')[1].split(';')[0] || 'png';
+      return fromName || '';
     }
 
     function pmBuildEmailLetterHtml(parsed) {
@@ -23781,8 +23839,8 @@
       }
     }
 
-    async function pmConvertSupportedAttachmentToPdfBytes(file) {
-      const ext = (file.name.split('.').pop() || '').toLowerCase();
+    async function pmConvertSupportedAttachmentToPdfBytes(file, att) {
+      const ext = pmAttachmentExt(file, att);
       if (['doc', 'docx', 'xls', 'xlsx'].includes(ext)) return await convertOfficeToPdfBytes(file);
       if (isImageExt(ext)) return await convertImageToPdfBytes(file);
       if (ext === 'pdf') {
@@ -23795,10 +23853,13 @@
     }
 
     async function pmAppendPdfBytes(targetPdf, srcBytes) {
-      if (!srcBytes) return;
+      if (!srcBytes || !srcBytes.length) return 0;
       const src = await PDFLib.PDFDocument.load(srcBytes);
-      const pages = await targetPdf.copyPages(src, src.getPageIndices());
+      const idxs = src.getPageIndices();
+      if (!idxs.length) return 0;
+      const pages = await targetPdf.copyPages(src, idxs);
       pages.forEach((p) => targetPdf.addPage(p));
+      return pages.length;
     }
 
     async function convertEmailToPdfBytes(file) {
@@ -23815,28 +23876,42 @@
       const msg = t('confirmEmailAttachments')
         .replace('{n}', String(candidates.length))
         .replace('{list}', listHtml);
-      // Hide loading while the modal is up so the user can click.
-      hideLoading();
+      // Keep isLoading=true while the dialog is open (do NOT hideLoading):
+      // otherwise the Yes-click falls through onto the drop-zone and aborts
+      // the in-flight import. The dialog sits above the loader (z-index).
       const addAttachments = await showConfirmDialog(msg, {
         html: true,
         yesText: t('emailAttachmentsYes'),
         noText: t('emailAttachmentsNo'),
       });
-      showLoading(t('emailImportLoading'));
       if (!addAttachments) return emailBytes;
 
-      const out = await PDFLib.PDFDocument.create();
-      await pmAppendPdfBytes(out, emailBytes);
-      for (const att of candidates) {
-        try {
-          const attFile = pmAttachmentToFile(att);
-          const attPdf = await pmConvertSupportedAttachmentToPdfBytes(attFile);
-          if (attPdf) await pmAppendPdfBytes(out, attPdf);
-        } catch (err) {
-          console.warn('email attachment import skipped:', att && att.filename, err);
+      try {
+        const out = await PDFLib.PDFDocument.create();
+        await pmAppendPdfBytes(out, emailBytes);
+        for (let i = 0; i < candidates.length; i++) {
+          const att = candidates[i];
+          const label = att.filename || att.fileName || ('attachment ' + (i + 1));
+          try {
+            showLoading(t('emailImportLoading') + ' (' + (i + 1) + '/' + candidates.length + ': ' + label + ')');
+            const attFile = pmAttachmentToFile(att);
+            if (!attFile.size) {
+              console.warn('email attachment empty, skipped:', label);
+              continue;
+            }
+            const attPdf = await pmConvertSupportedAttachmentToPdfBytes(attFile, att);
+            if (attPdf) await pmAppendPdfBytes(out, attPdf);
+          } catch (err) {
+            console.warn('email attachment import skipped:', label, err);
+          }
         }
+        showLoading(t('emailImportLoading'));
+        return await out.save();
+      } catch (err) {
+        // Never lose the letter if merging attachments blows up.
+        console.error('email attachment merge failed; returning letter only', err);
+        return emailBytes;
       }
-      return await out.save();
     }
 
     // Universally gets PDF bytes from any supported file:
