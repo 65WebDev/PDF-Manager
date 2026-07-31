@@ -17121,7 +17121,8 @@
     // the hit-area padding-bottom), which shoved underlines/strikeouts
     // well below the ink. Top stays the measured glyph top so we track
     // the same alignment as the blue selection highlight.
-    function textLayerSelectionRectsIn(inner, range) {
+    function textLayerSelectionRectsIn(inner, range, liveScaleY) {
+      const scaleY = (liveScaleY > 0) ? liveScaleY : 1;
       const rects = [];
       const walker = document.createTreeWalker(inner, NodeFilter.SHOW_TEXT, {
         acceptNode(node) {
@@ -17166,7 +17167,15 @@
               if (sr && sr.height > 0) top = sr.top;
             }
           } catch (_) {}
-          const h = (fs > 0) ? fs : Math.min(r.height, Math.max(4, r.height * 0.75));
+          // fs (inline style or computed) and the r.height fallback are both
+          // the glyph's UNTRANSFORMED CSS size - r.top above already reads
+          // through any live transform on an ancestor (e.g. syncPreview-
+          // TextLayersLiveScale/peSyncTextLayerLiveZoom scaling the whole
+          // layer while a rebuild is pending), but a height derived from a
+          // static CSS value has to be scaled by the same factor explicitly
+          // or the selection highlight's bottom edge drifts from the glyph
+          // by an amount that grows with how far the live scale is from 1.
+          const h = ((fs > 0) ? fs : Math.min(r.height, Math.max(4, r.height * 0.75))) * scaleY;
           rects.push({
             left: r.left,
             right: r.right,
@@ -17250,30 +17259,13 @@
         const outer = inner.closest('.page-text-layer');
         if (!outer) return;
         let box = outer.querySelector(':scope > .tl-sel-highlight');
-        let rects = null;
-        if (hasSel) {
-          try {
-            for (let i = 0; i < selection.rangeCount; i++) {
-              const range = selection.getRangeAt(i);
-              if (!range.intersectsNode(inner)) continue;
-              const rs = textLayerSelectionRectsIn(inner, range);
-              rects = rects ? rects.concat(rs) : rs;
-            }
-          } catch (_) {}
-        }
-        if (!rects || !rects.length) {
-          if (box) box.textContent = '';
-          return;
-        }
-        if (!box) {
-          box = document.createElement('div');
-          box.className = 'tl-sel-highlight';
-          outer.appendChild(box);
-        }
-        const or = outer.getBoundingClientRect();
-        // When #peTextLayer is live-scaled (peSyncTextLayerLiveZoom), client
+        // When #peTextLayer/.page-text-layer is live-scaled
+        // (peSyncTextLayerLiveZoom / syncPreviewTextLayersLiveScale), client
         // rects are in screen space but highlight children are laid out in
-        // the layer's unscaled local px — divide by the CSS scale.
+        // the layer's unscaled local px — divide by the CSS scale. Read
+        // this BEFORE gathering rects: textLayerSelectionRectsIn also needs
+        // sy to scale the glyph-height-derived bottom edge it computes from
+        // a static (untransformed) font-size.
         let sx = 1, sy = 1;
         try {
           const tr = window.getComputedStyle(outer).transform;
@@ -17297,6 +17289,27 @@
             }
           }
         } catch (_) {}
+        let rects = null;
+        if (hasSel) {
+          try {
+            for (let i = 0; i < selection.rangeCount; i++) {
+              const range = selection.getRangeAt(i);
+              if (!range.intersectsNode(inner)) continue;
+              const rs = textLayerSelectionRectsIn(inner, range, sy);
+              rects = rects ? rects.concat(rs) : rs;
+            }
+          } catch (_) {}
+        }
+        if (!rects || !rects.length) {
+          if (box) box.textContent = '';
+          return;
+        }
+        if (!box) {
+          box = document.createElement('div');
+          box.className = 'tl-sel-highlight';
+          outer.appendChild(box);
+        }
+        const or = outer.getBoundingClientRect();
         const merged = textLayerMergeSelectionRects(rects);
         const frag = document.createDocumentFragment();
         for (const m of merged) {
