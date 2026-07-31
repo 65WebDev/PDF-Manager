@@ -11041,6 +11041,12 @@
       const gap = pageGapForScale(currentScale);
       pagesContainer.style.setProperty('--page-gap', gap + 'px');
 
+      // Every scale tick (slider drag, pinch, ...) resizes the page cards
+      // immediately; keep any built text layers (and an active selection)
+      // visually glued to the new size in the same tick instead of letting
+      // them lag until the debounced rebuild lands.
+      if (typeof syncPreviewTextLayersLiveScale === 'function') syncPreviewTextLayersLiveScale();
+
       if (pinchActive) {
         return;
       }
@@ -16931,6 +16937,53 @@
       };
     }
 
+    /**
+     * Scale changes (dragging the zoom slider, pinch, etc.) resize the page
+     * cards' CSS immediately, but the pdf.js text layer built into each one
+     * keeps its last-built pixel size/position until the debounced
+     * buildPageTextLayer rebuild catches up (it needs a fresh pdf.js
+     * viewport, not just a resize). Left alone, that gap makes an active
+     * selection - and the invisible layer it lives in - visibly drift out
+     * of sync with the page while the scale keeps changing, snapping back
+     * only once the rebuild lands. Mirrors peSyncTextLayerLiveZoom's fix for
+     * the same issue in the page editor: stretch each existing layer with a
+     * CSS transform to the CURRENT card size every tick, so it (and the
+     * custom selection highlight painted from its live geometry) visually
+     * tracks the page in real time; the eventual rebuild then swaps in the
+     * real glyph layout without any visible jump.
+     */
+    function syncPreviewTextLayersLiveScale() {
+      if (typeof isZoomTextSelect !== 'function' || !isZoomTextSelect()) return;
+      const layers = pagesContainer.querySelectorAll('.page .page-text-layer');
+      if (!layers.length) return;
+      let touchedSelection = false;
+      layers.forEach(layer => {
+        const builtW = parseFloat(layer.dataset.builtW);
+        const builtH = parseFloat(layer.dataset.builtH);
+        if (!(builtW > 0) || !(builtH > 0)) return;
+        const wrapper = layer.parentElement;
+        const img = wrapper ? wrapper.querySelector('img') : null;
+        if (!img || !img.naturalWidth || !img.naturalHeight) return;
+        const trueAspectRatio = parseFloat(layer.dataset.trueAspectRatio) || 0;
+        const metrics = getPageImgDisplayMetrics(img, wrapper, trueAspectRatio);
+        if (!metrics || !metrics.width || !metrics.height) return;
+        layer.style.left = metrics.left + 'px';
+        layer.style.top = metrics.top + 'px';
+        const sx = metrics.width / builtW;
+        const sy = metrics.height / builtH;
+        if (Math.abs(sx - 1) < 0.002 && Math.abs(sy - 1) < 0.002) {
+          if (layer.style.transform) layer.style.transform = '';
+        } else {
+          layer.style.transformOrigin = '0 0';
+          layer.style.transform = 'scale(' + sx + ', ' + sy + ')';
+          touchedSelection = true;
+        }
+      });
+      if (touchedSelection && typeof scheduleTextLayerHighlightRender === 'function') {
+        scheduleTextLayerHighlightRender();
+      }
+    }
+
     const PAGE_TEXT_LAYER_KEY = 'pdfjs-tl2';
 
     // ── Selection "gap guard" ─────────────────────────────────────────────
@@ -17693,6 +17746,13 @@
       layer.style.top = metrics.top + 'px';
       layer.style.width = metrics.width + 'px';
       layer.style.height = metrics.height + 'px';
+      layer.style.transform = '';
+      // Let syncPreviewTextLayersLiveScale visually track the card's live
+      // CSS size between this build and the next one (e.g. while the scale
+      // slider is being dragged), without needing to know the glyph layout.
+      layer.dataset.builtW = String(metrics.width);
+      layer.dataset.builtH = String(metrics.height);
+      layer.dataset.trueAspectRatio = String(trueAspectRatio);
       layer.innerHTML = '';
 
       try {
