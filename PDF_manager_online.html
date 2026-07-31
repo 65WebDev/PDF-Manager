@@ -28578,6 +28578,23 @@ async function peBuildTextLayer(st, gen) {
   const container = document.getElementById('peTextLayer');
   if (!container || !st || !st.page || !st.viewport) return;
   if (typeof pdfjsLib === 'undefined' || !pdfjsLib.renderTextLayer) return;
+  // A rebuild for a different page must never carry the previous page's
+  // selection into this one: peRestorePageTextSelAnchor re-applies plain
+  // character OFFSETS, so on the new page's unrelated text those offsets
+  // would just land on whatever span happens to sit at a similar position
+  // instead of being dropped, which is what made a selection appear to
+  // "jump" across a page switch. Only a rebuild of the SAME page (pinch/
+  // zoom, redact confirm, etc.) is allowed to restore it.
+  const samePage = container.dataset.peTlPageIdx === String(st.idx);
+  if (!samePage) {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount && !sel.isCollapsed) {
+      let n = sel.anchorNode;
+      if (n && n.nodeType === 3) n = n.parentElement;
+      if (n && n.closest && n.closest('#peTextLayer')) sel.removeAllRanges();
+    }
+  }
+  container.dataset.peTlPageIdx = String(st.idx);
   // Text selection on a 90/270-rotated page is unreliable (pdf.js lays the
   // glyph spans out in the page's own unrotated coordinate space and relies
   // on the viewport transform to rotate them into place, which the
@@ -28588,8 +28605,8 @@ async function peBuildTextLayer(st, gen) {
     container.innerHTML = '';
     return;
   }
-  // Pinch/zoom rebuilds this DOM — keep the user's page-text selection.
-  const savedSel = peCapturePageTextSelAnchor();
+  // Pinch/zoom rebuilds this DOM — keep the user's page-text selection (same page only).
+  const savedSel = samePage ? peCapturePageTextSelAnchor() : null;
   if (typeof shieldPageTextLayerEvents === 'function') shieldPageTextLayerEvents(container);
   const builtW = Math.round(st.viewport.width);
   const builtH = Math.round(st.viewport.height);
