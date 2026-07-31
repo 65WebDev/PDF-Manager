@@ -5814,11 +5814,15 @@
         width: calc(var(--pm-menu-ctrl-h) * 0.524);
         height: calc(var(--pm-menu-ctrl-h) * 0.524);
       }
-      /* Cursor mode glyph is naturally ~30×30 inside the 42×42 hit target */
-      .main-row.menu-shrink #selectModeBtn svg {
-        width: calc(var(--pm-menu-ctrl-h) * 0.714);
-        height: calc(var(--pm-menu-ctrl-h) * 0.714);
-      }
+      /* 0.524 = 22/42: at the full (unshrunk) --pm-menu-ctrl-h, every icon-btn
+         svg above lands back on the pre-shrink 22px baseline, so entering
+         menu-shrink is a no-op in size until --pm-menu-ctrl-h itself starts
+         dropping toward its 28px floor - only then do icons visibly shrink,
+         all together. The cursor glyph previously used its own 0.714 ratio
+         (matched to its ~30px natural size instead of the 22px baseline),
+         which made it jump up in size the instant menu-shrink activated
+         while every other icon stayed put; it now follows the same 0.524
+         rule as the rest. */
       /* Desktop rotate glyph ~22px at full size (same as other tool icons) */
       .main-row.menu-shrink button#rotateLeftBtn .rotate-glyph,
       .main-row.menu-shrink button#rotateRightBtn .rotate-glyph {
