@@ -2400,6 +2400,16 @@
     #peObjLayer.pe-objlayer-passthrough { pointer-events: none; }
     #pageEditModal.pe-obj-select-mode #peObjLayer .pe-obj,
     #peObjLayer.pe-objlayer-passthrough .pe-obj { pointer-events: auto; }
+    /* A text-selection drag already in progress must keep extending through
+       objects stacked on top of the text - otherwise an object re-enabling
+       pointer-events (rule above) becomes the hit-test target under the
+       cursor and the native selection can never reach the text behind it.
+       Starting a drag ON an object is unaffected: that mousedown lands on
+       the object first and never sets textLayerDrag / this class. */
+    #pageEditModal.pe-textsel-passthrough #peObjLayer .pe-obj,
+    #pageEditModal.pe-textsel-passthrough #peObjLayer .pe-obj-callout-box {
+      pointer-events: none !important;
+    }
     .pe-obj-marquee {
       position: absolute; border: 1px solid #3498db;
       background: rgba(52, 152, 219, .12); pointer-events: none; z-index: 5;
@@ -17225,6 +17235,8 @@
         document.querySelectorAll('.page-text-layer-inner.textLayer')
           .forEach(resetTextLayerEndGuard);
         prevRange = null;
+        const peModal = document.getElementById('pageEditModal');
+        if (peModal) peModal.classList.remove('pe-textsel-passthrough');
       };
       document.addEventListener('pointerup', endDrag);
       window.addEventListener('blur', endDrag);
@@ -17543,6 +17555,12 @@
               // the browser's own anchor entirely instead.
               wordMode: e.detail >= 2
             };
+            // Page editor: let this drag extend through objects stacked on
+            // top of the text (see .pe-textsel-passthrough CSS).
+            if (layer.id === 'peTextLayer') {
+              const peModal = document.getElementById('pageEditModal');
+              if (peModal) peModal.classList.add('pe-textsel-passthrough');
+            }
             // Hide Copy/markup menu while the selection (or its handles) is
             // being adjusted; it returns on pointerup if a selection remains.
             if (layer.id === 'peTextLayer' && typeof peBeginTextSelHandleDrag === 'function') {
@@ -17721,13 +17739,33 @@
           return r.bottom > host.top - 240 && r.top < host.bottom + 240;
         });
 
+      // A wheel-scroll during an in-progress selection drag can carry the
+      // selected page outside the viewport buffer above. Tearing down its
+      // text layer would delete the DOM nodes the native Selection anchors
+      // to, collapsing it instantly - so any page still holding part of a
+      // live (non-collapsed) selection is kept regardless of visibility.
+      const keep = new Set(visible);
+      const liveSel = window.getSelection();
+      if (liveSel && liveSel.rangeCount && !liveSel.isCollapsed) {
+        try {
+          for (let i = 0; i < liveSel.rangeCount; i++) {
+            const r = liveSel.getRangeAt(i);
+            pagesContainer.querySelectorAll('.page').forEach(p => {
+              if (!keep.has(p) && p.querySelector('.page-text-layer') && r.intersectsNode(p)) {
+                keep.add(p);
+              }
+            });
+          }
+        } catch (_) {}
+      }
+
       for (const div of visible) {
         if (token !== pageTextLayerToken) return;
         await buildPageTextLayer(div, doc, token);
       }
 
       pagesContainer.querySelectorAll('.page').forEach(p => {
-        if (!visible.includes(p)) {
+        if (!keep.has(p)) {
           const layer = p.querySelector('.page-text-layer');
           if (layer) layer.remove();
         }
