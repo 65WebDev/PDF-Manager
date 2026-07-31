@@ -16771,6 +16771,80 @@
       document.querySelectorAll('.page .page-text-layer').forEach(el => el.remove());
     }
 
+    /** Snapshot preview-grid text selection as plain-text offsets in its layer. */
+    function capturePreviewPageTextSelAnchor() {
+      try {
+        if (typeof isZoomTextSelect === 'function' && !isZoomTextSelect()) return null;
+        const sel = window.getSelection();
+        if (!sel || !sel.rangeCount || sel.isCollapsed) return null;
+        const range = sel.getRangeAt(0);
+        let node = range.commonAncestorContainer;
+        if (node && node.nodeType === 3) node = node.parentElement;
+        const layer = node && node.closest
+          ? node.closest('#scrollContainer .page .page-text-layer') : null;
+        if (!layer) return null;
+        const page = layer.closest('.page');
+        if (!page) return null;
+        const pageIdx = parseInt(page.dataset.index, 10);
+        if (Number.isNaN(pageIdx)) return null;
+        const preStart = document.createRange();
+        preStart.selectNodeContents(layer);
+        preStart.setEnd(range.startContainer, range.startOffset);
+        const startOffset = preStart.toString().length;
+        const preEnd = document.createRange();
+        preEnd.selectNodeContents(layer);
+        preEnd.setEnd(range.endContainer, range.endOffset);
+        const endOffset = preEnd.toString().length;
+        if (!(endOffset > startOffset)) return null;
+        const menu = document.getElementById('pageTextCopyMenu');
+        return {
+          pageIdx,
+          startOffset,
+          endOffset,
+          text: (sel.toString() || '').replace(/\u00a0/g, ' '),
+          menuWasVisible: !!(menu && menu.classList.contains('visible'))
+        };
+      } catch (_) { return null; }
+    }
+
+    function restorePreviewPageTextSelAnchor(anchor) {
+      if (!anchor || anchor.pageIdx == null) return false;
+      const page = pagesContainer.querySelector('.page[data-index="' + anchor.pageIdx + '"]');
+      const layer = page && page.querySelector('.page-text-layer');
+      if (!layer) return false;
+      try {
+        const walker = document.createTreeWalker(layer, NodeFilter.SHOW_TEXT, null);
+        let startNode = null, startOff = 0, endNode = null, endOff = 0;
+        let seen = 0;
+        let node;
+        while ((node = walker.nextNode())) {
+          const len = node.nodeValue ? node.nodeValue.length : 0;
+          if (!startNode && seen + len >= anchor.startOffset) {
+            startNode = node;
+            startOff = Math.max(0, anchor.startOffset - seen);
+          }
+          if (!endNode && seen + len >= anchor.endOffset) {
+            endNode = node;
+            endOff = Math.max(0, anchor.endOffset - seen);
+            break;
+          }
+          seen += len;
+        }
+        if (!startNode || !endNode) return false;
+        const range = document.createRange();
+        range.setStart(startNode, Math.min(startOff, startNode.nodeValue.length));
+        range.setEnd(endNode, Math.min(endOff, endNode.nodeValue.length));
+        if (range.collapsed) return false;
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        if (typeof scheduleTextLayerHighlightRender === 'function') {
+          scheduleTextLayerHighlightRender();
+        }
+        return true;
+      } catch (_) { return false; }
+    }
+
     // trueAspectRatio (width/height), when given, describes the PDF page's own
     // geometry and is used instead of the raster image's pixel ratio to compute
     // the "object-fit: contain" box. The HQ raster is created from a canvas whose
@@ -17095,14 +17169,40 @@
           outer.appendChild(box);
         }
         const or = outer.getBoundingClientRect();
+        // When #peTextLayer is live-scaled (peSyncTextLayerLiveZoom), client
+        // rects are in screen space but highlight children are laid out in
+        // the layer's unscaled local px — divide by the CSS scale.
+        let sx = 1, sy = 1;
+        try {
+          const tr = window.getComputedStyle(outer).transform;
+          if (tr && tr !== 'none') {
+            const m = tr.match(/^matrix\(([^)]+)\)$/);
+            if (m) {
+              const p = m[1].split(',').map(parseFloat);
+              if (p.length >= 4) {
+                if (Math.abs(p[0]) > 1e-6) sx = p[0];
+                if (Math.abs(p[3]) > 1e-6) sy = p[3];
+              }
+            } else {
+              const m3 = tr.match(/^matrix3d\(([^)]+)\)$/);
+              if (m3) {
+                const p = m3[1].split(',').map(parseFloat);
+                if (p.length >= 11) {
+                  if (Math.abs(p[0]) > 1e-6) sx = p[0];
+                  if (Math.abs(p[5]) > 1e-6) sy = p[5];
+                }
+              }
+            }
+          }
+        } catch (_) {}
         const merged = textLayerMergeSelectionRects(rects);
         const frag = document.createDocumentFragment();
         for (const m of merged) {
           const d = document.createElement('div');
-          d.style.left = (m.left - or.left) + 'px';
-          d.style.top = (m.top - or.top) + 'px';
-          d.style.width = (m.right - m.left) + 'px';
-          d.style.height = (m.bottom - m.top) + 'px';
+          d.style.left = ((m.left - or.left) / sx) + 'px';
+          d.style.top = ((m.top - or.top) / sy) + 'px';
+          d.style.width = ((m.right - m.left) / sx) + 'px';
+          d.style.height = ((m.bottom - m.top) / sy) + 'px';
           frag.appendChild(d);
         }
         box.textContent = '';
@@ -17602,6 +17702,8 @@
         invalidatePageTextLayers();
         return;
       }
+      // Scale changes rebuild glyph DOM — keep the user's selection across it.
+      const savedSel = capturePreviewPageTextSelAnchor();
       const token = ++pageTextLayerToken;
       let doc;
       try {
@@ -17630,6 +17732,14 @@
           if (layer) layer.remove();
         }
       });
+
+      if (savedSel && token === pageTextLayerToken) {
+        requestAnimationFrame(() => {
+          if (token !== pageTextLayerToken) return;
+          if (!isZoomTextSelect()) return;
+          restorePreviewPageTextSelAnchor(savedSel);
+        });
+      }
     }
 
     function updateZoomPanMode() {
@@ -28186,10 +28296,47 @@ function peApplyStageLayout(options = {}) {
   canvas.style.height = h + 'px';
   stage.classList.add('pe-layout-zoom');
   peUpdateObjectsLayout();
+  // Keep the text layer (and its selection highlight) visually locked to the
+  // live stage size until peBuildTextLayer rebuilds glyphs at the new scale.
+  peSyncTextLayerLiveZoom(options.refreshSelectionUi !== false);
   // Keep crop overlay in sync with live stage size (pinch used to skip this
   // and the box drifted until the gesture ended).
   if (!options.skipCrop) peRedrawCrop();
   if (!options.skipOverflow) peUpdateStageWrapOverflow();
+}
+
+/**
+ * During live zoom the stage/canvas CSS box changes every frame, but the
+ * pdf.js text layer keeps its last-built pixel size until peBuildTextLayer
+ * runs. Scale #peTextLayer (and the in-layer .tl-sel-highlight) to match so
+ * the selection tracks the page instead of sitting still or flying off.
+ */
+function peSyncTextLayerLiveZoom(refreshSelectionUi) {
+  const container = document.getElementById('peTextLayer');
+  if (!container || !peState || !peState.viewport) return;
+  const builtW = peState._tlBuiltW;
+  const builtH = peState._tlBuiltH;
+  if (!(builtW > 0) || !(builtH > 0)) {
+    container.style.transform = '';
+    return;
+  }
+  const liveW = Math.max(1, Math.round(peState.viewport.width));
+  const liveH = Math.max(1, Math.round(peState.viewport.height));
+  const sx = liveW / builtW;
+  const sy = liveH / builtH;
+  if (Math.abs(sx - 1) < 0.002 && Math.abs(sy - 1) < 0.002) {
+    if (container.style.transform) container.style.transform = '';
+    return;
+  }
+  container.style.transformOrigin = '0 0';
+  container.style.transform = 'scale(' + sx + ', ' + sy + ')';
+  if (refreshSelectionUi) {
+    // Refresh the custom blue overlay under the new transform. Avoid
+    // removeAllRanges/addRange every frame — that fights OS selection handles.
+    if (typeof scheduleTextLayerHighlightRender === 'function') {
+      scheduleTextLayerHighlightRender();
+    }
+  }
 }
 
 /** Continuous zoom used while a pinch gesture is active (midpoint stays put). */
@@ -28267,6 +28414,8 @@ function peCommitStagePdfBitmap(prepared, opts) {
   canvas.style.height = cssH + 'px';
   stage.style.width = cssW + 'px';
   stage.style.height = cssH + 'px';
+  // Until peBuildTextLayer finishes, keep glyphs visually glued to the new stage size.
+  if (typeof peSyncTextLayerLiveZoom === 'function') peSyncTextLayerLiveZoom(false);
   canvas.getContext('2d').drawImage(off, 0, 0);
   stage.classList.remove('pe-layout-zoom');
   if (peState.inlineEditId) {
@@ -28404,10 +28553,16 @@ async function peBuildTextLayer(st, gen) {
   // Pinch/zoom rebuilds this DOM — keep the user's page-text selection.
   const savedSel = peCapturePageTextSelAnchor();
   if (typeof shieldPageTextLayerEvents === 'function') shieldPageTextLayerEvents(container);
+  const builtW = Math.round(st.viewport.width);
+  const builtH = Math.round(st.viewport.height);
   container.style.left = '0px';
   container.style.top = '0px';
-  container.style.width = Math.round(st.viewport.width) + 'px';
-  container.style.height = Math.round(st.viewport.height) + 'px';
+  container.style.width = builtW + 'px';
+  container.style.height = builtH + 'px';
+  container.style.transform = '';
+  container.style.transformOrigin = '';
+  st._tlBuiltW = builtW;
+  st._tlBuiltH = builtH;
   let textContent;
   try {
     textContent = await st.page.getTextContent();
