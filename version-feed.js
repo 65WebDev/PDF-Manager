@@ -1,13 +1,13 @@
 /* Auto-generated version feed for the About dialog. Do not edit by hand. */
 window.__PDF_MANAGER_VERSION_FEED__ = {
-  "build": "build-130",
-  "number": 130,
-  "commit": "b2d1f08ff99a5eec751f70ce8b33fa2aa6459842",
-  "shortCommit": "b2d1f08",
-  "date": "2026-07-31T08:09:07Z",
+  "build": "build-131",
+  "number": 131,
+  "commit": "0b3031090772c1e088bca15e1607f1534271f4e7",
+  "shortCommit": "0b30310",
+  "date": "2026-07-31T09:02:50Z",
   "downloadUrl": "https://github.com/5451165-bot/PDF-Manager/releases/latest/download/PDF_manager_online.html",
   "offlineDownloadUrl": "https://github.com/5451165-bot/PDF-Manager/releases/latest/download/PDF_manager_offline.html",
   "windowsVersion": "0.1.11",
   "windowsDownloadUrl": "https://github.com/5451165-bot/PDF-Manager/releases/tag/windows-v0.1.11",
-  "updatedAt": "2026-07-31T08:09:19.038Z"
+  "updatedAt": "2026-07-31T09:03:02.672Z"
 };
