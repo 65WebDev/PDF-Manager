@@ -23800,9 +23800,71 @@
       return /^(TABLE|P|PRE|UL|OL|H[1-6]|HR|IMG|BLOCKQUOTE|ADDRESS)$/i.test(tag);
     }
 
+    function pmEmailBlockIsEmpty(el) {
+      if (!el || el.nodeType !== 1) return true;
+      if (/^(IMG|HR|TABLE)$/i.test(el.tagName)) return false;
+      if (el.querySelector('img, table, svg, video, canvas')) return false;
+      return !(el.textContent || '').replace(/\u00A0/g, ' ').trim();
+    }
+
+    /** True when an element has non-whitespace direct text (not only element children). */
+    function pmEmailHasDirectText(el) {
+      if (!el || !el.childNodes) return false;
+      for (let i = 0; i < el.childNodes.length; i++) {
+        const n = el.childNodes[i];
+        if (n.nodeType === 3 && (n.textContent || '').replace(/\u00A0/g, ' ').trim()) return true;
+      }
+      return false;
+    }
+
+    /**
+     * If a container mixes block children with direct text / <br> runs, wrap those
+     * runs into anonymous DIVs so pagination cannot drop trailing letter text.
+     */
+    function pmEmailNormalizeMixedContent(root) {
+      if (!root) return;
+      const targets = [root, ...Array.from(root.querySelectorAll('div, section, article, center, td, th'))];
+      for (const el of targets) {
+        if (!pmEmailHasDirectText(el) && !Array.from(el.children || []).some((c) => c.tagName === 'BR')) {
+          continue;
+        }
+        const childEls = Array.from(el.children || []);
+        const useful = childEls.filter((c) => pmEmailIsAtomicBlock(c) ||
+          /^(DIV|SECTION|ARTICLE|CENTER|TABLE)$/i.test(c.tagName));
+        // Only normalize when element children look like split candidates AND there
+        // is also a text/BR run that walk() would otherwise skip.
+        if (useful.length < 1) continue;
+        if (!pmEmailHasDirectText(el) && !childEls.some((c) => c.tagName === 'BR')) continue;
+
+        const nodes = Array.from(el.childNodes);
+        const frag = document.createDocumentFragment();
+        let run = [];
+        const flushRun = () => {
+          if (!run.length) return;
+          const wrap = document.createElement('div');
+          run.forEach((n) => wrap.appendChild(n));
+          run = [];
+          if (!pmEmailBlockIsEmpty(wrap)) frag.appendChild(wrap);
+        };
+        for (const n of nodes) {
+          if (n.nodeType === 1 && (pmEmailIsAtomicBlock(n) ||
+              /^(DIV|SECTION|ARTICLE|CENTER|TABLE)$/i.test(n.tagName))) {
+            flushRun();
+            frag.appendChild(n);
+          } else {
+            run.push(n);
+          }
+        }
+        flushRun();
+        while (el.firstChild) el.removeChild(el.firstChild);
+        el.appendChild(frag);
+      }
+    }
+
     /** Flatten email body into pagination units (prefer block boundaries over mid-text cuts). */
     function pmEmailCollectBlocks(bodyEl) {
       if (!bodyEl) return [];
+      pmEmailNormalizeMixedContent(bodyEl);
       const out = [];
       const walk = (el) => {
         const kids = Array.from(el.children || []);
@@ -23819,9 +23881,13 @@
             const childEls = Array.from(kid.children || []);
             const useful = childEls.filter((c) => pmEmailIsAtomicBlock(c) ||
               /^(DIV|SECTION|ARTICLE|CENTER|TABLE)$/i.test(c.tagName));
-            if (useful.length >= 1 && useful.length === childEls.length) {
+            // After normalizeMixedContent, text/BR runs are wrapped — safe to split
+            // only when every child is a useful block and no direct text remains.
+            const safeToSplit = !pmEmailHasDirectText(kid) &&
+              !childEls.some((c) => c.tagName === 'BR');
+            if (safeToSplit && useful.length >= 1 && useful.length === childEls.length) {
               walk(kid);
-            } else if (useful.length >= 2) {
+            } else if (safeToSplit && useful.length >= 2) {
               walk(kid);
             } else {
               out.push(kid);
@@ -23832,7 +23898,10 @@
         }
       };
       walk(bodyEl);
-      return out.length ? out : (bodyEl.childNodes.length ? [bodyEl] : []);
+      const filtered = out.filter((el) => !pmEmailBlockIsEmpty(el));
+      if (filtered.length) return filtered;
+      if (!pmEmailBlockIsEmpty(bodyEl)) return [bodyEl];
+      return [];
     }
 
     /** Split a table that is taller than maxH into several tables by rows. */
@@ -23877,6 +23946,16 @@
       return parts.length ? parts : [table];
     }
 
+    function pmEmailPageHasBodyContent(page) {
+      if (!page) return false;
+      const inner = page.querySelector('.pm-eml-letter') || page;
+      const body = inner.querySelector('.pm-eml-body');
+      const scope = body || inner;
+      const nodes = Array.from(scope.children || []).filter((el) =>
+        el.tagName !== 'STYLE' && !el.classList.contains('pm-eml-head'));
+      return nodes.some((el) => !pmEmailBlockIsEmpty(el));
+    }
+
     async function pmRasterHtmlToA4PdfBytes(html) {
       const A4W = 794;   // A4 width @ 96dpi
       const A4H = 1123;  // A4 height @ 96dpi
@@ -23906,7 +23985,6 @@
         const head = letter.querySelector('.pm-eml-head');
         const body = letter.querySelector('.pm-eml-body');
         const styleHtml = styleEl ? styleEl.outerHTML : '';
-        const headH = head ? Math.ceil(head.getBoundingClientRect().height || head.offsetHeight || 0) : 0;
         let blocks = body ? pmEmailCollectBlocks(body) : [];
         // Expand oversized tables into row-groups before packing.
         const expanded = [];
@@ -23918,63 +23996,80 @@
             expanded.push(b);
           }
         }
-        blocks = expanded;
+        blocks = expanded.filter((el) => !pmEmailBlockIsEmpty(el));
 
+        // Pack without clipping so scrollHeight reflects full content; lock to A4
+        // only right before html2canvas.
         const makePage = () => {
           const page = document.createElement('div');
           page.className = 'pm-eml-page';
-          page.style.cssText = 'width:' + A4W + 'px;height:' + A4H + 'px;min-height:' + A4H +
-            'px;max-height:' + A4H + 'px;padding:' + PAD_Y + 'px ' + PAD_X +
-            'px;box-sizing:border-box;background:#fff;overflow:hidden;';
+          page.style.cssText = 'width:' + A4W + 'px;height:auto;min-height:0;max-height:none;padding:' +
+            PAD_Y + 'px ' + PAD_X + 'px;box-sizing:border-box;background:#fff;overflow:visible;';
           const inner = document.createElement('div');
           inner.className = 'pm-eml-letter';
           if (styleHtml) inner.innerHTML = styleHtml;
+          const bodyWrap = document.createElement('div');
+          bodyWrap.className = 'pm-eml-body';
           page.appendChild(inner);
           host.appendChild(page);
-          return { page, inner };
+          return { page, inner, bodyWrap };
         };
 
         const pageEls = [];
         let cur = makePage();
         pageEls.push(cur.page);
-        let used = 0;
 
         if (head) {
-          const headClone = head.cloneNode(true);
-          cur.inner.appendChild(headClone);
-          used = Math.ceil(headClone.getBoundingClientRect().height || headH || 0) + 8;
+          cur.inner.appendChild(head.cloneNode(true));
         }
+        cur.inner.appendChild(cur.bodyWrap);
+        let dest = cur.bodyWrap;
 
         const startNewPage = () => {
           cur = makePage();
           pageEls.push(cur.page);
-          used = 0;
+          cur.inner.appendChild(cur.bodyWrap);
+          dest = cur.bodyWrap;
         };
 
+        // Content height of the letter inner (excludes page padding).
+        const innerHeight = () => Math.ceil(cur.inner.scrollHeight || cur.inner.offsetHeight || 0);
+
         for (const block of blocks) {
-          // Move live nodes from the measure tree; clones for already-split tables.
-          const node = block.parentNode ? block : block;
-          cur.inner.appendChild(node);
-          const bh = Math.ceil(node.getBoundingClientRect().height || node.offsetHeight || 1);
-          if (used > 0 && used + bh > contentH) {
-            cur.inner.removeChild(node);
-            startNewPage();
-            cur.inner.appendChild(node);
-            used = Math.ceil(node.getBoundingClientRect().height || node.offsetHeight || 1);
-          } else {
-            used += bh;
+          if (pmEmailBlockIsEmpty(block)) continue;
+          const node = block;
+          dest.appendChild(node);
+          // Prefer real laid-out height over summed estimates (margins/line-boxes).
+          if (innerHeight() > contentH + 2) {
+            // Doesn't fit on this page — move to the next one (unless it's the
+            // only body node here, in which case it stays and may clip).
+            if (dest.children.length > 1) {
+              dest.removeChild(node);
+              startNewPage();
+              dest.appendChild(node);
+            }
           }
         }
 
-        // If body was empty, still keep the header page.
-        if (!blocks.length && !head) {
-          // nothing to draw
+        // Drop trailing blank pages (e.g. spacer forced a new page).
+        while (pageEls.length > 1) {
+          const last = pageEls[pageEls.length - 1];
+          if (pmEmailPageHasBodyContent(last)) break;
+          pageEls.pop();
+          if (last.parentNode) last.parentNode.removeChild(last);
         }
 
-        host.removeChild(measure);
+        if (measure.parentNode) host.removeChild(measure);
 
-        // 2) Rasterize each page at full A4 — never shrink the last page
-        // (a short page with width > height looked landscape in the viewer).
+        // Lock every page to full A4 portrait before rasterizing.
+        for (const page of pageEls) {
+          page.style.height = A4H + 'px';
+          page.style.minHeight = A4H + 'px';
+          page.style.maxHeight = A4H + 'px';
+          page.style.overflow = 'hidden';
+        }
+
+        // 2) Rasterize each page at full A4 portrait.
         const newPdf = await PDFLib.PDFDocument.create();
         const pageWpt = A4W * PX_TO_PT;
         const pageHpt = A4H * PX_TO_PT;
