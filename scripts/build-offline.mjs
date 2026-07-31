@@ -55,6 +55,9 @@ const PDFJS_WORKER_URL =
 const CANTOO_IMPORT =
   "import('https://esm.sh/@cantoo/pdf-lib@2.7.4')";
 
+const POSTAL_MIME_IMPORT =
+  "import('https://cdn.jsdelivr.net/npm/postal-mime@2.7.5/+esm')";
+
 async function fetchText(url) {
   const res = await fetch(url);
   if (!res.ok) {
@@ -170,6 +173,40 @@ function replaceCantooImport(html, bundledEsm) {
   );
 }
 
+async function bundlePostalMime() {
+  const result = await esbuild.build({
+    entryPoints: [join(root, 'node_modules/postal-mime/src/postal-mime.js')],
+    bundle: true,
+    format: 'esm',
+    platform: 'browser',
+    write: false,
+    minify: true,
+    target: ['es2020'],
+    logLevel: 'silent',
+  });
+  return result.outputFiles[0].text;
+}
+
+function replacePostalMimeImport(html, bundledEsm) {
+  if (!html.includes(POSTAL_MIME_IMPORT)) {
+    throw new Error('Could not find postal-mime dynamic import');
+  }
+  const moduleB64 = toBase64(bundledEsm);
+  const replacement = [
+    '(function () {',
+    `  var moduleB64 = '${moduleB64}';`,
+    "  var binary = atob(moduleB64);",
+    '  var bytes = new Uint8Array(binary.length);',
+    '  for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);',
+    "  var blob = new Blob([bytes], { type: 'text/javascript' });",
+    '  var moduleUrl = URL.createObjectURL(blob);',
+    '  return import(moduleUrl);',
+    '})()',
+  ].join('\n          ');
+  // postalMimeLibPromise = import('...').then(...).catch(...)
+  return html.replace(POSTAL_MIME_IMPORT, replacement);
+}
+
 function addOfflineBanner(html) {
   const marker = '<title>Менеджер документов PDF</title>';
   const banner =
@@ -208,11 +245,15 @@ async function main() {
   console.log('Bundling @cantoo/pdf-lib...');
   const cantooBundle = await bundleCantooPdfLib();
 
+  console.log('Bundling postal-mime...');
+  const postalMimeBundle = await bundlePostalMime();
+
   html = addOfflineBanner(html);
   html = setOfflineFlag(html);
   html = replaceHeadScripts(html, inlinedBlocks);
   html = replacePdfJsWorker(html, workerCode);
   html = replaceCantooImport(html, cantooBundle);
+  html = replacePostalMimeImport(html, postalMimeBundle);
 
   writeFileSync(outputPath, html, 'utf8');
   const sizeMb = (Buffer.byteLength(html, 'utf8') / (1024 * 1024)).toFixed(2);

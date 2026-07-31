@@ -46,6 +46,7 @@
   <script src="https://cdn.jsdelivr.net/npm/docx-preview@0.3.7/dist/docx-preview.min.js"></script>
   <!--ExcelJS: Read XLSX with styles and print options for pagination when converting to PDF-->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+  <!--postal-mime is loaded on demand via dynamic import (see loadPostalMime) -->
 
   <style>
     html, body { height: 100%; }
@@ -6701,7 +6702,7 @@
       <div id="info" class="info" style="display:none;"></div>
       <h1>Менеджер документов PDF</h1>
     </div>
-    <div id="dropZone" class="drop-zone"><span class="dz-desktop" data-i18n="dropZoneDesktop">Нажмите здесь или перетащите в эту область один или несколько файлов для открытия</span><span class="dz-mobile" data-i18n="dropZoneMobile">Нажмите здесь для выбора одного или нескольких файлов</span><br><span data-i18n="dropZoneFormats" style="font-size:14px;color:#888;margin-top:8px;display:block;">Поддерживаются: PDF, Word (.docx), Excel (.xls, .xlsx), изображения (PNG, JPEG, BMP, GIF, WEBP, TIFF)</span></div>
+    <div id="dropZone" class="drop-zone"><span class="dz-desktop" data-i18n="dropZoneDesktop">Нажмите здесь или перетащите в эту область один или несколько файлов для открытия</span><span class="dz-mobile" data-i18n="dropZoneMobile">Нажмите здесь для выбора одного или нескольких файлов</span><br><span data-i18n="dropZoneFormats" style="font-size:14px;color:#888;margin-top:8px;display:block;">Поддерживаются: PDF, Word (.docx), Excel (.xls, .xlsx), письма (.eml), изображения (PNG, JPEG, BMP, GIF, WEBP, TIFF)</span></div>
     <div id="pagesContainer" class="pages"></div>
     <div id="insertIndicator"></div>
     <div id="insertMenu">
@@ -7075,7 +7076,13 @@
         scale: 'Масштаб:', pin: 'Закрепить', unpin: 'Открепить', pages: 'Страниц:',
         dropZoneDesktop: 'Нажмите здесь или перетащите в эту область один или несколько файлов для открытия',
         dropZoneMobile: 'Нажмите здесь для выбора одного или нескольких файлов',
-        dropZoneFormats: 'Поддерживаются: PDF, Word (.docx), Excel (.xls, .xlsx), изображения (PNG, JPEG, BMP, GIF, WEBP, TIFF)',
+        dropZoneFormats: 'Поддерживаются: PDF, Word (.docx), Excel (.xls, .xlsx), письма (.eml), изображения (PNG, JPEG, BMP, GIF, WEBP, TIFF)',
+        confirmEmailAttachments: 'Письмо содержит вложения, которые можно добавить отдельными страницами ({n}):<br><br>{list}<br><br>Добавить вложения следующими страницами?',
+        emailImportLoading: 'Импорт письма...',
+        emailAttachmentsYes: 'Добавить вложения',
+        emailAttachmentsNo: 'Только письмо',
+        emailHdrFrom: 'От:', emailHdrTo: 'Кому:', emailHdrCc: 'Копия:', emailHdrDate: 'Дата:',
+        emailNoSubject: '(без темы)',
         helpHotkeys: 'Горячие клавиши', helpHideToggle: 'Скрыть подсказку', helpClickToHide: 'Нажмите для скрытия окна',
         helpTitle: 'Основные горячие клавиши',
         helpSubtitlePages: 'Работа со страницами:', helpSubtitleGeneral: 'Общие:',
@@ -7321,7 +7328,13 @@
         scale: 'Scale:', pin: 'Pin', unpin: 'Unpin', pages: 'Pages:',
         dropZoneDesktop: 'Click here or drag one or more files into this area to open',
         dropZoneMobile: 'Tap here to select one or more files',
-        dropZoneFormats: 'Supported: PDF, Word (.docx), Excel (.xls, .xlsx), images (PNG, JPEG, BMP, GIF, WEBP, TIFF)',
+        dropZoneFormats: 'Supported: PDF, Word (.docx), Excel (.xls, .xlsx), email (.eml), images (PNG, JPEG, BMP, GIF, WEBP, TIFF)',
+        confirmEmailAttachments: 'This email has attachments that can be added as separate pages ({n}):<br><br>{list}<br><br>Add attachments as following pages?',
+        emailImportLoading: 'Importing email...',
+        emailAttachmentsYes: 'Add attachments',
+        emailAttachmentsNo: 'Email only',
+        emailHdrFrom: 'From:', emailHdrTo: 'To:', emailHdrCc: 'Cc:', emailHdrDate: 'Date:',
+        emailNoSubject: '(no subject)',
         helpHotkeys: 'Keyboard shortcuts', helpHideToggle: 'Hide hint', helpClickToHide: 'Click to hide',
         helpTitle: 'Keyboard shortcuts',
         helpSubtitlePages: 'Pages:', helpSubtitleGeneral: 'General:',
@@ -14946,7 +14959,7 @@
       if (fileInput) return;
       fileInput = document.createElement('input');
       fileInput.type = 'file';
-      fileInput.accept = '.pdf,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.bmp,.gif,.webp,.tif,.tiff';
+      fileInput.accept = '.pdf,.docx,.xls,.xlsx,.eml,.png,.jpg,.jpeg,.bmp,.gif,.webp,.tif,.tiff';
       fileInput.style.display = 'none';
       document.body.appendChild(fileInput);
       fileInput.addEventListener('change', e => e.target.files[0] && loadPDF(e.target.files[0]));
@@ -14981,6 +14994,7 @@
                 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
                 'application/vnd.ms-excel': ['.xls'],
                 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+                'message/rfc822': ['.eml'],
                 'image/png': ['.png'],
                 'image/jpeg': ['.jpg', '.jpeg'],
                 'image/bmp': ['.bmp'],
@@ -15011,7 +15025,7 @@
           const inp = document.createElement('input');
           inp.type = 'file';
           inp.multiple = multi;
-          inp.accept = '.pdf,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.bmp,.gif,.webp,.tif,.tiff';
+          inp.accept = '.pdf,.docx,.xls,.xlsx,.eml,.png,.jpg,.jpeg,.bmp,.gif,.webp,.tif,.tiff';
           inp.onchange = () => resolve(inp.files && inp.files.length ? Array.from(inp.files) : null);
           inp.click();
         });
@@ -15066,7 +15080,7 @@
         invalidateHQ();
         // Name from the first file, extension → .pdf
         currentFileName = (firstName || 'документ.pdf')
-          .replace(/\.(docx?|xlsx?|png|jpe?g|bmp|gif|webp|tiff?)$/i, '.pdf');
+          .replace(/\.(docx?|xlsx?|eml|png|jpe?g|bmp|gif|webp|tiff?)$/i, '.pdf');
         if (!/\.pdf$/i.test(currentFileName)) currentFileName += '.pdf';
 
         dropZone.style.display = 'none';
@@ -15107,6 +15121,7 @@
       const ext = file.name.split('.').pop().toLowerCase();
       const isOffice = ['doc', 'docx', 'xls', 'xlsx'].includes(ext);
       const isImage = isImageExt(ext);
+      const isEmail = isEmailExt(ext);
 
       try {
         let pdfBytes;
@@ -15117,6 +15132,9 @@
         } else if (isImage) {
           showLoading(`Импорт изображения ${file.name}...`);
           pdfBytes = new Uint8Array(await convertImageToPdfBytes(file));
+        } else if (isEmail) {
+          showLoading(t('emailImportLoading'));
+          pdfBytes = new Uint8Array(await convertEmailToPdfBytes(file));
         } else {
           showLoading(t('loadingPreparingDoc'));
           pdfBytes = new Uint8Array(await file.arrayBuffer());
@@ -15125,7 +15143,7 @@
         if (isLoadingCancelled) { historyPushSuspended = false; return; }
 
         // Password-protected PDFs: preparePdfBytes prompts for the password when needed.
-        if (!isOffice && !isImage) {
+        if (!isOffice && !isImage && !isEmail) {
           const prepared = await preparePdfBytes(pdfBytes, file.name);
           if (prepared === null) {
             historyPushSuspended = false;
@@ -15142,8 +15160,8 @@
         pdfDoc = preparedPdfLibDoc || await PDFLib.PDFDocument.load(pdfBytes);
         preparedPdfLibDoc = null;
         invalidateHQ();
-        currentFileName = (isOffice || isImage)
-          ? file.name.replace(/\.(docx?|xlsx?|png|jpe?g|bmp|gif|webp|tiff?)$/i, '.pdf')
+        currentFileName = (isOffice || isImage || isEmail)
+          ? file.name.replace(/\.(docx?|xlsx?|eml|png|jpe?g|bmp|gif|webp|tiff?)$/i, '.pdf')
           : file.name;
 
         dropZone.style.display = 'none';
@@ -18924,6 +18942,7 @@
                 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
                 'application/vnd.ms-excel': ['.xls'],
                 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+                'message/rfc822': ['.eml'],
                 'image/png': ['.png'],
                 'image/jpeg': ['.jpg', '.jpeg'],
                 'image/bmp': ['.bmp'],
@@ -18951,7 +18970,7 @@
           const inp = document.createElement('input');
           inp.type = 'file';
           inp.multiple = true;
-          inp.accept = '.pdf,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.bmp,.gif,.webp,.tif,.tiff';
+          inp.accept = '.pdf,.docx,.xls,.xlsx,.eml,.png,.jpg,.jpeg,.bmp,.gif,.webp,.tif,.tiff';
           inp.onchange = () => resolve(inp.files && inp.files.length ? Array.from(inp.files) : null);
           inp.click();
         });
@@ -19112,6 +19131,7 @@
                 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
                 'application/vnd.ms-excel': ['.xls'],
                 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+                'message/rfc822': ['.eml'],
                 'image/png': ['.png'],
                 'image/jpeg': ['.jpg', '.jpeg'],
                 'image/bmp': ['.bmp'],
@@ -19134,7 +19154,7 @@
         files = await new Promise((resolve) => {
           const inp = document.createElement('input');
           inp.type = 'file';
-          inp.accept = '.pdf,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.bmp,.gif,.webp,.tif,.tiff';
+          inp.accept = '.pdf,.docx,.xls,.xlsx,.eml,.png,.jpg,.jpeg,.bmp,.gif,.webp,.tif,.tiff';
           inp.multiple = true;
           inp.onchange = () => resolve(Array.from(inp.files));
           inp.click();
@@ -20643,6 +20663,7 @@
       ['JSZip', '3.10.1'],
       ['docx-preview', '0.3.7'],
       ['ExcelJS', '4.4.0'],
+      ['postal-mime', '2.7.5'],
       ['@cantoo/pdf-lib', '2.7.4']
     ];
 
@@ -21163,7 +21184,7 @@
 
     function suggestPdfSaveFileName(fileName) {
       let suggestedName = (fileName || 'документ.pdf')
-        .replace(/\.(docx?|xlsx?|png|jpe?g|bmp|gif|webp|tiff?)$/i, '.pdf');
+        .replace(/\.(docx?|xlsx?|eml|png|jpe?g|bmp|gif|webp|tiff?)$/i, '.pdf');
       if (!/\.pdf$/i.test(suggestedName)) suggestedName += '.pdf';
       return suggestedName;
     }
@@ -21428,6 +21449,26 @@
           });
       }
       return pdfPasswordLibPromise;
+    }
+
+    // postal-mime (EML parser). Online: jsDelivr ESM. Offline build replaces the
+    // import() call with a blob: URL (scripts/build-offline.mjs).
+    let postalMimeLibPromise = null;
+    async function loadPostalMime() {
+      if (window.PostalMime) return window.PostalMime;
+      if (!postalMimeLibPromise) {
+        postalMimeLibPromise = import('https://cdn.jsdelivr.net/npm/postal-mime@2.7.5/+esm')
+          .then((m) => {
+            const PM = m && (m.default || m.PostalMime || m);
+            window.PostalMime = PM;
+            return PM;
+          })
+          .catch((err) => {
+            postalMimeLibPromise = null;
+            throw err;
+          });
+      }
+      return postalMimeLibPromise;
     }
 
     function pdfLoadLooksPasswordProtected(err) {
@@ -22051,6 +22092,7 @@
                 'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
                 'application/vnd.ms-excel': ['.xls'],
                 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+                'message/rfc822': ['.eml'],
                 'image/png': ['.png'],
                 'image/jpeg': ['.jpg', '.jpeg'],
                 'image/bmp': ['.bmp'],
@@ -22076,7 +22118,7 @@
       // Fallback: regular <input type="file">
       const input = document.createElement('input');
       input.type = 'file';
-      input.accept = '.pdf,.docx,.xls,.xlsx,.png,.jpg,.jpeg,.bmp,.gif,.webp,.tif,.tiff';
+      input.accept = '.pdf,.docx,.xls,.xlsx,.eml,.png,.jpg,.jpeg,.bmp,.gif,.webp,.tif,.tiff';
       input.multiple = true;
       input.onchange = async () => { await handleFiles(Array.from(input.files)); };
       input.click();
@@ -22213,6 +22255,9 @@
             const typeLabel = ext === 'docx' || ext === 'doc' ? 'Word' : 'Excel';
             return { file, pageCount: typeLabel, isOffice: true };
           }
+          if (ext === 'eml') {
+            return { file, pageCount: 'Email', isOffice: true };
+          }
           if (typeof isImageExt === 'function' && isImageExt(ext)) {
             return { file, pageCount: 1 };
           }
@@ -22278,8 +22323,8 @@
           `;
 
           const ext = file.name.split('.').pop().toLowerCase();
-          const isOfficeFile = ['doc', 'docx', 'xls', 'xlsx'].includes(ext);
-          const typeColors = { pdf: '#e74c3c', docx: '#2b579a', doc: '#2b579a', xlsx: '#217346', xls: '#217346' };
+          const isOfficeFile = ['doc', 'docx', 'xls', 'xlsx', 'eml'].includes(ext);
+          const typeColors = { pdf: '#e74c3c', docx: '#2b579a', doc: '#2b579a', xlsx: '#217346', xls: '#217346', eml: '#8e44ad' };
           const typeColor = typeColors[ext] || '#888';
           const typeLabel = ext.toUpperCase();
           const pageLabel = isOfficeFile
@@ -23568,9 +23613,236 @@
       return await newPdf.save();
     }
 
+    // ── .eml (email) → PDF via postal-mime + html2canvas ──
+    function isEmailExt(ext) {
+      return (ext || '').toLowerCase() === 'eml';
+    }
+
+    function pmFormatEmailAddresses(list) {
+      if (!list || !list.length) return '';
+      return list.map((a) => {
+        if (!a) return '';
+        if (typeof a === 'string') return a;
+        if (a.name && a.address) return a.name + ' <' + a.address + '>';
+        return a.address || a.name || '';
+      }).filter(Boolean).join(', ');
+    }
+
+    function pmBytesToDataUrl(bytes, mime) {
+      const u8 = bytes instanceof Uint8Array ? bytes
+        : (bytes instanceof ArrayBuffer ? new Uint8Array(bytes) : new Uint8Array(bytes || []));
+      let bin = '';
+      const chunk = 0x8000;
+      for (let i = 0; i < u8.length; i += chunk) {
+        bin += String.fromCharCode.apply(null, u8.subarray(i, i + chunk));
+      }
+      return 'data:' + (mime || 'application/octet-stream') + ';base64,' + btoa(bin);
+    }
+
+    function pmSanitizeEmailHtml(html) {
+      const tmp = document.createElement('div');
+      tmp.innerHTML = String(html || '');
+      tmp.querySelectorAll('script, iframe, object, embed, link[rel="import"]').forEach((el) => el.remove());
+      tmp.querySelectorAll('*').forEach((el) => {
+        Array.from(el.attributes || []).forEach((attr) => {
+          const n = attr.name || '';
+          const v = attr.value || '';
+          if (/^on/i.test(n) || ((n === 'href' || n === 'src') && /^\s*javascript:/i.test(v))) {
+            el.removeAttribute(n);
+          }
+        });
+      });
+      return tmp.innerHTML;
+    }
+
+    function pmResolveEmailCidImages(html, attachments) {
+      const map = new Map();
+      (attachments || []).forEach((att) => {
+        if (!att || !att.contentId) return;
+        const cid = String(att.contentId).replace(/^<|>$/g, '').toLowerCase();
+        if (!cid || map.has(cid)) return;
+        try {
+          map.set(cid, pmBytesToDataUrl(att.content, att.mimeType || 'image/png'));
+        } catch (_) {}
+      });
+      if (!map.size) return html;
+      return String(html || '').replace(/cid:([^"'>\s]+)/gi, (full, raw) => {
+        const key = String(raw || '').replace(/^<|>$/g, '').toLowerCase();
+        return map.get(key) || full;
+      });
+    }
+
+    function pmEmailAttachmentIsPageCandidate(att) {
+      if (!att) return false;
+      const disp = String(att.disposition || 'attachment').toLowerCase();
+      if (disp === 'inline') return false;
+      const name = att.filename || att.fileName || '';
+      const ext = (name.split('.').pop() || '').toLowerCase();
+      if (!ext || ext === 'eml' || ext === 'msg') return false;
+      return ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'eml'].includes(ext) || isImageExt(ext);
+    }
+
+    function pmAttachmentToFile(att) {
+      const name = att.filename || att.fileName || 'attachment.bin';
+      const mime = att.mimeType || 'application/octet-stream';
+      const content = att.content;
+      const blob = new Blob([content], { type: mime });
+      return new File([blob], name, { type: mime });
+    }
+
+    function pmBuildEmailLetterHtml(parsed) {
+      const subject = parsed.subject || t('emailNoSubject');
+      const from = pmFormatEmailAddresses(parsed.from ? [parsed.from].flat() : []);
+      const to = pmFormatEmailAddresses(parsed.to);
+      const cc = pmFormatEmailAddresses(parsed.cc);
+      const dateStr = parsed.date
+        ? (parsed.date instanceof Date ? parsed.date : new Date(parsed.date)).toLocaleString()
+        : '';
+      let bodyHtml = '';
+      if (parsed.html) {
+        bodyHtml = pmResolveEmailCidImages(pmSanitizeEmailHtml(parsed.html), parsed.attachments);
+      } else {
+        const text = String(parsed.text || '').replace(/\r\n/g, '\n');
+        bodyHtml = '<pre style="white-space:pre-wrap;font-family:Segoe UI,Arial,sans-serif;font-size:13px;margin:0;">'
+          + escapeHtml(text) + '</pre>';
+      }
+      const row = (label, val) => val
+        ? '<div class="pm-eml-row"><span class="pm-eml-k">' + escapeHtml(label) + '</span>'
+          + '<span class="pm-eml-v">' + escapeHtml(val) + '</span></div>'
+        : '';
+      return `
+        <div class="pm-eml-letter">
+          <style>
+            .pm-eml-letter { font-family: "Segoe UI", Arial, sans-serif; color: #1a1a1a; }
+            .pm-eml-head { border-bottom: 1px solid #c8c8c8; padding-bottom: 14px; margin-bottom: 16px; }
+            .pm-eml-subject { font-size: 18px; font-weight: 700; margin: 0 0 10px; line-height: 1.3; word-break: break-word; }
+            .pm-eml-row { display: flex; gap: 8px; font-size: 12.5px; line-height: 1.45; margin: 3px 0; }
+            .pm-eml-k { flex: 0 0 64px; color: #666; font-weight: 600; }
+            .pm-eml-v { flex: 1 1 auto; min-width: 0; word-break: break-word; }
+            .pm-eml-body { font-size: 13px; line-height: 1.5; word-wrap: break-word; }
+            .pm-eml-body img { max-width: 100% !important; height: auto !important; }
+            .pm-eml-body table { border-collapse: collapse; max-width: 100%; }
+            .pm-eml-body td, .pm-eml-body th { word-break: break-word; }
+          </style>
+          <div class="pm-eml-head">
+            <div class="pm-eml-subject">${escapeHtml(subject)}</div>
+            ${row(t('emailHdrFrom'), from)}
+            ${row(t('emailHdrTo'), to)}
+            ${row(t('emailHdrCc'), cc)}
+            ${row(t('emailHdrDate'), dateStr)}
+          </div>
+          <div class="pm-eml-body">${bodyHtml}</div>
+        </div>`;
+    }
+
+    async function pmRasterHtmlToA4PdfBytes(html) {
+      const A4W = 794;
+      const A4H = 1123;
+      const container = document.createElement('div');
+      container.style.cssText = `
+        width: ${A4W}px; padding: 40px 44px; background: #fff;
+        position: fixed; left: -9999px; top: 0; box-sizing: border-box;`;
+      container.innerHTML = html;
+      document.body.appendChild(container);
+      try {
+        await waitForImagesIn(container);
+        if (document.fonts && document.fonts.ready) {
+          try { await document.fonts.ready; } catch (_) {}
+        }
+        await new Promise((r) => setTimeout(r, 40));
+        const canvas = await html2canvas(container, {
+          scale: OFFICE_RENDER_SCALE,
+          useCORS: true,
+          backgroundColor: '#ffffff',
+          width: A4W,
+          logging: false,
+          windowWidth: A4W + 88,
+          letterRendering: true,
+        });
+        const newPdf = await PDFLib.PDFDocument.create();
+        const pageWpt = A4W * PX_TO_PT;
+        const pageHpt = A4H * PX_TO_PT;
+        const sliceCssH = A4H;
+        const scale = OFFICE_RENDER_SCALE;
+        const slicePx = Math.round(sliceCssH * scale);
+        let y = 0;
+        while (y < canvas.height) {
+          const h = Math.min(slicePx, canvas.height - y);
+          const bytes = canvasRegionToJpegBytes(canvas, 0, y, canvas.width, h);
+          const jpg = await newPdf.embedJpg(bytes);
+          const pageH = (h / scale) * PX_TO_PT;
+          const pg = newPdf.addPage([pageWpt, pageH > 1 ? pageH : pageHpt]);
+          pg.drawImage(jpg, { x: 0, y: 0, width: pageWpt, height: pageH > 1 ? pageH : pageHpt });
+          y += h;
+        }
+        return await newPdf.save();
+      } finally {
+        document.body.removeChild(container);
+      }
+    }
+
+    async function pmConvertSupportedAttachmentToPdfBytes(file) {
+      const ext = (file.name.split('.').pop() || '').toLowerCase();
+      if (['doc', 'docx', 'xls', 'xlsx'].includes(ext)) return await convertOfficeToPdfBytes(file);
+      if (isImageExt(ext)) return await convertImageToPdfBytes(file);
+      if (ext === 'pdf') {
+        const raw = new Uint8Array(await file.arrayBuffer());
+        const prepared = await preparePdfBytes(raw, file.name);
+        preparedPdfLibDoc = null;
+        return prepared;
+      }
+      return null;
+    }
+
+    async function pmAppendPdfBytes(targetPdf, srcBytes) {
+      if (!srcBytes) return;
+      const src = await PDFLib.PDFDocument.load(srcBytes);
+      const pages = await targetPdf.copyPages(src, src.getPageIndices());
+      pages.forEach((p) => targetPdf.addPage(p));
+    }
+
+    async function convertEmailToPdfBytes(file) {
+      const PostalMime = await loadPostalMime();
+      const buf = await file.arrayBuffer();
+      const parsed = await PostalMime.parse(buf, { attachmentEncoding: 'arraybuffer' });
+      const letterHtml = pmBuildEmailLetterHtml(parsed || {});
+      const emailBytes = await pmRasterHtmlToA4PdfBytes(letterHtml);
+
+      const candidates = (parsed && parsed.attachments || []).filter(pmEmailAttachmentIsPageCandidate);
+      if (!candidates.length) return emailBytes;
+
+      const listHtml = candidates.map((a) => escapeHtml(a.filename || a.fileName || 'attachment')).join('<br>');
+      const msg = t('confirmEmailAttachments')
+        .replace('{n}', String(candidates.length))
+        .replace('{list}', listHtml);
+      // Hide loading while the modal is up so the user can click.
+      hideLoading();
+      const addAttachments = await showConfirmDialog(msg, {
+        html: true,
+        yesText: t('emailAttachmentsYes'),
+        noText: t('emailAttachmentsNo'),
+      });
+      showLoading(t('emailImportLoading'));
+      if (!addAttachments) return emailBytes;
+
+      const out = await PDFLib.PDFDocument.create();
+      await pmAppendPdfBytes(out, emailBytes);
+      for (const att of candidates) {
+        try {
+          const attFile = pmAttachmentToFile(att);
+          const attPdf = await pmConvertSupportedAttachmentToPdfBytes(attFile);
+          if (attPdf) await pmAppendPdfBytes(out, attPdf);
+        } catch (err) {
+          console.warn('email attachment import skipped:', att && att.filename, err);
+        }
+      }
+      return await out.save();
+    }
+
     // Universally gets PDF bytes from any supported file:
     // PDF - as is (preparePdfBytes asks for a password when the file requires one);
-    // Office - via convertOfficeToPdfBytes; image - via convertImageToPdfBytes.
+    // Office - via convertOfficeToPdfBytes; image - via convertImageToPdfBytes;
+    // Email (.eml) - via convertEmailToPdfBytes.
     // Returns null if the user cancels the password prompt or the file cannot be read.
     async function fileToPdfBytes(file, showLoad) {
       const ext = (file.name.split('.').pop() || '').toLowerCase();
@@ -23581,6 +23853,10 @@
       if (isImageExt(ext)) {
         if (showLoad) showLoading(`Импорт изображения ${file.name}...`);
         return await convertImageToPdfBytes(file);
+      }
+      if (isEmailExt(ext)) {
+        if (showLoad) showLoading(t('emailImportLoading'));
+        return await convertEmailToPdfBytes(file);
       }
       const raw = new Uint8Array(await file.arrayBuffer());
       const prepared = await preparePdfBytes(raw, file.name);
@@ -24414,11 +24690,12 @@ function isOsFilesDrag(e) {
 function filterSupportedDroppedFiles(fileList) {
   const isSupported = (name) => {
     const ext = ((name || '').split('.').pop() || '').toLowerCase();
-    return ['pdf', 'doc', 'docx', 'xls', 'xlsx'].includes(ext) ||
+    return ['pdf', 'doc', 'docx', 'xls', 'xlsx', 'eml'].includes(ext) ||
            (typeof isImageExt === 'function' && isImageExt(ext));
   };
   return Array.from(fileList || []).filter(f =>
     f.type === 'application/pdf' ||
+    f.type === 'message/rfc822' ||
     (f.type && f.type.startsWith('image/')) ||
     isSupported(f.name));
 }
