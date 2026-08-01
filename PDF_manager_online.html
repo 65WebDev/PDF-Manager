@@ -973,14 +973,15 @@
       height: 42px;
       z-index: 129;
     }
-    /*Two export buttons - common area, including the gap between them*/
+    /*Three popup buttons (e.g. "as images" + "compress" + "encrypt") - common
+       area, including the gaps between them: 3 * 42px + 2 * 6px gap = 138px.*/
     .top-menu .img-save-wrapper--multi:has(.img-save-btn.show)::after {
       content: '';
       position: absolute;
       top: calc(100% + 6px);
       left: 50%;
       transform: translateX(-50%);
-      width: 90px;
+      width: 138px;
       height: 42px;
       z-index: 129;
     }
@@ -1004,12 +1005,40 @@
     }
     .top-menu .img-save-btn svg { width: 22px; height: 22px; display: block; }
     .top-menu .img-save-btn:hover:not(:disabled) { background: #3498db; }
-    /*Two popup buttons side by side (e.g. "as images" + "encrypt") - offset each
-       42px-wide button 24px either side of the wrapper's own center, leaving the
-       6px gap the --multi bridge above already accounts for. A wrapper with a
-       single popup button (no --left/--right) keeps the plain centered left:50%.*/
-    .top-menu .img-save-btn--left { left: calc(50% - 24px); }
-    .top-menu .img-save-btn--right { left: calc(50% + 24px); }
+    /* "Слегка подсвечивается" - a soft accent ring hinting that compressing
+       would save a lot (≥30%, computed ahead of time in the background; see
+       pmApplyCompressHighlight). Deliberately just a static ring, not an
+       animation - stays "slight", not attention-grabbing. */
+    .top-menu .img-save-btn--compress.pm-compress-notable {
+      box-shadow: 0 0 0 2px #2dc30a, 0 4px 14px rgba(0, 0, 0, .5);
+    }
+    /* Soft-disabled: nothing worth compressing right now (confirmed by a
+       fresh estimate). Deliberately NOT the native disabled attribute -
+       .img-save-btn:disabled hides the button outright (opacity 0,
+       pointer-events none), which would also hide the tooltip explaining
+       why - this needs to stay hoverable. The click itself is blocked
+       inline in the button's own onclick, not by CSS. Darkens (rather than
+       fading via opacity, which read as washed-out/lighter against the
+       dark toolbar) so it clearly reads as "off" without disappearing. */
+    .top-menu .img-save-btn--compress.pm-compress-unavailable {
+      background: #232d38;
+      border-color: rgba(255, 255, 255, .14);
+      cursor: not-allowed;
+    }
+    .top-menu .img-save-btn--compress.pm-compress-unavailable svg {
+      opacity: .5;
+    }
+    .top-menu .img-save-btn--compress.pm-compress-unavailable:hover {
+      background: #232d38;
+    }
+    /*Three popup buttons side by side (e.g. "as images" + "compress" + "encrypt") -
+       offset the outer two 42px-wide buttons 48px either side of the wrapper's own
+       center (42px button + 6px gap), leaving the 6px gaps the --multi bridge above
+       already accounts for. The middle button (--mid) needs no offset - it keeps
+       the plain centered left:50% every .img-save-btn already has. A wrapper with a
+       single popup button (no --left/--right/--mid) also keeps that plain center.*/
+    .top-menu .img-save-btn--left { left: calc(50% - 48px); }
+    .top-menu .img-save-btn--right { left: calc(50% + 48px); }
     /*Shown state - managed from JS*/
     .top-menu .img-save-btn.show {
       opacity: 1;
@@ -6244,11 +6273,13 @@
         <div class="img-save-wrapper img-save-wrapper--multi">
           <button id="exportBtn" class="compact-btn" onclick="exportSelectedPages()" disabled title="Экспорт выделенных страниц в один PDF (Shift+E)" data-i18n-title="exportSelectedPages"><span class="btn-ico">📥</span><span class="btn-label" data-i18n="export">Экспорт</span></button>
           <button class="img-save-btn img-save-btn--images img-save-btn--left" onclick="exportSelectedPages(true)" title="Экспорт как изображения&#10;(экспорт выделенных страниц в PDF, где страницы сохранены как изображения)" aria-label="Экспорт как изображения" data-i18n-title="exportAsImagesHint" data-i18n-aria="exportAsImages"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></button>
+          <button class="img-save-btn img-save-btn--compress img-save-btn--mid" onclick="if (!this.classList.contains('pm-compress-unavailable')) exportSelectedPages('compress')" title="Сжать PDF&#10;(уменьшить размер файла без потери качества)" aria-label="Сжать PDF" data-i18n-title="compressPdfHint" data-i18n-aria="compressPdf"><svg viewBox="0 0 48 48" width="20" height="20" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M8.92 8.714C8.495 7.39 9.476 6 10.867 6h26.266c1.391 0 2.372 1.39 1.947 2.714C37.9 12.4 36 19.09 36 24s1.9 11.6 3.08 15.286c.425 1.325-.556 2.714-1.947 2.714H10.867c-1.391 0-2.372-1.39-1.947-2.714C10.1 35.6 12 28.91 12 24S10.1 12.4 8.92 8.714ZM4 15c1.5 2 2 6 2 9s-.5 7-2 9"/><path d="M18 15.5h12M18 24h12m-12 8h4"/><path d="M44 15c-1.5 2-2 6-2 9s.5 6 2 9"/></svg></button>
           <button class="img-save-btn img-save-btn--encrypt img-save-btn--right" onclick="exportSelectedPages('encrypt')" title="Зашифровать файл паролем" aria-label="Зашифровать файл паролем" data-i18n-title="encryptFileTooltip" data-i18n-aria="encryptFileTooltip"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></button>
         </div>
         <div class="img-save-wrapper img-save-wrapper--multi">
           <button id="saveBtn" onclick="savePDF()" class="save-btn compact-btn" title="Сохранить итоговый файл (S)" data-i18n-title="saveFinalFile"><span class="btn-ico">💾</span><span class="btn-label" data-i18n="save">Сохранить</span></button>
           <button class="img-save-btn img-save-btn--left" onclick="savePDF(true)" title="Сохранить как изображения&#10;(сохранение файла в PDF, где страницы сохранены как изображения)" aria-label="Сохранить как изображения" data-i18n-title="saveAsImagesHint" data-i18n-aria="saveAsImages"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></button>
+          <button class="img-save-btn img-save-btn--compress img-save-btn--mid" onclick="if (!this.classList.contains('pm-compress-unavailable')) savePDF('compress')" title="Сжать PDF&#10;(уменьшить размер файла без потери качества)" aria-label="Сжать PDF" data-i18n-title="compressPdfHint" data-i18n-aria="compressPdf"><svg viewBox="0 0 48 48" width="20" height="20" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M8.92 8.714C8.495 7.39 9.476 6 10.867 6h26.266c1.391 0 2.372 1.39 1.947 2.714C37.9 12.4 36 19.09 36 24s1.9 11.6 3.08 15.286c.425 1.325-.556 2.714-1.947 2.714H10.867c-1.391 0-2.372-1.39-1.947-2.714C10.1 35.6 12 28.91 12 24S10.1 12.4 8.92 8.714ZM4 15c1.5 2 2 6 2 9s-.5 7-2 9"/><path d="M18 15.5h12M18 24h12m-12 8h4"/><path d="M44 15c-1.5 2-2 6-2 9s.5 6 2 9"/></svg></button>
           <button class="img-save-btn img-save-btn--encrypt img-save-btn--right" onclick="savePDF('encrypt')" title="Зашифровать файл паролем" aria-label="Зашифровать файл паролем" data-i18n-title="encryptFileTooltip" data-i18n-aria="encryptFileTooltip"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></button>
         </div>
         <button id="mobileReadModeBtn" class="compact-btn" onclick="enterReadMode()" disabled title="Режим чтения" data-i18n-title="readMode"><span class="btn-ico"><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span></button>
@@ -6998,6 +7029,17 @@
     let originalFileBytes = null;
     //Reusing an already parsed pdf-lib document from preparePdfBytes.
     let preparedPdfLibDoc = null;
+    // "Сжать PDF" tooltip-estimate cache/state - declared this early because
+    // updateUIState() (called synchronously below, before any document is
+    // open) reaches into it via pmSyncCompressButtonsUnavailable(); a `let`
+    // declared later in the script would still be in its temporal dead zone
+    // at that first call and throw, aborting the rest of this script (see
+    // the full pmCompressEstimateIsFresh/pmComputeCompressEstimate/etc.
+    // implementation much further down).
+    let pmCompressEstimateCache = { save: null, export: null };
+    let pmCompressEstimateInFlight = { save: null, export: null };
+    const PM_COMPRESS_ESTIMATE_TTL_MS = 20000;
+    const PM_COMPRESS_HIGHLIGHT_RATIO = 0.30;
     let pdfjsPreloadTask = null;   //parallel parsing of pdf.js when opening a file
     //“Dirty” state of the document: were there any changes (rotation/movement/insertion/
     //deletion) after the last save. Resets to false when saving.
@@ -7249,6 +7291,13 @@
         export: 'Экспорт', exportSelectedPages: 'Экспорт выделенных страниц в один PDF (Shift+E)',
         exportAsImages: 'Экспорт как изображения',
         exportAsImagesHint: 'Экспорт как изображения\n(экспорт выделенных страниц в PDF, где страницы сохранены как изображения)',
+        compressPdf: 'Сжать PDF',
+        compressPdfHint: 'Сжать PDF\n(уменьшить размер файла без потери качества)',
+        compressPdfHintEstimate: 'Сжать PDF\n(ожидаемое уменьшение размера файла: {before} → {after})',
+        compressPdfEstimating: 'Сжать PDF\n(расчёт ожидаемого уменьшения размера файла…)',
+        compressPdfProgress: 'Сжатие изображений...',
+        compressPdfResult: 'Размер файла уменьшен: {before} → {after}',
+        compressPdfNoBenefit: 'Существенного уменьшения размера файла не ожидается',
         save: 'Сохранить', saveFinalFile: 'Сохранить итоговый файл (S)',
         saveAsImages: 'Сохранить как изображения',
         saveAsImagesHint: 'Сохранить как изображения\n(сохранение файла в PDF, где страницы сохранены как изображения)',
@@ -7511,6 +7560,13 @@
         export: 'Export', exportSelectedPages: 'Export selected pages to a single PDF (Shift+E)',
         exportAsImages: 'Export as images',
         exportAsImagesHint: 'Export as images\n(export selected pages to PDF with pages saved as images)',
+        compressPdf: 'Compress PDF',
+        compressPdfHint: 'Compress PDF\n(reduce file size without losing quality)',
+        compressPdfHintEstimate: 'Compress PDF\n(expected file size reduction: {before} → {after})',
+        compressPdfEstimating: 'Compress PDF\n(estimating expected file size reduction…)',
+        compressPdfProgress: 'Compressing images...',
+        compressPdfResult: 'File size reduced: {before} → {after}',
+        compressPdfNoBenefit: 'No significant file size reduction expected',
         save: 'Save', saveFinalFile: 'Save final file (S)',
         saveAsImages: 'Save as images',
         saveAsImagesHint: 'Save as images\n(save file as PDF with pages saved as images)',
@@ -8426,6 +8482,11 @@
         exportBtn.parentElement.querySelectorAll('.img-save-btn')
           .forEach(b => { b.disabled = exportBtn.disabled; });
       }
+      // Selection changes can also flip which pages Export's own compress
+      // estimate is scoped to (stale for the new selection until re-hovered)
+      // - re-check whether the "nothing worth compressing" soft-disable
+      // still applies now that the base enabled/disabled state above changed.
+      if (typeof pmSyncCompressButtonsUnavailable === 'function') pmSyncCompressButtonsUnavailable();
 
       scheduleExportDragCache();
       syncExportBtnDraggable();
@@ -8814,6 +8875,10 @@
           if (el.hasAttribute('data-tip')) el.setAttribute('data-tip', val);
         }
       });
+      // The line above just reset the Compress PDF buttons back to their
+      // static hint from data-i18n-title - if size estimates were already
+      // cached, put them right back (in the new language) instead of losing them.
+      if (typeof pmRefreshAllCompressEstimateTooltips === 'function') pmRefreshAllCompressEstimateTooltips();
       document.querySelectorAll('[data-i18n-aria]').forEach((el) => {
         const key = el.getAttribute('data-i18n-aria');
         if (key) el.setAttribute('aria-label', t(key));
@@ -22402,6 +22467,7 @@
       if (isLoading || selectedPages.size === 0) return;
       const asImage = mode === true || mode === 'images';
       const encryptOnly = mode === 'encrypt';
+      const compressOnly = mode === 'compress';
 
       const indicesToExport = getExportSelectedIndices();
       if (indicesToExport.length === 0) return;
@@ -22449,12 +22515,20 @@
 
       showLoading("Экспорт выделенных страниц...");
 
+      let compressBeforeSize = null, compressChangedCount = 0;
       try {
         let bytes = await buildExportPdfBytes(indicesToExport);
         if (asImage) {
           showLoading('Подготовка изображений...');
           bytes = await rasterizePdfBytesToImagePdf(
             bytes, rasterScale, 'Экспорт страниц как изображений...', jpegQuality);
+        }
+        if (compressOnly) {
+          showLoading(t('compressPdfProgress'));
+          compressBeforeSize = bytes.length;
+          const result = await compressPdfImagesBytes(bytes, t('compressPdfProgress'));
+          bytes = result.bytes;
+          compressChangedCount = result.changedCount;
         }
         if (encryptPassword) {
           showLoading('Шифрование файла...');
@@ -22482,6 +22556,13 @@
           a.download = suggestedName;
           a.click();
           URL.revokeObjectURL(url);
+        }
+        if (compressOnly) {
+          if (compressChangedCount > 0) {
+            alert(t('compressPdfResult', { before: formatBytes(compressBeforeSize), after: formatBytes(bytes.length) }));
+          } else {
+            alert(t('compressPdfNoBenefit'));
+          }
         }
       } catch (e) {
         console.error(e);
@@ -22615,6 +22696,7 @@
       if (isLoading || !pdfDoc) return alert('Нет документа');
       const asImage = mode === true || mode === 'images';
       const encryptOnly = mode === 'encrypt';
+      const compressOnly = mode === 'compress';
 
       let jpegQuality = 0.92;
       let rasterScale = dpiToPdfScale(DEFAULT_RASTER_DPI);
@@ -22716,6 +22798,14 @@
           bytes = await rasterizePdfBytesToImagePdf(
             bytes, rasterScale, 'Сохранение страниц как изображений...', jpegQuality);
         }
+        let compressBeforeSize = null, compressChangedCount = 0;
+        if (compressOnly) {
+          showLoading(t('compressPdfProgress'));
+          compressBeforeSize = bytes.length;
+          const result = await compressPdfImagesBytes(bytes, t('compressPdfProgress'));
+          bytes = result.bytes;
+          compressChangedCount = result.changedCount;
+        }
         if (encryptPassword) {
           showLoading('Шифрование файла...');
           try {
@@ -22751,6 +22841,13 @@
         }
         // The document is saved - we consider it “clean” (without unsaved changes)
         await resetDocHistoryToCurrent();
+        if (compressOnly) {
+          if (compressChangedCount > 0) {
+            alert(t('compressPdfResult', { before: formatBytes(compressBeforeSize), after: formatBytes(bytes.length) }));
+          } else {
+            alert(t('compressPdfNoBenefit'));
+          }
+        }
       } catch (e) {
         if (saveTarget && saveTarget.writable) {
           try { await saveTarget.writable.abort(); } catch (_) {}
@@ -26038,6 +26135,13 @@
           if (!pdfDoc) return;   // nothing to act on yet - "see the opportunity" only makes sense once a document is open
           clearTimeout(hideTimer);
           popBtns.forEach(b => { if (!b.disabled) b.classList.add('show'); });
+          const compressBtn = wrapper.querySelector('.img-save-btn--compress');
+          if (compressBtn && typeof pmRefreshCompressEstimateTooltip === 'function') {
+            // Export only ever sends the SELECTED pages, never the whole
+            // document, so its estimate must be scoped to that selection.
+            const scope = wrapper.querySelector('#exportBtn') ? 'export' : 'save';
+            pmRefreshCompressEstimateTooltip(scope, compressBtn);
+          }
         };
         const scheduleHide = () => {
           clearTimeout(hideTimer);
@@ -40224,6 +40328,7 @@ function pePositionTextSelCtxMenuAwayFromSelection(menu, clientX, clientY, info)
   const viewB = viewT + (vv ? vv.height : window.innerHeight);
 
   let selBox = null;
+  let lineRects = [];
   const grow = (r) => {
     if (!r || (!(r.width > 0) && !(r.height > 0))) return;
     if (!selBox) selBox = { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
@@ -40237,7 +40342,10 @@ function pePositionTextSelCtxMenuAwayFromSelection(menu, clientX, clientY, info)
   try {
     if (info && info.range) {
       const rects = info.range.getClientRects();
-      for (let i = 0; i < rects.length; i++) grow(rects[i]);
+      for (let i = 0; i < rects.length; i++) {
+        grow(rects[i]);
+        if (rects[i].width > 0 || rects[i].height > 0) lineRects.push(rects[i]);
+      }
       if (!selBox) grow(info.range.getBoundingClientRect());
     }
   } catch (_) {}
@@ -40259,6 +40367,36 @@ function pePositionTextSelCtxMenuAwayFromSelection(menu, clientX, clientY, info)
   });
 
   const candidates = [];
+  // The line of the selection actually nearest the click - anchoring here
+  // keeps the menu close to the cursor even when the full selection spans
+  // many lines/columns, instead of only ever considering positions relative
+  // to the selection's overall (possibly huge) bounding box.
+  let clickLine = null;
+  if (lineRects.length) {
+    let bestLineDist = Infinity;
+    for (const r of lineRects) {
+      const cy = Math.max(r.top, Math.min(r.bottom, clientY));
+      const cx = Math.max(r.left, Math.min(r.right, clientX));
+      const d = Math.hypot(cx - clientX, cy - clientY);
+      if (d < bestLineDist) { bestLineDist = d; clickLine = r; }
+    }
+  }
+  if (clickLine) {
+    candidates.push(
+      { x: clientX, y: clickLine.bottom + gap },
+      { x: clientX - mw, y: clickLine.bottom + gap },
+      { x: clientX, y: clickLine.top - mh - gap },
+      { x: clientX - mw, y: clickLine.top - mh - gap },
+      { x: clickLine.right + gap, y: clientY - mh / 2 },
+      { x: clickLine.left - mw - gap, y: clientY - mh / 2 }
+    );
+  }
+  candidates.push(
+    { x: clientX + gap, y: clientY + gap },
+    { x: clientX - mw - gap, y: clientY - mh - gap },
+    { x: clientX + gap, y: clientY - mh - gap },
+    { x: clientX - mw - gap, y: clientY + gap }
+  );
   if (selBox) {
     const midX = (selBox.left + selBox.right) / 2 - mw / 2;
     candidates.push(
@@ -40272,20 +40410,19 @@ function pePositionTextSelCtxMenuAwayFromSelection(menu, clientX, clientY, info)
       { x: selBox.left - mw - gap, y: (selBox.top + selBox.bottom) / 2 - mh / 2 }
     );
   }
-  candidates.push(
-    { x: clientX + gap, y: clientY + gap },
-    { x: clientX - mw - gap, y: clientY - mh - gap },
-    { x: clientX + gap, y: clientY - mh - gap },
-    { x: clientX - mw - gap, y: clientY + gap }
-  );
 
-  let best = null;
+  // Pick the closest-to-cursor candidate that doesn't cover the selection,
+  // instead of just the first one in priority order - for a tall/wide
+  // selection, an early "priority" candidate (e.g. flush against the far
+  // edge of the WHOLE selection, always at its top regardless of where in
+  // the selection the click actually landed) can end up much farther from
+  // the click than a later, equally valid candidate right next to it.
+  let best = null, bestDist = Infinity;
   for (let i = 0; i < candidates.length; i++) {
     const c = clamp(candidates[i].x, candidates[i].y);
-    if (!overlapsSel(c.x, c.y)) {
-      best = c;
-      break;
-    }
+    if (overlapsSel(c.x, c.y)) continue;
+    const d = Math.hypot(c.x - clientX, c.y - clientY);
+    if (d < bestDist) { bestDist = d; best = c; }
   }
   if (!best) {
     // Last resort: pin to the edge of the viewport farthest from the selection mid.
@@ -49668,6 +49805,543 @@ async function peRewriteStreamBytes(doc, stream, newBytes) {
     try { stream.dict.delete(PDFLib.PDFName.of('DP')); } catch (_) {}
     stream.dict.set(PDFLib.PDFName.of('Length'), PDFLib.PDFNumber.of(stream.contents.length));
   } catch (_) {}
+}
+
+// ============================================================================
+// "Сжать PDF" - resample oversized embedded JPEGs in place, leaving text and
+// vector graphics untouched. Deliberately narrow in scope for safety:
+//   - only plain /DCTDecode (JPEG) images, single filter (no [.., DCTDecode]
+//     chains) - the browser's own JPEG decoder handles them with no extra
+//     dependency, and re-encoding stays lossy-once instead of stacking loss
+//     on top of whatever the original encoder already did.
+//   - only DeviceRGB/DeviceGray (or ICCBased with N=1/3) color - CMYK JPEGs
+//     are notoriously inconsistent across browsers (some invert them), so
+//     touching one risks visibly wrong colors rather than a smaller file.
+//   - never an image with /SMask or /Mask - re-encoding as plain JPEG has no
+//     alpha channel, so a masked image would lose its transparency.
+//   - only when the image is actually painted somewhere with a resolvable
+//     CTM, and its native pixel size exceeds what that placement's biggest
+//     on-page size needs at PM_COMPRESS_TARGET_DPI by more than the slack
+//     factor - otherwise there's nothing safe to gain.
+// ============================================================================
+
+const PM_COMPRESS_TARGET_DPI = 200;
+const PM_COMPRESS_SIZE_SLACK = 1.15;
+const PM_COMPRESS_MIN_PIXELS = 300 * 300;
+const PM_COMPRESS_JPEG_QUALITY = 0.85;
+
+function pmRefEq(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  try {
+    if (typeof a.objectNumber === 'number' && typeof b.objectNumber === 'number') {
+      return a.objectNumber === b.objectNumber && a.generationNumber === b.generationNumber;
+    }
+  } catch (_) {}
+  return false;
+}
+
+// name -> {kind:'image', ref, obj} | {kind:'form', obj, matrix, resources}
+function pmBuildXObjectRefMap(doc, resourcesDict) {
+  const out = new Map();
+  if (!resourcesDict || typeof resourcesDict.get !== 'function') return out;
+  const xoDict = peLookupPdfObj(doc, resourcesDict.get(PDFLib.PDFName.of('XObject')));
+  if (!xoDict || typeof xoDict.keys !== 'function') return out;
+  for (const key of xoDict.keys()) {
+    const rawVal = xoDict.get(key);
+    const obj = peLookupPdfObj(doc, rawVal);
+    if (!obj || !obj.dict) continue;
+    const st = pePdfResName(obj.dict.get(PDFLib.PDFName.of('Subtype')));
+    const name = peDecodePdfNameToken(pePdfResName(key));
+    const ref = (rawVal && typeof rawVal.objectNumber === 'number') ? rawVal : null;
+    if (st === 'Image') {
+      out.set(name, { kind: 'image', ref, obj });
+    } else if (st === 'Form' && obj.contents != null) {
+      let matrix = [1, 0, 0, 1, 0, 0];
+      const mObj = peLookupPdfObj(doc, obj.dict.get(PDFLib.PDFName.of('Matrix')));
+      if (mObj && typeof mObj.asArray === 'function') {
+        const m = mObj.asArray().map(x => pePdfNumValue(doc, x));
+        if (m.length === 6 && m.every(v => v != null)) matrix = m;
+      }
+      const resources = peLookupPdfObj(doc, obj.dict.get(PDFLib.PDFName.of('Resources')));
+      out.set(name, { kind: 'form', obj, matrix, resources });
+    }
+  }
+  return out;
+}
+
+// Walks a content stream tracking q/Q/cm only far enough to know, for every
+// image Do, the on-page size (in PDF points) that placement needs - recurses
+// into Form XObjects with a visited-guard against circular references.
+// Everything else (text, paths, inline images) is skipped as opaque bytes.
+function pmTrackImageUsage(doc, src, resourcesDict, initialCtm, usageMap, depth, formStack) {
+  if (!src || depth > 8) return;
+  const xobjMap = pmBuildXObjectRefMap(doc, resourcesDict);
+  const len = src.length;
+  let i = 0;
+  let ctm = initialCtm.slice();
+  const ctmStack = [];
+  const numBuf = [];
+  let lastName = '';
+
+  const isWS = c => c === 0x20 || c === 0x09 || c === 0x0d || c === 0x0a || c === 0x0c || c === 0;
+  const isDelim = c => c === 0x28 || c === 0x29 || c === 0x3c || c === 0x3e || c === 0x5b ||
+    c === 0x5d || c === 0x7b || c === 0x7d || c === 0x2f || c === 0x25;
+
+  function skipWS() {
+    while (i < len) {
+      const c = src[i];
+      if (isWS(c)) { i++; continue; }
+      if (c === 0x25) { while (i < len && src[i] !== 0x0a && src[i] !== 0x0d) i++; continue; }
+      break;
+    }
+  }
+  function skipLiteralString() {
+    i++;
+    let d = 1;
+    while (i < len && d > 0) {
+      const c = src[i];
+      if (c === 0x5c) { i += 2; continue; }
+      if (c === 0x28) d++;
+      else if (c === 0x29) d--;
+      i++;
+    }
+  }
+  function skipName() {
+    i++;
+    while (i < len && !isWS(src[i]) && !isDelim(src[i])) i++;
+  }
+  function skipHexOrDict() {
+    if (src[i + 1] === 0x3c) {
+      i += 2;
+      let d = 1;
+      while (i < len && d > 0) {
+        skipWS();
+        if (i >= len) break;
+        const c = src[i];
+        if (c === 0x3c && src[i + 1] === 0x3c) { d++; i += 2; continue; }
+        if (c === 0x3e && src[i + 1] === 0x3e) { d--; i += 2; continue; }
+        if (c === 0x28) { skipLiteralString(); continue; }
+        if (c === 0x2f) { skipName(); continue; }
+        if (c === 0x3c) { skipHexOrDict(); continue; }
+        i++;
+      }
+    } else {
+      i++;
+      while (i < len && src[i] !== 0x3e) i++;
+      if (i < len) i++;
+    }
+  }
+  function skipArray() {
+    i++;
+    let d = 1;
+    while (i < len && d > 0) {
+      skipWS();
+      if (i >= len) break;
+      const c = src[i];
+      if (c === 0x5b) { d++; i++; continue; }
+      if (c === 0x5d) { d--; i++; continue; }
+      if (c === 0x28) { skipLiteralString(); continue; }
+      if (c === 0x3c) { skipHexOrDict(); continue; }
+      if (c === 0x2f) { skipName(); continue; }
+      i++;
+    }
+  }
+  function skipInlineImage() {
+    i += 2; // past 'BI'
+    while (i < len) {
+      skipWS();
+      if (i >= len) return;
+      const c = src[i];
+      if (c === 0x2f) { skipName(); continue; }
+      if (c === 0x28) { skipLiteralString(); continue; }
+      if (c === 0x3c) { skipHexOrDict(); continue; }
+      if (c === 0x5b) { skipArray(); continue; }
+      if (src[i] === 0x49 && src[i + 1] === 0x44 &&
+          (i + 2 >= len || isWS(src[i + 2]) || isDelim(src[i + 2]))) {
+        i += 2;
+        if (i < len && isWS(src[i])) i++;
+        break;
+      }
+      i++;
+    }
+    while (i < len) {
+      if (src[i] === 0x45 && src[i + 1] === 0x49 &&
+          (i === 0 || isWS(src[i - 1])) &&
+          (i + 2 >= len || isWS(src[i + 2]) || isDelim(src[i + 2]))) {
+        i += 2;
+        return;
+      }
+      i++;
+    }
+  }
+
+  while (i < len) {
+    skipWS();
+    if (i >= len) break;
+    const c = src[i];
+    if (c === 0x28) { skipLiteralString(); numBuf.length = 0; continue; }
+    if (c === 0x3c) { skipHexOrDict(); numBuf.length = 0; continue; }
+    if (c === 0x5b) { skipArray(); numBuf.length = 0; continue; }
+    if (c === 0x2f) {
+      const start = i;
+      skipName();
+      lastName = peDecodePdfNameToken(String.fromCharCode.apply(null, src.subarray(start + 1, i)));
+      continue;
+    }
+    if (c === 0x2b || c === 0x2d || c === 0x2e || (c >= 0x30 && c <= 0x39)) {
+      const start = i;
+      i++;
+      while (i < len && !isWS(src[i]) && !isDelim(src[i])) i++;
+      const n = parseFloat(String.fromCharCode.apply(null, src.subarray(start, i)));
+      if (Number.isFinite(n)) numBuf.push(n);
+      continue;
+    }
+    const start = i;
+    while (i < len && !isWS(src[i]) && !isDelim(src[i])) i++;
+    if (i === start) { i++; continue; } // stray delimiter byte - avoid getting stuck
+    const op = String.fromCharCode.apply(null, src.subarray(start, i));
+    if (op === 'q') { ctmStack.push(ctm.slice()); numBuf.length = 0; continue; }
+    if (op === 'Q') { if (ctmStack.length) ctm = ctmStack.pop(); numBuf.length = 0; continue; }
+    if (op === 'cm') {
+      if (numBuf.length >= 6) {
+        const m = numBuf.slice(-6);
+        ctm = peMatMul(ctm, m[0], m[1], m[2], m[3], m[4], m[5]);
+      }
+      numBuf.length = 0; continue;
+    }
+    if (op === 'Do') {
+      const info = xobjMap.get(lastName);
+      if (info) {
+        if (info.kind === 'image' && info.ref) {
+          const c00x = ctm[4], c00y = ctm[5];
+          const c10x = ctm[0] + ctm[4], c10y = ctm[1] + ctm[5];
+          const c01x = ctm[2] + ctm[4], c01y = ctm[3] + ctm[5];
+          const wPt = Math.hypot(c10x - c00x, c10y - c00y);
+          const hPt = Math.hypot(c01x - c00x, c01y - c00y);
+          const key = info.ref.objectNumber + '_' + info.ref.generationNumber;
+          const cur = usageMap.get(key);
+          if (cur) { cur.maxWpt = Math.max(cur.maxWpt, wPt); cur.maxHpt = Math.max(cur.maxHpt, hPt); }
+          else usageMap.set(key, { ref: info.ref, obj: info.obj, maxWpt: wPt, maxHpt: hPt });
+        } else if (info.kind === 'form' && !formStack.includes(info.obj)) {
+          const formCtm = peMatMul(ctm, info.matrix[0], info.matrix[1], info.matrix[2], info.matrix[3], info.matrix[4], info.matrix[5]);
+          const formContent = peDecodePdfStreamBytes(info.obj);
+          const formRes = info.resources || resourcesDict;
+          pmTrackImageUsage(doc, formContent, formRes, formCtm, usageMap, depth + 1, formStack.concat([info.obj]));
+        }
+      }
+      numBuf.length = 0; continue;
+    }
+    if (op === 'BI') { skipInlineImage(); numBuf.length = 0; continue; }
+    numBuf.length = 0;
+  }
+}
+
+function pmImageFilterIsDct(doc, obj) {
+  try {
+    const f = obj.dict.get(PDFLib.PDFName.of('Filter'));
+    return f ? pePdfResName(f) === 'DCTDecode' : false;
+  } catch (_) { return false; }
+}
+
+function pmImageHasMask(doc, obj) {
+  try {
+    if (obj.dict.get(PDFLib.PDFName.of('SMask'))) return true;
+    if (obj.dict.get(PDFLib.PDFName.of('Mask'))) return true;
+  } catch (_) {}
+  return false;
+}
+
+function pmImageColorSpaceOk(doc, obj) {
+  try {
+    const cs = peLookupPdfObj(doc, obj.dict.get(PDFLib.PDFName.of('ColorSpace')));
+    if (!cs) return false;
+    const name = pePdfResName(cs);
+    if (name === 'DeviceRGB' || name === 'DeviceGray' || name === 'CalRGB' || name === 'CalGray') return true;
+    if (typeof cs.asArray === 'function') {
+      const arr = cs.asArray();
+      if (arr.length >= 2 && pePdfResName(arr[0]) === 'ICCBased') {
+        const iccStream = peLookupPdfObj(doc, arr[1]);
+        const n = iccStream && iccStream.dict ? pePdfNumValue(doc, iccStream.dict.get(PDFLib.PDFName.of('N'))) : null;
+        return n === 1 || n === 3;
+      }
+    }
+    return false;
+  } catch (_) { return false; }
+}
+
+async function pmCollectImageCompressionCandidates(doc) {
+  const usageMap = new Map();
+  for (const page of doc.getPages()) {
+    const res = pePageResourcesDict(doc, page);
+    if (!res) continue;
+    const content = peGetPageContentBytes(doc, page);
+    if (!content) continue;
+    try {
+      pmTrackImageUsage(doc, content, res, [1, 0, 0, 1, 0, 0], usageMap, 0, []);
+    } catch (e) { console.warn('pmTrackImageUsage failed for a page', e); }
+  }
+  const candidates = [];
+  for (const { ref, obj, maxWpt, maxHpt } of usageMap.values()) {
+    try {
+      if (!obj || !obj.dict || obj.contents == null) continue;
+      if (!pmImageFilterIsDct(doc, obj)) continue;
+      if (pmImageHasMask(doc, obj)) continue;
+      if (!pmImageColorSpaceOk(doc, obj)) continue;
+      const w = pePdfNumValue(doc, obj.dict.get(PDFLib.PDFName.of('Width')));
+      const h = pePdfNumValue(doc, obj.dict.get(PDFLib.PDFName.of('Height')));
+      if (!(w > 0) || !(h > 0) || w * h < PM_COMPRESS_MIN_PIXELS) continue;
+      if (!(maxWpt > 0) || !(maxHpt > 0)) continue; // never actually painted - unsafe to guess a target
+      const targetW = Math.max(1, Math.ceil((maxWpt / 72) * PM_COMPRESS_TARGET_DPI));
+      const targetH = Math.max(1, Math.ceil((maxHpt / 72) * PM_COMPRESS_TARGET_DPI));
+      if (w <= targetW * PM_COMPRESS_SIZE_SLACK && h <= targetH * PM_COMPRESS_SIZE_SLACK) continue;
+      const origBytes = peDecodePdfStreamBytes(obj);
+      if (!origBytes || !origBytes.length) continue;
+      candidates.push({ ref, targetW, targetH, origBytes });
+    } catch (e) { console.warn('compress candidate check failed', e); }
+  }
+  return candidates;
+}
+
+async function pmDownsampleJpegBytes(jpegBytes, targetW, targetH, quality) {
+  const blob = new Blob([jpegBytes], { type: 'image/jpeg' });
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(blob);
+  } catch (_) {
+    return null; // undecodable JPEG variant - leave the image untouched
+  }
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = targetW;
+    canvas.height = targetH;
+    const cctx = canvas.getContext('2d');
+    cctx.imageSmoothingEnabled = true;
+    cctx.imageSmoothingQuality = 'high';
+    cctx.drawImage(bitmap, 0, 0, targetW, targetH);
+    const newBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+    if (!newBlob) return null;
+    return new Uint8Array(await newBlob.arrayBuffer());
+  } finally {
+    try { bitmap.close(); } catch (_) {}
+  }
+}
+
+// Replaces every XObject resource entry (page-level and, recursively, inside
+// Form XObjects) that pointed at oldRef with newRef - a shared image can be
+// referenced under different local names on different pages/forms.
+function pmSwapXObjectRefInDict(doc, resourcesDict, oldRef, newRef, visited) {
+  if (!resourcesDict || typeof resourcesDict.get !== 'function') return;
+  const xoDict = peLookupPdfObj(doc, resourcesDict.get(PDFLib.PDFName.of('XObject')));
+  if (!xoDict || typeof xoDict.keys !== 'function') return;
+  for (const key of xoDict.keys()) {
+    const rawVal = xoDict.get(key);
+    if (pmRefEq(rawVal, oldRef)) { xoDict.set(key, newRef); continue; }
+    const obj = peLookupPdfObj(doc, rawVal);
+    if (!obj || !obj.dict) continue;
+    if (pePdfResName(obj.dict.get(PDFLib.PDFName.of('Subtype'))) !== 'Form') continue;
+    const visitKey = (rawVal && typeof rawVal.objectNumber === 'number')
+      ? rawVal.objectNumber + '_' + rawVal.generationNumber : obj;
+    if (visited.has(visitKey)) continue;
+    visited.add(visitKey);
+    const formRes = peLookupPdfObj(doc, obj.dict.get(PDFLib.PDFName.of('Resources'))) || resourcesDict;
+    pmSwapXObjectRefInDict(doc, formRes, oldRef, newRef, visited);
+  }
+}
+
+function pmSwapXObjectRefEverywhere(doc, oldRef, newRef) {
+  const visited = new Set();
+  for (const page of doc.getPages()) {
+    pmSwapXObjectRefInDict(doc, pePageResourcesDict(doc, page), oldRef, newRef, visited);
+  }
+}
+
+// Downsamples oversized embedded JPEGs in place. Returns the new PDF bytes
+// plus how many images were actually touched, so the caller can tell the
+// user "nothing to compress" instead of silently no-op-saving the file.
+async function compressPdfImagesBytes(bytes, progressLabel) {
+  const doc = await PDFLib.PDFDocument.load(bytes);
+  const candidates = await pmCollectImageCompressionCandidates(doc);
+  let changedCount = 0;
+  for (let idx = 0; idx < candidates.length; idx++) {
+    const cand = candidates[idx];
+    if (progressLabel) showLoading(`${progressLabel} ${idx + 1}/${candidates.length}`);
+    let newBytes = null;
+    try {
+      newBytes = await pmDownsampleJpegBytes(cand.origBytes, cand.targetW, cand.targetH, PM_COMPRESS_JPEG_QUALITY);
+    } catch (e) { console.warn('image downsample failed', e); }
+    if (!newBytes || newBytes.length >= cand.origBytes.length) continue; // no real benefit - leave as-is
+    let embedded;
+    try {
+      embedded = await doc.embedJpg(newBytes);
+    } catch (e) { console.warn('embedJpg failed', e); continue; }
+    if (!embedded || !embedded.ref) continue;
+    pmSwapXObjectRefEverywhere(doc, cand.ref, embedded.ref);
+    // Every reference to the old image was just swapped to the new one above,
+    // so it's now unreachable - but pdf-lib's save() doesn't garbage-collect
+    // unreferenced indirect objects on its own, and would otherwise still
+    // serialize the old (bigger) image data into the output file right
+    // alongside the new one, growing the file instead of shrinking it.
+    try { doc.context.delete(cand.ref); } catch (_) {}
+    changedCount++;
+  }
+  if (!changedCount) return { bytes, changedCount: 0 };
+  const outBytes = await doc.save();
+  // Per-image byte counts already got checked, but re-serializing the whole
+  // document (new xref, no longer reusing the source's own object/stream
+  // packing) has its own overhead - guard the one promise that actually
+  // matters: never hand back a file bigger than what came in.
+  if (outBytes.length >= bytes.length) return { bytes, changedCount: 0 };
+  return { bytes: outBytes, changedCount };
+}
+
+// ---- "Сжать PDF" tooltip preview -------------------------------------
+// Runs the real compression pipeline once in the background (cached, with a
+// short TTL to catch in-place edits) so the button's tooltip can show the
+// expected size reduction BEFORE the user clicks it, instead of only
+// finding out after the save/export already happened.
+//
+// Two independent scopes, cached separately:
+//   'save'   - the WHOLE document, keyed to pdfDoc + its page count.
+//   'export' - only the currently SELECTED pages (Export never sends the
+//              whole document) - keyed to pdfDoc + the exact selection, so
+//              toggling which pages are checked invalidates it correctly.
+// (pmCompressEstimateCache/InFlight and the PM_COMPRESS_* consts are
+// declared near pdfDoc, far above - updateUIState() calls into this code
+// on the very first, synchronous "no document yet" pass, long before
+// execution reaches this point in the script, and referencing a later
+// `let` before its own declaration line has run throws instead of just
+// being undefined.)
+
+function pmCompressEstimateIsFresh(scope, selKey) {
+  const c = pmCompressEstimateCache[scope];
+  if (!c || typeof pdfDoc === 'undefined' || !pdfDoc) return false;
+  if (c.forDoc !== pdfDoc) return false;
+  if (scope === 'export') { if (c.forSelKey !== selKey) return false; }
+  else if (c.forPageCount !== pdfDoc.getPageCount()) return false;
+  return (Date.now() - c.computedAt) < PM_COMPRESS_ESTIMATE_TTL_MS;
+}
+
+async function pmComputeCompressEstimate(scope) {
+  if (typeof pdfDoc === 'undefined' || !pdfDoc) return null;
+  let selKey = null, indices = null;
+  if (scope === 'export') {
+    indices = (typeof getExportSelectedIndices === 'function') ? getExportSelectedIndices() : [];
+    if (!indices.length) return null;
+    selKey = indices.join(',');
+  }
+  if (pmCompressEstimateIsFresh(scope, selKey)) return pmCompressEstimateCache[scope];
+  if (pmCompressEstimateInFlight[scope]) return pmCompressEstimateInFlight[scope];
+  const targetDoc = pdfDoc;
+  const targetPageCount = pdfDoc.getPageCount();
+  pmCompressEstimateInFlight[scope] = (async () => {
+    try {
+      let bytes;
+      if (scope === 'export') {
+        bytes = await buildExportPdfBytes(indices);
+      } else if (peDocumentHasEditorObjects() || peDocumentHasPendingShapeRaster(pdfDoc) || peDocumentHasRedactedPages(pdfDoc)) {
+        bytes = await peBuildFlattenedPdfBytes(pdfDoc);
+      } else {
+        bytes = await pdfDoc.save();
+      }
+      const result = await compressPdfImagesBytes(bytes, null);
+      const entry = {
+        forDoc: targetDoc, forPageCount: targetPageCount, forSelKey: selKey, computedAt: Date.now(),
+        before: bytes.length, after: result.bytes.length, changedCount: result.changedCount
+      };
+      pmCompressEstimateCache[scope] = entry;
+      return entry;
+    } catch (e) {
+      console.warn('compress estimate failed', e);
+      return null;
+    } finally {
+      pmCompressEstimateInFlight[scope] = null;
+    }
+  })();
+  return pmCompressEstimateInFlight[scope];
+}
+
+function pmApplyCompressEstimateToButton(btn, entry) {
+  let text;
+  if (entry && entry.changedCount > 0) {
+    text = t('compressPdfHintEstimate', { before: formatBytes(entry.before), after: formatBytes(entry.after) });
+  } else if (entry && entry.changedCount === 0) {
+    // Confirmed (not just "no data yet") - nothing worth compressing.
+    text = t('compressPdfNoBenefit');
+  } else {
+    text = t('compressPdfHint');
+  }
+  btn.title = text;
+}
+
+function pmApplyCompressHighlight(btn, entry) {
+  const ratio = (entry && entry.changedCount > 0 && entry.before > 0) ? (1 - entry.after / entry.before) : 0;
+  btn.classList.toggle('pm-compress-notable', ratio >= PM_COMPRESS_HIGHLIGHT_RATIO);
+}
+
+// Soft-deactivates a compress button once we've CONFIRMED (fresh estimate)
+// there's nothing worth compressing - stays visible/hoverable (so the
+// explanatory tooltip pmApplyCompressEstimateToButton just set can still be
+// read) rather than using the native disabled attribute, which the
+// .img-save-btn:disabled rule hides outright (opacity 0, pointer-events
+// none - exactly wrong here, that would hide the tooltip along with it).
+// The click handlers themselves also check this class before acting.
+function pmSyncCompressButtonsUnavailable() {
+  document.querySelectorAll('.img-save-wrapper').forEach(wrapper => {
+    const btn = wrapper.querySelector('.img-save-btn--compress');
+    if (!btn || btn.disabled) { if (btn) btn.classList.remove('pm-compress-unavailable'); return; }
+    const scope = wrapper.querySelector('#exportBtn') ? 'export' : 'save';
+    let selKey = null;
+    if (scope === 'export') {
+      const indices = (typeof getExportSelectedIndices === 'function') ? getExportSelectedIndices() : [];
+      selKey = indices.join(',');
+    }
+    const entry = pmCompressEstimateIsFresh(scope, selKey) ? pmCompressEstimateCache[scope] : null;
+    btn.classList.toggle('pm-compress-unavailable', !!(entry && entry.changedCount === 0));
+  });
+}
+
+// Fire-and-forget: safe to call on every hover - internally cached/deduped.
+// scope: 'save' | 'export'; btn: that specific wrapper's own compress button
+// (each scope has its own button element - never shared).
+function pmRefreshCompressEstimateTooltip(scope, btn) {
+  if (typeof pdfDoc === 'undefined' || !pdfDoc || !btn) return;
+  let selKey = null;
+  if (scope === 'export') {
+    const indices = (typeof getExportSelectedIndices === 'function') ? getExportSelectedIndices() : [];
+    if (!indices.length) {
+      pmApplyCompressEstimateToButton(btn, null);
+      pmApplyCompressHighlight(btn, null);
+      btn.classList.remove('pm-compress-unavailable');
+      return;
+    }
+    selKey = indices.join(',');
+  }
+  const apply = (entry) => {
+    pmApplyCompressEstimateToButton(btn, entry);
+    pmApplyCompressHighlight(btn, entry);
+    pmSyncCompressButtonsUnavailable();
+  };
+  if (pmCompressEstimateIsFresh(scope, selKey)) { apply(pmCompressEstimateCache[scope]); return; }
+  // No fresh number yet and it isn't instant to compute - say so up front
+  // rather than leaving the old/static text sitting there looking stale,
+  // and don't leave the button looking blocked while the outcome is
+  // genuinely still unknown.
+  btn.title = t('compressPdfEstimating');
+  btn.classList.remove('pm-compress-unavailable');
+  pmComputeCompressEstimate(scope).then(entry => apply(entry));
+}
+
+// Re-applies whatever's already cached for both buttons (e.g. after
+// pmApplyI18n resets every data-i18n-title element, including these, back
+// to the static hint) without forcing a fresh recompute.
+function pmRefreshAllCompressEstimateTooltips() {
+  document.querySelectorAll('.img-save-wrapper').forEach(wrapper => {
+    const btn = wrapper.querySelector('.img-save-btn--compress');
+    if (!btn) return;
+    const scope = wrapper.querySelector('#exportBtn') ? 'export' : 'save';
+    pmRefreshCompressEstimateTooltip(scope, btn);
+  });
 }
 
 // PDF user-space point → normalized top-based visual coordinates of the
