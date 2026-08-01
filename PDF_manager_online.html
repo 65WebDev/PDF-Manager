@@ -1191,6 +1191,18 @@
     }
     .pm-search-faint-mark.visible { display: block; }
 
+    /* The single-page editor (#pageEditModal, z-index 99990) opens on top of
+       everything above - lift the search panel and its highlight overlays
+       above it too so Ctrl+F search also works while the editor is open.
+       #pageEditModal is earlier in the DOM than all three, so the general
+       sibling combinator reaches them (including .pm-search-faint-mark's
+       pooled <div>s, appended to <body> at runtime, i.e. after it too). */
+    #pageEditModal.open ~ #pmSearchPanel,
+    #pageEditModal.open ~ #pmSearchHighlightBox,
+    #pageEditModal.open ~ .pm-search-faint-mark {
+      z-index: 100000;
+    }
+
     /*═══ Page editor (RMB → “Edit page...”, desktop) ═══*/
     #pageCtxMenu,
     #readModeCtxMenu,
@@ -27708,15 +27720,30 @@ async function pmSearchGoToResult(idx) {
   const r = pmSearchState.results[idx];
   if (!r) return;
   const token = ++pmSearchHighlightToken;
+  const matchOnOtherTab = typeof pmTabsEnabled === 'function' && pmTabsEnabled() &&
+    r.tabId != null && r.tabId !== pmActiveId;
+  // A page-editor session is scoped to the active tab's document, so it
+  // can't show a match from a different tab - close it first (saving any
+  // pending edits, same as the user closing it manually) before switching.
+  if (matchOnOtherTab && peState && typeof pageEditSave === 'function') {
+    await pageEditSave({});
+    if (token !== pmSearchHighlightToken) return;
+  }
   // The result is on another tab - first switch to it, then count
   // faded highlight for the NEW set of visible (active tab) matches.
-  if (typeof pmTabsEnabled === 'function' && pmTabsEnabled() &&
-      r.tabId != null && r.tabId !== pmActiveId && typeof pmActivate === 'function') {
+  if (matchOnOtherTab && typeof pmActivate === 'function') {
     await pmActivate(r.tabId);
     if (token !== pmSearchHighlightToken) return;
     await pmSearchEnsureRectsForActiveTab();
     if (token !== pmSearchHighlightToken) return;
     pmSearchRenderAllHighlights();
+  }
+  // Same-tab match on a page other than the one currently open in the
+  // editor - jump the editor to it (same mechanism as its prev/next page
+  // nav arrows), so search works the same way as in preview mode.
+  if (peState && peState.idx !== r.pageIdx && typeof pageEditSave === 'function') {
+    await pageEditSave({ openIdx: r.pageIdx });
+    if (token !== pmSearchHighlightToken) return;
   }
   if (!r._rectFrac) r._rectFrac = await pmSearchComputeRectFrac(r);
   if (token !== pmSearchHighlightToken) return;
@@ -27803,7 +27830,37 @@ function pmSearchScrollPageIntoView(pageDiv) {
   if (Math.abs(delta) >= 1) scrollContainer.scrollTop += delta;
 }
 
+// Editor equivalent of pmSearchScrollFragmentIntoView: pan #peStageWrap
+// (a plain overflow:auto scroller) just enough to bring the match rect
+// inside it, instead of scrolling the (hidden, behind the modal) grid.
+function pmSearchScrollFragmentIntoViewEditor(r) {
+  const wrap = document.getElementById('peStageWrap');
+  if (!wrap || !r || !r._rectFrac) return;
+  // The true (unclipped) position - the clipped one used for rendering can
+  // sit exactly at the search panel's edge for anything currently hidden
+  // behind/above it, which would make the pan distance look far smaller
+  // than it actually is.
+  const rect = pmSearchEditorRawRect(r._rectFrac);
+  if (!rect) return;
+  const wrapRect = wrap.getBoundingClientRect();
+  const PAD = 12;
+  if (rect.top < wrapRect.top + PAD) {
+    wrap.scrollTop -= (wrapRect.top + PAD - rect.top);
+  } else if (rect.top + rect.height > wrapRect.bottom - PAD) {
+    wrap.scrollTop += (rect.top + rect.height - (wrapRect.bottom - PAD));
+  }
+  if (rect.left < wrapRect.left + PAD) {
+    wrap.scrollLeft -= (wrapRect.left + PAD - rect.left);
+  } else if (rect.left + rect.width > wrapRect.right - PAD) {
+    wrap.scrollLeft += (rect.left + rect.width - (wrapRect.right - PAD));
+  }
+}
+
 async function pmSearchScrollFragmentIntoView(r) {
+  if (peState && r && peState.idx === r.pageIdx) {
+    pmSearchScrollFragmentIntoViewEditor(r);
+    return;
+  }
   if (!scrollContainer || !r) {
     const div = r && pagesContainer.querySelector('.page[data-index="' + r.pageIdx + '"]');
     if (div) pmSearchScrollPageIntoView(div);
@@ -27836,6 +27893,10 @@ function pmSearchClearHighlight() {
 
 // We wait until the page image is rendered (lazy loading/upgrade to HQ).
 function pmSearchWaitPageImageReady(pageIdx) {
+  // The editor's own openPageEditor()/pageEditSave() already await the
+  // stage render before pmSearchGoToResult resumes, so the canvas for
+  // peState.idx is always ready the instant we get here.
+  if (peState && peState.idx === pageIdx) return Promise.resolve(document.getElementById('peCanvas'));
   return new Promise((resolve) => {
     const div = pagesContainer.querySelector('.page[data-index="' + pageIdx + '"]');
     const img = div ? div.querySelector('.img-wrapper img') : null;
@@ -28003,10 +28064,70 @@ async function pmSearchShowPreciseHighlight(r, token) {
   pmSearchRenderAllHighlights();
 }
 
+// Same idea as pmSearchGetHighlightClipTop, scoped to the editor: only the
+// floating search panel can overlap #peCanvas (the editor's own toolbar
+// sits above #peStageWrap in the layout, never over the stage itself).
+function pmSearchEditorClipTop(centerX) {
+  // Baseline is the wrap's OWN top edge, not the bare page-viewport y=0 -
+  // a panned-down page routinely puts the canvas's unclipped top well above
+  // y=0, and treating 0 as a clip threshold there would "cut" (and often
+  // fully zero out) every match currently scrolled above the wrap, which
+  // is exactly the case pmSearchScrollFragmentIntoViewEditor most needs a
+  // real (possibly off-screen-above) rect for in order to pan to it.
+  const wrap = document.getElementById('peStageWrap');
+  let clipTop = wrap ? wrap.getBoundingClientRect().top : 0;
+  const panel = document.getElementById('pmSearchPanel');
+  if (panel && panel.classList.contains('open')) {
+    const pR = panel.getBoundingClientRect();
+    if (centerX >= pR.left - 12 && centerX <= pR.right + 12) {
+      clipTop = Math.max(clipTop, pR.bottom);
+    }
+  }
+  return clipTop;
+}
+
+// Screen rectangle (px) for a fraction (0..1) of the page currently open in
+// the single-page editor, WITHOUT the search-panel-avoidance clip below -
+// used where the true (possibly off-screen, e.g. scrolled above the wrap)
+// position is what's needed, such as computing how far to pan to reach it.
+function pmSearchEditorRawRect(rectFrac) {
+  const canvas = document.getElementById('peCanvas');
+  if (!canvas) return null;
+  const canvasRect = canvas.getBoundingClientRect();
+  if (!canvasRect.width || !canvasRect.height) return null;
+  return {
+    left: canvasRect.left + rectFrac.x * canvasRect.width,
+    top: canvasRect.top + rectFrac.y * canvasRect.height,
+    width: rectFrac.w * canvasRect.width,
+    height: rectFrac.h * canvasRect.height
+  };
+}
+
+// Screen rectangle (px) for a fraction (0..1) of the page currently open in
+// the single-page editor. Unlike the preview grid's raster <img>, #peCanvas
+// is laid out at exactly the PDF page's CSS box (no object-fit letterboxing
+// to correct for) and its on-screen size/position is always live and
+// accurate - no separate "sync on pan/zoom" bookkeeping needed here.
+function pmSearchEditorPixelRect(rectFrac) {
+  const raw = pmSearchEditorRawRect(rectFrac);
+  if (!raw) return null;
+  let { left, top, width, height } = raw;
+
+  const clipTop = pmSearchEditorClipTop(left + width / 2);
+  if (top < clipTop) {
+    const cut = clipTop - top;
+    top += cut;
+    height -= cut;
+  }
+  if (height <= 0 || width <= 0) return null;
+  return { left, top, width, height };
+}
+
 // Screen rectangle (px, taking into account letterboxing of the image and cropping under
 // top menu) for a given page and a fraction (0..1) from it. null if page
 // is not currently drawn on the screen (lazy not loaded / tab is not active).
 function pmSearchPixelRectForPage(pageIdx, rectFrac) {
+  if (peState && peState.idx === pageIdx) return pmSearchEditorPixelRect(rectFrac);
   const div = pagesContainer.querySelector('.page[data-index="' + pageIdx + '"]');
   const img = div ? div.querySelector('.img-wrapper img') : null;
   if (!img || !img.naturalWidth || !img.naturalHeight) return null;
@@ -28323,6 +28444,14 @@ function pmSearchToggleOpen() {
   scrollContainer.addEventListener('scroll', () => {
     if (pmSearchState.results.length) pmSearchRenderAllHighlights();
   }, { passive: true });
+  // Same idea for the single-page editor's own scroller (panning a
+  // zoomed-in page) - #peStageWrap exists from page load, guard inside.
+  const peStageWrapEl = document.getElementById('peStageWrap');
+  if (peStageWrapEl) {
+    peStageWrapEl.addEventListener('scroll', () => {
+      if (peState && pmSearchState.results.length) pmSearchRenderAllHighlights();
+    }, { passive: true });
+  }
 })();
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -28667,6 +28796,12 @@ function peApplyStageLayout(options = {}) {
   // and the box drifted until the gesture ended).
   if (!options.skipCrop) peRedrawCrop();
   if (!options.skipOverflow) peUpdateStageWrapOverflow();
+  // #peCanvas just resized - reposition any live search highlight/faint
+  // marks so they keep tracking the page through the zoom gesture.
+  if (typeof pmSearchState !== 'undefined' && pmSearchState.results.length &&
+      typeof pmSearchRenderAllHighlights === 'function') {
+    pmSearchRenderAllHighlights();
+  }
 }
 
 /**
@@ -32062,6 +32197,13 @@ async function openPageEditor(idx, restoreSelection) {
     peSyncScaleSliderUi();
     peResetEditorHistory();
     peUpdatePageNavButtons();
+    // Reflect whatever the search panel is currently showing on the page
+    // that just opened (covers both a search-driven jump and the editor's
+    // own prev/next arrows while search stays open).
+    if (typeof pmSearchState !== 'undefined' && pmSearchState.results.length &&
+        typeof pmSearchRenderAllHighlights === 'function') {
+      pmSearchRenderAllHighlights();
+    }
     requestAnimationFrame(() => {
       if (typeof peUpdateToolbarWrap === 'function') peUpdateToolbarWrap();
     });
@@ -32611,6 +32753,12 @@ async function pageEditClose(force) {
     }
   }
   peDestroy();
+  // peState is gone now - let any active search highlight fall back to
+  // whatever the grid shows for that page (or hide if it's not visible there either).
+  if (typeof pmSearchState !== 'undefined' && pmSearchState.results.length &&
+      typeof pmSearchRenderAllHighlights === 'function') {
+    pmSearchRenderAllHighlights();
+  }
 }
 
 function peToggleEditorMenu() {
@@ -32843,10 +32991,19 @@ function peOnKeyDown(e) {
       return;
     }
   }
-  // Inside the editor, turn off Ctrl+F (otherwise the regular browser search will pop up)
-  if ((e.ctrlKey || e.metaKey) && e.code === 'KeyF') { e.preventDefault(); e.stopPropagation(); return; }
+  // Ctrl+F opens the same document search panel used in preview mode
+  // (still blocking the browser's own native find so it never pops up).
+  if ((e.ctrlKey || e.metaKey) && e.code === 'KeyF') {
+    e.preventDefault(); e.stopPropagation();
+    if (pdfDoc && typeof pmSearchToggleOpen === 'function') pmSearchToggleOpen();
+    return;
+  }
   if (e.key === 'Escape') {
     e.preventDefault(); e.stopPropagation();
+    // Search sits on top of everything else (same priority as in preview
+    // mode) - dismiss it first, even if the search input itself has focus
+    // (this capture-phase listener runs before the input's own handler).
+    if (typeof pmSearchState !== 'undefined' && pmSearchState.open) { pmSearchClose(); return; }
     if (peColorPreview) { peCloseColorPickerSession(); return; }
     if (peIsShapeMenuOpen()) { peCloseShapeMenu(); return; }
     const colorPop = document.getElementById('peShapeColorPopup');
