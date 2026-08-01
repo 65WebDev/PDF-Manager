@@ -36256,9 +36256,14 @@ function peResumeInlineTextEditAfterMove(o) {
   if (!peState || !o || peState.inlineEditId !== o.id) return;
   peState.inlineEditFocusPending = true;
   peArmTextKeyboardQuiet(40);
+  // Always unpark: on desktop this is the ONLY place .pe-text-geom-dragging
+  // (added unconditionally by peStartInlineTextMove for every border-drag,
+  // mobile or not) gets removed post-drag — leaving it stuck makes the caret
+  // invisible/unselectable modal-wide (see the CSS rule keyed off that class)
+  // until a fresh peBeginInlineEdit happens to clear it too.
+  peUnparkOskProxyAfterGeomDrag();
   // Re-attach mobile overlay (was suspended for the drag) at the new position.
   if (peUsesMobileEditOverlay() || resume) {
-    peUnparkOskProxyAfterGeomDrag();
     peStartMobileEditOverlay(o);
   }
   peFocusInlineEditorNow();
