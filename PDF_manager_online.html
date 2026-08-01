@@ -27583,10 +27583,14 @@ async function pmSearchGetTabPages(tabId) {
 // List of tab(s) to search for, taking into account the “All tabs” checkbox.
 function pmSearchTargets() {
   const tabsOn = typeof pmTabsEnabled === 'function' && pmTabsEnabled();
+  const activeId = (tabsOn && pmActiveId != null) ? pmActiveId : null;
+  // The single-page editor only ever shows one page of the active tab's
+  // document - search must stay confined to that page while it's open (see
+  // the peState filter in pmSearchRun below), so cross-tab search doesn't apply.
+  if (peState) return [{ id: activeId, name: currentFileName || 'Документ' }];
   if (pmSearchState.allTabs && tabsOn && pmTabs.length) {
     return pmTabs.map(t => ({ id: t.id, name: t.fileName || 'Документ' }));
   }
-  const activeId = (tabsOn && pmActiveId != null) ? pmActiveId : null;
   return [{ id: activeId, name: currentFileName || 'Документ' }];
 }
 
@@ -27607,6 +27611,7 @@ async function pmSearchRun(query, opts) {
     const pages = await pmSearchGetTabPages(target.id);
     if (runToken !== pmSearchRunToken) return;   // request is outdated
     pages.forEach((page, idx) => {
+      if (peState && idx !== peState.idx) return;
       const text = page.text;
       if (!text) return;
       const lower = text.toLowerCase();
@@ -27720,30 +27725,22 @@ async function pmSearchGoToResult(idx) {
   const r = pmSearchState.results[idx];
   if (!r) return;
   const token = ++pmSearchHighlightToken;
-  const matchOnOtherTab = typeof pmTabsEnabled === 'function' && pmTabsEnabled() &&
-    r.tabId != null && r.tabId !== pmActiveId;
-  // A page-editor session is scoped to the active tab's document, so it
-  // can't show a match from a different tab - close it first (saving any
-  // pending edits, same as the user closing it manually) before switching.
-  if (matchOnOtherTab && peState && typeof pageEditSave === 'function') {
-    await pageEditSave({});
-    if (token !== pmSearchHighlightToken) return;
-  }
-  // The result is on another tab - first switch to it, then count
-  // faded highlight for the NEW set of visible (active tab) matches.
-  if (matchOnOtherTab && typeof pmActivate === 'function') {
-    await pmActivate(r.tabId);
-    if (token !== pmSearchHighlightToken) return;
-    await pmSearchEnsureRectsForActiveTab();
-    if (token !== pmSearchHighlightToken) return;
-    pmSearchRenderAllHighlights();
-  }
-  // Same-tab match on a page other than the one currently open in the
-  // editor - jump the editor to it (same mechanism as its prev/next page
-  // nav arrows), so search works the same way as in preview mode.
-  if (peState && peState.idx !== r.pageIdx && typeof pageEditSave === 'function') {
-    await pageEditSave({ openIdx: r.pageIdx });
-    if (token !== pmSearchHighlightToken) return;
+  // While the editor is open, pmSearchTargets()/pmSearchRun() already
+  // confine every result to the active tab's peState.idx page - search
+  // must never itself switch pages or tabs out from under an edit in
+  // progress, so there's nothing to jump here in that case.
+  if (!peState) {
+    const matchOnOtherTab = typeof pmTabsEnabled === 'function' && pmTabsEnabled() &&
+      r.tabId != null && r.tabId !== pmActiveId;
+    // The result is on another tab - first switch to it, then count
+    // faded highlight for the NEW set of visible (active tab) matches.
+    if (matchOnOtherTab && typeof pmActivate === 'function') {
+      await pmActivate(r.tabId);
+      if (token !== pmSearchHighlightToken) return;
+      await pmSearchEnsureRectsForActiveTab();
+      if (token !== pmSearchHighlightToken) return;
+      pmSearchRenderAllHighlights();
+    }
   }
   if (!r._rectFrac) r._rectFrac = await pmSearchComputeRectFrac(r);
   if (token !== pmSearchHighlightToken) return;
@@ -28353,6 +28350,17 @@ function pmSearchPositionPanel() {
   panel.style.top = Math.round(rect.bottom + 10) + 'px';
 }
 
+// "Search all tabs" doesn't apply while the single-page editor is open -
+// search is confined to peState.idx then (see pmSearchTargets), so a
+// different tab could never contribute a result anyway.
+function pmSearchUpdateAllTabsRowVisibility() {
+  const allTabsRow = document.getElementById('pmSearchAllTabsRow');
+  if (!allTabsRow) return;
+  const multiTabAvailable = !peState &&
+    typeof pmTabsEnabled === 'function' && pmTabsEnabled() && pmTabs.length > 1;
+  allTabsRow.classList.toggle('hidden', !multiTabAvailable);
+}
+
 function pmSearchOpen() {
   if (!pdfDoc) return;
   const panel = document.getElementById('pmSearchPanel');
@@ -28362,9 +28370,7 @@ function pmSearchOpen() {
   panel.setAttribute('aria-hidden', 'false');
   pmSearchPositionPanel();
 
-  const allTabsRow = document.getElementById('pmSearchAllTabsRow');
-  const multiTabAvailable = typeof pmTabsEnabled === 'function' && pmTabsEnabled() && pmTabs.length > 1;
-  if (allTabsRow) allTabsRow.classList.toggle('hidden', !multiTabAvailable);
+  pmSearchUpdateAllTabsRowVisibility();
 
   // The search field always opens empty (cleared when closed) - just a trick.
   const input = document.getElementById('pmSearchInput');
@@ -32197,13 +32203,16 @@ async function openPageEditor(idx, restoreSelection) {
     peSyncScaleSliderUi();
     peResetEditorHistory();
     peUpdatePageNavButtons();
-    // Reflect whatever the search panel is currently showing on the page
-    // that just opened (covers both a search-driven jump and the editor's
-    // own prev/next arrows while search stays open).
-    if (typeof pmSearchState !== 'undefined' && pmSearchState.results.length &&
-        typeof pmSearchRenderAllHighlights === 'function') {
-      pmSearchRenderAllHighlights();
+    // Search must not leak matches from other pages while editing - re-run
+    // it now that peState.idx is set so pmSearchRun()'s own filter confines
+    // the results to this page (silent: no jump/scroll, this page is
+    // already what's on screen). Covers both a search-driven page jump and
+    // the editor's own prev/next arrows while search stays open.
+    if (typeof pmSearchState !== 'undefined' && pmSearchState.open && pmSearchState.lastQuery &&
+        typeof pmSearchRun === 'function') {
+      await pmSearchRun(pmSearchState.lastQuery, { silent: true });
     }
+    if (typeof pmSearchUpdateAllTabsRowVisibility === 'function') pmSearchUpdateAllTabsRowVisibility();
     requestAnimationFrame(() => {
       if (typeof peUpdateToolbarWrap === 'function') peUpdateToolbarWrap();
     });
@@ -32753,12 +32762,13 @@ async function pageEditClose(force) {
     }
   }
   peDestroy();
-  // peState is gone now - let any active search highlight fall back to
-  // whatever the grid shows for that page (or hide if it's not visible there either).
-  if (typeof pmSearchState !== 'undefined' && pmSearchState.results.length &&
-      typeof pmSearchRenderAllHighlights === 'function') {
-    pmSearchRenderAllHighlights();
+  // peState is gone now - re-run search (silent: no jump/scroll) to widen
+  // back out from the single-page scope it was confined to while editing.
+  if (typeof pmSearchState !== 'undefined' && pmSearchState.open && pmSearchState.lastQuery &&
+      typeof pmSearchRun === 'function') {
+    await pmSearchRun(pmSearchState.lastQuery, { silent: true });
   }
+  if (typeof pmSearchUpdateAllTabsRowVisibility === 'function') pmSearchUpdateAllTabsRowVisibility();
 }
 
 function peToggleEditorMenu() {
