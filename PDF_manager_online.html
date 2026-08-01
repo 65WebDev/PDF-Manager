@@ -28494,6 +28494,10 @@ let peTextSelPointerDown = false;
 let peTextSelLastClientX = 0;
 let peTextSelLastClientY = 0;
 let peLastZoomMouseX = null, peLastZoomMouseY = null;
+// See peOnKeyDown/peOnKeyUp's Alt handling - tracks whether keydown
+// suppressed the browser's own "solo Alt press" menu-focus behavior, so
+// the matching keyup gets the same treatment.
+let peAltMenuGuardActive = false;
 let pePinchActive = false;
 let pePinchStartDist = 0;
 let pePinchStartSlider = 100;
@@ -32926,6 +32930,19 @@ function peOnKeyDown(e) {
   // comment, marker) so that you can see what exactly has been added to the page.
   if (e.key === 'Alt') {
     document.getElementById('pageEditModal')?.classList.add('pe-alt-highlight');
+    // Suppress the browser's own "solo Alt press" menu-focus handling here
+    // too (see the matching preview-mode guard) - #pageEditModal being
+    // open makes that guard bail out entirely (it explicitly skips while
+    // any modal is active), so without this, holding Alt inside the
+    // editor steals keyboard focus to the browser chrome exactly like the
+    // un-prevented preview-mode case did, breaking the very next shortcut
+    // (e.g. Ctrl+F opening the browser's find instead of the editor's).
+    const altTag = (e.target.tagName || '').toLowerCase();
+    const altTyping = altTag === 'textarea' || altTag === 'input' || e.target.isContentEditable;
+    if (!e.ctrlKey && !e.metaKey && !altTyping) {
+      e.preventDefault();
+      peAltMenuGuardActive = true;
+    }
   }
   const tag = (e.target.tagName || '').toLowerCase();
   const typing = tag === 'textarea' || tag === 'input' || e.target.isContentEditable;
@@ -33112,6 +33129,7 @@ function peSyncActiveDragShift(e) {
 function peOnKeyUp(e) {
   if (e.key === 'Alt') {
     document.getElementById('pageEditModal')?.classList.remove('pe-alt-highlight');
+    if (peAltMenuGuardActive) { e.preventDefault(); peAltMenuGuardActive = false; }
   }
   if (e.key === 'Shift') {
     peSyncActiveDragShift(e);
