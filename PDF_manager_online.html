@@ -22330,8 +22330,11 @@
     async function deleteSelected() {
       if (isLoading || selectedPages.size === 0) return;
 
-      // Deletion confirmation
-      const confirmed = await showConfirmDialog(t('confirmDeletePages'));
+      // Deletion confirmation - singular wording when exactly one page is
+      // targeted (selectedPages is already narrowed to the RMB target(s) by
+      // syncSelectionToCtxTargets() when invoked from the context menu).
+      const confirmed = await showConfirmDialog(
+        selectedPages.size === 1 ? t('confirmDeletePage') : t('confirmDeletePages'));
       if (!confirmed) return;
 
       // We mark only pages without a deletion mark and deselect them
