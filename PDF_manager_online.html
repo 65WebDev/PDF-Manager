@@ -1191,6 +1191,18 @@
     }
     .pm-search-faint-mark.visible { display: block; }
 
+    /* The single-page editor (#pageEditModal, z-index 99990) opens on top of
+       everything above - lift the search panel and its highlight overlays
+       above it too so Ctrl+F search also works while the editor is open.
+       #pageEditModal is earlier in the DOM than all three, so the general
+       sibling combinator reaches them (including .pm-search-faint-mark's
+       pooled <div>s, appended to <body> at runtime, i.e. after it too). */
+    #pageEditModal.open ~ #pmSearchPanel,
+    #pageEditModal.open ~ #pmSearchHighlightBox,
+    #pageEditModal.open ~ .pm-search-faint-mark {
+      z-index: 100000;
+    }
+
     /*═══ Page editor (RMB → “Edit page...”, desktop) ═══*/
     #pageCtxMenu,
     #readModeCtxMenu,
@@ -2521,7 +2533,10 @@
       padding: 1px 2px; min-width: 12px; vertical-align: top;
       overflow-wrap: break-word; word-break: break-word;
     }
-    .pe-obj-text.pe-inline-edit { cursor: text; user-select: text; position: relative; }
+    /* Otherwise contenteditable focus draws Chromium's own default focus
+       ring, a second border slightly offset from .pe-obj.sel's - the two
+       never lined up. The blue selection outline is the only border needed. */
+    .pe-obj-text.pe-inline-edit { cursor: text; user-select: text; position: relative; outline: none; }
     .pe-obj-text.pe-inline-edit.pe-text-border-drag { cursor: move; user-select: none; }
     .pe-obj-text.pe-inline-edit.pe-text-border-hover { cursor: move; }
     /*pe-empty instead of pure :empty - the element now always has children
@@ -2738,7 +2753,11 @@
       box-shadow: 0 0 0 1px rgba(52,152,219,.12);
     }
     .pe-text-rotate-handle::before {
-      content: ''; position: absolute; left: 50%; top: 100%; width: 1px; height: 9px;
+      /* height overshoots the actual gap-to-outline distance by outline-width
+         (3px) on purpose - Chromium rounds the outline's device-pixel edge
+         independently of this pseudo-element's, and a flush 9px length left
+         a 1px seam between the two on non-integer-DPR screens. */
+      content: ''; position: absolute; left: 50%; top: 100%; width: 1px; height: 12px;
       background: rgba(52, 152, 219, .55); transform: translateX(-50%);
     }
     .pe-text-rotate-handle:active { cursor: grabbing; }
@@ -6696,6 +6715,14 @@
           <line x1="6" y1="6" x2="18" y2="18"/><line x1="18" y1="6" x2="6" y2="18"/>
         </svg>
       </button>
+    </div>
+    <!-- Manually-added text block: plain text-edit actions (Copy above already
+         covers copy) instead of the PDF-text markup icons above - formatting
+         there has its own toolbar buttons already. -->
+    <div class="pe-text-sel-inline-actions" hidden style="display:none">
+      <button type="button" class="pe-text-sel-copy" data-action="cut-text" data-i18n="peCut">Вырезать</button>
+      <button type="button" class="pe-text-sel-copy" data-action="paste-text" data-i18n="pePaste">Вставить</button>
+      <button type="button" class="pe-text-sel-copy" data-action="delete-text" data-i18n="peDelete">Удалить</button>
     </div>
   </div>
   <div id="peRotateAngleLabel" class="pe-rotate-angle-label" aria-hidden="true"></div>
@@ -13174,8 +13201,18 @@
       scrollContainer.focus({ preventScroll: true });
     }, true);
 
-    // Windows/Chrome: Alt alone activates browser menu bar, and keydown more
-    // doesn't reach the page. We block this when Alt is used to zoom over a PDF.
+    // Windows/Chrome (and Firefox's menu-bar toggle): a "solo" Alt press -
+    // keydown then keyup with no other key pressed in between - activates
+    // the browser's own Alt-menu handling, which steals keyboard focus so
+    // the very next shortcut (e.g. Ctrl+F right after an Alt+wheel zoom)
+    // reaches the browser instead of the page. Suppressing it takes
+    // preventDefault() on BOTH the keydown AND the matching keyup - the
+    // browser's heuristic still fires on release even when only keydown
+    // was prevented, which was the gap here. altMenuGuardActive tracks
+    // whether keydown suppressed it, since pointerInWorkArea can no longer
+    // be true by keyup (e.g. the zoom itself moved the page out from under
+    // the cursor) even though the same gesture should still be suppressed.
+    let altMenuGuardActive = false;
     window.addEventListener('keydown', (e) => {
       if (isTouchDevice || !pdfDoc) return;
       if (e.key !== 'Alt' && e.code !== 'AltLeft' && e.code !== 'AltRight') return;
@@ -13187,6 +13224,7 @@
           .includes((e.target.type || 'text').toLowerCase())) return;
       if (!pointerInWorkArea) return;
       e.preventDefault();
+      altMenuGuardActive = true;
     }, true);
 
     window.addEventListener('keyup', (e) => {
@@ -13198,6 +13236,7 @@
       if (tag === 'textarea' || e.target.isContentEditable) return;
       if (tag === 'input' && ['text', 'search', 'email', 'url', 'tel', 'password', 'number']
           .includes((e.target.type || 'text').toLowerCase())) return;
+      if (altMenuGuardActive) { e.preventDefault(); altMenuGuardActive = false; }
       scrollContainer.focus({ preventScroll: true });
     }, true);
 
@@ -27571,10 +27610,14 @@ async function pmSearchGetTabPages(tabId) {
 // List of tab(s) to search for, taking into account the “All tabs” checkbox.
 function pmSearchTargets() {
   const tabsOn = typeof pmTabsEnabled === 'function' && pmTabsEnabled();
+  const activeId = (tabsOn && pmActiveId != null) ? pmActiveId : null;
+  // The single-page editor only ever shows one page of the active tab's
+  // document - search must stay confined to that page while it's open (see
+  // the peState filter in pmSearchRun below), so cross-tab search doesn't apply.
+  if (peState) return [{ id: activeId, name: currentFileName || 'Документ' }];
   if (pmSearchState.allTabs && tabsOn && pmTabs.length) {
     return pmTabs.map(t => ({ id: t.id, name: t.fileName || 'Документ' }));
   }
-  const activeId = (tabsOn && pmActiveId != null) ? pmActiveId : null;
   return [{ id: activeId, name: currentFileName || 'Документ' }];
 }
 
@@ -27595,6 +27638,7 @@ async function pmSearchRun(query, opts) {
     const pages = await pmSearchGetTabPages(target.id);
     if (runToken !== pmSearchRunToken) return;   // request is outdated
     pages.forEach((page, idx) => {
+      if (peState && idx !== peState.idx) return;
       const text = page.text;
       if (!text) return;
       const lower = text.toLowerCase();
@@ -27708,15 +27752,22 @@ async function pmSearchGoToResult(idx) {
   const r = pmSearchState.results[idx];
   if (!r) return;
   const token = ++pmSearchHighlightToken;
-  // The result is on another tab - first switch to it, then count
-  // faded highlight for the NEW set of visible (active tab) matches.
-  if (typeof pmTabsEnabled === 'function' && pmTabsEnabled() &&
-      r.tabId != null && r.tabId !== pmActiveId && typeof pmActivate === 'function') {
-    await pmActivate(r.tabId);
-    if (token !== pmSearchHighlightToken) return;
-    await pmSearchEnsureRectsForActiveTab();
-    if (token !== pmSearchHighlightToken) return;
-    pmSearchRenderAllHighlights();
+  // While the editor is open, pmSearchTargets()/pmSearchRun() already
+  // confine every result to the active tab's peState.idx page - search
+  // must never itself switch pages or tabs out from under an edit in
+  // progress, so there's nothing to jump here in that case.
+  if (!peState) {
+    const matchOnOtherTab = typeof pmTabsEnabled === 'function' && pmTabsEnabled() &&
+      r.tabId != null && r.tabId !== pmActiveId;
+    // The result is on another tab - first switch to it, then count
+    // faded highlight for the NEW set of visible (active tab) matches.
+    if (matchOnOtherTab && typeof pmActivate === 'function') {
+      await pmActivate(r.tabId);
+      if (token !== pmSearchHighlightToken) return;
+      await pmSearchEnsureRectsForActiveTab();
+      if (token !== pmSearchHighlightToken) return;
+      pmSearchRenderAllHighlights();
+    }
   }
   if (!r._rectFrac) r._rectFrac = await pmSearchComputeRectFrac(r);
   if (token !== pmSearchHighlightToken) return;
@@ -27803,7 +27854,37 @@ function pmSearchScrollPageIntoView(pageDiv) {
   if (Math.abs(delta) >= 1) scrollContainer.scrollTop += delta;
 }
 
+// Editor equivalent of pmSearchScrollFragmentIntoView: pan #peStageWrap
+// (a plain overflow:auto scroller) just enough to bring the match rect
+// inside it, instead of scrolling the (hidden, behind the modal) grid.
+function pmSearchScrollFragmentIntoViewEditor(r) {
+  const wrap = document.getElementById('peStageWrap');
+  if (!wrap || !r || !r._rectFrac) return;
+  // The true (unclipped) position - the clipped one used for rendering can
+  // sit exactly at the search panel's edge for anything currently hidden
+  // behind/above it, which would make the pan distance look far smaller
+  // than it actually is.
+  const rect = pmSearchEditorRawRect(r._rectFrac);
+  if (!rect) return;
+  const wrapRect = wrap.getBoundingClientRect();
+  const PAD = 12;
+  if (rect.top < wrapRect.top + PAD) {
+    wrap.scrollTop -= (wrapRect.top + PAD - rect.top);
+  } else if (rect.top + rect.height > wrapRect.bottom - PAD) {
+    wrap.scrollTop += (rect.top + rect.height - (wrapRect.bottom - PAD));
+  }
+  if (rect.left < wrapRect.left + PAD) {
+    wrap.scrollLeft -= (wrapRect.left + PAD - rect.left);
+  } else if (rect.left + rect.width > wrapRect.right - PAD) {
+    wrap.scrollLeft += (rect.left + rect.width - (wrapRect.right - PAD));
+  }
+}
+
 async function pmSearchScrollFragmentIntoView(r) {
+  if (peState && r && peState.idx === r.pageIdx) {
+    pmSearchScrollFragmentIntoViewEditor(r);
+    return;
+  }
   if (!scrollContainer || !r) {
     const div = r && pagesContainer.querySelector('.page[data-index="' + r.pageIdx + '"]');
     if (div) pmSearchScrollPageIntoView(div);
@@ -27836,6 +27917,10 @@ function pmSearchClearHighlight() {
 
 // We wait until the page image is rendered (lazy loading/upgrade to HQ).
 function pmSearchWaitPageImageReady(pageIdx) {
+  // The editor's own openPageEditor()/pageEditSave() already await the
+  // stage render before pmSearchGoToResult resumes, so the canvas for
+  // peState.idx is always ready the instant we get here.
+  if (peState && peState.idx === pageIdx) return Promise.resolve(document.getElementById('peCanvas'));
   return new Promise((resolve) => {
     const div = pagesContainer.querySelector('.page[data-index="' + pageIdx + '"]');
     const img = div ? div.querySelector('.img-wrapper img') : null;
@@ -28003,10 +28088,70 @@ async function pmSearchShowPreciseHighlight(r, token) {
   pmSearchRenderAllHighlights();
 }
 
+// Same idea as pmSearchGetHighlightClipTop, scoped to the editor: only the
+// floating search panel can overlap #peCanvas (the editor's own toolbar
+// sits above #peStageWrap in the layout, never over the stage itself).
+function pmSearchEditorClipTop(centerX) {
+  // Baseline is the wrap's OWN top edge, not the bare page-viewport y=0 -
+  // a panned-down page routinely puts the canvas's unclipped top well above
+  // y=0, and treating 0 as a clip threshold there would "cut" (and often
+  // fully zero out) every match currently scrolled above the wrap, which
+  // is exactly the case pmSearchScrollFragmentIntoViewEditor most needs a
+  // real (possibly off-screen-above) rect for in order to pan to it.
+  const wrap = document.getElementById('peStageWrap');
+  let clipTop = wrap ? wrap.getBoundingClientRect().top : 0;
+  const panel = document.getElementById('pmSearchPanel');
+  if (panel && panel.classList.contains('open')) {
+    const pR = panel.getBoundingClientRect();
+    if (centerX >= pR.left - 12 && centerX <= pR.right + 12) {
+      clipTop = Math.max(clipTop, pR.bottom);
+    }
+  }
+  return clipTop;
+}
+
+// Screen rectangle (px) for a fraction (0..1) of the page currently open in
+// the single-page editor, WITHOUT the search-panel-avoidance clip below -
+// used where the true (possibly off-screen, e.g. scrolled above the wrap)
+// position is what's needed, such as computing how far to pan to reach it.
+function pmSearchEditorRawRect(rectFrac) {
+  const canvas = document.getElementById('peCanvas');
+  if (!canvas) return null;
+  const canvasRect = canvas.getBoundingClientRect();
+  if (!canvasRect.width || !canvasRect.height) return null;
+  return {
+    left: canvasRect.left + rectFrac.x * canvasRect.width,
+    top: canvasRect.top + rectFrac.y * canvasRect.height,
+    width: rectFrac.w * canvasRect.width,
+    height: rectFrac.h * canvasRect.height
+  };
+}
+
+// Screen rectangle (px) for a fraction (0..1) of the page currently open in
+// the single-page editor. Unlike the preview grid's raster <img>, #peCanvas
+// is laid out at exactly the PDF page's CSS box (no object-fit letterboxing
+// to correct for) and its on-screen size/position is always live and
+// accurate - no separate "sync on pan/zoom" bookkeeping needed here.
+function pmSearchEditorPixelRect(rectFrac) {
+  const raw = pmSearchEditorRawRect(rectFrac);
+  if (!raw) return null;
+  let { left, top, width, height } = raw;
+
+  const clipTop = pmSearchEditorClipTop(left + width / 2);
+  if (top < clipTop) {
+    const cut = clipTop - top;
+    top += cut;
+    height -= cut;
+  }
+  if (height <= 0 || width <= 0) return null;
+  return { left, top, width, height };
+}
+
 // Screen rectangle (px, taking into account letterboxing of the image and cropping under
 // top menu) for a given page and a fraction (0..1) from it. null if page
 // is not currently drawn on the screen (lazy not loaded / tab is not active).
 function pmSearchPixelRectForPage(pageIdx, rectFrac) {
+  if (peState && peState.idx === pageIdx) return pmSearchEditorPixelRect(rectFrac);
   const div = pagesContainer.querySelector('.page[data-index="' + pageIdx + '"]');
   const img = div ? div.querySelector('.img-wrapper img') : null;
   if (!img || !img.naturalWidth || !img.naturalHeight) return null;
@@ -28229,7 +28374,18 @@ function pmSearchPositionPanel() {
   const menu = document.querySelector('.top-menu');
   if (!panel || !menu) return;
   const rect = menu.getBoundingClientRect();
-  panel.style.top = Math.round(rect.bottom + 10) + 'px';
+  panel.style.top = Math.round(rect.bottom + 4) + 'px';
+}
+
+// "Search all tabs" doesn't apply while the single-page editor is open -
+// search is confined to peState.idx then (see pmSearchTargets), so a
+// different tab could never contribute a result anyway.
+function pmSearchUpdateAllTabsRowVisibility() {
+  const allTabsRow = document.getElementById('pmSearchAllTabsRow');
+  if (!allTabsRow) return;
+  const multiTabAvailable = !peState &&
+    typeof pmTabsEnabled === 'function' && pmTabsEnabled() && pmTabs.length > 1;
+  allTabsRow.classList.toggle('hidden', !multiTabAvailable);
 }
 
 function pmSearchOpen() {
@@ -28241,9 +28397,7 @@ function pmSearchOpen() {
   panel.setAttribute('aria-hidden', 'false');
   pmSearchPositionPanel();
 
-  const allTabsRow = document.getElementById('pmSearchAllTabsRow');
-  const multiTabAvailable = typeof pmTabsEnabled === 'function' && pmTabsEnabled() && pmTabs.length > 1;
-  if (allTabsRow) allTabsRow.classList.toggle('hidden', !multiTabAvailable);
+  pmSearchUpdateAllTabsRowVisibility();
 
   // The search field always opens empty (cleared when closed) - just a trick.
   const input = document.getElementById('pmSearchInput');
@@ -28323,6 +28477,14 @@ function pmSearchToggleOpen() {
   scrollContainer.addEventListener('scroll', () => {
     if (pmSearchState.results.length) pmSearchRenderAllHighlights();
   }, { passive: true });
+  // Same idea for the single-page editor's own scroller (panning a
+  // zoomed-in page) - #peStageWrap exists from page load, guard inside.
+  const peStageWrapEl = document.getElementById('peStageWrap');
+  if (peStageWrapEl) {
+    peStageWrapEl.addEventListener('scroll', () => {
+      if (peState && pmSearchState.results.length) pmSearchRenderAllHighlights();
+    }, { passive: true });
+  }
 })();
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -28347,6 +28509,10 @@ let peTextSelPointerDown = false;
 let peTextSelLastClientX = 0;
 let peTextSelLastClientY = 0;
 let peLastZoomMouseX = null, peLastZoomMouseY = null;
+// See peOnKeyDown/peOnKeyUp's Alt handling - tracks whether keydown
+// suppressed the browser's own "solo Alt press" menu-focus behavior, so
+// the matching keyup gets the same treatment.
+let peAltMenuGuardActive = false;
 let pePinchActive = false;
 let pePinchStartDist = 0;
 let pePinchStartSlider = 100;
@@ -28667,6 +28833,12 @@ function peApplyStageLayout(options = {}) {
   // and the box drifted until the gesture ended).
   if (!options.skipCrop) peRedrawCrop();
   if (!options.skipOverflow) peUpdateStageWrapOverflow();
+  // #peCanvas just resized - reposition any live search highlight/faint
+  // marks so they keep tracking the page through the zoom gesture.
+  if (typeof pmSearchState !== 'undefined' && pmSearchState.results.length &&
+      typeof pmSearchRenderAllHighlights === 'function') {
+    pmSearchRenderAllHighlights();
+  }
 }
 
 /**
@@ -31055,7 +31227,7 @@ function editSelectedPage() {
     // actions, rotating a page that ISN'T part of the current multi-selection
     // must not collapse that selection down to just the rotated page.
     let selOk = true;
-    if (action === 'replace' || action === 'cut' || action === 'delete') {
+    if (action === 'replace' || action === 'cut') {
       selOk = syncSelectionToCtxTargets();
     } else if (action === 'export' || action === 'copy' || action === 'print') {
       selOk = syncSelectionToCtxTargets({ notify: true });
@@ -31137,9 +31309,28 @@ function editSelectedPage() {
       case 'copy':
         if (selOk) copySelectedPagesToClipboard();
         break;
-      case 'delete':
-        if (selOk) deleteSelected();
+      case 'delete': {
+        // Same targeting as rotate above, and for the same reason: deleting
+        // a page reached via RMB that ISN'T part of the current
+        // multi-selection must not collapse that selection down to just
+        // the deleted page - the rest of the selection should still be
+        // there afterward.
+        const selectedNd = selSnapshot.selected.filter(i => !markedForDeletion.has(i));
+        const targets = (anchorIdx != null && selectedNd.includes(anchorIdx))
+          ? selectedNd
+          : (anchorIdx != null && !markedForDeletion.has(anchorIdx))
+            ? [anchorIdx]
+            : selectedNd;
+        if (!targets.length) break;
+        const matchesSelection = targets.length === selectedNd.length &&
+          targets.every(i => selectedNd.includes(i));
+        if (matchesSelection) {
+          deleteSelected();
+        } else {
+          targets.forEach(i => deleteSinglePage(i));
+        }
         break;
+      }
       case 'print':
         if (selOk) printSelectedPages();
         break;
@@ -32062,6 +32253,16 @@ async function openPageEditor(idx, restoreSelection) {
     peSyncScaleSliderUi();
     peResetEditorHistory();
     peUpdatePageNavButtons();
+    // Search must not leak matches from other pages while editing - re-run
+    // it now that peState.idx is set so pmSearchRun()'s own filter confines
+    // the results to this page (silent: no jump/scroll, this page is
+    // already what's on screen). Covers both a search-driven page jump and
+    // the editor's own prev/next arrows while search stays open.
+    if (typeof pmSearchState !== 'undefined' && pmSearchState.open && pmSearchState.lastQuery &&
+        typeof pmSearchRun === 'function') {
+      await pmSearchRun(pmSearchState.lastQuery, { silent: true });
+    }
+    if (typeof pmSearchUpdateAllTabsRowVisibility === 'function') pmSearchUpdateAllTabsRowVisibility();
     requestAnimationFrame(() => {
       if (typeof peUpdateToolbarWrap === 'function') peUpdateToolbarWrap();
     });
@@ -32611,6 +32812,13 @@ async function pageEditClose(force) {
     }
   }
   peDestroy();
+  // peState is gone now - re-run search (silent: no jump/scroll) to widen
+  // back out from the single-page scope it was confined to while editing.
+  if (typeof pmSearchState !== 'undefined' && pmSearchState.open && pmSearchState.lastQuery &&
+      typeof pmSearchRun === 'function') {
+    await pmSearchRun(pmSearchState.lastQuery, { silent: true });
+  }
+  if (typeof pmSearchUpdateAllTabsRowVisibility === 'function') pmSearchUpdateAllTabsRowVisibility();
 }
 
 function peToggleEditorMenu() {
@@ -32756,6 +32964,19 @@ function peOnKeyDown(e) {
   // comment, marker) so that you can see what exactly has been added to the page.
   if (e.key === 'Alt') {
     document.getElementById('pageEditModal')?.classList.add('pe-alt-highlight');
+    // Suppress the browser's own "solo Alt press" menu-focus handling here
+    // too (see the matching preview-mode guard) - #pageEditModal being
+    // open makes that guard bail out entirely (it explicitly skips while
+    // any modal is active), so without this, holding Alt inside the
+    // editor steals keyboard focus to the browser chrome exactly like the
+    // un-prevented preview-mode case did, breaking the very next shortcut
+    // (e.g. Ctrl+F opening the browser's find instead of the editor's).
+    const altTag = (e.target.tagName || '').toLowerCase();
+    const altTyping = altTag === 'textarea' || altTag === 'input' || e.target.isContentEditable;
+    if (!e.ctrlKey && !e.metaKey && !altTyping) {
+      e.preventDefault();
+      peAltMenuGuardActive = true;
+    }
   }
   const tag = (e.target.tagName || '').toLowerCase();
   const typing = tag === 'textarea' || tag === 'input' || e.target.isContentEditable;
@@ -32843,10 +33064,19 @@ function peOnKeyDown(e) {
       return;
     }
   }
-  // Inside the editor, turn off Ctrl+F (otherwise the regular browser search will pop up)
-  if ((e.ctrlKey || e.metaKey) && e.code === 'KeyF') { e.preventDefault(); e.stopPropagation(); return; }
+  // Ctrl+F opens the same document search panel used in preview mode
+  // (still blocking the browser's own native find so it never pops up).
+  if ((e.ctrlKey || e.metaKey) && e.code === 'KeyF') {
+    e.preventDefault(); e.stopPropagation();
+    if (pdfDoc && typeof pmSearchToggleOpen === 'function') pmSearchToggleOpen();
+    return;
+  }
   if (e.key === 'Escape') {
     e.preventDefault(); e.stopPropagation();
+    // Search sits on top of everything else (same priority as in preview
+    // mode) - dismiss it first, even if the search input itself has focus
+    // (this capture-phase listener runs before the input's own handler).
+    if (typeof pmSearchState !== 'undefined' && pmSearchState.open) { pmSearchClose(); return; }
     if (peColorPreview) { peCloseColorPickerSession(); return; }
     if (peIsShapeMenuOpen()) { peCloseShapeMenu(); return; }
     const colorPop = document.getElementById('peShapeColorPopup');
@@ -32933,6 +33163,7 @@ function peSyncActiveDragShift(e) {
 function peOnKeyUp(e) {
   if (e.key === 'Alt') {
     document.getElementById('pageEditModal')?.classList.remove('pe-alt-highlight');
+    if (peAltMenuGuardActive) { e.preventDefault(); peAltMenuGuardActive = false; }
   }
   if (e.key === 'Shift') {
     peSyncActiveDragShift(e);
@@ -35558,7 +35789,22 @@ function peScrollSelectedTextIntoFocusCenter(o) {
   const el = document.querySelector('#peObjLayer [data-pe-id="' + o.id + '"].pe-obj-text');
   if (!el) return;
   if (peState.inlineEditId === o.id) {
-    peScrollElementIntoTextFocusCenter(el, { force: true, withPad: true, estimate: true });
+    // Force-centering exists so the on-screen keyboard never covers the
+    // block being edited (this runs right after e.g. a drag-move, to
+    // resume editing).
+    const oskAssist = typeof peNeedsOskTextFocusAssist === 'function' && peNeedsOskTextFocusAssist();
+    if (oskAssist) {
+      peScrollElementIntoTextFocusCenter(el, { force: true, withPad: true, estimate: true });
+      return;
+    }
+    // Desktop: peScrollElementIntoTextFocusCenter's own "covered" check fires
+    // just from sitting near the viewport edge - which is exactly where a
+    // just-finished drag legitimately leaves it - so force:false alone isn't
+    // enough to stop it scrolling. Only nudge when the mini-panel is actually
+    // hiding the caret, same as peScrollInlineEditorIntoWrapSafeZone does.
+    if (typeof peElCoveredByPropsPanel === 'function' && peElCoveredByPropsPanel(el)) {
+      peScrollElementIntoTextFocusCenter(el, { force: false, withPad: true, allowDesktopTopPad: true });
+    }
     return;
   }
   // Selection only: center if covered by mini-panel / viewport; pad only if needed.
@@ -36025,9 +36271,14 @@ function peResumeInlineTextEditAfterMove(o) {
   if (!peState || !o || peState.inlineEditId !== o.id) return;
   peState.inlineEditFocusPending = true;
   peArmTextKeyboardQuiet(40);
+  // Always unpark: on desktop this is the ONLY place .pe-text-geom-dragging
+  // (added unconditionally by peStartInlineTextMove for every border-drag,
+  // mobile or not) gets removed post-drag — leaving it stuck makes the caret
+  // invisible/unselectable modal-wide (see the CSS rule keyed off that class)
+  // until a fresh peBeginInlineEdit happens to clear it too.
+  peUnparkOskProxyAfterGeomDrag();
   // Re-attach mobile overlay (was suspended for the drag) at the new position.
   if (peUsesMobileEditOverlay() || resume) {
-    peUnparkOskProxyAfterGeomDrag();
     peStartMobileEditOverlay(o);
   }
   peFocusInlineEditorNow();
@@ -39619,11 +39870,23 @@ function peRestoreTextSelRange(range) {
 
 function peCaptureEditorTextSelection() {
   const sel = window.getSelection();
-  if (!sel || !sel.rangeCount || sel.isCollapsed) return null;
+  if (!sel || !sel.rangeCount) return null;
   const range = sel.getRangeAt(0);
   let node = range.commonAncestorContainer;
   if (node && node.nodeType === 3) node = node.parentElement;
   if (!node || !node.closest) return null;
+  if (sel.isCollapsed) {
+    // A placed caret (nothing selected) - only useful for the inline-edit
+    // case, so RMB there can still offer Paste at the caret instead of
+    // falling through to the whole-object menu (whose own Paste creates a
+    // brand new object - correct there, wrong for "I just moved the caret
+    // inside the block I'm editing").
+    const inlineEl = node.closest('.pe-obj-text.pe-inline-edit');
+    if (inlineEl && document.getElementById('peObjLayer')?.contains(inlineEl)) {
+      return { kind: 'inline', range: range.cloneRange(), text: '', el: inlineEl };
+    }
+    return null;
+  }
   const text = (sel.toString() || '').replace(/\u00a0/g, ' ');
   if (!text.trim()) return null;
   const pageLayer = node.closest('#peTextLayer');
@@ -39909,12 +40172,36 @@ function peShowTextSelCtxMenu(clientX, clientY, info) {
     el.hidden = !showClear;
     el.style.display = showClear ? '' : 'none';
   });
+  // A collapsed caret (no actual selection) can only reach here via the
+  // inline-edit case (see peCaptureEditorTextSelection) - Copy/Cut/Delete
+  // don't apply to "nothing selected", only Paste at the caret does.
+  const hasSelection = !(info.kind === 'inline' && !(info.text && info.text.trim()));
   const copyBtn = menu.querySelector('.pe-text-sel-copy');
   if (copyBtn) {
-    const hideCopy = info.kind === 'markup-obj';
+    const hideCopy = info.kind === 'markup-obj' || !hasSelection;
     copyBtn.style.display = hideCopy ? 'none' : '';
     const sep = menu.querySelector('.pe-text-sel-sep');
     if (sep) sep.style.display = hideCopy ? 'none' : '';
+  }
+  // Manually-added text block: swap the PDF-text markup icons (highlight/
+  // strikeout/underline/comment - formatting already has its own toolbar
+  // buttons) for plain Cut/Paste/Delete text-edit actions.
+  const isInline = info.kind === 'inline';
+  const iconsGroup = menu.querySelector('.pe-text-sel-icons');
+  if (iconsGroup) {
+    iconsGroup.hidden = isInline;
+    iconsGroup.style.display = isInline ? 'none' : '';
+  }
+  const inlineActions = menu.querySelector('.pe-text-sel-inline-actions');
+  if (inlineActions) {
+    inlineActions.hidden = !isInline;
+    inlineActions.style.display = isInline ? '' : 'none';
+    if (isInline) {
+      const cutBtn = inlineActions.querySelector('[data-action="cut-text"]');
+      const delBtn = inlineActions.querySelector('[data-action="delete-text"]');
+      if (cutBtn) cutBtn.style.display = hasSelection ? '' : 'none';
+      if (delBtn) delBtn.style.display = hasSelection ? '' : 'none';
+    }
   }
   menu.classList.add('visible');
   menu.setAttribute('aria-hidden', 'false');
@@ -40107,6 +40394,16 @@ async function peTextSelCopy() {
   peRestoreTextSelRange(ctx.range);
 }
 
+/** Sync the persisted text-object's html/plain-text after an inline DOM edit. */
+function peSyncInlineTextObjFromEl(el) {
+  const o = peState && peState.objects.find(x => String(x.id) === String(el.dataset.peId));
+  if (o && o.type === 'text') {
+    o.html = el.innerHTML;
+    o.text = peEditablePlainText(el);
+  }
+  return o;
+}
+
 function peApplyInlineTextSelMarkup(action) {
   const ctx = peTextSelCtx;
   if (!ctx || ctx.kind !== 'inline' || !ctx.el) return;
@@ -40122,11 +40419,7 @@ function peApplyInlineTextSelMarkup(action) {
   } else if (action === 'underline') {
     peApplySpanStyleToSelection({ textDecoration: 'underline', textDecorationColor: '#e74c3c' });
   }
-  const o = peState && peState.objects.find(x => String(x.id) === String(el.dataset.peId));
-  if (o && o.type === 'text') {
-    o.html = el.innerHTML;
-    o.text = peEditablePlainText(el);
-  }
+  peSyncInlineTextObjFromEl(el);
   peCommitEditorHistory();
   // DOM mutation invalidates the pre-action Range — refresh from live selection.
   try {
@@ -40135,6 +40428,93 @@ function peApplyInlineTextSelMarkup(action) {
       ctx.range = sel.getRangeAt(0).cloneRange();
     }
   } catch (_) {}
+}
+
+/** Cut = copy the selected text to the clipboard, then delete it. */
+async function peTextSelCut() {
+  const ctx = peTextSelCtx;
+  if (!ctx || ctx.kind !== 'inline' || !ctx.el) return;
+  const el = ctx.el;
+  const text = ctx.text || '';
+  try { el.focus({ preventScroll: true }); } catch (_) { try { el.focus(); } catch (__) {} }
+  peRestoreTextSelRange(ctx.range);
+  if (typeof pmCopyPageTextToClipboard === 'function') {
+    await pmCopyPageTextToClipboard(text);
+  } else {
+    try { await navigator.clipboard.writeText(text); } catch (_) {}
+  }
+  peRestoreTextSelRange(ctx.range);
+  try { document.execCommand('delete'); } catch (_) {}
+  const o = peSyncInlineTextObjFromEl(el);
+  if (o) peSyncTextEmptyClass(el, o);
+  peCommitEditorHistory();
+}
+
+/** Delete = remove the selected text without touching the clipboard. */
+function peTextSelDeleteSelection() {
+  const ctx = peTextSelCtx;
+  if (!ctx || ctx.kind !== 'inline' || !ctx.el) return;
+  const el = ctx.el;
+  try { el.focus({ preventScroll: true }); } catch (_) { try { el.focus(); } catch (__) {} }
+  peRestoreTextSelRange(ctx.range);
+  try { document.execCommand('delete'); } catch (_) {}
+  const o = peSyncInlineTextObjFromEl(el);
+  if (o) peSyncTextEmptyClass(el, o);
+  peCommitEditorHistory();
+}
+
+/** Paste = replace the selected text with the system clipboard's plain text. */
+/**
+ * Text-only clipboard read for pasting INTO an editable text run - unlike
+ * peReadSystemClipboardForPaste() (used for whole-object canvas paste,
+ * where an image is a legitimate result), an image can never be inserted
+ * inline here, so probing for one first only costs an extra, pointless
+ * clipboard-read permission prompt before the text one.
+ */
+async function peReadClipboardTextOnly() {
+  if (navigator.clipboard && navigator.clipboard.readText) {
+    try {
+      const text = (await navigator.clipboard.readText()).trim();
+      if (text) return text;
+    } catch (_) {}
+  }
+  if (navigator.clipboard && navigator.clipboard.read) {
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        if (item.types.includes('text/plain')) {
+          const text = (await (await item.getType('text/plain')).text()).trim();
+          if (text) return text;
+        }
+      }
+    } catch (_) {}
+  }
+  return '';
+}
+
+async function peTextSelPaste() {
+  const ctx = peTextSelCtx;
+  if (!ctx || ctx.kind !== 'inline' || !ctx.el) return;
+  const el = ctx.el;
+  try { el.focus({ preventScroll: true }); } catch (_) { try { el.focus(); } catch (__) {} }
+  peRestoreTextSelRange(ctx.range);
+  // Mirrors native Ctrl+V exactly (the browser's own keyboard paste runs
+  // this same legacy command internally) - unlike the Async Clipboard API
+  // fallback below, it never triggers its own clipboard-read permission
+  // prompt, since the browser mediates it directly rather than exposing
+  // clipboard content to page script.
+  let pasted = false;
+  try { pasted = document.execCommand('paste'); } catch (_) {}
+  if (!pasted) {
+    let text = '';
+    try { text = await peReadClipboardTextOnly(); } catch (_) {}
+    if (!text) return;
+    try { el.focus({ preventScroll: true }); } catch (_) { try { el.focus(); } catch (__) {} }
+    peRestoreTextSelRange(ctx.range);
+    try { document.execCommand('insertText', false, text); } catch (_) {}
+  }
+  peSyncInlineTextObjFromEl(el);
+  peCommitEditorHistory();
 }
 
 function peApplyPageTextSelMarkup(action) {
@@ -40292,6 +40672,22 @@ function peOnTextSelCtxAction(action) {
       peHideTextSelCtxMenu();
       peRestoreTextSelRange(range);
     });
+    return;
+  }
+  if (action === 'cut-text') {
+    if (ctx.kind !== 'inline') { peHideTextSelCtxMenu(); return; }
+    void peTextSelCut().finally(() => peHideTextSelCtxMenu());
+    return;
+  }
+  if (action === 'paste-text') {
+    if (ctx.kind !== 'inline') { peHideTextSelCtxMenu(); return; }
+    void peTextSelPaste().finally(() => peHideTextSelCtxMenu());
+    return;
+  }
+  if (action === 'delete-text') {
+    if (ctx.kind !== 'inline') { peHideTextSelCtxMenu(); return; }
+    peTextSelDeleteSelection();
+    peHideTextSelCtxMenu();
     return;
   }
   if (action === 'redact-text') {
@@ -40485,7 +40881,9 @@ function peShowObjCtxMenu(clientX, clientY, overlapObjs) {
 
 function peOnObjContextMenu(e) {
   if (!peState || peState.tool === 'crop') return;
-  // Selected text inside an editable text block → text-markup menu
+  // Selected text (or just a placed caret) inside an editable text block →
+  // the Copy/Cut/Paste/Delete menu (peCaptureEditorTextSelection returns
+  // 'inline' for both cases; peShowTextSelCtxMenu shows only Paste for a caret).
   const textInfo = peCaptureEditorTextSelection();
   if (textInfo && textInfo.kind === 'inline') {
     e.preventDefault();
@@ -41759,6 +42157,24 @@ function peObjMouseDown(e, o) {
     if (peIsTextBorderHit(e.currentTarget, e.clientX, e.clientY)) {
       if (touchLike && e.cancelable) e.preventDefault();
       peStartInlineTextMove(e, o);
+    } else {
+      // Plain click inside the text content - let the browser handle native
+      // caret placement / selection collapse entirely on its own, and stop
+      // the event here so it can never reach an ancestor's own pointerdown
+      // handling (deselect-on-blank-click, marquee-select, etc.) meant for
+      // clicks that land OUTSIDE this actively-edited block, not inside it.
+      // Clear a pre-existing (non-collapsed) selection ourselves first: the
+      // browser's own mousedown then only has to PLACE a fresh caret rather
+      // than COLLAPSE an existing range near the click point, which is where
+      // Chromium's glyph-center hit-testing gets ambiguous - it can land the
+      // new caret without ever visibly clearing the old highlighted range,
+      // needing 2-3 more clicks before one happens to land in an unambiguous
+      // spot (a gap between glyphs) to finally take effect.
+      try {
+        const sel = window.getSelection();
+        if (sel && !sel.isCollapsed) sel.removeAllRanges();
+      } catch (_) {}
+      e.stopPropagation();
     }
     return;
   }
