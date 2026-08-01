@@ -1005,6 +1005,13 @@
     }
     .top-menu .img-save-btn svg { width: 22px; height: 22px; display: block; }
     .top-menu .img-save-btn:hover:not(:disabled) { background: #3498db; }
+    /* "Слегка подсвечивается" - a soft accent ring hinting that compressing
+       would save a lot (≥30%, computed ahead of time in the background; see
+       pmApplyCompressHighlight). Deliberately just a static ring, not an
+       animation - stays "slight", not attention-grabbing. */
+    .top-menu .img-save-btn--compress.pm-compress-notable {
+      box-shadow: 0 0 0 2px rgba(52, 152, 219, .65), 0 4px 14px rgba(0, 0, 0, .5);
+    }
     /*Three popup buttons side by side (e.g. "as images" + "compress" + "encrypt") -
        offset the outer two 42px-wide buttons 48px either side of the wrapper's own
        center (42px button + 6px gap), leaving the 6px gaps the --multi bridge above
@@ -8831,10 +8838,10 @@
           if (el.hasAttribute('data-tip')) el.setAttribute('data-tip', val);
         }
       });
-      // The line above just reset the Compress PDF button back to its static
-      // hint from data-i18n-title - if a size estimate was already cached,
-      // put it right back (in the new language) instead of losing it.
-      if (typeof pmRefreshCompressEstimateTooltip === 'function') pmRefreshCompressEstimateTooltip();
+      // The line above just reset the Compress PDF buttons back to their
+      // static hint from data-i18n-title - if size estimates were already
+      // cached, put them right back (in the new language) instead of losing them.
+      if (typeof pmRefreshAllCompressEstimateTooltips === 'function') pmRefreshAllCompressEstimateTooltips();
       document.querySelectorAll('[data-i18n-aria]').forEach((el) => {
         const key = el.getAttribute('data-i18n-aria');
         if (key) el.setAttribute('aria-label', t(key));
@@ -26091,7 +26098,13 @@
           if (!pdfDoc) return;   // nothing to act on yet - "see the opportunity" only makes sense once a document is open
           clearTimeout(hideTimer);
           popBtns.forEach(b => { if (!b.disabled) b.classList.add('show'); });
-          if (typeof pmRefreshCompressEstimateTooltip === 'function') pmRefreshCompressEstimateTooltip();
+          const compressBtn = wrapper.querySelector('.img-save-btn--compress');
+          if (compressBtn && typeof pmRefreshCompressEstimateTooltip === 'function') {
+            // Export only ever sends the SELECTED pages, never the whole
+            // document, so its estimate must be scoped to that selection.
+            const scope = wrapper.querySelector('#exportBtn') ? 'export' : 'save';
+            pmRefreshCompressEstimateTooltip(scope, compressBtn);
+          }
         };
         const scheduleHide = () => {
           clearTimeout(hideTimer);
@@ -50113,66 +50126,111 @@ async function compressPdfImagesBytes(bytes, progressLabel) {
 }
 
 // ---- "Сжать PDF" tooltip preview -------------------------------------
-// Runs the real compression pipeline once in the background (cached, keyed
-// to the current pdfDoc + page count, with a short TTL to catch in-place
-// edits that don't change either) so the button's tooltip can show the
+// Runs the real compression pipeline once in the background (cached, with a
+// short TTL to catch in-place edits) so the button's tooltip can show the
 // expected size reduction BEFORE the user clicks it, instead of only
 // finding out after the save/export already happened.
-let pmCompressEstimateCache = null;
-let pmCompressEstimateInFlight = null;
+//
+// Two independent scopes, cached separately:
+//   'save'   - the WHOLE document, keyed to pdfDoc + its page count.
+//   'export' - only the currently SELECTED pages (Export never sends the
+//              whole document) - keyed to pdfDoc + the exact selection, so
+//              toggling which pages are checked invalidates it correctly.
+let pmCompressEstimateCache = { save: null, export: null };
+let pmCompressEstimateInFlight = { save: null, export: null };
 const PM_COMPRESS_ESTIMATE_TTL_MS = 20000;
+// "слегка подсвечивается" on the Save button when compression would be substantial.
+const PM_COMPRESS_HIGHLIGHT_RATIO = 0.30;
 
-function pmCompressEstimateIsFresh() {
-  if (!pmCompressEstimateCache || typeof pdfDoc === 'undefined' || !pdfDoc) return false;
-  const c = pmCompressEstimateCache;
-  return c.forDoc === pdfDoc
-    && c.forPageCount === pdfDoc.getPageCount()
-    && (Date.now() - c.computedAt) < PM_COMPRESS_ESTIMATE_TTL_MS;
+function pmCompressEstimateIsFresh(scope, selKey) {
+  const c = pmCompressEstimateCache[scope];
+  if (!c || typeof pdfDoc === 'undefined' || !pdfDoc) return false;
+  if (c.forDoc !== pdfDoc) return false;
+  if (scope === 'export') { if (c.forSelKey !== selKey) return false; }
+  else if (c.forPageCount !== pdfDoc.getPageCount()) return false;
+  return (Date.now() - c.computedAt) < PM_COMPRESS_ESTIMATE_TTL_MS;
 }
 
-async function pmComputeCompressEstimate() {
+async function pmComputeCompressEstimate(scope) {
   if (typeof pdfDoc === 'undefined' || !pdfDoc) return null;
-  if (pmCompressEstimateIsFresh()) return pmCompressEstimateCache;
-  if (pmCompressEstimateInFlight) return pmCompressEstimateInFlight;
+  let selKey = null, indices = null;
+  if (scope === 'export') {
+    indices = (typeof getExportSelectedIndices === 'function') ? getExportSelectedIndices() : [];
+    if (!indices.length) return null;
+    selKey = indices.join(',');
+  }
+  if (pmCompressEstimateIsFresh(scope, selKey)) return pmCompressEstimateCache[scope];
+  if (pmCompressEstimateInFlight[scope]) return pmCompressEstimateInFlight[scope];
   const targetDoc = pdfDoc;
   const targetPageCount = pdfDoc.getPageCount();
-  pmCompressEstimateInFlight = (async () => {
+  pmCompressEstimateInFlight[scope] = (async () => {
     try {
       let bytes;
-      if (peDocumentHasEditorObjects() || peDocumentHasPendingShapeRaster(pdfDoc) || peDocumentHasRedactedPages(pdfDoc)) {
+      if (scope === 'export') {
+        bytes = await buildExportPdfBytes(indices);
+      } else if (peDocumentHasEditorObjects() || peDocumentHasPendingShapeRaster(pdfDoc) || peDocumentHasRedactedPages(pdfDoc)) {
         bytes = await peBuildFlattenedPdfBytes(pdfDoc);
       } else {
         bytes = await pdfDoc.save();
       }
       const result = await compressPdfImagesBytes(bytes, null);
       const entry = {
-        forDoc: targetDoc, forPageCount: targetPageCount, computedAt: Date.now(),
+        forDoc: targetDoc, forPageCount: targetPageCount, forSelKey: selKey, computedAt: Date.now(),
         before: bytes.length, after: result.bytes.length, changedCount: result.changedCount
       };
-      pmCompressEstimateCache = entry;
+      pmCompressEstimateCache[scope] = entry;
       return entry;
     } catch (e) {
       console.warn('compress estimate failed', e);
       return null;
     } finally {
-      pmCompressEstimateInFlight = null;
+      pmCompressEstimateInFlight[scope] = null;
     }
   })();
-  return pmCompressEstimateInFlight;
+  return pmCompressEstimateInFlight[scope];
 }
 
-function pmApplyCompressEstimateToButtons(entry) {
+function pmApplyCompressEstimateToButton(btn, entry) {
   const text = (entry && entry.changedCount > 0)
     ? t('compressPdfHintEstimate', { before: formatBytes(entry.before), after: formatBytes(entry.after) })
     : t('compressPdfHint');
-  document.querySelectorAll('.img-save-btn--compress').forEach(btn => { btn.title = text; });
+  btn.title = text;
+}
+
+function pmApplyCompressHighlight(btn, entry) {
+  const ratio = (entry && entry.changedCount > 0 && entry.before > 0) ? (1 - entry.after / entry.before) : 0;
+  btn.classList.toggle('pm-compress-notable', ratio >= PM_COMPRESS_HIGHLIGHT_RATIO);
 }
 
 // Fire-and-forget: safe to call on every hover - internally cached/deduped.
-function pmRefreshCompressEstimateTooltip() {
-  if (typeof pdfDoc === 'undefined' || !pdfDoc) return;
-  if (pmCompressEstimateIsFresh()) { pmApplyCompressEstimateToButtons(pmCompressEstimateCache); return; }
-  pmComputeCompressEstimate().then(entry => { if (entry) pmApplyCompressEstimateToButtons(entry); });
+// scope: 'save' | 'export'; btn: that specific wrapper's own compress button
+// (each scope has its own button element - never shared).
+function pmRefreshCompressEstimateTooltip(scope, btn) {
+  if (typeof pdfDoc === 'undefined' || !pdfDoc || !btn) return;
+  let selKey = null;
+  if (scope === 'export') {
+    const indices = (typeof getExportSelectedIndices === 'function') ? getExportSelectedIndices() : [];
+    if (!indices.length) { pmApplyCompressEstimateToButton(btn, null); return; }
+    selKey = indices.join(',');
+  }
+  const apply = (entry) => {
+    pmApplyCompressEstimateToButton(btn, entry);
+    if (scope === 'save') pmApplyCompressHighlight(btn, entry);
+  };
+  if (pmCompressEstimateIsFresh(scope, selKey)) { apply(pmCompressEstimateCache[scope]); return; }
+  pmComputeCompressEstimate(scope).then(entry => apply(entry));
+}
+
+// Re-applies whatever's already cached for both buttons (e.g. after
+// pmApplyI18n resets every data-i18n-title element, including these, back
+// to the static hint) without forcing a fresh recompute.
+function pmRefreshAllCompressEstimateTooltips() {
+  document.querySelectorAll('.img-save-wrapper').forEach(wrapper => {
+    const btn = wrapper.querySelector('.img-save-btn--compress');
+    if (!btn) return;
+    const scope = wrapper.querySelector('#exportBtn') ? 'export' : 'save';
+    pmRefreshCompressEstimateTooltip(scope, btn);
+  });
 }
 
 // PDF user-space point → normalized top-based visual coordinates of the
