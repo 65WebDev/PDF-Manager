@@ -28359,7 +28359,7 @@ function pmSearchPositionPanel() {
   const menu = document.querySelector('.top-menu');
   if (!panel || !menu) return;
   const rect = menu.getBoundingClientRect();
-  panel.style.top = Math.round(rect.bottom + 10) + 'px';
+  panel.style.top = Math.round(rect.bottom + 4) + 'px';
 }
 
 // "Search all tabs" doesn't apply while the single-page editor is open -
@@ -31212,7 +31212,7 @@ function editSelectedPage() {
     // actions, rotating a page that ISN'T part of the current multi-selection
     // must not collapse that selection down to just the rotated page.
     let selOk = true;
-    if (action === 'replace' || action === 'cut' || action === 'delete') {
+    if (action === 'replace' || action === 'cut') {
       selOk = syncSelectionToCtxTargets();
     } else if (action === 'export' || action === 'copy' || action === 'print') {
       selOk = syncSelectionToCtxTargets({ notify: true });
@@ -31294,9 +31294,28 @@ function editSelectedPage() {
       case 'copy':
         if (selOk) copySelectedPagesToClipboard();
         break;
-      case 'delete':
-        if (selOk) deleteSelected();
+      case 'delete': {
+        // Same targeting as rotate above, and for the same reason: deleting
+        // a page reached via RMB that ISN'T part of the current
+        // multi-selection must not collapse that selection down to just
+        // the deleted page - the rest of the selection should still be
+        // there afterward.
+        const selectedNd = selSnapshot.selected.filter(i => !markedForDeletion.has(i));
+        const targets = (anchorIdx != null && selectedNd.includes(anchorIdx))
+          ? selectedNd
+          : (anchorIdx != null && !markedForDeletion.has(anchorIdx))
+            ? [anchorIdx]
+            : selectedNd;
+        if (!targets.length) break;
+        const matchesSelection = targets.length === selectedNd.length &&
+          targets.every(i => selectedNd.includes(i));
+        if (matchesSelection) {
+          deleteSelected();
+        } else {
+          targets.forEach(i => deleteSinglePage(i));
+        }
         break;
+      }
       case 'print':
         if (selOk) printSelectedPages();
         break;
