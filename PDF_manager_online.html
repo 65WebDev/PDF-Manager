@@ -1012,6 +1012,19 @@
     .top-menu .img-save-btn--compress.pm-compress-notable {
       box-shadow: 0 0 0 2px rgba(230, 126, 34, .55), 0 4px 14px rgba(0, 0, 0, .5);
     }
+    /* Soft-disabled: nothing worth compressing right now (confirmed by a
+       fresh estimate). Deliberately NOT the native disabled attribute -
+       .img-save-btn:disabled hides the button outright (opacity 0,
+       pointer-events none), which would also hide the tooltip explaining
+       why - this needs to stay hoverable. The click itself is blocked
+       inline in the button's own onclick, not by CSS. */
+    .top-menu .img-save-btn--compress.pm-compress-unavailable {
+      opacity: .4;
+      cursor: not-allowed;
+    }
+    .top-menu .img-save-btn--compress.pm-compress-unavailable:hover {
+      background: #3d5468;
+    }
     /*Three popup buttons side by side (e.g. "as images" + "compress" + "encrypt") -
        offset the outer two 42px-wide buttons 48px either side of the wrapper's own
        center (42px button + 6px gap), leaving the 6px gaps the --multi bridge above
@@ -6254,13 +6267,13 @@
         <div class="img-save-wrapper img-save-wrapper--multi">
           <button id="exportBtn" class="compact-btn" onclick="exportSelectedPages()" disabled title="Экспорт выделенных страниц в один PDF (Shift+E)" data-i18n-title="exportSelectedPages"><span class="btn-ico">📥</span><span class="btn-label" data-i18n="export">Экспорт</span></button>
           <button class="img-save-btn img-save-btn--images img-save-btn--left" onclick="exportSelectedPages(true)" title="Экспорт как изображения&#10;(экспорт выделенных страниц в PDF, где страницы сохранены как изображения)" aria-label="Экспорт как изображения" data-i18n-title="exportAsImagesHint" data-i18n-aria="exportAsImages"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></button>
-          <button class="img-save-btn img-save-btn--compress img-save-btn--mid" onclick="exportSelectedPages('compress')" title="Сжать PDF&#10;(уменьшить размер файла без потери качества)" aria-label="Сжать PDF" data-i18n-title="compressPdfHint" data-i18n-aria="compressPdf"><svg viewBox="0 0 48 48" width="20" height="20" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M8.92 8.714C8.495 7.39 9.476 6 10.867 6h26.266c1.391 0 2.372 1.39 1.947 2.714C37.9 12.4 36 19.09 36 24s1.9 11.6 3.08 15.286c.425 1.325-.556 2.714-1.947 2.714H10.867c-1.391 0-2.372-1.39-1.947-2.714C10.1 35.6 12 28.91 12 24S10.1 12.4 8.92 8.714ZM4 15c1.5 2 2 6 2 9s-.5 7-2 9"/><path d="M18 15.5h12M18 24h12m-12 8h4"/><path d="M44 15c-1.5 2-2 6-2 9s.5 6 2 9"/></svg></button>
+          <button class="img-save-btn img-save-btn--compress img-save-btn--mid" onclick="if (!this.classList.contains('pm-compress-unavailable')) exportSelectedPages('compress')" title="Сжать PDF&#10;(уменьшить размер файла без потери качества)" aria-label="Сжать PDF" data-i18n-title="compressPdfHint" data-i18n-aria="compressPdf"><svg viewBox="0 0 48 48" width="20" height="20" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M8.92 8.714C8.495 7.39 9.476 6 10.867 6h26.266c1.391 0 2.372 1.39 1.947 2.714C37.9 12.4 36 19.09 36 24s1.9 11.6 3.08 15.286c.425 1.325-.556 2.714-1.947 2.714H10.867c-1.391 0-2.372-1.39-1.947-2.714C10.1 35.6 12 28.91 12 24S10.1 12.4 8.92 8.714ZM4 15c1.5 2 2 6 2 9s-.5 7-2 9"/><path d="M18 15.5h12M18 24h12m-12 8h4"/><path d="M44 15c-1.5 2-2 6-2 9s.5 6 2 9"/></svg></button>
           <button class="img-save-btn img-save-btn--encrypt img-save-btn--right" onclick="exportSelectedPages('encrypt')" title="Зашифровать файл паролем" aria-label="Зашифровать файл паролем" data-i18n-title="encryptFileTooltip" data-i18n-aria="encryptFileTooltip"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></button>
         </div>
         <div class="img-save-wrapper img-save-wrapper--multi">
           <button id="saveBtn" onclick="savePDF()" class="save-btn compact-btn" title="Сохранить итоговый файл (S)" data-i18n-title="saveFinalFile"><span class="btn-ico">💾</span><span class="btn-label" data-i18n="save">Сохранить</span></button>
           <button class="img-save-btn img-save-btn--left" onclick="savePDF(true)" title="Сохранить как изображения&#10;(сохранение файла в PDF, где страницы сохранены как изображения)" aria-label="Сохранить как изображения" data-i18n-title="saveAsImagesHint" data-i18n-aria="saveAsImages"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></button>
-          <button class="img-save-btn img-save-btn--compress img-save-btn--mid" onclick="savePDF('compress')" title="Сжать PDF&#10;(уменьшить размер файла без потери качества)" aria-label="Сжать PDF" data-i18n-title="compressPdfHint" data-i18n-aria="compressPdf"><svg viewBox="0 0 48 48" width="20" height="20" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M8.92 8.714C8.495 7.39 9.476 6 10.867 6h26.266c1.391 0 2.372 1.39 1.947 2.714C37.9 12.4 36 19.09 36 24s1.9 11.6 3.08 15.286c.425 1.325-.556 2.714-1.947 2.714H10.867c-1.391 0-2.372-1.39-1.947-2.714C10.1 35.6 12 28.91 12 24S10.1 12.4 8.92 8.714ZM4 15c1.5 2 2 6 2 9s-.5 7-2 9"/><path d="M18 15.5h12M18 24h12m-12 8h4"/><path d="M44 15c-1.5 2-2 6-2 9s.5 6 2 9"/></svg></button>
+          <button class="img-save-btn img-save-btn--compress img-save-btn--mid" onclick="if (!this.classList.contains('pm-compress-unavailable')) savePDF('compress')" title="Сжать PDF&#10;(уменьшить размер файла без потери качества)" aria-label="Сжать PDF" data-i18n-title="compressPdfHint" data-i18n-aria="compressPdf"><svg viewBox="0 0 48 48" width="20" height="20" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M8.92 8.714C8.495 7.39 9.476 6 10.867 6h26.266c1.391 0 2.372 1.39 1.947 2.714C37.9 12.4 36 19.09 36 24s1.9 11.6 3.08 15.286c.425 1.325-.556 2.714-1.947 2.714H10.867c-1.391 0-2.372-1.39-1.947-2.714C10.1 35.6 12 28.91 12 24S10.1 12.4 8.92 8.714ZM4 15c1.5 2 2 6 2 9s-.5 7-2 9"/><path d="M18 15.5h12M18 24h12m-12 8h4"/><path d="M44 15c-1.5 2-2 6-2 9s.5 6 2 9"/></svg></button>
           <button class="img-save-btn img-save-btn--encrypt img-save-btn--right" onclick="savePDF('encrypt')" title="Зашифровать файл паролем" aria-label="Зашифровать файл паролем" data-i18n-title="encryptFileTooltip" data-i18n-aria="encryptFileTooltip"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></button>
         </div>
         <button id="mobileReadModeBtn" class="compact-btn" onclick="enterReadMode()" disabled title="Режим чтения" data-i18n-title="readMode"><span class="btn-ico"><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span></button>
@@ -8452,6 +8465,11 @@
         exportBtn.parentElement.querySelectorAll('.img-save-btn')
           .forEach(b => { b.disabled = exportBtn.disabled; });
       }
+      // Selection changes can also flip which pages Export's own compress
+      // estimate is scoped to (stale for the new selection until re-hovered)
+      // - re-check whether the "nothing worth compressing" soft-disable
+      // still applies now that the base enabled/disabled state above changed.
+      if (typeof pmSyncCompressButtonsUnavailable === 'function') pmSyncCompressButtonsUnavailable();
 
       scheduleExportDragCache();
       syncExportBtnDraggable();
@@ -50193,15 +50211,43 @@ async function pmComputeCompressEstimate(scope) {
 }
 
 function pmApplyCompressEstimateToButton(btn, entry) {
-  const text = (entry && entry.changedCount > 0)
-    ? t('compressPdfHintEstimate', { before: formatBytes(entry.before), after: formatBytes(entry.after) })
-    : t('compressPdfHint');
+  let text;
+  if (entry && entry.changedCount > 0) {
+    text = t('compressPdfHintEstimate', { before: formatBytes(entry.before), after: formatBytes(entry.after) });
+  } else if (entry && entry.changedCount === 0) {
+    // Confirmed (not just "no data yet") - nothing worth compressing.
+    text = t('compressPdfNoBenefit');
+  } else {
+    text = t('compressPdfHint');
+  }
   btn.title = text;
 }
 
 function pmApplyCompressHighlight(btn, entry) {
   const ratio = (entry && entry.changedCount > 0 && entry.before > 0) ? (1 - entry.after / entry.before) : 0;
   btn.classList.toggle('pm-compress-notable', ratio >= PM_COMPRESS_HIGHLIGHT_RATIO);
+}
+
+// Soft-deactivates a compress button once we've CONFIRMED (fresh estimate)
+// there's nothing worth compressing - stays visible/hoverable (so the
+// explanatory tooltip pmApplyCompressEstimateToButton just set can still be
+// read) rather than using the native disabled attribute, which the
+// .img-save-btn:disabled rule hides outright (opacity 0, pointer-events
+// none - exactly wrong here, that would hide the tooltip along with it).
+// The click handlers themselves also check this class before acting.
+function pmSyncCompressButtonsUnavailable() {
+  document.querySelectorAll('.img-save-wrapper').forEach(wrapper => {
+    const btn = wrapper.querySelector('.img-save-btn--compress');
+    if (!btn || btn.disabled) { if (btn) btn.classList.remove('pm-compress-unavailable'); return; }
+    const scope = wrapper.querySelector('#exportBtn') ? 'export' : 'save';
+    let selKey = null;
+    if (scope === 'export') {
+      const indices = (typeof getExportSelectedIndices === 'function') ? getExportSelectedIndices() : [];
+      selKey = indices.join(',');
+    }
+    const entry = pmCompressEstimateIsFresh(scope, selKey) ? pmCompressEstimateCache[scope] : null;
+    btn.classList.toggle('pm-compress-unavailable', !!(entry && entry.changedCount === 0));
+  });
 }
 
 // Fire-and-forget: safe to call on every hover - internally cached/deduped.
@@ -50212,17 +50258,25 @@ function pmRefreshCompressEstimateTooltip(scope, btn) {
   let selKey = null;
   if (scope === 'export') {
     const indices = (typeof getExportSelectedIndices === 'function') ? getExportSelectedIndices() : [];
-    if (!indices.length) { pmApplyCompressEstimateToButton(btn, null); return; }
+    if (!indices.length) {
+      pmApplyCompressEstimateToButton(btn, null);
+      btn.classList.remove('pm-compress-unavailable');
+      return;
+    }
     selKey = indices.join(',');
   }
   const apply = (entry) => {
     pmApplyCompressEstimateToButton(btn, entry);
     if (scope === 'save') pmApplyCompressHighlight(btn, entry);
+    pmSyncCompressButtonsUnavailable();
   };
   if (pmCompressEstimateIsFresh(scope, selKey)) { apply(pmCompressEstimateCache[scope]); return; }
   // No fresh number yet and it isn't instant to compute - say so up front
-  // rather than leaving the old/static text sitting there looking stale.
+  // rather than leaving the old/static text sitting there looking stale,
+  // and don't leave the button looking blocked while the outcome is
+  // genuinely still unknown.
   btn.title = t('compressPdfEstimating');
+  btn.classList.remove('pm-compress-unavailable');
   pmComputeCompressEstimate(scope).then(entry => apply(entry));
 }
 
