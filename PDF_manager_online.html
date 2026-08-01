@@ -13186,8 +13186,18 @@
       scrollContainer.focus({ preventScroll: true });
     }, true);
 
-    // Windows/Chrome: Alt alone activates browser menu bar, and keydown more
-    // doesn't reach the page. We block this when Alt is used to zoom over a PDF.
+    // Windows/Chrome (and Firefox's menu-bar toggle): a "solo" Alt press -
+    // keydown then keyup with no other key pressed in between - activates
+    // the browser's own Alt-menu handling, which steals keyboard focus so
+    // the very next shortcut (e.g. Ctrl+F right after an Alt+wheel zoom)
+    // reaches the browser instead of the page. Suppressing it takes
+    // preventDefault() on BOTH the keydown AND the matching keyup - the
+    // browser's heuristic still fires on release even when only keydown
+    // was prevented, which was the gap here. altMenuGuardActive tracks
+    // whether keydown suppressed it, since pointerInWorkArea can no longer
+    // be true by keyup (e.g. the zoom itself moved the page out from under
+    // the cursor) even though the same gesture should still be suppressed.
+    let altMenuGuardActive = false;
     window.addEventListener('keydown', (e) => {
       if (isTouchDevice || !pdfDoc) return;
       if (e.key !== 'Alt' && e.code !== 'AltLeft' && e.code !== 'AltRight') return;
@@ -13199,6 +13209,7 @@
           .includes((e.target.type || 'text').toLowerCase())) return;
       if (!pointerInWorkArea) return;
       e.preventDefault();
+      altMenuGuardActive = true;
     }, true);
 
     window.addEventListener('keyup', (e) => {
@@ -13210,6 +13221,7 @@
       if (tag === 'textarea' || e.target.isContentEditable) return;
       if (tag === 'input' && ['text', 'search', 'email', 'url', 'tel', 'password', 'number']
           .includes((e.target.type || 'text').toLowerCase())) return;
+      if (altMenuGuardActive) { e.preventDefault(); altMenuGuardActive = false; }
       scrollContainer.focus({ preventScroll: true });
     }, true);
 
