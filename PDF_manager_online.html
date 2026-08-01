@@ -7256,7 +7256,9 @@
         exportAsImagesHint: 'Экспорт как изображения\n(экспорт выделенных страниц в PDF, где страницы сохранены как изображения)',
         compressPdf: 'Сжать PDF',
         compressPdfHint: 'Сжать PDF\n(уменьшить размер файла без потери качества)',
-        compressPdfComingSoon: 'Функция «Сжать PDF» скоро появится',
+        compressPdfProgress: 'Сжатие изображений...',
+        compressPdfResult: 'Размер файла уменьшен: {before} → {after}',
+        compressPdfNoBenefit: 'Существенного уменьшения размера файла не ожидается',
         save: 'Сохранить', saveFinalFile: 'Сохранить итоговый файл (S)',
         saveAsImages: 'Сохранить как изображения',
         saveAsImagesHint: 'Сохранить как изображения\n(сохранение файла в PDF, где страницы сохранены как изображения)',
@@ -7521,7 +7523,9 @@
         exportAsImagesHint: 'Export as images\n(export selected pages to PDF with pages saved as images)',
         compressPdf: 'Compress PDF',
         compressPdfHint: 'Compress PDF\n(reduce file size without losing quality)',
-        compressPdfComingSoon: 'The "Compress PDF" feature is coming soon',
+        compressPdfProgress: 'Compressing images...',
+        compressPdfResult: 'File size reduced: {before} → {after}',
+        compressPdfNoBenefit: 'No significant file size reduction expected',
         save: 'Save', saveFinalFile: 'Save final file (S)',
         saveAsImages: 'Save as images',
         saveAsImagesHint: 'Save as images\n(save file as PDF with pages saved as images)',
@@ -22413,9 +22417,7 @@
       if (isLoading || selectedPages.size === 0) return;
       const asImage = mode === true || mode === 'images';
       const encryptOnly = mode === 'encrypt';
-      // TODO: embedded-image resampling isn't implemented yet - the button
-      // exists so the UI/menu placement can be reviewed first.
-      if (mode === 'compress') { alert(t('compressPdfComingSoon')); return; }
+      const compressOnly = mode === 'compress';
 
       const indicesToExport = getExportSelectedIndices();
       if (indicesToExport.length === 0) return;
@@ -22463,12 +22465,20 @@
 
       showLoading("Экспорт выделенных страниц...");
 
+      let compressBeforeSize = null, compressChangedCount = 0;
       try {
         let bytes = await buildExportPdfBytes(indicesToExport);
         if (asImage) {
           showLoading('Подготовка изображений...');
           bytes = await rasterizePdfBytesToImagePdf(
             bytes, rasterScale, 'Экспорт страниц как изображений...', jpegQuality);
+        }
+        if (compressOnly) {
+          showLoading(t('compressPdfProgress'));
+          compressBeforeSize = bytes.length;
+          const result = await compressPdfImagesBytes(bytes, t('compressPdfProgress'));
+          bytes = result.bytes;
+          compressChangedCount = result.changedCount;
         }
         if (encryptPassword) {
           showLoading('Шифрование файла...');
@@ -22496,6 +22506,13 @@
           a.download = suggestedName;
           a.click();
           URL.revokeObjectURL(url);
+        }
+        if (compressOnly) {
+          if (compressChangedCount > 0) {
+            alert(t('compressPdfResult', { before: formatBytes(compressBeforeSize), after: formatBytes(bytes.length) }));
+          } else {
+            alert(t('compressPdfNoBenefit'));
+          }
         }
       } catch (e) {
         console.error(e);
@@ -22629,9 +22646,7 @@
       if (isLoading || !pdfDoc) return alert('Нет документа');
       const asImage = mode === true || mode === 'images';
       const encryptOnly = mode === 'encrypt';
-      // TODO: embedded-image resampling isn't implemented yet - the button
-      // exists so the UI/menu placement can be reviewed first.
-      if (mode === 'compress') { alert(t('compressPdfComingSoon')); return; }
+      const compressOnly = mode === 'compress';
 
       let jpegQuality = 0.92;
       let rasterScale = dpiToPdfScale(DEFAULT_RASTER_DPI);
@@ -22733,6 +22748,14 @@
           bytes = await rasterizePdfBytesToImagePdf(
             bytes, rasterScale, 'Сохранение страниц как изображений...', jpegQuality);
         }
+        let compressBeforeSize = null, compressChangedCount = 0;
+        if (compressOnly) {
+          showLoading(t('compressPdfProgress'));
+          compressBeforeSize = bytes.length;
+          const result = await compressPdfImagesBytes(bytes, t('compressPdfProgress'));
+          bytes = result.bytes;
+          compressChangedCount = result.changedCount;
+        }
         if (encryptPassword) {
           showLoading('Шифрование файла...');
           try {
@@ -22768,6 +22791,13 @@
         }
         // The document is saved - we consider it “clean” (without unsaved changes)
         await resetDocHistoryToCurrent();
+        if (compressOnly) {
+          if (compressChangedCount > 0) {
+            alert(t('compressPdfResult', { before: formatBytes(compressBeforeSize), after: formatBytes(bytes.length) }));
+          } else {
+            alert(t('compressPdfNoBenefit'));
+          }
+        }
       } catch (e) {
         if (saveTarget && saveTarget.writable) {
           try { await saveTarget.writable.abort(); } catch (_) {}
@@ -49685,6 +49715,394 @@ async function peRewriteStreamBytes(doc, stream, newBytes) {
     try { stream.dict.delete(PDFLib.PDFName.of('DP')); } catch (_) {}
     stream.dict.set(PDFLib.PDFName.of('Length'), PDFLib.PDFNumber.of(stream.contents.length));
   } catch (_) {}
+}
+
+// ============================================================================
+// "Сжать PDF" - resample oversized embedded JPEGs in place, leaving text and
+// vector graphics untouched. Deliberately narrow in scope for safety:
+//   - only plain /DCTDecode (JPEG) images, single filter (no [.., DCTDecode]
+//     chains) - the browser's own JPEG decoder handles them with no extra
+//     dependency, and re-encoding stays lossy-once instead of stacking loss
+//     on top of whatever the original encoder already did.
+//   - only DeviceRGB/DeviceGray (or ICCBased with N=1/3) color - CMYK JPEGs
+//     are notoriously inconsistent across browsers (some invert them), so
+//     touching one risks visibly wrong colors rather than a smaller file.
+//   - never an image with /SMask or /Mask - re-encoding as plain JPEG has no
+//     alpha channel, so a masked image would lose its transparency.
+//   - only when the image is actually painted somewhere with a resolvable
+//     CTM, and its native pixel size exceeds what that placement's biggest
+//     on-page size needs at PM_COMPRESS_TARGET_DPI by more than the slack
+//     factor - otherwise there's nothing safe to gain.
+// ============================================================================
+
+const PM_COMPRESS_TARGET_DPI = 200;
+const PM_COMPRESS_SIZE_SLACK = 1.15;
+const PM_COMPRESS_MIN_PIXELS = 300 * 300;
+const PM_COMPRESS_JPEG_QUALITY = 0.85;
+
+function pmRefEq(a, b) {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  try {
+    if (typeof a.objectNumber === 'number' && typeof b.objectNumber === 'number') {
+      return a.objectNumber === b.objectNumber && a.generationNumber === b.generationNumber;
+    }
+  } catch (_) {}
+  return false;
+}
+
+// name -> {kind:'image', ref, obj} | {kind:'form', obj, matrix, resources}
+function pmBuildXObjectRefMap(doc, resourcesDict) {
+  const out = new Map();
+  if (!resourcesDict || typeof resourcesDict.get !== 'function') return out;
+  const xoDict = peLookupPdfObj(doc, resourcesDict.get(PDFLib.PDFName.of('XObject')));
+  if (!xoDict || typeof xoDict.keys !== 'function') return out;
+  for (const key of xoDict.keys()) {
+    const rawVal = xoDict.get(key);
+    const obj = peLookupPdfObj(doc, rawVal);
+    if (!obj || !obj.dict) continue;
+    const st = pePdfResName(obj.dict.get(PDFLib.PDFName.of('Subtype')));
+    const name = peDecodePdfNameToken(pePdfResName(key));
+    const ref = (rawVal && typeof rawVal.objectNumber === 'number') ? rawVal : null;
+    if (st === 'Image') {
+      out.set(name, { kind: 'image', ref, obj });
+    } else if (st === 'Form' && obj.contents != null) {
+      let matrix = [1, 0, 0, 1, 0, 0];
+      const mObj = peLookupPdfObj(doc, obj.dict.get(PDFLib.PDFName.of('Matrix')));
+      if (mObj && typeof mObj.asArray === 'function') {
+        const m = mObj.asArray().map(x => pePdfNumValue(doc, x));
+        if (m.length === 6 && m.every(v => v != null)) matrix = m;
+      }
+      const resources = peLookupPdfObj(doc, obj.dict.get(PDFLib.PDFName.of('Resources')));
+      out.set(name, { kind: 'form', obj, matrix, resources });
+    }
+  }
+  return out;
+}
+
+// Walks a content stream tracking q/Q/cm only far enough to know, for every
+// image Do, the on-page size (in PDF points) that placement needs - recurses
+// into Form XObjects with a visited-guard against circular references.
+// Everything else (text, paths, inline images) is skipped as opaque bytes.
+function pmTrackImageUsage(doc, src, resourcesDict, initialCtm, usageMap, depth, formStack) {
+  if (!src || depth > 8) return;
+  const xobjMap = pmBuildXObjectRefMap(doc, resourcesDict);
+  const len = src.length;
+  let i = 0;
+  let ctm = initialCtm.slice();
+  const ctmStack = [];
+  const numBuf = [];
+  let lastName = '';
+
+  const isWS = c => c === 0x20 || c === 0x09 || c === 0x0d || c === 0x0a || c === 0x0c || c === 0;
+  const isDelim = c => c === 0x28 || c === 0x29 || c === 0x3c || c === 0x3e || c === 0x5b ||
+    c === 0x5d || c === 0x7b || c === 0x7d || c === 0x2f || c === 0x25;
+
+  function skipWS() {
+    while (i < len) {
+      const c = src[i];
+      if (isWS(c)) { i++; continue; }
+      if (c === 0x25) { while (i < len && src[i] !== 0x0a && src[i] !== 0x0d) i++; continue; }
+      break;
+    }
+  }
+  function skipLiteralString() {
+    i++;
+    let d = 1;
+    while (i < len && d > 0) {
+      const c = src[i];
+      if (c === 0x5c) { i += 2; continue; }
+      if (c === 0x28) d++;
+      else if (c === 0x29) d--;
+      i++;
+    }
+  }
+  function skipName() {
+    i++;
+    while (i < len && !isWS(src[i]) && !isDelim(src[i])) i++;
+  }
+  function skipHexOrDict() {
+    if (src[i + 1] === 0x3c) {
+      i += 2;
+      let d = 1;
+      while (i < len && d > 0) {
+        skipWS();
+        if (i >= len) break;
+        const c = src[i];
+        if (c === 0x3c && src[i + 1] === 0x3c) { d++; i += 2; continue; }
+        if (c === 0x3e && src[i + 1] === 0x3e) { d--; i += 2; continue; }
+        if (c === 0x28) { skipLiteralString(); continue; }
+        if (c === 0x2f) { skipName(); continue; }
+        if (c === 0x3c) { skipHexOrDict(); continue; }
+        i++;
+      }
+    } else {
+      i++;
+      while (i < len && src[i] !== 0x3e) i++;
+      if (i < len) i++;
+    }
+  }
+  function skipArray() {
+    i++;
+    let d = 1;
+    while (i < len && d > 0) {
+      skipWS();
+      if (i >= len) break;
+      const c = src[i];
+      if (c === 0x5b) { d++; i++; continue; }
+      if (c === 0x5d) { d--; i++; continue; }
+      if (c === 0x28) { skipLiteralString(); continue; }
+      if (c === 0x3c) { skipHexOrDict(); continue; }
+      if (c === 0x2f) { skipName(); continue; }
+      i++;
+    }
+  }
+  function skipInlineImage() {
+    i += 2; // past 'BI'
+    while (i < len) {
+      skipWS();
+      if (i >= len) return;
+      const c = src[i];
+      if (c === 0x2f) { skipName(); continue; }
+      if (c === 0x28) { skipLiteralString(); continue; }
+      if (c === 0x3c) { skipHexOrDict(); continue; }
+      if (c === 0x5b) { skipArray(); continue; }
+      if (src[i] === 0x49 && src[i + 1] === 0x44 &&
+          (i + 2 >= len || isWS(src[i + 2]) || isDelim(src[i + 2]))) {
+        i += 2;
+        if (i < len && isWS(src[i])) i++;
+        break;
+      }
+      i++;
+    }
+    while (i < len) {
+      if (src[i] === 0x45 && src[i + 1] === 0x49 &&
+          (i === 0 || isWS(src[i - 1])) &&
+          (i + 2 >= len || isWS(src[i + 2]) || isDelim(src[i + 2]))) {
+        i += 2;
+        return;
+      }
+      i++;
+    }
+  }
+
+  while (i < len) {
+    skipWS();
+    if (i >= len) break;
+    const c = src[i];
+    if (c === 0x28) { skipLiteralString(); numBuf.length = 0; continue; }
+    if (c === 0x3c) { skipHexOrDict(); numBuf.length = 0; continue; }
+    if (c === 0x5b) { skipArray(); numBuf.length = 0; continue; }
+    if (c === 0x2f) {
+      const start = i;
+      skipName();
+      lastName = peDecodePdfNameToken(String.fromCharCode.apply(null, src.subarray(start + 1, i)));
+      continue;
+    }
+    if (c === 0x2b || c === 0x2d || c === 0x2e || (c >= 0x30 && c <= 0x39)) {
+      const start = i;
+      i++;
+      while (i < len && !isWS(src[i]) && !isDelim(src[i])) i++;
+      const n = parseFloat(String.fromCharCode.apply(null, src.subarray(start, i)));
+      if (Number.isFinite(n)) numBuf.push(n);
+      continue;
+    }
+    const start = i;
+    while (i < len && !isWS(src[i]) && !isDelim(src[i])) i++;
+    if (i === start) { i++; continue; } // stray delimiter byte - avoid getting stuck
+    const op = String.fromCharCode.apply(null, src.subarray(start, i));
+    if (op === 'q') { ctmStack.push(ctm.slice()); numBuf.length = 0; continue; }
+    if (op === 'Q') { if (ctmStack.length) ctm = ctmStack.pop(); numBuf.length = 0; continue; }
+    if (op === 'cm') {
+      if (numBuf.length >= 6) {
+        const m = numBuf.slice(-6);
+        ctm = peMatMul(ctm, m[0], m[1], m[2], m[3], m[4], m[5]);
+      }
+      numBuf.length = 0; continue;
+    }
+    if (op === 'Do') {
+      const info = xobjMap.get(lastName);
+      if (info) {
+        if (info.kind === 'image' && info.ref) {
+          const c00x = ctm[4], c00y = ctm[5];
+          const c10x = ctm[0] + ctm[4], c10y = ctm[1] + ctm[5];
+          const c01x = ctm[2] + ctm[4], c01y = ctm[3] + ctm[5];
+          const wPt = Math.hypot(c10x - c00x, c10y - c00y);
+          const hPt = Math.hypot(c01x - c00x, c01y - c00y);
+          const key = info.ref.objectNumber + '_' + info.ref.generationNumber;
+          const cur = usageMap.get(key);
+          if (cur) { cur.maxWpt = Math.max(cur.maxWpt, wPt); cur.maxHpt = Math.max(cur.maxHpt, hPt); }
+          else usageMap.set(key, { ref: info.ref, obj: info.obj, maxWpt: wPt, maxHpt: hPt });
+        } else if (info.kind === 'form' && !formStack.includes(info.obj)) {
+          const formCtm = peMatMul(ctm, info.matrix[0], info.matrix[1], info.matrix[2], info.matrix[3], info.matrix[4], info.matrix[5]);
+          const formContent = peDecodePdfStreamBytes(info.obj);
+          const formRes = info.resources || resourcesDict;
+          pmTrackImageUsage(doc, formContent, formRes, formCtm, usageMap, depth + 1, formStack.concat([info.obj]));
+        }
+      }
+      numBuf.length = 0; continue;
+    }
+    if (op === 'BI') { skipInlineImage(); numBuf.length = 0; continue; }
+    numBuf.length = 0;
+  }
+}
+
+function pmImageFilterIsDct(doc, obj) {
+  try {
+    const f = obj.dict.get(PDFLib.PDFName.of('Filter'));
+    return f ? pePdfResName(f) === 'DCTDecode' : false;
+  } catch (_) { return false; }
+}
+
+function pmImageHasMask(doc, obj) {
+  try {
+    if (obj.dict.get(PDFLib.PDFName.of('SMask'))) return true;
+    if (obj.dict.get(PDFLib.PDFName.of('Mask'))) return true;
+  } catch (_) {}
+  return false;
+}
+
+function pmImageColorSpaceOk(doc, obj) {
+  try {
+    const cs = peLookupPdfObj(doc, obj.dict.get(PDFLib.PDFName.of('ColorSpace')));
+    if (!cs) return false;
+    const name = pePdfResName(cs);
+    if (name === 'DeviceRGB' || name === 'DeviceGray' || name === 'CalRGB' || name === 'CalGray') return true;
+    if (typeof cs.asArray === 'function') {
+      const arr = cs.asArray();
+      if (arr.length >= 2 && pePdfResName(arr[0]) === 'ICCBased') {
+        const iccStream = peLookupPdfObj(doc, arr[1]);
+        const n = iccStream && iccStream.dict ? pePdfNumValue(doc, iccStream.dict.get(PDFLib.PDFName.of('N'))) : null;
+        return n === 1 || n === 3;
+      }
+    }
+    return false;
+  } catch (_) { return false; }
+}
+
+async function pmCollectImageCompressionCandidates(doc) {
+  const usageMap = new Map();
+  for (const page of doc.getPages()) {
+    const res = pePageResourcesDict(doc, page);
+    if (!res) continue;
+    const content = peGetPageContentBytes(doc, page);
+    if (!content) continue;
+    try {
+      pmTrackImageUsage(doc, content, res, [1, 0, 0, 1, 0, 0], usageMap, 0, []);
+    } catch (e) { console.warn('pmTrackImageUsage failed for a page', e); }
+  }
+  const candidates = [];
+  for (const { ref, obj, maxWpt, maxHpt } of usageMap.values()) {
+    try {
+      if (!obj || !obj.dict || obj.contents == null) continue;
+      if (!pmImageFilterIsDct(doc, obj)) continue;
+      if (pmImageHasMask(doc, obj)) continue;
+      if (!pmImageColorSpaceOk(doc, obj)) continue;
+      const w = pePdfNumValue(doc, obj.dict.get(PDFLib.PDFName.of('Width')));
+      const h = pePdfNumValue(doc, obj.dict.get(PDFLib.PDFName.of('Height')));
+      if (!(w > 0) || !(h > 0) || w * h < PM_COMPRESS_MIN_PIXELS) continue;
+      if (!(maxWpt > 0) || !(maxHpt > 0)) continue; // never actually painted - unsafe to guess a target
+      const targetW = Math.max(1, Math.ceil((maxWpt / 72) * PM_COMPRESS_TARGET_DPI));
+      const targetH = Math.max(1, Math.ceil((maxHpt / 72) * PM_COMPRESS_TARGET_DPI));
+      if (w <= targetW * PM_COMPRESS_SIZE_SLACK && h <= targetH * PM_COMPRESS_SIZE_SLACK) continue;
+      const origBytes = peDecodePdfStreamBytes(obj);
+      if (!origBytes || !origBytes.length) continue;
+      candidates.push({ ref, targetW, targetH, origBytes });
+    } catch (e) { console.warn('compress candidate check failed', e); }
+  }
+  return candidates;
+}
+
+async function pmDownsampleJpegBytes(jpegBytes, targetW, targetH, quality) {
+  const blob = new Blob([jpegBytes], { type: 'image/jpeg' });
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(blob);
+  } catch (_) {
+    return null; // undecodable JPEG variant - leave the image untouched
+  }
+  try {
+    const canvas = document.createElement('canvas');
+    canvas.width = targetW;
+    canvas.height = targetH;
+    const cctx = canvas.getContext('2d');
+    cctx.imageSmoothingEnabled = true;
+    cctx.imageSmoothingQuality = 'high';
+    cctx.drawImage(bitmap, 0, 0, targetW, targetH);
+    const newBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+    if (!newBlob) return null;
+    return new Uint8Array(await newBlob.arrayBuffer());
+  } finally {
+    try { bitmap.close(); } catch (_) {}
+  }
+}
+
+// Replaces every XObject resource entry (page-level and, recursively, inside
+// Form XObjects) that pointed at oldRef with newRef - a shared image can be
+// referenced under different local names on different pages/forms.
+function pmSwapXObjectRefInDict(doc, resourcesDict, oldRef, newRef, visited) {
+  if (!resourcesDict || typeof resourcesDict.get !== 'function') return;
+  const xoDict = peLookupPdfObj(doc, resourcesDict.get(PDFLib.PDFName.of('XObject')));
+  if (!xoDict || typeof xoDict.keys !== 'function') return;
+  for (const key of xoDict.keys()) {
+    const rawVal = xoDict.get(key);
+    if (pmRefEq(rawVal, oldRef)) { xoDict.set(key, newRef); continue; }
+    const obj = peLookupPdfObj(doc, rawVal);
+    if (!obj || !obj.dict) continue;
+    if (pePdfResName(obj.dict.get(PDFLib.PDFName.of('Subtype'))) !== 'Form') continue;
+    const visitKey = (rawVal && typeof rawVal.objectNumber === 'number')
+      ? rawVal.objectNumber + '_' + rawVal.generationNumber : obj;
+    if (visited.has(visitKey)) continue;
+    visited.add(visitKey);
+    const formRes = peLookupPdfObj(doc, obj.dict.get(PDFLib.PDFName.of('Resources'))) || resourcesDict;
+    pmSwapXObjectRefInDict(doc, formRes, oldRef, newRef, visited);
+  }
+}
+
+function pmSwapXObjectRefEverywhere(doc, oldRef, newRef) {
+  const visited = new Set();
+  for (const page of doc.getPages()) {
+    pmSwapXObjectRefInDict(doc, pePageResourcesDict(doc, page), oldRef, newRef, visited);
+  }
+}
+
+// Downsamples oversized embedded JPEGs in place. Returns the new PDF bytes
+// plus how many images were actually touched, so the caller can tell the
+// user "nothing to compress" instead of silently no-op-saving the file.
+async function compressPdfImagesBytes(bytes, progressLabel) {
+  const doc = await PDFLib.PDFDocument.load(bytes);
+  const candidates = await pmCollectImageCompressionCandidates(doc);
+  let changedCount = 0;
+  for (let idx = 0; idx < candidates.length; idx++) {
+    const cand = candidates[idx];
+    if (progressLabel) showLoading(`${progressLabel} ${idx + 1}/${candidates.length}`);
+    let newBytes = null;
+    try {
+      newBytes = await pmDownsampleJpegBytes(cand.origBytes, cand.targetW, cand.targetH, PM_COMPRESS_JPEG_QUALITY);
+    } catch (e) { console.warn('image downsample failed', e); }
+    if (!newBytes || newBytes.length >= cand.origBytes.length) continue; // no real benefit - leave as-is
+    let embedded;
+    try {
+      embedded = await doc.embedJpg(newBytes);
+    } catch (e) { console.warn('embedJpg failed', e); continue; }
+    if (!embedded || !embedded.ref) continue;
+    pmSwapXObjectRefEverywhere(doc, cand.ref, embedded.ref);
+    // Every reference to the old image was just swapped to the new one above,
+    // so it's now unreachable - but pdf-lib's save() doesn't garbage-collect
+    // unreferenced indirect objects on its own, and would otherwise still
+    // serialize the old (bigger) image data into the output file right
+    // alongside the new one, growing the file instead of shrinking it.
+    try { doc.context.delete(cand.ref); } catch (_) {}
+    changedCount++;
+  }
+  if (!changedCount) return { bytes, changedCount: 0 };
+  const outBytes = await doc.save();
+  // Per-image byte counts already got checked, but re-serializing the whole
+  // document (new xref, no longer reusing the source's own object/stream
+  // packing) has its own overhead - guard the one promise that actually
+  // matters: never hand back a file bigger than what came in.
+  if (outBytes.length >= bytes.length) return { bytes, changedCount: 0 };
+  return { bytes: outBytes, changedCount };
 }
 
 // PDF user-space point → normalized top-based visual coordinates of the
