@@ -7023,6 +7023,17 @@
     let originalFileBytes = null;
     //Reusing an already parsed pdf-lib document from preparePdfBytes.
     let preparedPdfLibDoc = null;
+    // "Сжать PDF" tooltip-estimate cache/state - declared this early because
+    // updateUIState() (called synchronously below, before any document is
+    // open) reaches into it via pmSyncCompressButtonsUnavailable(); a `let`
+    // declared later in the script would still be in its temporal dead zone
+    // at that first call and throw, aborting the rest of this script (see
+    // the full pmCompressEstimateIsFresh/pmComputeCompressEstimate/etc.
+    // implementation much further down).
+    let pmCompressEstimateCache = { save: null, export: null };
+    let pmCompressEstimateInFlight = { save: null, export: null };
+    const PM_COMPRESS_ESTIMATE_TTL_MS = 20000;
+    const PM_COMPRESS_HIGHLIGHT_RATIO = 0.30;
     let pdfjsPreloadTask = null;   //parallel parsing of pdf.js when opening a file
     //“Dirty” state of the document: were there any changes (rotation/movement/insertion/
     //deletion) after the last save. Resets to false when saving.
@@ -50156,11 +50167,12 @@ async function compressPdfImagesBytes(bytes, progressLabel) {
 //   'export' - only the currently SELECTED pages (Export never sends the
 //              whole document) - keyed to pdfDoc + the exact selection, so
 //              toggling which pages are checked invalidates it correctly.
-let pmCompressEstimateCache = { save: null, export: null };
-let pmCompressEstimateInFlight = { save: null, export: null };
-const PM_COMPRESS_ESTIMATE_TTL_MS = 20000;
-// "слегка подсвечивается" on the Save button when compression would be substantial.
-const PM_COMPRESS_HIGHLIGHT_RATIO = 0.30;
+// (pmCompressEstimateCache/InFlight and the PM_COMPRESS_* consts are
+// declared near pdfDoc, far above - updateUIState() calls into this code
+// on the very first, synchronous "no document yet" pass, long before
+// execution reaches this point in the script, and referencing a later
+// `let` before its own declaration line has run throws instead of just
+// being undefined.)
 
 function pmCompressEstimateIsFresh(scope, selKey) {
   const c = pmCompressEstimateCache[scope];
