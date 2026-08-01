@@ -6709,6 +6709,14 @@
         </svg>
       </button>
     </div>
+    <!-- Manually-added text block: plain text-edit actions (Copy above already
+         covers copy) instead of the PDF-text markup icons above - formatting
+         there has its own toolbar buttons already. -->
+    <div class="pe-text-sel-inline-actions" hidden style="display:none">
+      <button type="button" class="pe-text-sel-copy" data-action="cut-text" data-i18n="peCut">Вырезать</button>
+      <button type="button" class="pe-text-sel-copy" data-action="paste-text" data-i18n="pePaste">Вставить</button>
+      <button type="button" class="pe-text-sel-copy" data-action="delete-text" data-i18n="peDelete">Удалить</button>
+    </div>
   </div>
   <div id="peRotateAngleLabel" class="pe-rotate-angle-label" aria-hidden="true"></div>
   <div id="peAspectSnapLabel" class="pe-aspect-snap-label" aria-hidden="true" data-i18n="peAspectSnap">Оригинальное соотношение</div>
@@ -40132,6 +40140,20 @@ function peShowTextSelCtxMenu(clientX, clientY, info) {
     const sep = menu.querySelector('.pe-text-sel-sep');
     if (sep) sep.style.display = hideCopy ? 'none' : '';
   }
+  // Manually-added text block: swap the PDF-text markup icons (highlight/
+  // strikeout/underline/comment - formatting already has its own toolbar
+  // buttons) for plain Cut/Paste/Delete text-edit actions.
+  const isInline = info.kind === 'inline';
+  const iconsGroup = menu.querySelector('.pe-text-sel-icons');
+  if (iconsGroup) {
+    iconsGroup.hidden = isInline;
+    iconsGroup.style.display = isInline ? 'none' : '';
+  }
+  const inlineActions = menu.querySelector('.pe-text-sel-inline-actions');
+  if (inlineActions) {
+    inlineActions.hidden = !isInline;
+    inlineActions.style.display = isInline ? '' : 'none';
+  }
   menu.classList.add('visible');
   menu.setAttribute('aria-hidden', 'false');
   peArmCtxMenuOutsideGuard(600);
@@ -40323,6 +40345,16 @@ async function peTextSelCopy() {
   peRestoreTextSelRange(ctx.range);
 }
 
+/** Sync the persisted text-object's html/plain-text after an inline DOM edit. */
+function peSyncInlineTextObjFromEl(el) {
+  const o = peState && peState.objects.find(x => String(x.id) === String(el.dataset.peId));
+  if (o && o.type === 'text') {
+    o.html = el.innerHTML;
+    o.text = peEditablePlainText(el);
+  }
+  return o;
+}
+
 function peApplyInlineTextSelMarkup(action) {
   const ctx = peTextSelCtx;
   if (!ctx || ctx.kind !== 'inline' || !ctx.el) return;
@@ -40338,11 +40370,7 @@ function peApplyInlineTextSelMarkup(action) {
   } else if (action === 'underline') {
     peApplySpanStyleToSelection({ textDecoration: 'underline', textDecorationColor: '#e74c3c' });
   }
-  const o = peState && peState.objects.find(x => String(x.id) === String(el.dataset.peId));
-  if (o && o.type === 'text') {
-    o.html = el.innerHTML;
-    o.text = peEditablePlainText(el);
-  }
+  peSyncInlineTextObjFromEl(el);
   peCommitEditorHistory();
   // DOM mutation invalidates the pre-action Range — refresh from live selection.
   try {
@@ -40351,6 +40379,58 @@ function peApplyInlineTextSelMarkup(action) {
       ctx.range = sel.getRangeAt(0).cloneRange();
     }
   } catch (_) {}
+}
+
+/** Cut = copy the selected text to the clipboard, then delete it. */
+async function peTextSelCut() {
+  const ctx = peTextSelCtx;
+  if (!ctx || ctx.kind !== 'inline' || !ctx.el) return;
+  const el = ctx.el;
+  const text = ctx.text || '';
+  try { el.focus({ preventScroll: true }); } catch (_) { try { el.focus(); } catch (__) {} }
+  peRestoreTextSelRange(ctx.range);
+  if (typeof pmCopyPageTextToClipboard === 'function') {
+    await pmCopyPageTextToClipboard(text);
+  } else {
+    try { await navigator.clipboard.writeText(text); } catch (_) {}
+  }
+  peRestoreTextSelRange(ctx.range);
+  try { document.execCommand('delete'); } catch (_) {}
+  const o = peSyncInlineTextObjFromEl(el);
+  if (o) peSyncTextEmptyClass(el, o);
+  peCommitEditorHistory();
+}
+
+/** Delete = remove the selected text without touching the clipboard. */
+function peTextSelDeleteSelection() {
+  const ctx = peTextSelCtx;
+  if (!ctx || ctx.kind !== 'inline' || !ctx.el) return;
+  const el = ctx.el;
+  try { el.focus({ preventScroll: true }); } catch (_) { try { el.focus(); } catch (__) {} }
+  peRestoreTextSelRange(ctx.range);
+  try { document.execCommand('delete'); } catch (_) {}
+  const o = peSyncInlineTextObjFromEl(el);
+  if (o) peSyncTextEmptyClass(el, o);
+  peCommitEditorHistory();
+}
+
+/** Paste = replace the selected text with the system clipboard's plain text. */
+async function peTextSelPaste() {
+  const ctx = peTextSelCtx;
+  if (!ctx || ctx.kind !== 'inline' || !ctx.el) return;
+  const el = ctx.el;
+  try { el.focus({ preventScroll: true }); } catch (_) { try { el.focus(); } catch (__) {} }
+  peRestoreTextSelRange(ctx.range);
+  let clip = null;
+  try {
+    clip = typeof peReadSystemClipboardForPaste === 'function' ? await peReadSystemClipboardForPaste() : null;
+  } catch (_) {}
+  if (!clip || clip.kind !== 'text' || !clip.text) return;
+  try { el.focus({ preventScroll: true }); } catch (_) { try { el.focus(); } catch (__) {} }
+  peRestoreTextSelRange(ctx.range);
+  try { document.execCommand('insertText', false, clip.text); } catch (_) {}
+  peSyncInlineTextObjFromEl(el);
+  peCommitEditorHistory();
 }
 
 function peApplyPageTextSelMarkup(action) {
@@ -40508,6 +40588,22 @@ function peOnTextSelCtxAction(action) {
       peHideTextSelCtxMenu();
       peRestoreTextSelRange(range);
     });
+    return;
+  }
+  if (action === 'cut-text') {
+    if (ctx.kind !== 'inline') { peHideTextSelCtxMenu(); return; }
+    void peTextSelCut().finally(() => peHideTextSelCtxMenu());
+    return;
+  }
+  if (action === 'paste-text') {
+    if (ctx.kind !== 'inline') { peHideTextSelCtxMenu(); return; }
+    void peTextSelPaste().finally(() => peHideTextSelCtxMenu());
+    return;
+  }
+  if (action === 'delete-text') {
+    if (ctx.kind !== 'inline') { peHideTextSelCtxMenu(); return; }
+    peTextSelDeleteSelection();
+    peHideTextSelCtxMenu();
     return;
   }
   if (action === 'redact-text') {
@@ -41975,6 +42071,13 @@ function peObjMouseDown(e, o) {
     if (peIsTextBorderHit(e.currentTarget, e.clientX, e.clientY)) {
       if (touchLike && e.cancelable) e.preventDefault();
       peStartInlineTextMove(e, o);
+    } else {
+      // Plain click inside the text content - let the browser handle native
+      // caret placement / selection collapse entirely on its own, and stop
+      // the event here so it can never reach an ancestor's own pointerdown
+      // handling (deselect-on-blank-click, marquee-select, etc.) meant for
+      // clicks that land OUTSIDE this actively-edited block, not inside it.
+      e.stopPropagation();
     }
     return;
   }
