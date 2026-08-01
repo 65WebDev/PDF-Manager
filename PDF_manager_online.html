@@ -1010,7 +1010,7 @@
        pmApplyCompressHighlight). Deliberately just a static ring, not an
        animation - stays "slight", not attention-grabbing. */
     .top-menu .img-save-btn--compress.pm-compress-notable {
-      box-shadow: 0 0 0 2px rgba(52, 152, 219, .65), 0 4px 14px rgba(0, 0, 0, .5);
+      box-shadow: 0 0 0 2px rgba(230, 126, 34, .55), 0 4px 14px rgba(0, 0, 0, .5);
     }
     /*Three popup buttons side by side (e.g. "as images" + "compress" + "encrypt") -
        offset the outer two 42px-wide buttons 48px either side of the wrapper's own
@@ -7264,6 +7264,7 @@
         compressPdf: 'Сжать PDF',
         compressPdfHint: 'Сжать PDF\n(уменьшить размер файла без потери качества)',
         compressPdfHintEstimate: 'Сжать PDF\n(ожидаемое уменьшение размера файла: {before} → {after})',
+        compressPdfEstimating: 'Сжать PDF\n(расчёт ожидаемого уменьшения размера файла…)',
         compressPdfProgress: 'Сжатие изображений...',
         compressPdfResult: 'Размер файла уменьшен: {before} → {after}',
         compressPdfNoBenefit: 'Существенного уменьшения размера файла не ожидается',
@@ -7532,6 +7533,7 @@
         compressPdf: 'Compress PDF',
         compressPdfHint: 'Compress PDF\n(reduce file size without losing quality)',
         compressPdfHintEstimate: 'Compress PDF\n(expected file size reduction: {before} → {after})',
+        compressPdfEstimating: 'Compress PDF\n(estimating expected file size reduction…)',
         compressPdfProgress: 'Compressing images...',
         compressPdfResult: 'File size reduced: {before} → {after}',
         compressPdfNoBenefit: 'No significant file size reduction expected',
@@ -50218,6 +50220,9 @@ function pmRefreshCompressEstimateTooltip(scope, btn) {
     if (scope === 'save') pmApplyCompressHighlight(btn, entry);
   };
   if (pmCompressEstimateIsFresh(scope, selKey)) { apply(pmCompressEstimateCache[scope]); return; }
+  // No fresh number yet and it isn't instant to compute - say so up front
+  // rather than leaving the old/static text sitting there looking stale.
+  btn.title = t('compressPdfEstimating');
   pmComputeCompressEstimate(scope).then(entry => apply(entry));
 }
 
