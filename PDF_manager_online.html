@@ -35782,7 +35782,14 @@ function peScrollSelectedTextIntoFocusCenter(o) {
   const el = document.querySelector('#peObjLayer [data-pe-id="' + o.id + '"].pe-obj-text');
   if (!el) return;
   if (peState.inlineEditId === o.id) {
-    peScrollElementIntoTextFocusCenter(el, { force: true, withPad: true, estimate: true });
+    // Force-centering exists so the on-screen keyboard never covers the
+    // block being edited (this runs right after e.g. a drag-move, to
+    // resume editing) - peScrollElementIntoTextFocusCenter's own desktop
+    // guard ("never force-center into mid-viewport") only takes effect
+    // when force is false, so force must itself stay scoped to touch/OSK
+    // devices, or it silently overrides that guard on desktop too.
+    const oskAssist = typeof peNeedsOskTextFocusAssist === 'function' && peNeedsOskTextFocusAssist();
+    peScrollElementIntoTextFocusCenter(el, { force: oskAssist, withPad: true, estimate: true });
     return;
   }
   // Selection only: center if covered by mini-panel / viewport; pad only if needed.
@@ -40471,12 +40478,21 @@ async function peTextSelPaste() {
   const el = ctx.el;
   try { el.focus({ preventScroll: true }); } catch (_) { try { el.focus(); } catch (__) {} }
   peRestoreTextSelRange(ctx.range);
-  let text = '';
-  try { text = await peReadClipboardTextOnly(); } catch (_) {}
-  if (!text) return;
-  try { el.focus({ preventScroll: true }); } catch (_) { try { el.focus(); } catch (__) {} }
-  peRestoreTextSelRange(ctx.range);
-  try { document.execCommand('insertText', false, text); } catch (_) {}
+  // Mirrors native Ctrl+V exactly (the browser's own keyboard paste runs
+  // this same legacy command internally) - unlike the Async Clipboard API
+  // fallback below, it never triggers its own clipboard-read permission
+  // prompt, since the browser mediates it directly rather than exposing
+  // clipboard content to page script.
+  let pasted = false;
+  try { pasted = document.execCommand('paste'); } catch (_) {}
+  if (!pasted) {
+    let text = '';
+    try { text = await peReadClipboardTextOnly(); } catch (_) {}
+    if (!text) return;
+    try { el.focus({ preventScroll: true }); } catch (_) { try { el.focus(); } catch (__) {} }
+    peRestoreTextSelRange(ctx.range);
+    try { document.execCommand('insertText', false, text); } catch (_) {}
+  }
   peSyncInlineTextObjFromEl(el);
   peCommitEditorHistory();
 }
