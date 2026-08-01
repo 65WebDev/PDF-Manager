@@ -39843,11 +39843,23 @@ function peRestoreTextSelRange(range) {
 
 function peCaptureEditorTextSelection() {
   const sel = window.getSelection();
-  if (!sel || !sel.rangeCount || sel.isCollapsed) return null;
+  if (!sel || !sel.rangeCount) return null;
   const range = sel.getRangeAt(0);
   let node = range.commonAncestorContainer;
   if (node && node.nodeType === 3) node = node.parentElement;
   if (!node || !node.closest) return null;
+  if (sel.isCollapsed) {
+    // A placed caret (nothing selected) - only useful for the inline-edit
+    // case, so RMB there can still offer Paste at the caret instead of
+    // falling through to the whole-object menu (whose own Paste creates a
+    // brand new object - correct there, wrong for "I just moved the caret
+    // inside the block I'm editing").
+    const inlineEl = node.closest('.pe-obj-text.pe-inline-edit');
+    if (inlineEl && document.getElementById('peObjLayer')?.contains(inlineEl)) {
+      return { kind: 'inline', range: range.cloneRange(), text: '', el: inlineEl };
+    }
+    return null;
+  }
   const text = (sel.toString() || '').replace(/\u00a0/g, ' ');
   if (!text.trim()) return null;
   const pageLayer = node.closest('#peTextLayer');
@@ -40133,9 +40145,13 @@ function peShowTextSelCtxMenu(clientX, clientY, info) {
     el.hidden = !showClear;
     el.style.display = showClear ? '' : 'none';
   });
+  // A collapsed caret (no actual selection) can only reach here via the
+  // inline-edit case (see peCaptureEditorTextSelection) - Copy/Cut/Delete
+  // don't apply to "nothing selected", only Paste at the caret does.
+  const hasSelection = !(info.kind === 'inline' && !(info.text && info.text.trim()));
   const copyBtn = menu.querySelector('.pe-text-sel-copy');
   if (copyBtn) {
-    const hideCopy = info.kind === 'markup-obj';
+    const hideCopy = info.kind === 'markup-obj' || !hasSelection;
     copyBtn.style.display = hideCopy ? 'none' : '';
     const sep = menu.querySelector('.pe-text-sel-sep');
     if (sep) sep.style.display = hideCopy ? 'none' : '';
@@ -40153,6 +40169,12 @@ function peShowTextSelCtxMenu(clientX, clientY, info) {
   if (inlineActions) {
     inlineActions.hidden = !isInline;
     inlineActions.style.display = isInline ? '' : 'none';
+    if (isInline) {
+      const cutBtn = inlineActions.querySelector('[data-action="cut-text"]');
+      const delBtn = inlineActions.querySelector('[data-action="delete-text"]');
+      if (cutBtn) cutBtn.style.display = hasSelection ? '' : 'none';
+      if (delBtn) delBtn.style.display = hasSelection ? '' : 'none';
+    }
   }
   menu.classList.add('visible');
   menu.setAttribute('aria-hidden', 'false');
@@ -40415,20 +40437,46 @@ function peTextSelDeleteSelection() {
 }
 
 /** Paste = replace the selected text with the system clipboard's plain text. */
+/**
+ * Text-only clipboard read for pasting INTO an editable text run - unlike
+ * peReadSystemClipboardForPaste() (used for whole-object canvas paste,
+ * where an image is a legitimate result), an image can never be inserted
+ * inline here, so probing for one first only costs an extra, pointless
+ * clipboard-read permission prompt before the text one.
+ */
+async function peReadClipboardTextOnly() {
+  if (navigator.clipboard && navigator.clipboard.readText) {
+    try {
+      const text = (await navigator.clipboard.readText()).trim();
+      if (text) return text;
+    } catch (_) {}
+  }
+  if (navigator.clipboard && navigator.clipboard.read) {
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        if (item.types.includes('text/plain')) {
+          const text = (await (await item.getType('text/plain')).text()).trim();
+          if (text) return text;
+        }
+      }
+    } catch (_) {}
+  }
+  return '';
+}
+
 async function peTextSelPaste() {
   const ctx = peTextSelCtx;
   if (!ctx || ctx.kind !== 'inline' || !ctx.el) return;
   const el = ctx.el;
   try { el.focus({ preventScroll: true }); } catch (_) { try { el.focus(); } catch (__) {} }
   peRestoreTextSelRange(ctx.range);
-  let clip = null;
-  try {
-    clip = typeof peReadSystemClipboardForPaste === 'function' ? await peReadSystemClipboardForPaste() : null;
-  } catch (_) {}
-  if (!clip || clip.kind !== 'text' || !clip.text) return;
+  let text = '';
+  try { text = await peReadClipboardTextOnly(); } catch (_) {}
+  if (!text) return;
   try { el.focus({ preventScroll: true }); } catch (_) { try { el.focus(); } catch (__) {} }
   peRestoreTextSelRange(ctx.range);
-  try { document.execCommand('insertText', false, clip.text); } catch (_) {}
+  try { document.execCommand('insertText', false, text); } catch (_) {}
   peSyncInlineTextObjFromEl(el);
   peCommitEditorHistory();
 }
@@ -40797,7 +40845,9 @@ function peShowObjCtxMenu(clientX, clientY, overlapObjs) {
 
 function peOnObjContextMenu(e) {
   if (!peState || peState.tool === 'crop') return;
-  // Selected text inside an editable text block → text-markup menu
+  // Selected text (or just a placed caret) inside an editable text block →
+  // the Copy/Cut/Paste/Delete menu (peCaptureEditorTextSelection returns
+  // 'inline' for both cases; peShowTextSelCtxMenu shows only Paste for a caret).
   const textInfo = peCaptureEditorTextSelection();
   if (textInfo && textInfo.kind === 'inline') {
     e.preventDefault();
@@ -42077,6 +42127,17 @@ function peObjMouseDown(e, o) {
       // the event here so it can never reach an ancestor's own pointerdown
       // handling (deselect-on-blank-click, marquee-select, etc.) meant for
       // clicks that land OUTSIDE this actively-edited block, not inside it.
+      // Clear a pre-existing (non-collapsed) selection ourselves first: the
+      // browser's own mousedown then only has to PLACE a fresh caret rather
+      // than COLLAPSE an existing range near the click point, which is where
+      // Chromium's glyph-center hit-testing gets ambiguous - it can land the
+      // new caret without ever visibly clearing the old highlighted range,
+      // needing 2-3 more clicks before one happens to land in an unambiguous
+      // spot (a gap between glyphs) to finally take effect.
+      try {
+        const sel = window.getSelection();
+        if (sel && !sel.isCollapsed) sel.removeAllRanges();
+      } catch (_) {}
       e.stopPropagation();
     }
     return;
