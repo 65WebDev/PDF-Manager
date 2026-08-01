@@ -2533,7 +2533,10 @@
       padding: 1px 2px; min-width: 12px; vertical-align: top;
       overflow-wrap: break-word; word-break: break-word;
     }
-    .pe-obj-text.pe-inline-edit { cursor: text; user-select: text; position: relative; }
+    /* Otherwise contenteditable focus draws Chromium's own default focus
+       ring, a second border slightly offset from .pe-obj.sel's - the two
+       never lined up. The blue selection outline is the only border needed. */
+    .pe-obj-text.pe-inline-edit { cursor: text; user-select: text; position: relative; outline: none; }
     .pe-obj-text.pe-inline-edit.pe-text-border-drag { cursor: move; user-select: none; }
     .pe-obj-text.pe-inline-edit.pe-text-border-hover { cursor: move; }
     /*pe-empty instead of pure :empty - the element now always has children
@@ -35788,12 +35791,20 @@ function peScrollSelectedTextIntoFocusCenter(o) {
   if (peState.inlineEditId === o.id) {
     // Force-centering exists so the on-screen keyboard never covers the
     // block being edited (this runs right after e.g. a drag-move, to
-    // resume editing) - peScrollElementIntoTextFocusCenter's own desktop
-    // guard ("never force-center into mid-viewport") only takes effect
-    // when force is false, so force must itself stay scoped to touch/OSK
-    // devices, or it silently overrides that guard on desktop too.
+    // resume editing).
     const oskAssist = typeof peNeedsOskTextFocusAssist === 'function' && peNeedsOskTextFocusAssist();
-    peScrollElementIntoTextFocusCenter(el, { force: oskAssist, withPad: true, estimate: true });
+    if (oskAssist) {
+      peScrollElementIntoTextFocusCenter(el, { force: true, withPad: true, estimate: true });
+      return;
+    }
+    // Desktop: peScrollElementIntoTextFocusCenter's own "covered" check fires
+    // just from sitting near the viewport edge - which is exactly where a
+    // just-finished drag legitimately leaves it - so force:false alone isn't
+    // enough to stop it scrolling. Only nudge when the mini-panel is actually
+    // hiding the caret, same as peScrollInlineEditorIntoWrapSafeZone does.
+    if (typeof peElCoveredByPropsPanel === 'function' && peElCoveredByPropsPanel(el)) {
+      peScrollElementIntoTextFocusCenter(el, { force: false, withPad: true, allowDesktopTopPad: true });
+    }
     return;
   }
   // Selection only: center if covered by mini-panel / viewport; pad only if needed.
