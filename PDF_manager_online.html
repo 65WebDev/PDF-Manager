@@ -40328,6 +40328,7 @@ function pePositionTextSelCtxMenuAwayFromSelection(menu, clientX, clientY, info)
   const viewB = viewT + (vv ? vv.height : window.innerHeight);
 
   let selBox = null;
+  let lineRects = [];
   const grow = (r) => {
     if (!r || (!(r.width > 0) && !(r.height > 0))) return;
     if (!selBox) selBox = { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
@@ -40341,7 +40342,10 @@ function pePositionTextSelCtxMenuAwayFromSelection(menu, clientX, clientY, info)
   try {
     if (info && info.range) {
       const rects = info.range.getClientRects();
-      for (let i = 0; i < rects.length; i++) grow(rects[i]);
+      for (let i = 0; i < rects.length; i++) {
+        grow(rects[i]);
+        if (rects[i].width > 0 || rects[i].height > 0) lineRects.push(rects[i]);
+      }
       if (!selBox) grow(info.range.getBoundingClientRect());
     }
   } catch (_) {}
@@ -40363,6 +40367,36 @@ function pePositionTextSelCtxMenuAwayFromSelection(menu, clientX, clientY, info)
   });
 
   const candidates = [];
+  // The line of the selection actually nearest the click - anchoring here
+  // keeps the menu close to the cursor even when the full selection spans
+  // many lines/columns, instead of only ever considering positions relative
+  // to the selection's overall (possibly huge) bounding box.
+  let clickLine = null;
+  if (lineRects.length) {
+    let bestLineDist = Infinity;
+    for (const r of lineRects) {
+      const cy = Math.max(r.top, Math.min(r.bottom, clientY));
+      const cx = Math.max(r.left, Math.min(r.right, clientX));
+      const d = Math.hypot(cx - clientX, cy - clientY);
+      if (d < bestLineDist) { bestLineDist = d; clickLine = r; }
+    }
+  }
+  if (clickLine) {
+    candidates.push(
+      { x: clientX, y: clickLine.bottom + gap },
+      { x: clientX - mw, y: clickLine.bottom + gap },
+      { x: clientX, y: clickLine.top - mh - gap },
+      { x: clientX - mw, y: clickLine.top - mh - gap },
+      { x: clickLine.right + gap, y: clientY - mh / 2 },
+      { x: clickLine.left - mw - gap, y: clientY - mh / 2 }
+    );
+  }
+  candidates.push(
+    { x: clientX + gap, y: clientY + gap },
+    { x: clientX - mw - gap, y: clientY - mh - gap },
+    { x: clientX + gap, y: clientY - mh - gap },
+    { x: clientX - mw - gap, y: clientY + gap }
+  );
   if (selBox) {
     const midX = (selBox.left + selBox.right) / 2 - mw / 2;
     candidates.push(
@@ -40376,20 +40410,19 @@ function pePositionTextSelCtxMenuAwayFromSelection(menu, clientX, clientY, info)
       { x: selBox.left - mw - gap, y: (selBox.top + selBox.bottom) / 2 - mh / 2 }
     );
   }
-  candidates.push(
-    { x: clientX + gap, y: clientY + gap },
-    { x: clientX - mw - gap, y: clientY - mh - gap },
-    { x: clientX + gap, y: clientY - mh - gap },
-    { x: clientX - mw - gap, y: clientY + gap }
-  );
 
-  let best = null;
+  // Pick the closest-to-cursor candidate that doesn't cover the selection,
+  // instead of just the first one in priority order - for a tall/wide
+  // selection, an early "priority" candidate (e.g. flush against the far
+  // edge of the WHOLE selection, always at its top regardless of where in
+  // the selection the click actually landed) can end up much farther from
+  // the click than a later, equally valid candidate right next to it.
+  let best = null, bestDist = Infinity;
   for (let i = 0; i < candidates.length; i++) {
     const c = clamp(candidates[i].x, candidates[i].y);
-    if (!overlapsSel(c.x, c.y)) {
-      best = c;
-      break;
-    }
+    if (overlapsSel(c.x, c.y)) continue;
+    const d = Math.hypot(c.x - clientX, c.y - clientY);
+    if (d < bestDist) { bestDist = d; best = c; }
   }
   if (!best) {
     // Last resort: pin to the edge of the viewport farthest from the selection mid.
