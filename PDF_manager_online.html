@@ -1195,10 +1195,32 @@
       overflow-wrap: break-word;
     }
     /*Bookmarks popup - reuses .pm-search-panel's box/positioning, own content layout*/
-    .pm-bookmarks-panel { min-width: 260px; max-width: min(92vw, 340px); padding: 8px; }
+    .pm-bookmarks-panel { min-width: 260px; max-width: min(92vw, 340px); padding: 0; gap: 0; }
+    .pm-bookmarks-panel.pm-bookmarks-dragging { user-select: none; }
+    /*Grab strip along the top edge, same idea as the page-editor's .pe-props-drag
+      (there it's a strip on the left; here it's on top) - lets the popup be
+      repositioned instead of only ever sitting in its computed default spot.*/
+    .pm-bookmarks-drag {
+      flex: 0 0 auto; height: 14px; width: 100%;
+      display: flex; align-items: center; justify-content: center;
+      cursor: grab; border-radius: 10px 10px 0 0;
+      background: rgba(255, 255, 255, 0.06);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+    }
+    .pm-bookmarks-drag:hover { background: rgba(255, 255, 255, 0.1); }
+    .pm-bookmarks-panel.pm-bookmarks-dragging .pm-bookmarks-drag,
+    .pm-bookmarks-drag:active { cursor: grabbing; background: rgba(255, 255, 255, 0.12); }
+    .pm-bookmarks-drag-grips {
+      width: 16px; height: 8px;
+      background-image: radial-gradient(circle, currentColor 1.15px, transparent 1.25px);
+      background-size: 5.3px 4px;
+      background-position: 0 0;
+      opacity: 0.95; pointer-events: none;
+      color: rgba(255, 255, 255, 0.55);
+    }
     .pm-bookmarks-header {
       justify-content: space-between;
-      padding: 2px 6px 6px;
+      padding: 8px 10px 6px;
       margin-bottom: 4px;
       border-bottom: 1px solid rgba(255,255,255,0.15);
     }
@@ -1206,6 +1228,7 @@
     .pm-bookmarks-list {
       display: flex; flex-direction: column; gap: 1px;
       max-height: 50vh; overflow-y: auto;
+      padding: 0 8px 8px;
     }
     .pm-bookmarks-item {
       display: flex; align-items: baseline; gap: 6px;
@@ -2958,6 +2981,7 @@
     .mode-btn.mode-sep { margin-right: 16px; } /*visual distance from the rotation/print block*/
     .readmode-wrapper.mode-sep { margin-right: 16px; } /*same indentation, but the wrapper is not .mode-btn*/
     #bookmarksBtn.mode-sep { margin-right: 16px; } /*same indentation, on the other side of the mode-switch group*/
+    #bookmarksBtn.active-mode { background: #3498db; } /*lit up while the bookmarks popup is open*/
 
     /*Navigation mode: palm cursor, pages do not respond to hover*/
     .nav-mode-active #scrollContainer { cursor: grab; }
@@ -6895,6 +6919,9 @@
 
   <!--Bookmarks / table of contents popup (opened from #bookmarksBtn)-->
   <div id="pmBookmarksPanel" class="pm-search-panel pm-bookmarks-panel" role="dialog" aria-hidden="true" aria-label="Закладки">
+    <div class="pm-bookmarks-drag" id="pmBookmarksDragHandle" title="Переместить панель" aria-hidden="true">
+      <span class="pm-bookmarks-drag-grips"></span>
+    </div>
     <div class="pm-search-row pm-bookmarks-header">
       <span class="pm-bookmarks-title" data-i18n="bookmarksPanel">Закладки</span>
       <button id="pmBookmarksCloseBtn" type="button" title="Закрыть (Esc)" aria-label="Закрыть закладки" data-i18n-title="searchClose" data-i18n-aria="bookmarksClose">
@@ -7095,7 +7122,7 @@
     // Same reasoning as pmCompressEstimateCache above: updateUIState() calls
     // pmBookmarksClose() (hoisted function, safe) which reaches into this
     // state object - it must exist before that first synchronous call too.
-    let pmBookmarksState = { open: false };
+    let pmBookmarksState = { open: false, userMoved: false };
     let pmBookmarksReqToken = 0;
     let pdfjsPreloadTask = null;   //parallel parsing of pdf.js when opening a file
     //“Dirty” state of the document: were there any changes (rotation/movement/insertion/
@@ -12613,6 +12640,12 @@
       }
       const pauseBtn = document.getElementById('pmAutoScrollPauseBtn');
       if (pauseBtn) pauseBtn.style.top = (top + 84 + 6) + 'px';
+      // Keep the bookmarks popup below these buttons too if it's open and
+      // the user hasn't manually dragged it elsewhere.
+      if (typeof pmBookmarksState !== 'undefined' && pmBookmarksState.open && !pmBookmarksState.userMoved &&
+          typeof pmBookmarksPositionPanel === 'function') {
+        pmBookmarksPositionPanel();
+      }
     }
 
     function pmNavBtnForDir(dir) {
@@ -28686,16 +28719,34 @@ function pmSearchToggleOpen() {
 // pmBookmarksState/pmBookmarksReqToken are declared much earlier, next to
 // pdfDoc - see the comment there for why.
 
+// Left-aligned to the same 20px "left border" used by the prev/next
+// single-column page-jump buttons and the mobile page-count badge, and
+// anchored below whichever header row is on screen (same reference logic
+// as pmPositionPageNavButtons) so it never covers "Страниц: N". If those
+// prev/next buttons are currently showing (high zoom, single column), sit
+// below them too instead of overlapping.
 function pmBookmarksPositionPanel() {
   const panel = document.getElementById('pmBookmarksPanel');
-  const menu = document.querySelector('.top-menu');
-  const btn = document.getElementById('bookmarksBtn');
-  if (!panel || !menu || !btn) return;
-  const menuRect = menu.getBoundingClientRect();
-  const btnRect = btn.getBoundingClientRect();
-  panel.style.top = Math.round(menuRect.bottom + 4) + 'px';
-  const maxLeft = Math.max(8, window.innerWidth - panel.offsetWidth - 8);
-  panel.style.left = Math.round(Math.max(8, Math.min(btnRect.left, maxLeft))) + 'px';
+  if (!panel) return;
+  const bar = document.getElementById('stickyFileBar');
+  const barActive = bar && bar.classList.contains('visible');
+  let referenceBottom;
+  if (barActive) {
+    referenceBottom = bar.getBoundingClientRect().bottom;
+  } else {
+    const header = document.querySelector('.content-header');
+    const headerRect = header ? header.getBoundingClientRect() : null;
+    referenceBottom = (headerRect && headerRect.height > 0) ? headerRect.bottom
+      : (typeof stickyBarTop === 'function' ? stickyBarTop() : 0);
+  }
+  let top = referenceBottom + 12;
+  const nextNavBtn = document.getElementById('pmPageNextBtn');
+  if (nextNavBtn && nextNavBtn.classList.contains('visible')) {
+    const navRect = nextNavBtn.getBoundingClientRect();
+    if (navRect.height > 0) top = Math.max(top, navRect.bottom + 12);
+  }
+  panel.style.top = Math.round(top) + 'px';
+  panel.style.left = '20px';
 }
 
 function pmBookmarksSetStatus(text) {
@@ -28708,7 +28759,6 @@ function pmBookmarksSetStatus(text) {
 function pmBookmarksGoTo(pageIndex) {
   const pageEl = pagesContainer.querySelector('.page[data-index="' + pageIndex + '"]');
   if (pageEl && typeof scrollPageIntoViewTop === 'function') scrollPageIntoViewTop(pageEl);
-  pmBookmarksClose();
 }
 
 function pmBookmarksRenderList(items) {
@@ -28789,8 +28839,11 @@ function pmBookmarksOpen() {
   const panel = document.getElementById('pmBookmarksPanel');
   if (!panel) return;
   pmBookmarksState.open = true;
+  pmBookmarksState.userMoved = false;
   panel.classList.add('open');
   panel.setAttribute('aria-hidden', 'false');
+  const btn = document.getElementById('bookmarksBtn');
+  if (btn) { btn.classList.add('active-mode'); btn.setAttribute('aria-pressed', 'true'); }
   pmBookmarksPositionPanel();
   pmBookmarksLoadAndRender();
 }
@@ -28799,6 +28852,8 @@ function pmBookmarksClose() {
   const panel = document.getElementById('pmBookmarksPanel');
   if (panel) { panel.classList.remove('open'); panel.setAttribute('aria-hidden', 'true'); }
   pmBookmarksState.open = false;
+  const btn = document.getElementById('bookmarksBtn');
+  if (btn) { btn.classList.remove('active-mode'); btn.setAttribute('aria-pressed', 'false'); }
   ++pmBookmarksReqToken; // cancel an in-flight extraction so it can't render into a closed popup
 }
 
@@ -28807,9 +28862,17 @@ function pmBookmarksToggle() {
   pmBookmarksOpen();
 }
 
+function pmBookmarksClampPos(left, top, panel) {
+  const w = panel.offsetWidth, h = panel.offsetHeight;
+  const maxLeft = Math.max(8, window.innerWidth - w - 8);
+  const maxTop = Math.max(8, window.innerHeight - h - 8);
+  return { left: Math.min(Math.max(8, left), maxLeft), top: Math.min(Math.max(8, top), maxTop) };
+}
+
 (function pmBookmarksInit() {
   const panel = document.getElementById('pmBookmarksPanel');
   const closeBtn = document.getElementById('pmBookmarksCloseBtn');
+  const dragHandle = document.getElementById('pmBookmarksDragHandle');
   if (!panel || !closeBtn) return;
   closeBtn.addEventListener('click', pmBookmarksClose);
   document.addEventListener('mousedown', (e) => {
@@ -28818,8 +28881,30 @@ function pmBookmarksToggle() {
     pmBookmarksClose();
   });
   window.addEventListener('resize', () => {
-    if (pmBookmarksState.open) pmBookmarksPositionPanel();
+    if (pmBookmarksState.open && !pmBookmarksState.userMoved) pmBookmarksPositionPanel();
   });
+
+  if (dragHandle && typeof peBindPointerDown === 'function') {
+    let drag = null;
+    peBindPointerDown(dragHandle, (e) => {
+      const rect = panel.getBoundingClientRect();
+      drag = { startX: e.clientX, startY: e.clientY, startLeft: rect.left, startTop: rect.top };
+      panel.classList.add('pm-bookmarks-dragging');
+      if (typeof peCapturePointer === 'function') peCapturePointer(e, dragHandle);
+      e.preventDefault();
+    });
+    peBindPointerMoveUp((e) => {
+      if (!drag) return;
+      const c = pmBookmarksClampPos(drag.startLeft + (e.clientX - drag.startX), drag.startTop + (e.clientY - drag.startY), panel);
+      panel.style.left = c.left + 'px';
+      panel.style.top = c.top + 'px';
+      pmBookmarksState.userMoved = true;
+    }, () => {
+      if (!drag) return;
+      drag = null;
+      panel.classList.remove('pm-bookmarks-dragging');
+    });
+  }
 })();
 
 // ═══════════════════════════════════════════════════════════════════════
