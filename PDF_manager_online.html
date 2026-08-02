@@ -1195,7 +1195,10 @@
       overflow-wrap: break-word;
     }
     /*Bookmarks popup - reuses .pm-search-panel's box/positioning, own content layout*/
-    .pm-bookmarks-panel { width: 340px; min-width: 220px; max-width: 92vw; padding: 0; gap: 0; }
+    /*overflow:hidden clips the drag/resize strips' hover highlights to the
+      panel's own rounded corners instead of them poking out as sharp
+      rectangles past the curve.*/
+    .pm-bookmarks-panel { width: 340px; min-width: 220px; max-width: 92vw; padding: 0; gap: 0; overflow: hidden; }
     .pm-bookmarks-panel.pm-bookmarks-dragging,
     .pm-bookmarks-panel.pm-bookmarks-resizing { user-select: none; }
     /*Grab strip along the right edge to resize the popup's width.*/
@@ -7147,7 +7150,10 @@
     // Same reasoning as pmCompressEstimateCache above: updateUIState() calls
     // pmBookmarksClose() (hoisted function, safe) which reaches into this
     // state object - it must exist before that first synchronous call too.
-    let pmBookmarksState = { open: false, userMoved: false, collapsedPaths: new Set() };
+    // pos/width hold the user's manually dragged/resized layout (null = not
+    // customized yet, use the computed default) - remembered for as long as
+    // the page stays loaded, restored on every subsequent open.
+    let pmBookmarksState = { open: false, pos: null, width: null, collapsedPaths: new Set() };
     let pmBookmarksReqToken = 0;
     let pdfjsPreloadTask = null;   //parallel parsing of pdf.js when opening a file
     //“Dirty” state of the document: were there any changes (rotation/movement/insertion/
@@ -12669,7 +12675,7 @@
       if (pauseBtn) pauseBtn.style.top = (top + 84 + 6) + 'px';
       // Keep the bookmarks popup below these buttons too if it's open and
       // the user hasn't manually dragged it elsewhere.
-      if (typeof pmBookmarksState !== 'undefined' && pmBookmarksState.open && !pmBookmarksState.userMoved &&
+      if (typeof pmBookmarksState !== 'undefined' && pmBookmarksState.open && !pmBookmarksState.pos &&
           typeof pmBookmarksPositionPanel === 'function') {
         pmBookmarksPositionPanel();
       }
@@ -28930,13 +28936,21 @@ function pmBookmarksOpen() {
   const panel = document.getElementById('pmBookmarksPanel');
   if (!panel) return;
   pmBookmarksState.open = true;
-  pmBookmarksState.userMoved = false;
-  panel.style.width = ''; // back to the CSS default until resized again
+  // Restore a remembered manual size/position, if any; otherwise fall back
+  // to the CSS default width and the computed default position.
+  panel.style.width = pmBookmarksState.width != null ? pmBookmarksState.width + 'px' : '';
   panel.classList.add('open');
   panel.setAttribute('aria-hidden', 'false');
   const btn = document.getElementById('bookmarksBtn');
   if (btn) { btn.classList.add('active-mode'); btn.setAttribute('aria-pressed', 'true'); }
-  pmBookmarksPositionPanel();
+  if (pmBookmarksState.pos) {
+    // Re-clamp in case the viewport was resized while the popup was closed.
+    const c = pmBookmarksClampPos(pmBookmarksState.pos.left, pmBookmarksState.pos.top, panel);
+    panel.style.left = c.left + 'px';
+    panel.style.top = c.top + 'px';
+  } else {
+    pmBookmarksPositionPanel();
+  }
   pmBookmarksLoadAndRender();
 }
 
@@ -28982,7 +28996,15 @@ function pmBookmarksClampWidth(width, panelLeft) {
   if (!panel || !closeBtn) return;
   closeBtn.addEventListener('click', pmBookmarksClose);
   window.addEventListener('resize', () => {
-    if (pmBookmarksState.open && !pmBookmarksState.userMoved) pmBookmarksPositionPanel();
+    if (!pmBookmarksState.open) return;
+    if (pmBookmarksState.pos) {
+      // Keep the remembered position but re-clamp it to the new viewport size.
+      const c = pmBookmarksClampPos(pmBookmarksState.pos.left, pmBookmarksState.pos.top, panel);
+      panel.style.left = c.left + 'px';
+      panel.style.top = c.top + 'px';
+    } else {
+      pmBookmarksPositionPanel();
+    }
   });
 
   if (dragHandle && typeof peBindPointerDown === 'function') {
@@ -28999,7 +29021,7 @@ function pmBookmarksClampWidth(width, panelLeft) {
       const c = pmBookmarksClampPos(drag.startLeft + (e.clientX - drag.startX), drag.startTop + (e.clientY - drag.startY), panel);
       panel.style.left = c.left + 'px';
       panel.style.top = c.top + 'px';
-      pmBookmarksState.userMoved = true;
+      pmBookmarksState.pos = { left: c.left, top: c.top };
     }, () => {
       if (!drag) return;
       drag = null;
@@ -29021,6 +29043,7 @@ function pmBookmarksClampWidth(width, panelLeft) {
       if (!resize) return;
       const w = pmBookmarksClampWidth(resize.startWidth + (e.clientX - resize.startX), resize.panelLeft);
       panel.style.width = w + 'px';
+      pmBookmarksState.width = w;
     }, () => {
       if (!resize) return;
       resize = null;
