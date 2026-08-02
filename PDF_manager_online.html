@@ -1247,11 +1247,11 @@
     .pm-bookmarks-row.pm-bookmarks-hidden { display: none; }
     /*Expand/collapse toggle for a group's children, and a same-width blank
       spacer on leaf entries so titles still line up at a consistent indent.*/
-    .pm-bookmarks-toggle, .pm-bookmarks-toggle-spacer { flex: 0 0 14px; width: 14px; }
+    .pm-bookmarks-toggle, .pm-bookmarks-toggle-spacer { flex: 0 0 28px; width: 28px; }
     .pm-bookmarks-toggle {
-      height: 14px; padding: 0; margin-right: 2px;
+      height: 28px; padding: 0; margin-right: 2px;
       display: flex; align-items: center; justify-content: center;
-      border: none; border-radius: 3px; background: transparent;
+      border: none; border-radius: 5px; background: transparent;
       color: rgba(255,255,255,0.65); cursor: pointer;
       transition: transform 0.12s;
     }
@@ -6946,7 +6946,7 @@
 
   <!--Bookmarks / table of contents popup (opened from #bookmarksBtn)-->
   <div id="pmBookmarksPanel" class="pm-search-panel pm-bookmarks-panel" role="dialog" aria-hidden="true" aria-label="Закладки">
-    <div class="pm-bookmarks-drag" id="pmBookmarksDragHandle" title="Переместить панель" aria-hidden="true">
+    <div class="pm-bookmarks-drag" id="pmBookmarksDragHandle" title="Переместить панель. Двойной клик — вернуть на место по умолчанию" aria-hidden="true">
       <span class="pm-bookmarks-drag-grips"></span>
     </div>
     <div class="pm-search-row pm-bookmarks-header">
@@ -28850,7 +28850,7 @@ function pmBookmarksRenderList(items) {
       toggle.className = 'pm-bookmarks-toggle' + (collapsed ? ' collapsed' : '');
       toggle.dataset.path = it.path;
       toggle.setAttribute('aria-label', t(collapsed ? 'bookmarksExpandGroup' : 'bookmarksCollapseGroup'));
-      toggle.innerHTML = '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+      toggle.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
       toggle.addEventListener('click', (e) => {
         e.stopPropagation();
         pmBookmarksToggleGroup(it.path);
@@ -29026,6 +29026,17 @@ function pmBookmarksClampWidth(width, panelLeft) {
       if (!drag) return;
       drag = null;
       panel.classList.remove('pm-bookmarks-dragging');
+    });
+  }
+
+  if (dragHandle) {
+    // Double-click the drag strip: back to the default position (width is
+    // untouched - resizing and moving are reset independently).
+    dragHandle.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      pmBookmarksState.pos = null;
+      pmBookmarksPositionPanel();
     });
   }
 
