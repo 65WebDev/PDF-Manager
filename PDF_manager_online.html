@@ -1194,6 +1194,41 @@
       font-size: 12px; opacity: .8; min-height: 14px;
       overflow-wrap: break-word;
     }
+    /*Bookmarks popup - reuses .pm-search-panel's box/positioning, own content layout*/
+    .pm-bookmarks-panel { min-width: 260px; max-width: min(92vw, 340px); padding: 8px; }
+    .pm-bookmarks-header {
+      justify-content: space-between;
+      padding: 2px 6px 6px;
+      margin-bottom: 4px;
+      border-bottom: 1px solid rgba(255,255,255,0.15);
+    }
+    .pm-bookmarks-title { font-weight: 600; font-size: 13px; }
+    .pm-bookmarks-list {
+      display: flex; flex-direction: column; gap: 1px;
+      max-height: 50vh; overflow-y: auto;
+    }
+    .pm-bookmarks-item {
+      display: flex; align-items: baseline; gap: 6px;
+      width: 100%; box-sizing: border-box;
+      padding: 6px 8px; border: none; border-radius: 6px;
+      background: transparent; color: #fff; text-align: left;
+      font-size: 13px; cursor: pointer;
+    }
+    .pm-bookmarks-item:hover:not(:disabled) { background: rgba(255,255,255,0.18); }
+    .pm-bookmarks-item:disabled { opacity: .45; cursor: default; }
+    .pm-bookmarks-item-title {
+      flex: 1; min-width: 0;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .pm-bookmarks-item-page {
+      flex-shrink: 0; opacity: .6;
+      font-size: 11px; font-variant-numeric: tabular-nums;
+    }
+    .pm-bookmarks-status {
+      display: none;
+      padding: 14px 8px; opacity: .7; font-size: 12px; text-align: center;
+    }
+    .pm-bookmarks-status.has-content { display: block; }
     /*Precise highlighting of a specific found fragment (coordinate rectangle)*/
     #pmSearchHighlightBox {
       position: fixed;
@@ -2922,6 +2957,7 @@
     }
     .mode-btn.mode-sep { margin-right: 16px; } /*visual distance from the rotation/print block*/
     .readmode-wrapper.mode-sep { margin-right: 16px; } /*same indentation, but the wrapper is not .mode-btn*/
+    #bookmarksBtn.mode-sep { margin-right: 16px; } /*same indentation, on the other side of the mode-switch group*/
 
     /*Navigation mode: palm cursor, pages do not respond to hover*/
     .nav-mode-active #scrollContainer { cursor: grab; }
@@ -4883,6 +4919,8 @@
       #selectModeBtn, #navModeBtn { display: none !important; }
       /*The desktop button for reading mode (and the zoom mode next to it) is hidden; mobile - shown*/
       .readmode-wrapper { display: none !important; }
+      /*Bookmarks popup: desktop-only for now, same as the mode-switch group next to it*/
+      #bookmarksBtn { display: none !important; }
       #mobileReadModeBtn { display: inline-flex !important; }
       /*Merge button hidden on mobile (replaced with read button)*/
       #mergeBtn { display: none !important; }
@@ -6235,6 +6273,8 @@
 
       <!--Central zone: icon buttons-->
       <div class="centered-actions">
+        <!--Bookmarks / table of contents-->
+        <button id="bookmarksBtn" class="icon-btn mode-sep" onclick="pmBookmarksToggle()" disabled title="Закладки" data-i18n-title="bookmarksPanel"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12a1 1 0 0 1 1 1v16l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg></button>
         <!--Operating modes: reading, page selection (cursor) and navigation (palm)-->
         <div class="readmode-wrapper mode-sep">
           <button id="selectModeBtn" class="icon-btn mode-btn rl-slot-main active-mode" onclick="setMode('select')" disabled title="Режим выбора (C)" data-i18n-title="selectMode"><svg viewBox="-1 0 24 24" width="30" height="30" fill="currentColor"><path d="M7 4 L7 19 L11 15.2 L13.7 21.2 L16 20.2 L13.4 14.4 L18 14 Z"/></svg></button>
@@ -6853,6 +6893,18 @@
     <div id="pmSearchStatus" class="pm-search-status"></div>
   </div>
 
+  <!--Bookmarks / table of contents popup (opened from #bookmarksBtn)-->
+  <div id="pmBookmarksPanel" class="pm-search-panel pm-bookmarks-panel" role="dialog" aria-hidden="true" aria-label="Закладки">
+    <div class="pm-search-row pm-bookmarks-header">
+      <span class="pm-bookmarks-title" data-i18n="bookmarksPanel">Закладки</span>
+      <button id="pmBookmarksCloseBtn" type="button" title="Закрыть (Esc)" aria-label="Закрыть закладки" data-i18n-title="searchClose" data-i18n-aria="bookmarksClose">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div id="pmBookmarksList" class="pm-bookmarks-list"></div>
+    <div id="pmBookmarksStatus" class="pm-bookmarks-status"></div>
+  </div>
+
   <!--Tooltip when dragging files to open in new tabs-->
   <div id="tabDropHint" aria-hidden="true">
     <div class="tab-drop-badge">
@@ -7040,6 +7092,11 @@
     let pmCompressEstimateInFlight = { save: null, export: null };
     const PM_COMPRESS_ESTIMATE_TTL_MS = 20000;
     const PM_COMPRESS_HIGHLIGHT_RATIO = 0.30;
+    // Same reasoning as pmCompressEstimateCache above: updateUIState() calls
+    // pmBookmarksClose() (hoisted function, safe) which reaches into this
+    // state object - it must exist before that first synchronous call too.
+    let pmBookmarksState = { open: false };
+    let pmBookmarksReqToken = 0;
     let pdfjsPreloadTask = null;   //parallel parsing of pdf.js when opening a file
     //“Dirty” state of the document: were there any changes (rotation/movement/insertion/
     //deletion) after the last save. Resets to false when saving.
@@ -7362,6 +7419,8 @@
         searchPlaceholder: 'Поиск по документу', searchFind: 'Найти (Enter)',
         searchPrev: 'Предыдущее совпадение (Shift+Enter)', searchNext: 'Следующее совпадение (Enter)',
         searchClose: 'Закрыть (Esc)', searchAllTabs: 'Искать по всем вкладкам',
+        bookmarksPanel: 'Закладки', bookmarksClose: 'Закрыть закладки',
+        bookmarksEmpty: 'В документе нет закладок', bookmarksLoading: 'Загрузка…',
         newDocumentHint: 'Будет создан новый документ', openInNewTabs: 'Откроется в новых вкладках',
         tabClose: 'Закрыть вкладку', tabCloseOthers: 'Закрыть другие вкладки', tabCloseRight: 'Закрыть вкладки справа',
         peInsertText: 'Вставить текст', peInsertImage: 'Вставить изображение', peAddShapes: 'Добавить фигуры',
@@ -7631,6 +7690,8 @@
         searchPlaceholder: 'Search text', searchFind: 'Find (Enter)',
         searchPrev: 'Previous match (Shift+Enter)', searchNext: 'Next match (Enter)',
         searchClose: 'Close (Esc)', searchAllTabs: 'Search all tabs',
+        bookmarksPanel: 'Bookmarks', bookmarksClose: 'Close bookmarks',
+        bookmarksEmpty: 'No bookmarks in this document', bookmarksLoading: 'Loading…',
         newDocumentHint: 'A new document will be created', openInNewTabs: 'Open in new tabs',
         tabClose: 'Close tab', tabCloseOthers: 'Close other tabs', tabCloseRight: 'Close tabs to the right',
         peInsertText: 'Insert text', peInsertImage: 'Insert image', peAddShapes: 'Add shapes',
@@ -8522,6 +8583,11 @@
       const loupeModeBtnEl = document.getElementById('loupeModeBtn');
       if (loupeModeBtnEl) loupeModeBtnEl.disabled = readModeDisabled;
       if (mobileReadModeBtnEl) mobileReadModeBtnEl.disabled = readModeDisabled;
+      const bookmarksBtnEl = document.getElementById('bookmarksBtn');
+      if (bookmarksBtnEl) {
+        bookmarksBtnEl.disabled = readModeDisabled;
+        if (readModeDisabled && typeof pmBookmarksClose === 'function') pmBookmarksClose();
+      }
       if (!isTouchDevice && selectModeBtn && navModeBtn) {
         selectModeBtn.disabled = modeBtnsDisabled;
         navModeBtn.disabled = modeBtnsDisabled;
@@ -14521,6 +14587,11 @@
       if (pmSearchState.open && e.code === 'Escape') {
         e.preventDefault();
         pmSearchClose();
+        return;
+      }
+      if (pmBookmarksState.open && e.code === 'Escape') {
+        e.preventDefault();
+        pmBookmarksClose();
         return;
       }
       if (!isTouchDevice && isPreviewModifierHeld(e)) hideDesktopQuickActionsForModifier();
@@ -28608,6 +28679,147 @@ function pmSearchToggleOpen() {
       if (peState && pmSearchState.results.length) pmSearchRenderAllHighlights();
     }, { passive: true });
   }
+})();
+
+// ─── Bookmarks / table of contents popup (view + jump-to-page for now;
+// editing is planned later) ─────────────────────────────────────────────
+// pmBookmarksState/pmBookmarksReqToken are declared much earlier, next to
+// pdfDoc - see the comment there for why.
+
+function pmBookmarksPositionPanel() {
+  const panel = document.getElementById('pmBookmarksPanel');
+  const menu = document.querySelector('.top-menu');
+  const btn = document.getElementById('bookmarksBtn');
+  if (!panel || !menu || !btn) return;
+  const menuRect = menu.getBoundingClientRect();
+  const btnRect = btn.getBoundingClientRect();
+  panel.style.top = Math.round(menuRect.bottom + 4) + 'px';
+  const maxLeft = Math.max(8, window.innerWidth - panel.offsetWidth - 8);
+  panel.style.left = Math.round(Math.max(8, Math.min(btnRect.left, maxLeft))) + 'px';
+}
+
+function pmBookmarksSetStatus(text) {
+  const status = document.getElementById('pmBookmarksStatus');
+  if (!status) return;
+  status.textContent = text || '';
+  status.classList.toggle('has-content', !!text);
+}
+
+function pmBookmarksGoTo(pageIndex) {
+  const pageEl = pagesContainer.querySelector('.page[data-index="' + pageIndex + '"]');
+  if (pageEl && typeof scrollPageIntoViewTop === 'function') scrollPageIntoViewTop(pageEl);
+  pmBookmarksClose();
+}
+
+function pmBookmarksRenderList(items) {
+  const list = document.getElementById('pmBookmarksList');
+  if (!list) return;
+  list.innerHTML = '';
+  if (!items.length) {
+    pmBookmarksSetStatus(t('bookmarksEmpty'));
+    return;
+  }
+  pmBookmarksSetStatus('');
+  const frag = document.createDocumentFragment();
+  items.forEach((it) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'pm-bookmarks-item';
+    btn.style.paddingLeft = (8 + it.level * 14) + 'px';
+    const titleSpan = document.createElement('span');
+    titleSpan.className = 'pm-bookmarks-item-title';
+    titleSpan.textContent = it.title || '—';
+    btn.appendChild(titleSpan);
+    if (it.pageIndex != null) {
+      const pageSpan = document.createElement('span');
+      pageSpan.className = 'pm-bookmarks-item-page';
+      pageSpan.textContent = String(it.pageIndex + 1);
+      btn.appendChild(pageSpan);
+      btn.addEventListener('click', () => pmBookmarksGoTo(it.pageIndex));
+    } else {
+      btn.disabled = true;
+    }
+    frag.appendChild(btn);
+  });
+  list.appendChild(frag);
+}
+
+// Re-parses the document's outline fresh on every open (via a throwaway
+// pdf.js doc, same ad-hoc pattern used elsewhere in the app) rather than
+// caching it - guarantees page numbers stay correct across edits/undo
+// without needing to hook into every place that could invalidate a cache.
+async function pmBookmarksExtract() {
+  if (!pdfDoc) return [];
+  const bytes = await pdfDoc.save();
+  const doc = await pdfjsLib.getDocument({ data: bytes }).promise;
+  const rawOutline = await doc.getOutline();
+  if (!rawOutline || !rawOutline.length) return [];
+  const items = [];
+  async function walk(nodes, level) {
+    for (const node of nodes) {
+      let pageIndex = null;
+      try {
+        let dest = node.dest;
+        if (typeof dest === 'string') dest = await doc.getDestination(dest);
+        if (Array.isArray(dest) && dest[0] != null) {
+          pageIndex = await doc.getPageIndex(dest[0]);
+        }
+      } catch (_) {}
+      items.push({ title: node.title || '', pageIndex, level });
+      if (node.items && node.items.length) await walk(node.items, level + 1);
+    }
+  }
+  await walk(rawOutline, 0);
+  return items;
+}
+
+async function pmBookmarksLoadAndRender() {
+  const token = ++pmBookmarksReqToken;
+  const list = document.getElementById('pmBookmarksList');
+  if (list) list.innerHTML = '';
+  pmBookmarksSetStatus(t('bookmarksLoading'));
+  let items = [];
+  try { items = await pmBookmarksExtract(); } catch (_) { items = []; }
+  if (token !== pmBookmarksReqToken) return; // popup closed/reopened, or doc changed, meanwhile
+  pmBookmarksRenderList(items);
+}
+
+function pmBookmarksOpen() {
+  if (!pdfDoc) return;
+  const panel = document.getElementById('pmBookmarksPanel');
+  if (!panel) return;
+  pmBookmarksState.open = true;
+  panel.classList.add('open');
+  panel.setAttribute('aria-hidden', 'false');
+  pmBookmarksPositionPanel();
+  pmBookmarksLoadAndRender();
+}
+
+function pmBookmarksClose() {
+  const panel = document.getElementById('pmBookmarksPanel');
+  if (panel) { panel.classList.remove('open'); panel.setAttribute('aria-hidden', 'true'); }
+  pmBookmarksState.open = false;
+  ++pmBookmarksReqToken; // cancel an in-flight extraction so it can't render into a closed popup
+}
+
+function pmBookmarksToggle() {
+  if (pmBookmarksState.open) { pmBookmarksClose(); return; }
+  pmBookmarksOpen();
+}
+
+(function pmBookmarksInit() {
+  const panel = document.getElementById('pmBookmarksPanel');
+  const closeBtn = document.getElementById('pmBookmarksCloseBtn');
+  if (!panel || !closeBtn) return;
+  closeBtn.addEventListener('click', pmBookmarksClose);
+  document.addEventListener('mousedown', (e) => {
+    if (!pmBookmarksState.open) return;
+    if (e.target.closest('#pmBookmarksPanel, #bookmarksBtn')) return;
+    pmBookmarksClose();
+  });
+  window.addEventListener('resize', () => {
+    if (pmBookmarksState.open) pmBookmarksPositionPanel();
+  });
 })();
 
 // ═══════════════════════════════════════════════════════════════════════
