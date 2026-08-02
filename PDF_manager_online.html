@@ -1240,9 +1240,23 @@
       max-height: 50vh; overflow-y: auto;
       padding: 0 8px 8px;
     }
+    .pm-bookmarks-row { display: flex; align-items: center; }
+    .pm-bookmarks-row.pm-bookmarks-hidden { display: none; }
+    /*Expand/collapse toggle for a group's children, and a same-width blank
+      spacer on leaf entries so titles still line up at a consistent indent.*/
+    .pm-bookmarks-toggle, .pm-bookmarks-toggle-spacer { flex: 0 0 14px; width: 14px; }
+    .pm-bookmarks-toggle {
+      height: 14px; padding: 0; margin-right: 2px;
+      display: flex; align-items: center; justify-content: center;
+      border: none; border-radius: 3px; background: transparent;
+      color: rgba(255,255,255,0.65); cursor: pointer;
+      transition: transform 0.12s;
+    }
+    .pm-bookmarks-toggle:hover { color: #fff; background: rgba(255,255,255,0.12); }
+    .pm-bookmarks-toggle.collapsed { transform: rotate(-90deg); }
     .pm-bookmarks-item {
       display: flex; align-items: baseline; gap: 6px;
-      width: 100%; box-sizing: border-box;
+      flex: 1; min-width: 0; box-sizing: border-box;
       padding: 6px 8px; border: none; border-radius: 6px;
       background: transparent; color: #fff; text-align: left;
       font-size: 13px; cursor: pointer;
@@ -7133,7 +7147,7 @@
     // Same reasoning as pmCompressEstimateCache above: updateUIState() calls
     // pmBookmarksClose() (hoisted function, safe) which reaches into this
     // state object - it must exist before that first synchronous call too.
-    let pmBookmarksState = { open: false, userMoved: false };
+    let pmBookmarksState = { open: false, userMoved: false, collapsedPaths: new Set() };
     let pmBookmarksReqToken = 0;
     let pdfjsPreloadTask = null;   //parallel parsing of pdf.js when opening a file
     //“Dirty” state of the document: were there any changes (rotation/movement/insertion/
@@ -7459,6 +7473,7 @@
         searchClose: 'Закрыть (Esc)', searchAllTabs: 'Искать по всем вкладкам',
         bookmarksPanel: 'Закладки', bookmarksClose: 'Закрыть закладки',
         bookmarksEmpty: 'В документе нет закладок', bookmarksLoading: 'Загрузка…',
+        bookmarksExpandGroup: 'Развернуть группу', bookmarksCollapseGroup: 'Свернуть группу',
         newDocumentHint: 'Будет создан новый документ', openInNewTabs: 'Откроется в новых вкладках',
         tabClose: 'Закрыть вкладку', tabCloseOthers: 'Закрыть другие вкладки', tabCloseRight: 'Закрыть вкладки справа',
         peInsertText: 'Вставить текст', peInsertImage: 'Вставить изображение', peAddShapes: 'Добавить фигуры',
@@ -7730,6 +7745,7 @@
         searchClose: 'Close (Esc)', searchAllTabs: 'Search all tabs',
         bookmarksPanel: 'Bookmarks', bookmarksClose: 'Close bookmarks',
         bookmarksEmpty: 'No bookmarks in this document', bookmarksLoading: 'Loading…',
+        bookmarksExpandGroup: 'Expand group', bookmarksCollapseGroup: 'Collapse group',
         newDocumentHint: 'A new document will be created', openInNewTabs: 'Open in new tabs',
         tabClose: 'Close tab', tabCloseOthers: 'Close other tabs', tabCloseRight: 'Close tabs to the right',
         peInsertText: 'Insert text', peInsertImage: 'Insert image', peAddShapes: 'Add shapes',
@@ -28772,6 +28788,39 @@ function pmBookmarksGoTo(pageIndex) {
   if (pageEl && typeof scrollPageIntoViewTop === 'function') scrollPageIntoViewTop(pageEl);
 }
 
+// A node's children are hidden the moment ANY of its ancestor groups is
+// collapsed - check the chain of ancestor paths rather than just the
+// node's immediate parent, so collapsing a top-level chapter also hides
+// grandchildren whose own (still-expanded) parent sits under it.
+function pmBookmarksIsVisible(path, collapsedPaths) {
+  let p = path;
+  let dashIdx;
+  while ((dashIdx = p.lastIndexOf('-')) !== -1) {
+    p = p.substring(0, dashIdx);
+    if (collapsedPaths.has(p)) return false;
+  }
+  return true;
+}
+
+function pmBookmarksApplyVisibility() {
+  document.querySelectorAll('#pmBookmarksList .pm-bookmarks-row').forEach((row) => {
+    const visible = pmBookmarksIsVisible(row.dataset.path, pmBookmarksState.collapsedPaths);
+    row.classList.toggle('pm-bookmarks-hidden', !visible);
+  });
+}
+
+function pmBookmarksToggleGroup(path) {
+  const collapsedPaths = pmBookmarksState.collapsedPaths;
+  const nowCollapsed = !collapsedPaths.has(path);
+  if (nowCollapsed) collapsedPaths.add(path); else collapsedPaths.delete(path);
+  const toggleBtn = document.querySelector('#pmBookmarksList .pm-bookmarks-toggle[data-path="' + path + '"]');
+  if (toggleBtn) {
+    toggleBtn.classList.toggle('collapsed', nowCollapsed);
+    toggleBtn.setAttribute('aria-label', t(nowCollapsed ? 'bookmarksExpandGroup' : 'bookmarksCollapseGroup'));
+  }
+  pmBookmarksApplyVisibility();
+}
+
 function pmBookmarksRenderList(items) {
   const list = document.getElementById('pmBookmarksList');
   if (!list) return;
@@ -28783,10 +28832,33 @@ function pmBookmarksRenderList(items) {
   pmBookmarksSetStatus('');
   const frag = document.createDocumentFragment();
   items.forEach((it) => {
+    const row = document.createElement('div');
+    row.className = 'pm-bookmarks-row';
+    row.dataset.path = it.path;
+    row.style.paddingLeft = (8 + it.level * 14) + 'px';
+
+    if (it.hasChildren) {
+      const collapsed = pmBookmarksState.collapsedPaths.has(it.path);
+      const toggle = document.createElement('button');
+      toggle.type = 'button';
+      toggle.className = 'pm-bookmarks-toggle' + (collapsed ? ' collapsed' : '');
+      toggle.dataset.path = it.path;
+      toggle.setAttribute('aria-label', t(collapsed ? 'bookmarksExpandGroup' : 'bookmarksCollapseGroup'));
+      toggle.innerHTML = '<svg viewBox="0 0 24 24" width="10" height="10" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+      toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        pmBookmarksToggleGroup(it.path);
+      });
+      row.appendChild(toggle);
+    } else {
+      const spacer = document.createElement('span');
+      spacer.className = 'pm-bookmarks-toggle-spacer';
+      row.appendChild(spacer);
+    }
+
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = 'pm-bookmarks-item';
-    btn.style.paddingLeft = (8 + it.level * 14) + 'px';
     const titleSpan = document.createElement('span');
     titleSpan.className = 'pm-bookmarks-item-title';
     titleSpan.textContent = it.title || '—';
@@ -28800,9 +28872,11 @@ function pmBookmarksRenderList(items) {
     } else {
       btn.disabled = true;
     }
-    frag.appendChild(btn);
+    row.appendChild(btn);
+    frag.appendChild(row);
   });
   list.appendChild(frag);
+  pmBookmarksApplyVisibility();
 }
 
 // Re-parses the document's outline fresh on every open (via a throwaway
@@ -28816,8 +28890,13 @@ async function pmBookmarksExtract() {
   const rawOutline = await doc.getOutline();
   if (!rawOutline || !rawOutline.length) return [];
   const items = [];
-  async function walk(nodes, level) {
-    for (const node of nodes) {
+  // path is a dash-joined chain of sibling indices (e.g. "0-1-2") - a stable
+  // key for a node's position in the tree, used to remember which groups
+  // are collapsed across re-extractions of the same document.
+  async function walk(nodes, level, parentPath) {
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i];
+      const path = parentPath ? parentPath + '-' + i : String(i);
       let pageIndex = null;
       try {
         let dest = node.dest;
@@ -28826,11 +28905,12 @@ async function pmBookmarksExtract() {
           pageIndex = await doc.getPageIndex(dest[0]);
         }
       } catch (_) {}
-      items.push({ title: node.title || '', pageIndex, level });
-      if (node.items && node.items.length) await walk(node.items, level + 1);
+      const hasChildren = !!(node.items && node.items.length);
+      items.push({ title: node.title || '', pageIndex, level, path, hasChildren });
+      if (hasChildren) await walk(node.items, level + 1, path);
     }
   }
-  await walk(rawOutline, 0);
+  await walk(rawOutline, 0, '');
   return items;
 }
 
