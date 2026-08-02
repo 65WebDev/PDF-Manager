@@ -1195,8 +1195,18 @@
       overflow-wrap: break-word;
     }
     /*Bookmarks popup - reuses .pm-search-panel's box/positioning, own content layout*/
-    .pm-bookmarks-panel { min-width: 260px; max-width: min(92vw, 340px); padding: 0; gap: 0; }
-    .pm-bookmarks-panel.pm-bookmarks-dragging { user-select: none; }
+    .pm-bookmarks-panel { width: 340px; min-width: 220px; max-width: 92vw; padding: 0; gap: 0; }
+    .pm-bookmarks-panel.pm-bookmarks-dragging,
+    .pm-bookmarks-panel.pm-bookmarks-resizing { user-select: none; }
+    /*Grab strip along the right edge to resize the popup's width.*/
+    .pm-bookmarks-resize-handle {
+      position: absolute; top: 0; right: 0; bottom: 0; width: 8px;
+      cursor: ew-resize;
+    }
+    .pm-bookmarks-resize-handle:hover,
+    .pm-bookmarks-panel.pm-bookmarks-resizing .pm-bookmarks-resize-handle {
+      background: rgba(52, 152, 219, 0.4);
+    }
     /*Grab strip along the top edge, same idea as the page-editor's .pe-props-drag
       (there it's a strip on the left; here it's on top) - lets the popup be
       repositioned instead of only ever sitting in its computed default spot.*/
@@ -6930,6 +6940,7 @@
     </div>
     <div id="pmBookmarksList" class="pm-bookmarks-list"></div>
     <div id="pmBookmarksStatus" class="pm-bookmarks-status"></div>
+    <div class="pm-bookmarks-resize-handle" id="pmBookmarksResizeHandle" title="Изменить ширину" aria-hidden="true"></div>
   </div>
 
   <!--Tooltip when dragging files to open in new tabs-->
@@ -28840,6 +28851,7 @@ function pmBookmarksOpen() {
   if (!panel) return;
   pmBookmarksState.open = true;
   pmBookmarksState.userMoved = false;
+  panel.style.width = ''; // back to the CSS default until resized again
   panel.classList.add('open');
   panel.setAttribute('aria-hidden', 'false');
   const btn = document.getElementById('bookmarksBtn');
@@ -28862,24 +28874,33 @@ function pmBookmarksToggle() {
   pmBookmarksOpen();
 }
 
+// Keeps the popup within the working area during a drag - it must not be
+// dragged up over the top menu/toolbar, and stays inside the viewport
+// otherwise (there's no sidebar to also avoid).
 function pmBookmarksClampPos(left, top, panel) {
   const w = panel.offsetWidth, h = panel.offsetHeight;
+  const menu = document.querySelector('.top-menu');
+  const minTop = menu ? Math.max(8, menu.getBoundingClientRect().bottom) : 8;
   const maxLeft = Math.max(8, window.innerWidth - w - 8);
-  const maxTop = Math.max(8, window.innerHeight - h - 8);
-  return { left: Math.min(Math.max(8, left), maxLeft), top: Math.min(Math.max(8, top), maxTop) };
+  const maxTop = Math.max(minTop, window.innerHeight - h - 8);
+  return { left: Math.min(Math.max(8, left), maxLeft), top: Math.min(Math.max(minTop, top), maxTop) };
+}
+
+// Resizing only ever grows/shrinks from the right edge (left edge is fixed),
+// so the ceiling is however much room is left between the panel's current
+// left edge and the right side of the viewport.
+function pmBookmarksClampWidth(width, panelLeft) {
+  const maxWidth = Math.max(220, window.innerWidth - panelLeft - 8);
+  return Math.min(Math.max(220, width), maxWidth);
 }
 
 (function pmBookmarksInit() {
   const panel = document.getElementById('pmBookmarksPanel');
   const closeBtn = document.getElementById('pmBookmarksCloseBtn');
   const dragHandle = document.getElementById('pmBookmarksDragHandle');
+  const resizeHandle = document.getElementById('pmBookmarksResizeHandle');
   if (!panel || !closeBtn) return;
   closeBtn.addEventListener('click', pmBookmarksClose);
-  document.addEventListener('mousedown', (e) => {
-    if (!pmBookmarksState.open) return;
-    if (e.target.closest('#pmBookmarksPanel, #bookmarksBtn')) return;
-    pmBookmarksClose();
-  });
   window.addEventListener('resize', () => {
     if (pmBookmarksState.open && !pmBookmarksState.userMoved) pmBookmarksPositionPanel();
   });
@@ -28903,6 +28924,27 @@ function pmBookmarksClampPos(left, top, panel) {
       if (!drag) return;
       drag = null;
       panel.classList.remove('pm-bookmarks-dragging');
+    });
+  }
+
+  if (resizeHandle && typeof peBindPointerDown === 'function') {
+    let resize = null;
+    peBindPointerDown(resizeHandle, (e) => {
+      const rect = panel.getBoundingClientRect();
+      resize = { startX: e.clientX, startWidth: rect.width, panelLeft: rect.left };
+      panel.classList.add('pm-bookmarks-resizing');
+      if (typeof peCapturePointer === 'function') peCapturePointer(e, resizeHandle);
+      e.preventDefault();
+      e.stopPropagation();
+    });
+    peBindPointerMoveUp((e) => {
+      if (!resize) return;
+      const w = pmBookmarksClampWidth(resize.startWidth + (e.clientX - resize.startX), resize.panelLeft);
+      panel.style.width = w + 'px';
+    }, () => {
+      if (!resize) return;
+      resize = null;
+      panel.classList.remove('pm-bookmarks-resizing');
     });
   }
 })();
