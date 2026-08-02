@@ -864,13 +864,16 @@
     #toggleDeletedBtn:hover { background: #3498db; }
     #toggleDeletedBtn svg { display: block; }
 
-    /*The wrapping of the “Reading mode” / “Page enlargement mode” buttons is the same
-       two elements are permanently in the DOM; when switching between them they change places
-       classes .rl-slot-main / .rl-slot-popup (see setReadLoupeSlots in JS).*/
+    /*The wrapping of the "Select / Nav / Reading mode / Page enlargement mode"
+       buttons is the same: all four elements are permanently in the DOM; when
+       switching between them they change places via classes .rl-slot-main /
+       .rl-slot-popup (see syncModeButtonSlots in JS). The three non-active
+       ones stack vertically below the main one, each offset by its own
+       --rl-slot-index (also set by syncModeButtonSlots).*/
     .readmode-wrapper { position: relative; display: inline-flex; }
     .readmode-wrapper .rl-slot-popup {
       position: absolute;
-      top: calc(100% + 6px);
+      top: calc(100% + 6px + var(--rl-slot-index, 0) * (var(--pm-menu-ctrl-h, 42px) + 6px));
       left: 0;
       z-index: 210;
       opacity: 0;
@@ -890,11 +893,13 @@
       pointer-events: auto;
     }
     .readmode-wrapper .rl-slot-popup.show:disabled { opacity: 0.4; }
-    /*While the document is not open, both buttons of the pair are disabled - there is no pop-up at all
-       show (unlike “Delete”/“Print”, where showing disabled is a feature).
-       CSS level in case of race with JS check in initReadLoupeToggle.*/
+    /*While the document is not open, all four buttons are disabled - there is
+       no pop-up at all show (unlike “Delete”/“Print”, where showing disabled
+       is a feature). CSS level in case of race with JS check in initReadLoupeToggle.*/
     .readmode-wrapper:has(#readModeBtn:disabled) .rl-slot-popup,
-    .readmode-wrapper:has(#loupeModeBtn:disabled) .rl-slot-popup {
+    .readmode-wrapper:has(#loupeModeBtn:disabled) .rl-slot-popup,
+    .readmode-wrapper:has(#selectModeBtn:disabled) .rl-slot-popup,
+    .readmode-wrapper:has(#navModeBtn:disabled) .rl-slot-popup {
       display: none !important;
     }
 
@@ -926,8 +931,7 @@
     .top-menu .img-save-btn,
     #toggleDeletedBtn,
     #printSelectedBtn,
-    #readModeBtn.rl-slot-popup,
-    #loupeModeBtn.rl-slot-popup {
+    .readmode-wrapper .mode-btn.rl-slot-popup {
       width: 42px;
       height: 42px;
       min-width: 42px;
@@ -943,13 +947,10 @@
       cursor: pointer;
       box-shadow: 0 4px 14px rgba(0,0,0,0.5);
     }
-    #readModeBtn.rl-slot-popup.active-mode,
-    #loupeModeBtn.rl-slot-popup.active-mode { background: #3498db; }
+    .readmode-wrapper .mode-btn.rl-slot-popup.active-mode { background: #3498db; }
     /*Hover highlighting is the same as for other pop-up buttons (Delete/Print).
-       Needed explicitly with ID+:hover: otherwise it loses to the static background above (that one too
-       specified via ID, and without :hover in the selector it has less specificity).*/
-    #readModeBtn.rl-slot-popup:hover:not(:disabled),
-    #loupeModeBtn.rl-slot-popup:hover:not(:disabled) { background: #3498db; }
+       Needed explicitly with a class more specific than the plain background rule above.*/
+    .readmode-wrapper .mode-btn.rl-slot-popup:hover:not(:disabled) { background: #3498db; }
 
     /*“Save/export as images” button – pops up under the main button.
        Visibility is controlled by JS (.show class) with a timeout to allow time for hovering.*/
@@ -5887,8 +5888,7 @@
       .top-menu .main-row.menu-shrink .img-save-btn,
       .top-menu .main-row.menu-shrink #toggleDeletedBtn,
       .top-menu .main-row.menu-shrink #printSelectedBtn,
-      .top-menu .main-row.menu-shrink #readModeBtn.rl-slot-popup,
-      .top-menu .main-row.menu-shrink #loupeModeBtn.rl-slot-popup {
+      .top-menu .main-row.menu-shrink .readmode-wrapper .mode-btn.rl-slot-popup {
         width: var(--pm-menu-ctrl-h);
         height: var(--pm-menu-ctrl-h);
         min-width: var(--pm-menu-ctrl-h);
@@ -6237,11 +6237,11 @@
       <div class="centered-actions">
         <!--Operating modes: reading, page selection (cursor) and navigation (palm)-->
         <div class="readmode-wrapper mode-sep">
-          <button id="readModeBtn" class="icon-btn mode-btn rl-slot-main" onclick="onReadModeBtnClick()" disabled title="Режим чтения (R)" data-i18n-title="readModeKey"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></button>
+          <button id="selectModeBtn" class="icon-btn mode-btn rl-slot-main active-mode" onclick="setMode('select')" disabled title="Режим выбора (C)" data-i18n-title="selectMode"><svg viewBox="-1 0 24 24" width="30" height="30" fill="currentColor"><path d="M7 4 L7 19 L11 15.2 L13.7 21.2 L16 20.2 L13.4 14.4 L18 14 Z"/></svg></button>
+          <button id="navModeBtn" class="icon-btn mode-btn rl-slot-popup" onclick="setMode('nav')" disabled title="Режим навигации (H)" data-i18n-title="navMode"><svg viewBox="0 0 69.0645142 89.838707" width="22" height="22" fill="#ffffff" stroke="#000000" stroke-width="0.8" stroke-linejoin="round" aria-hidden="true"><path d="M40.4849663,82.8033905  c-9.1123066,0-16.3754902-5.1455078-19.4277363-13.7636719c-0.1801758-0.5087891-0.3701172-1.015625-0.5893555-1.5087891  c-0.6171875-1.3886719-0.6171875-1.3886719-0.7412109-1.5224609l-0.015625,0.0146484  c-0.7080078-1.3291016-3.1923828-5.6308632-11.9047842-20.7168007c-0.909668-1.5717773-0.3686523-3.5917969,1.2021484-4.5014648  c0.7021484-0.4023438,1.5004883-0.6147461,2.3085938-0.6147461c1.6572266,0,3.1967773,0.8867188,4.0185547,2.315918  l6.8134756,11.7963867c0.2260742,0.3916016,0.6865234,0.5839844,1.125,0.4648438  c0.4370117-0.1171875,0.7407227-0.5136719,0.7407227-0.9658203V16.7179394c0-2.1977549,1.6191406-4.0249033,3.6865234-4.1601572  c1.1650391-0.0810547,2.2583008,0.3310547,3.0761719,1.1494141c0.7470703,0.7475586,1.1586914,1.7426758,1.1586914,2.802247  v24.2529278c0,0.5522461,0.4477558,1,1.0000019,1s1-0.4477539,1-1V10.9962587c0-2.184082,1.7768555-3.960937,3.9604492-3.960937  c1.0600586,0,2.0551758,0.4116211,2.8022461,1.1591792c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v5.5131845  v0.277832v23.9750957c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1V16.7872753v-0.277832  c0-2.184083,1.7773438-3.9609385,3.9609375-3.9609385c1.0595703,0,2.0546875,0.4116211,2.8027344,1.1586914  c0.7470703,0.7475586,1.1582031,1.7426758,1.1582031,2.802247v5.9462891v18.3066387c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1  V22.4557323c0-2.184082,1.7773438-3.9609375,3.9609375-3.9609375c1.0595703,0,2.0546875,0.4116211,2.8017578,1.1591797  c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v37.1074219  C61.69981,72.3776093,52.1832085,82.8033905,40.4849663,82.8033905z"/></svg></button>
+          <button id="readModeBtn" class="icon-btn mode-btn rl-slot-popup" onclick="onReadModeBtnClick()" disabled title="Режим чтения (R)" data-i18n-title="readModeKey"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></button>
           <button id="loupeModeBtn" class="icon-btn mode-btn rl-slot-popup" onclick="toggleLoupeMode()" disabled title="Режим увеличения (Z)" data-i18n-title="loupeMode"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20.5 20.5l-4.8-4.8"/></svg></button>
         </div>
-        <button id="selectModeBtn" class="icon-btn mode-btn active-mode" onclick="setMode('select')" disabled title="Режим выбора (C)" data-i18n-title="selectMode"><svg viewBox="-1 0 24 24" width="30" height="30" fill="currentColor"><path d="M7 4 L7 19 L11 15.2 L13.7 21.2 L16 20.2 L13.4 14.4 L18 14 Z"/></svg></button>
-        <button id="navModeBtn" class="icon-btn mode-btn mode-sep" onclick="setMode('nav')" disabled title="Режим навигации (H)" data-i18n-title="navMode"><svg viewBox="0 0 69.0645142 89.838707" width="22" height="22" fill="#ffffff" stroke="#000000" stroke-width="0.8" stroke-linejoin="round" aria-hidden="true"><path d="M40.4849663,82.8033905  c-9.1123066,0-16.3754902-5.1455078-19.4277363-13.7636719c-0.1801758-0.5087891-0.3701172-1.015625-0.5893555-1.5087891  c-0.6171875-1.3886719-0.6171875-1.3886719-0.7412109-1.5224609l-0.015625,0.0146484  c-0.7080078-1.3291016-3.1923828-5.6308632-11.9047842-20.7168007c-0.909668-1.5717773-0.3686523-3.5917969,1.2021484-4.5014648  c0.7021484-0.4023438,1.5004883-0.6147461,2.3085938-0.6147461c1.6572266,0,3.1967773,0.8867188,4.0185547,2.315918  l6.8134756,11.7963867c0.2260742,0.3916016,0.6865234,0.5839844,1.125,0.4648438  c0.4370117-0.1171875,0.7407227-0.5136719,0.7407227-0.9658203V16.7179394c0-2.1977549,1.6191406-4.0249033,3.6865234-4.1601572  c1.1650391-0.0810547,2.2583008,0.3310547,3.0761719,1.1494141c0.7470703,0.7475586,1.1586914,1.7426758,1.1586914,2.802247  v24.2529278c0,0.5522461,0.4477558,1,1.0000019,1s1-0.4477539,1-1V10.9962587c0-2.184082,1.7768555-3.960937,3.9604492-3.960937  c1.0600586,0,2.0551758,0.4116211,2.8022461,1.1591792c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v5.5131845  v0.277832v23.9750957c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1V16.7872753v-0.277832  c0-2.184083,1.7773438-3.9609385,3.9609375-3.9609385c1.0595703,0,2.0546875,0.4116211,2.8027344,1.1586914  c0.7470703,0.7475586,1.1582031,1.7426758,1.1582031,2.802247v5.9462891v18.3066387c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1  V22.4557323c0-2.184082,1.7773438-3.9609375,3.9609375-3.9609375c1.0595703,0,2.0546875,0.4116211,2.8017578,1.1591797  c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v37.1074219  C61.69981,72.3776093,52.1832085,82.8033905,40.4849663,82.8033905z"/></svg></button>
         <button id="rotateLeftBtn" class="icon-btn" onclick="rotateSelected(-90)" disabled title="Повернуть выбранные страницы против часовой стрелки (Q)" data-i18n-title="rotateLeftSelected"><span class="rotate-glyph" aria-hidden="true">↺</span></button>
         <button id="rotateRightBtn" class="icon-btn" onclick="rotateSelected(90)" disabled title="Повернуть выбранные страницы по часовой стрелке (W)" data-i18n-title="rotateRightSelected"><span class="rotate-glyph" aria-hidden="true">↻</span></button>
         <button id="editPageBtn" class="icon-btn pe-open-btn" onclick="editSelectedPage()" disabled title="Редактировать страницу" data-i18n-title="editPage"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
@@ -7204,7 +7204,6 @@
       }
       if (m === 'loupe') {
         if (typeof loupeModeOn !== 'undefined' && loupeModeOn) return;
-        if (typeof setReadLoupeSlots === 'function') setReadLoupeSlots(true);
         if (typeof loupeModeOn !== 'undefined') loupeModeOn = true;
         const loupeBtn = document.getElementById('loupeModeBtn');
         if (loupeBtn) loupeBtn.classList.add('active-mode');
@@ -7214,6 +7213,7 @@
         if (navModeBtn) navModeBtn.classList.remove('active-mode');
         if (interactionMode !== 'select' && interactionMode !== 'nav') interactionMode = 'select';
         if (typeof updateNavShiftCursorState === 'function') updateNavShiftCursorState();
+        if (typeof syncModeButtonSlots === 'function') syncModeButtonSlots();
         return;
       }
       if (typeof setMode === 'function') setMode(m === 'nav' ? 'nav' : 'select');
@@ -14683,6 +14683,39 @@
       }
     });
 
+    // Which of the 4 merged mode buttons (select/nav/read/loupe) represents the
+    // currently active mode - becomes the visible "main" slot in .readmode-wrapper.
+    function pmActiveModeBtnId() {
+      if (typeof readModeActive !== 'undefined' && readModeActive) return 'readModeBtn';
+      if (typeof loupeModeOn !== 'undefined' && loupeModeOn) return 'loupeModeBtn';
+      if (typeof interactionMode !== 'undefined' && interactionMode === 'nav') return 'navModeBtn';
+      return 'selectModeBtn';
+    }
+    const PM_MODE_BTN_ORDER = ['selectModeBtn', 'navModeBtn', 'readModeBtn', 'loupeModeBtn'];
+    // Syncs .rl-slot-main/.rl-slot-popup/.active-mode classes and popup stacking
+    // order across all 4 merged mode buttons to match the currently active mode.
+    function syncModeButtonSlots() {
+      const wrapper = document.querySelector('.readmode-wrapper');
+      if (!wrapper) return;
+      const activeId = pmActiveModeBtnId();
+      let popupIdx = 0;
+      PM_MODE_BTN_ORDER.forEach(id => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        const isMain = id === activeId;
+        btn.classList.toggle('rl-slot-main', isMain);
+        btn.classList.toggle('rl-slot-popup', !isMain);
+        btn.classList.toggle('active-mode', isMain);
+        if (!isMain) {
+          btn.style.setProperty('--rl-slot-index', popupIdx);
+          popupIdx++;
+        } else {
+          btn.style.removeProperty('--rl-slot-index');
+        }
+      });
+      wrapper.querySelectorAll('.rl-slot-popup.show').forEach(el => el.classList.remove('show'));
+    }
+
     // Switching operating mode: 'select' (page selection) / 'nav' (navigation)
     function setMode(mode) {
       if (isLoading) return;
@@ -14722,6 +14755,7 @@
       if (typeof updateNavShiftCursorState === 'function') updateNavShiftCursorState();
       // Do not persist while reading (enterReadMode forces nav temporarily).
       if (!readModeActive) pmPersistCursorMode(mode === 'nav' ? 'nav' : 'select');
+      syncModeButtonSlots();
     }
 
     // Navigation mode: grab and drag the canvas (pan) along the X and Y axes.
@@ -14809,23 +14843,6 @@
       document.body.classList.toggle('z-loupe-hint', active);
     }
 
-    // ── Swap icons “Reading mode” ⇄ “Page enlargement mode” ────────────
-    // Both buttons are always in the DOM (readModeBtn/loupeModeBtn); visible "main"
-    // panel position and hidden popup (on hover) are classes
-    // .rl-slot-main / .rl-slot-popup, not different elements.
-    function setReadLoupeSlots(loupeIsMain) {
-      const readBtn = document.getElementById('readModeBtn');
-      const loupeBtn = document.getElementById('loupeModeBtn');
-      if (!readBtn || !loupeBtn) return;
-      readBtn.classList.toggle('rl-slot-main', !loupeIsMain);
-      readBtn.classList.toggle('rl-slot-popup', loupeIsMain);
-      loupeBtn.classList.toggle('rl-slot-main', loupeIsMain);
-      loupeBtn.classList.toggle('rl-slot-popup', !loupeIsMain);
-      // Immediately after the swap, we hide the popup - the new popup button has not yet been hovered.
-      readBtn.classList.remove('show');
-      loupeBtn.classList.remove('show');
-    }
-
     // Turns off zoom mode (if it was on) without touching the position
     // slot - used both for your own repeated click/Z and for
     // enabling any OTHER mode (select/nav/reading), see setMode()/enterReadMode().
@@ -14848,6 +14865,7 @@
         if (navModeBtn) navModeBtn.classList.remove('active-mode');
       }
       updateNavShiftCursorState();
+      syncModeButtonSlots();
     }
 
     // Click on the “Page Enlargement Mode” button OR press Z (without holding).
@@ -14859,7 +14877,6 @@
       if (!loupeBtn || loupeBtn.disabled) return;
       const isMain = loupeBtn.classList.contains('rl-slot-main');
       if (!isMain) {
-        setReadLoupeSlots(true);
         loupeModeOn = true;
       } else if (loupeModeOn) {
         turnOffLoupeMode();
@@ -14881,6 +14898,7 @@
       }
       updateNavShiftCursorState();
       pmPersistCursorMode('loupe');
+      syncModeButtonSlots();
     }
 
     // Persist cursor tool on tab/window close. Reading mode → select next time.
@@ -14893,10 +14911,6 @@
     // Click on the “Reading Mode” button. If it is now hidden under “Mode
     // increases” - first we change places, then we start reading as usual.
     function onReadModeBtnClick() {
-      const readBtn = document.getElementById('readModeBtn');
-      if (readBtn && !readBtn.classList.contains('rl-slot-main')) {
-        setReadLoupeSlots(false);
-      }
       enterReadMode();
     }
 
@@ -15812,6 +15826,7 @@
         const ov = document.getElementById('readModeScaleOverlay');
         if (ov) ov.style.opacity = '0.5';
       }
+      syncModeButtonSlots();
     }
 
     // restoreScale=true → return scale and position (exit via ESC)
@@ -15893,6 +15908,7 @@
           }
         }
       }
+      syncModeButtonSlots();
     }
 
     // Maximize/collapse windows with hotkeys
@@ -26045,12 +26061,14 @@
       });
     })();
 
-    // Pair “Reading mode” / “Page enlargement mode” - the same two elements,
-    // the one that is currently NOT in the main slot pops up (see setReadLoupeSlots).
+    // Group of 4 mode buttons (select/nav/read/loupe) - the same elements,
+    // the ones that are currently NOT in the main slot pop up (see syncModeButtonSlots).
     // We always show (even disabled), the same technique as the basket/print.
     (function initReadLoupeToggle() {
       if (isTouchDevice) return;
       const wrapper = document.querySelector('.readmode-wrapper');
+      const selectBtn = document.getElementById('selectModeBtn');
+      const navBtn = document.getElementById('navModeBtn');
       const readBtn = document.getElementById('readModeBtn');
       const loupeBtn = document.getElementById('loupeModeBtn');
       if (!wrapper || !readBtn || !loupeBtn) return;
@@ -26058,11 +26076,12 @@
 
       function show() {
         clearTimeout(hideTimer);
-        const popupEl = wrapper.querySelector('.rl-slot-popup');
-        // Unlike the cart/print, we don’t show this pop-up button,
-        // while it is disabled (the document is not yet open): enable zoom mode
+        // Unlike the cart/print, we don’t show these pop-up buttons,
+        // while they are disabled (the document is not yet open): enable zoom mode
         // there’s still nothing, and the translucent “nothing” button looks like a bug.
-        if (popupEl && !popupEl.disabled) popupEl.classList.add('show');
+        wrapper.querySelectorAll('.rl-slot-popup').forEach(popupEl => {
+          if (!popupEl.disabled) popupEl.classList.add('show');
+        });
       }
       function scheduleHide() {
         clearTimeout(hideTimer);
@@ -26071,7 +26090,7 @@
         }, POPUP_BTN_HIDE_MS);
       }
 
-      [wrapper, readBtn, loupeBtn].forEach(el => {
+      [wrapper, selectBtn, navBtn, readBtn, loupeBtn].filter(Boolean).forEach(el => {
         el.addEventListener('mouseenter', show);
         el.addEventListener('mouseleave', scheduleHide);
       });
@@ -31342,14 +31361,9 @@ function editSelectedPage() {
       case 'nav':
         setMode('nav');
         break;
-      case 'read': {
-        const readBtn = document.getElementById('readModeBtn');
-        if (readBtn && !readBtn.classList.contains('rl-slot-main')) {
-          setReadLoupeSlots(false);
-        }
+      case 'read':
         enterReadMode(anchorIdx);
         break;
-      }
       case 'loupe':
         toggleLoupeMode();
         break;
@@ -31487,22 +31501,12 @@ function editSelectedPage() {
         case 'select':
           setMode('select');
           break;
-        case 'loupe': {
-          const loupeBtn = document.getElementById('loupeModeBtn');
-          if (loupeBtn && !loupeBtn.classList.contains('rl-slot-main')) {
-            setReadLoupeSlots(true);
-          }
+        case 'loupe':
           toggleLoupeMode();
           break;
-        }
-        case 'read': {
-          const readBtn = document.getElementById('readModeBtn');
-          if (readBtn && !readBtn.classList.contains('rl-slot-main')) {
-            setReadLoupeSlots(false);
-          }
+        case 'read':
           enterReadMode(anchorIdx);
           break;
-        }
         case 'fit-width':
           if (typeof toggleFitWidthScale === 'function') toggleFitWidthScale();
           break;
@@ -31524,14 +31528,9 @@ function editSelectedPage() {
         case 'nav':
           setMode('nav');
           break;
-        case 'read': {
-          const readBtn = document.getElementById('readModeBtn');
-          if (readBtn && !readBtn.classList.contains('rl-slot-main')) {
-            setReadLoupeSlots(false);
-          }
+        case 'read':
           enterReadMode(anchorIdx);
           break;
-        }
         case 'fit-width':
           if (typeof toggleFitWidthScale === 'function') toggleFitWidthScale();
           break;
