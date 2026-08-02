@@ -28980,6 +28980,26 @@ function pmBookmarksToggleGroup(path) {
     toggleBtn.setAttribute('aria-label', t(nowCollapsed ? 'bookmarksExpandGroup' : 'bookmarksCollapseGroup'));
   }
   pmBookmarksApplyVisibility();
+  // Expanding can reveal rows that were never measured for truncation while
+  // they were display:none (scrollWidth/clientWidth both read 0 then).
+  pmBookmarksRefreshTitleTooltips();
+}
+
+// Native title-attribute tooltip (same "hover a while, then it appears"
+// behavior as every other title="" in this app) - only set on titles that
+// are actually clipped by the ellipsis, so it doesn't show for ones that
+// already fit. Must run while a row is NOT display:none (hidden rows read
+// 0 for both widths, which would look "not truncated") - callers measure
+// before hiding, or right after a group is expanded.
+function pmBookmarksRefreshTitleTooltips() {
+  const list = document.getElementById('pmBookmarksList');
+  if (!list) return;
+  list.querySelectorAll('.pm-bookmarks-item-title').forEach((span) => {
+    const row = span.closest('.pm-bookmarks-row');
+    if (row && row.classList.contains('pm-bookmarks-hidden')) return;
+    if (span.scrollWidth > span.clientWidth + 1) span.title = span.textContent;
+    else span.removeAttribute('title');
+  });
 }
 
 function pmBookmarksUpdateDeleteBtnState() {
@@ -29106,6 +29126,9 @@ function pmBookmarksRenderList(flatItems) {
     frag.appendChild(row);
   });
   list.appendChild(frag);
+  // Measure truncation BEFORE anything gets display:none'd by
+  // pmBookmarksApplyVisibility() below - a hidden row can't be measured.
+  pmBookmarksRefreshTitleTooltips();
   pmBookmarksApplyVisibility();
 }
 
@@ -29587,6 +29610,14 @@ function pmBookmarksClampLeftResize(width, rightEdge) {
   const resizeHandleLeft = document.getElementById('pmBookmarksResizeHandleLeft');
   if (!panel || !closeBtn) return;
   closeBtn.addEventListener('click', pmBookmarksClose);
+  // Resizing the popup's width (left/right handles) changes which titles
+  // are truncated - re-check tooltips whenever the panel's own box changes
+  // size, regardless of what caused it.
+  if (typeof ResizeObserver === 'function') {
+    new ResizeObserver(() => {
+      if (pmBookmarksState.open) pmBookmarksRefreshTitleTooltips();
+    }).observe(panel);
+  }
   window.addEventListener('resize', () => {
     if (!pmBookmarksState.open) return;
     if (pmBookmarksState.pos) {
