@@ -9896,9 +9896,18 @@
         const hint = historyChangeHint.slice();
         historyChangeHint = null;
         const marked = [...markedForDeletion].sort((x, y) => x - y);
-        const savePromise = pdfDoc.save().then(b => new Uint8Array(b));
+        // Serialize saves on the commit chain and wait until history thumbnail
+        // fills release the live pdfDoc — overlapping pdfDoc.save() during a
+        // borrow captured intermediate /Rotate and later poisoned the preview.
         historyCommitChain = historyCommitChain
-          .then(() => commitHistoryStep(savePromise, marked, hint))
+          .then(async () => {
+            if (!pdfDoc) return;
+            // saveLivePdfBytes waits for borrow-idle and serializes with flush/HQ.
+            const savePromise = (typeof saveLivePdfBytes === 'function')
+              ? saveLivePdfBytes()
+              : pdfDoc.save().then(b => new Uint8Array(b));
+            return commitHistoryStep(savePromise, marked, hint);
+          })
           .catch(e => console.error(e));
         return;
       }
@@ -9957,6 +9966,20 @@
         await new Promise(r => setTimeout(r, 20));
         spins++;
       }
+    }
+
+    // Serialize live pdfDoc.save() calls. Concurrent save()+mutate (history /
+    // rotate flush / HQ) used to capture intermediate /Rotate and later paint
+    // that stale raster over the final CSS spin (~1s snap-back).
+    let pdfDocSaveChain = Promise.resolve();
+    function saveLivePdfBytes() {
+      const done = pdfDocSaveChain.then(async () => {
+        await whenPdfDocIdle();
+        if (!pdfDoc) return null;
+        return new Uint8Array(await pdfDoc.save());
+      });
+      pdfDocSaveChain = done.then(() => {}, () => {});
+      return done;
     }
 
     async function renderThumbsFromBytes(pdfBytes, indices) {
@@ -10054,7 +10077,8 @@
       //We are waiting for the animation and live rendering of the preview to complete (it will fill in the
       //the final step is through patchHistoryPending - without a separate render).
       if (document.querySelector('.page.rotate-anim-active') ||
-          (thumbFlushQueue && thumbFlushQueue.size) || thumbFlushBusy) {
+          (thumbFlushQueue && thumbFlushQueue.size) || thumbFlushBusy ||
+          (typeof anyPageHasPendingRotateRaster === 'function' && anyPageHasPendingRotateRaster())) {
         scheduleSnapshotFill();
         return;
       }
@@ -11762,8 +11786,10 @@
       // live preview a moment after Save.
       if (typeof whenPdfDocIdle === 'function') await whenPdfDocIdle();
       if (token !== hqPdfjsToken) return null;
-      const bytes = await pdfDoc.save();
-      if (token !== hqPdfjsToken) return null;          //the document has changed - cancel
+      const bytes = (typeof saveLivePdfBytes === 'function')
+        ? await saveLivePdfBytes()
+        : new Uint8Array(await pdfDoc.save());
+      if (!bytes || token !== hqPdfjsToken) return null;          //the document has changed - cancel
       const doc = await pdfjsLib.getDocument({ data: bytes }).promise;
       if (token !== hqPdfjsToken) return null;
       hqPdfjsDoc = doc;
@@ -12338,9 +12364,12 @@
       for (const div of todo) {
         if (token !== hqPdfjsToken || (!force && currentScale < HQ_SCALE_THRESHOLD)) return;
         const idx = parseInt(div.dataset.index);
-        // Skip pages currently being rotated — applying HQ mid-animation would show
-        // the new-orientation image inside the still-animating wrapper, causing a flash.
-        if (isPageRotateBusy(pageRotateState.get(div))) continue;
+        // Skip pages still showing a CSS rotate (animating OR waiting for raster
+        // swap). Writing a baked /Rotate image under a non-zero transform doubles
+        // the angle until flush clears it — looks like a late snap.
+        if (typeof pageNeedsRotateRasterSwap === 'function'
+            ? pageNeedsRotateRasterSwap(div)
+            : isPageRotateBusy(pageRotateState.get(div))) continue;
         const img = div.querySelector('.img-wrapper img');
         if (!img) continue;
         try {
@@ -21551,6 +21580,9 @@
 
     async function rotateSelected(degrees) {
       if (isLoading || selectedPages.size === 0) return;
+      // Never mutate a history stand-in while renderThumbsFromBytes borrowed pdfDoc.
+      if (typeof whenPdfDocIdle === 'function') await whenPdfDocIdle();
+      if (!pdfDoc || selectedPages.size === 0) return;
       const indices = [];
       for (let idx of selectedPages) {
         if (markedForDeletion.has(idx)) continue;
@@ -21572,8 +21604,10 @@
     }
 
     // Quick actions for one specific page (on hover)
-    function rotateSinglePage(idx, degrees) {
+    async function rotateSinglePage(idx, degrees) {
       if (isLoading || markedForDeletion.has(idx)) return;
+      if (typeof whenPdfDocIdle === 'function') await whenPdfDocIdle();
+      if (!pdfDoc || markedForDeletion.has(idx)) return;
 
       const page = pdfDoc.getPage(idx);
       const current = page.getRotation().angle || 0;
@@ -21590,6 +21624,9 @@
     const PAGE_ROTATE_ANIM_MS = 288;
     const PAGE_ROTATE_NEAR_DONE = 0.88;
     const PAGE_ROTATE_MIN_SEGMENT_MS = 112;
+    // Wait for the Q/W burst to go idle before swapping rasters — avoids a
+    // mid-burst flush applying under a still-settling CSS angle.
+    const PAGE_ROTATE_FLUSH_IDLE_MS = 200;
     const prefersReducedMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const pageRotateState = new WeakMap();
     let thumbFlushQueue = new Set();
@@ -21623,6 +21660,29 @@
 
     function pageHasVisualRotateOffset(div, state) {
       return Math.abs(readVisualRotateDeg(div, state)) > 0.5;
+    }
+
+    // True while CSS still carries the spin (animating or waiting for flush).
+    // HQ / other img writers must not set src in this window.
+    function pageNeedsRotateRasterSwap(div) {
+      if (!div) return false;
+      const state = pageRotateState.get(div);
+      if (isPageRotateBusy(state)) return true;
+      if (pageHasVisualRotateOffset(div, state)) return true;
+      if (div.classList.contains('rotate-anim-active')) return true;
+      const idx = parseInt(div.dataset.index, 10);
+      if (!Number.isNaN(idx) && thumbFlushQueue.has(idx)) return true;
+      return false;
+    }
+
+    function anyPageHasPendingRotateRaster() {
+      if (thumbFlushBusy || (thumbFlushQueue && thumbFlushQueue.size)) return true;
+      if (document.querySelector('.page.rotate-anim-active')) return true;
+      const pages = document.querySelectorAll('.page');
+      for (const div of pages) {
+        if (pageNeedsRotateRasterSwap(div)) return true;
+      }
+      return false;
     }
 
     function cancelPageThumbnailFlush(indices) {
@@ -21698,9 +21758,8 @@
       clearPageRotateTransition(div, state);
       state.isAnimating = false;
       state.visualDeg = state.toDeg;
-      state.settleTimer = setTimeout(() => {
-        div.classList.remove('rotate-anim-active');
-      }, 40);
+      // Keep rotate-anim-active until raster swap so HQ/other writers skip us.
+      div.classList.add('rotate-anim-active');
       const pageIdx = parseInt(div.dataset.index, 10);
       if (!Number.isNaN(pageIdx)) scheduleThumbnailFlush([pageIdx]);
     }
@@ -21708,7 +21767,38 @@
     function scheduleThumbnailFlush(indices) {
       indices.forEach(i => thumbFlushQueue.add(i));
       clearTimeout(thumbFlushTimer);
-      thumbFlushTimer = setTimeout(flushRotateThumbnails, 32);
+      thumbFlushTimer = setTimeout(flushRotateThumbnails, PAGE_ROTATE_FLUSH_IDLE_MS);
+    }
+
+    function anyPageRotateAnimating() {
+      if (document.querySelector('.page.rotate-anim-active')) return true;
+      for (const idx of thumbFlushQueue) {
+        const div = document.querySelector(`.page[data-index="${idx}"]`);
+        if (isPageRotateBusy(pageRotateState.get(div))) return true;
+      }
+      return false;
+    }
+
+    function readPdfPageAngles(indices) {
+      const out = new Map();
+      if (!pdfDoc) return out;
+      indices.forEach(idx => {
+        try {
+          out.set(idx, pdfDoc.getPage(idx).getRotation().angle || 0);
+        } catch (_) {}
+      });
+      return out;
+    }
+
+    function pdfAnglesMatch(before, indices) {
+      if (!before || !pdfDoc) return false;
+      for (const idx of indices) {
+        let now;
+        try { now = pdfDoc.getPage(idx).getRotation().angle || 0; }
+        catch (_) { return false; }
+        if (before.get(idx) !== now) return false;
+      }
+      return true;
     }
 
     async function flushRotateThumbnails() {
@@ -21719,10 +21809,12 @@
         thumbFlushTimer = setTimeout(flushRotateThumbnails, 80);
         return;
       }
+      // Only wait on an in-flight CSS transition. After finishPageRotateAnimation,
+      // rotate-anim-active stays until raster swap — that must NOT block flush.
       for (const idx of thumbFlushQueue) {
         const div = document.querySelector(`.page[data-index="${idx}"]`);
-        const st = div && pageRotateState.get(div);
-        if (isPageRotateBusy(st)) {
+        if (isPageRotateBusy(pageRotateState.get(div))) {
+          clearTimeout(thumbFlushTimer);
           thumbFlushTimer = setTimeout(flushRotateThumbnails, 80);
           return;
         }
@@ -21746,45 +21838,36 @@
         clearTimeout(thumbFlushTimer);
         thumbFlushTimer = setTimeout(flushRotateThumbnails, 80);
       };
-      const thumbs = new Map();
-      const needRefresh = [];
-      for (const idx of batch) {
-        const pref = rotateThumbPrefetch.get(idx);
-        if (pref) {
-          const t = await pref;
-          rotateThumbPrefetch.delete(idx);
-          if (gen !== rotateThumbGen) {
-            requeueAndRetry();
-            return;
-          }
-          if (t) thumbs.set(idx, t);
-          else needRefresh.push(idx);
-        } else {
-          needRefresh.push(idx);
+      // Wait for pending history saves so we don't save() alongside them.
+      try {
+        if (typeof historyCommitChain !== 'undefined' && historyCommitChain) {
+          await historyCommitChain;
         }
-        if (shouldAbort()) {
-          batch.forEach(i => {
-            if (!thumbs.has(i)) thumbFlushQueue.add(i);
-          });
-          clearTimeout(thumbFlushTimer);
-          thumbFlushTimer = setTimeout(flushRotateThumbnails, 80);
-          return;
-        }
-      }
-      if (needRefresh.length) {
-        const more = await refreshThumbnails(needRefresh, shouldAbort);
-        if (gen !== rotateThumbGen || !more || !more.size) {
-          batch.forEach(i => { if (!thumbs.has(i)) thumbFlushQueue.add(i); });
-          clearTimeout(thumbFlushTimer);
-          thumbFlushTimer = setTimeout(flushRotateThumbnails, 80);
-          return;
-        }
-        more.forEach((v, k) => thumbs.set(k, v));
-      }
-      if (gen !== rotateThumbGen) {
+      } catch (_) {}
+      if (shouldAbort()) {
         requeueAndRetry();
         return;
       }
+      if (typeof whenPdfDocIdle === 'function') await whenPdfDocIdle();
+      if (shouldAbort()) {
+        requeueAndRetry();
+        return;
+      }
+
+      const anglesBefore = readPdfPageAngles(batch);
+      // Always re-render from the live tip — never reuse mid-burst prefetch.
+      batch.forEach(idx => rotateThumbPrefetch.delete(idx));
+      const more = await refreshThumbnails(batch, shouldAbort);
+      if (gen !== rotateThumbGen || !more || !more.size || shouldAbort()) {
+        requeueAndRetry();
+        return;
+      }
+      if (!pdfAnglesMatch(anglesBefore, batch)) {
+        requeueAndRetry();
+        return;
+      }
+      const thumbs = more;
+
       const entries = [];
       for (const idx of batch) {
         const div = document.querySelector(`.page[data-index="${idx}"]`);
@@ -21794,13 +21877,24 @@
           continue;
         }
         const thumb = thumbs.get(idx);
-        if (div && thumb) entries.push({ div, thumb });
+        if (div && thumb) entries.push({ div, thumb, pageIdx: idx });
       }
       if (gen !== rotateThumbGen) {
         requeueAndRetry();
         return;
       }
-      applyThumbnailsBatch(entries);
+      if (!entries.length) {
+        if (thumbFlushQueue.size) {
+          clearTimeout(thumbFlushTimer);
+          thumbFlushTimer = setTimeout(flushRotateThumbnails, 80);
+        }
+        return;
+      }
+      const applied = await applyThumbnailsBatch(entries, { gen });
+      if (!applied) {
+        requeueAndRetry();
+        return;
+      }
       } finally {
         thumbFlushBusy = false;
       }
@@ -21814,18 +21908,36 @@
       }
     }
 
-    // Applies thumbnails to cards using atomic synchronous replacement WITHOUT hiding.
-    // The thumbnail raster is already decoded when rendering (data-URL in the browser cache),
-    // so the src setting is rendered instantly: the old image under
-    // CSS-rotate is replaced by a ready-made rotated raster in the same frame - without
-    // empty/incorrect intermediate frame. All cards are switched
-    // in one synchronized pass, so there is no "out-of-sync" when turning 2+ pages.
-    function applyThumbnailsBatch(entries) {
-      for (const { div, thumb } of entries) {
+    // Swap CSS-rotated preview cards to baked rasters without a wrong-angle flash:
+    // warm-decode on a detached Image while the card keeps (old bitmap + CSS spin),
+    // then set src and clear transform in one synchronous pass (cached decode).
+    async function applyThumbnailsBatch(entries, opts) {
+      opts = opts || {};
+      const gen = opts.gen;
+      const prepared = [];
+      for (const entry of entries) {
+        const div = entry.div;
+        const thumb = entry.thumb;
         if (!div || !thumb) continue;
         const img = div.querySelector('img');
         if (!img) continue;
         const wrapper = div.querySelector('.img-wrapper');
+        // Warm decode off-DOM so the card can keep showing the CSS-rotated OLD
+        // raster. Setting the baked (already rotated) src while CSS spin is still
+        // on would double the angle for a frame.
+        try {
+          const warm = new Image();
+          warm.src = thumb.dataUrl;
+          if (warm.decode) await warm.decode();
+        } catch (_) {}
+        if (gen != null && gen !== rotateThumbGen) return false;
+        if (isPageRotateBusy(pageRotateState.get(div))) return false;
+        prepared.push({ div, thumb, img, wrapper });
+      }
+      if (!prepared.length) return true;
+      if (gen != null && gen !== rotateThumbGen) return false;
+
+      for (const { div, thumb, img, wrapper } of prepared) {
         const state = pageRotateState.get(div);
         if (state) {
           clearPageRotateTransition(div, state);
@@ -21837,16 +21949,16 @@
         }
         img.src = thumb.dataUrl;
         if (wrapper) {
-          wrapper.style.transition = '';
+          wrapper.style.transition = 'none';
           wrapper.style.transform = '';
         }
         if (thumb.isSideways) div.classList.add('page-rotated');
         else div.classList.remove('page-rotated');
         div.classList.remove('rotate-anim-active');
-        // Let's reuse the finished miniature for the story step (without a separate render).
         const pIdx = parseInt(div.dataset.index, 10);
         if (!Number.isNaN(pIdx)) patchHistoryPending(pIdx, thumb);
       }
+      return true;
     }
 
     function bumpPageRotateAnimation(div, degrees) {
@@ -21936,7 +22048,9 @@
       const hasImages = typeof peLoadPageEditorObjects === 'function' &&
         peLoadPageEditorObjects(idx).some(o => o.type === 'image');
       const thumbScale = hasImages ? THUMBNAIL_SCALE * 2 : THUMBNAIL_SCALE;
-      const viewport = page.getViewport({ scale: thumbScale });
+      // Match renderThumbDataFromDoc / HQ: honor pdf.js page.rotate (/Rotate).
+      const effectiveRotation = typeof page.rotate === 'number' ? page.rotate : 0;
+      const viewport = page.getViewport({ scale: thumbScale, rotation: effectiveRotation });
       const isSideways = viewport.width > viewport.height;
       const canvas = document.createElement('canvas');
       canvas.width = viewport.width;
@@ -21963,9 +22077,8 @@
 
     function applyThumbnailToDiv(div, thumb) {
       if (!div || !thumb) return;
-      const state = pageRotateState.get(div);
-      const pageIdx = parseInt(div.dataset.index, 10);
-      if (isPageRotateBusy(state)) {
+      if (pageNeedsRotateRasterSwap(div)) {
+        const pageIdx = parseInt(div.dataset.index, 10);
         if (!Number.isNaN(pageIdx)) scheduleThumbnailFlush([pageIdx]);
         return;
       }
@@ -21977,8 +22090,14 @@
       const max = pdfDoc.getPageCount();
       indices = indices.filter(i => i >= 0 && i < max);
       if (!indices.length) return new Map();
-      const pdfBytes = await pdfDoc.save();
+      if (typeof whenPdfDocIdle === 'function') await whenPdfDocIdle();
       if (shouldAbort && shouldAbort()) return new Map();
+      const anglesBefore = readPdfPageAngles(indices);
+      const pdfBytes = (typeof saveLivePdfBytes === 'function')
+        ? await saveLivePdfBytes()
+        : new Uint8Array(await pdfDoc.save());
+      if (!pdfBytes || (shouldAbort && shouldAbort())) return new Map();
+      if (!pdfAnglesMatch(anglesBefore, indices)) return new Map();
       const pdfjsDoc = await pdfjsLib.getDocument({ data: pdfBytes }).promise;
       if (shouldAbort && shouldAbort()) return new Map();
       const result = new Map();
@@ -21991,6 +22110,8 @@
           await new Promise(r => setTimeout(r, 0));
         }
       }
+      // Live doc rotated again while we rendered — discard stale rasters.
+      if (!pdfAnglesMatch(anglesBefore, indices)) return new Map();
       return result;
     }
 
