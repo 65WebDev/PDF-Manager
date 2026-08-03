@@ -58,9 +58,15 @@
       overflow: hidden;         /*remove the external (browser) scrollbar*/
     }
     .top-menu {
-      background: #2c3e50; padding: 8px 20px; 
-      box-shadow: 0 2px 8px rgba(0,0,0,0.15); 
-      position: relative; z-index: 100;
+      background: #2c3e50; padding: 8px 20px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      /*Above panels like the bookmarks/search popup (z-index 9200, position:fixed
+        siblings elsewhere in the DOM) but below the modal tier (9996+) - a
+        stacking context (position + z-index) traps EVERY descendant's own
+        z-index, however high, so the toolbar's own popups (mode-switch
+        dropdown, Delete/Save flyouts, ...) could never render above a
+        higher-numbered sibling panel without this being raised too.*/
+      position: relative; z-index: 9300;
       flex: 0 0 auto;          /*the menu takes its height and does not shrink*/
       display: flex;
       flex-direction: column;
@@ -844,7 +850,9 @@
       position: absolute;
       top: calc(100% + 6px);
       left: 0;
-      z-index: 210;
+      /*Same reasoning as .rl-slot-popup above - render above panels like the
+        bookmarks/search popup (z-index 9200) rather than behind them.*/
+      z-index: 99998;
       opacity: 0;
       transform: translateY(-6px);
       pointer-events: none;
@@ -875,7 +883,10 @@
       position: absolute;
       top: calc(100% + 6px + var(--rl-slot-index, 0) * (var(--pm-menu-ctrl-h, 42px) + 6px));
       left: 0;
-      z-index: 210;
+      /*Matches the app's other floating popups (context menus, #pmBookmarksCtxMenu)
+        so it renders above panels like the bookmarks/search popup (z-index 9200)
+        instead of being clipped behind them when they overlap.*/
+      z-index: 99998;
       opacity: 0;
       transform: translateY(-6px);
       pointer-events: none;
@@ -993,7 +1004,9 @@
       transform: translateX(-50%) translateY(-6px);
       opacity: 0;
       pointer-events: none;
-      z-index: 130;
+      /*Same reasoning as .rl-slot-popup above - render above panels like the
+        bookmarks/search popup (z-index 9200) rather than behind them.*/
+      z-index: 99998;
       transition: opacity 0.15s, transform 0.15s, background 0.15s;
     }
     /*Invisible “bridge” in the gap so that the cursor does not fall into the dead zone
@@ -3670,8 +3683,8 @@
 
     /*.scale-control::after - the vertical bar has been removed at the user's request*/
 
-    .main { 
-      padding: 10px 20px 20px; 
+    .main {
+      padding: 10px 6px 20px;    /*left/right tightened to match the mobile value below - more of the working area for the page itself*/
       overflow: auto;            /*the only scrollbar is inside the editor*/
       overflow-anchor: none;     /*we do not allow the browser to “anchor” the scroll when changing the scale*/
       flex: 1 1 auto;            /*takes up all the remaining space under the menu*/
