@@ -15886,28 +15886,86 @@
       });
     }
 
+    // True only when every rendered page is portrait (none flagged
+    // .page-rotated, i.e. none end up wider than tall after applying
+    // /Rotate) - the same per-page orientation signal already used to pick
+    // the thumbnail letterboxing rule (.page.page-rotated img).
+    function pmAllPagesPortrait() {
+      if (!pagesContainer) return false;
+      const pages = pagesContainer.querySelectorAll('.page');
+      if (!pages.length) return false;
+      for (const p of pages) {
+        if (p.classList.contains('page-rotated')) return false;
+      }
+      return true;
+    }
+
+    // Widest aspect ratio (naturalWidth/naturalHeight) among the currently
+    // rendered portrait pages, or null if none have a decoded image yet.
+    // Using the widest (closest to square) of them as the fit target means
+    // every narrower portrait page in the same document still ends up
+    // within the available width, not overflowing it.
+    function pmMaxPortraitAspect() {
+      if (!pagesContainer) return null;
+      let maxAspect = 0;
+      const imgs = pagesContainer.querySelectorAll('.page:not(.page-rotated) img');
+      for (const img of imgs) {
+        if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+          const a = img.naturalWidth / img.naturalHeight;
+          if (a > maxAspect) maxAspect = a;
+        }
+      }
+      return maxAspect > 0 ? maxAspect : null;
+    }
+
+    // Real rendered preview width at `scale` for a page with the given
+    // aspect ratio - as opposed to cardRowWidth()'s outer SQUARE card width,
+    // which is orientation-agnostic by design (a mixed portrait/landscape
+    // document needs a uniform card size). Mirrors the exact --page-inner-h /
+    // --preview-inset math applyScale() sets on #pagesContainer, so a
+    // portrait-only document can be scaled until its actual page content -
+    // not the surrounding square card - reaches the available width.
+    function portraitPreviewWidth(scale, aspect) {
+      const scaleFactor = scale / 100;
+      const thumb = Math.round(154 * scaleFactor);
+      const numH = Math.min(thumb * 0.16, 32);
+      const innerH = thumb * 1.35 - numH;
+      const inset = computePreviewInset(scaleFactor, scale);
+      const previewLong = innerH - inset;
+      return previewLong * aspect;
+    }
+
     // Calculate target zoom for reading mode on desktop:
     // the maximum possible at which one page's square card still fits the
-    // available working-area width (same "fit the square block" logic as mobile).
+    // available working-area width (same "fit the square block" logic as
+    // mobile) - unless the whole document is portrait, in which case the
+    // page's own (narrower) rendered width is used instead, so "fit width"
+    // zooms further and actually fills the working area with visible page
+    // content rather than stopping once the surrounding square card fits.
     function computeReadModeDesktopScale() {
       const avail = getScrollAvailWidth();
       if (avail <= 0) return clampScale(1300);
+      const aspect = pmAllPagesPortrait() ? pmMaxPortraitAspect() : null;
       let best = 70;
       for (let s = 70; s <= 1300; s++) {
-        if (cardRowWidth(s, 1) <= avail) best = s;
+        const w = aspect ? portraitPreviewWidth(s, aspect) : cardRowWidth(s, 1);
+        if (w <= avail) best = s;
         else break;
       }
       return best;
     }
 
     // Calculate target zoom for reading mode on mobile:
-    // the maximum possible at which one page fits in width.
+    // the maximum possible at which one page fits in width (same
+    // portrait-aware exception as computeReadModeDesktopScale above).
     function computeReadModeMobileScale() {
       const avail = getScrollAvailWidth();
       if (avail <= 0) return clampScale(700);
+      const aspect = pmAllPagesPortrait() ? pmMaxPortraitAspect() : null;
       let best = 70;
       for (let s = 70; s <= 700; s++) {
-        if (cardRowWidth(s, 1) <= avail) best = s;
+        const w = aspect ? portraitPreviewWidth(s, aspect) : cardRowWidth(s, 1);
+        if (w <= avail) best = s;
         else break;
       }
       return best;
