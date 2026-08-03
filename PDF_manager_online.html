@@ -19676,6 +19676,24 @@
       return false;
     }
 
+    // The bookmarks/search popups float ABOVE the page grid (bookmarks is
+    // pinned to the left edge, right where the leftmost page column would
+    // otherwise sit) - without this, the blue insertion indicator kept
+    // reacting to raw cursor coordinates underneath the popup, since this
+    // whole hit-test is purely geometric (clientX/clientY against page
+    // rects) and never checked whether something opaque was actually on
+    // top of the cursor first, same reasoning as the logo-menu/context-menu
+    // checks above.
+    function isPointOverFloatingPanel(clientX, clientY) {
+      for (const id of ['pmBookmarksPanel', 'pmSearchPanel']) {
+        const panel = document.getElementById(id);
+        if (!panel || !panel.classList.contains('open')) continue;
+        const r = panel.getBoundingClientRect();
+        if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) return true;
+      }
+      return false;
+    }
+
     // Keep a locked gap while the pointer stays near it / over the indicator,
     // so we don't flicker between neighboring gaps (or clear) when the
     // clickable hit box overlaps the page card.
@@ -19972,6 +19990,10 @@
         return;
       }
       if (isPointOverPageCtxMenu(e.clientX, e.clientY)) {
+        clearHoverInsert();
+        return;
+      }
+      if (isPointOverFloatingPanel(e.clientX, e.clientY)) {
         clearHoverInsert();
         return;
       }
