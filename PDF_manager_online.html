@@ -10810,6 +10810,26 @@
       const rms = document.getElementById('readModeScaleSlider');
       if (rms) rms.value = sliderVal;
       applyScale({ zoomAnchor });
+      pmRecenterFitWidthPage();
+    }
+
+    // "Fit page width" should always end up perfectly horizontally centered
+    // (no leftover horizontal scroll) unless the page is genuinely too wide
+    // to fit even fully zoomed out (pages-row-overflow, meant for panning).
+    // The general zoom-anchor restore (captureZoomAnchor/restoreZoomAnchor)
+    // runs against the OLD scale's overflow/few-cols classes and can drift
+    // slightly across a jump this large - correct that directly once
+    // everything has settled, one frame after the anchor restore's own late
+    // (rAF) pass (see applyZoomLayoutAndRestore).
+    function pmRecenterFitWidthPage() {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (!scrollContainer || !pagesContainer) return;
+          if (!pagesContainer.classList.contains('pages-row-overflow')) {
+            scrollContainer.scrollLeft = 0;
+          }
+        });
+      });
     }
 
     // "Fit page width" is a live-tracking mode, not a one-shot scale - call
@@ -11488,9 +11508,18 @@
 
       let overflow = false;
 
-      // One column: count by scale (without getBoundingClientRect) + hysteresis
+      // One column: count by scale (without getBoundingClientRect) + hysteresis.
+      // For an all-portrait document the visible page content is narrower
+      // than the square card by design (see portraitPreviewWidth) - basing
+      // this on the card's own width would call it "overflowing" (and force
+      // flex-start, losing centering) even when the actually-visible image
+      // fits the width fine, which is exactly what "fit page width" targets.
       if (isMobilePagesSingleColumn() || isPagesSingleColumnLayout()) {
-        const cardW = cardRowWidth(currentScale, 1);
+        const portraitAspect = (typeof pmAllPagesPortrait === 'function' && pmAllPagesPortrait())
+          ? pmMaxPortraitAspect() : null;
+        const cardW = portraitAspect
+          ? portraitPreviewWidth(currentScale, portraitAspect)
+          : cardRowWidth(currentScale, 1);
         const hyst = pagesContainer.classList.contains('pages-row-overflow') ? -16 : 16;
         overflow = cardW > avail + hyst;
       } else {
