@@ -7,7 +7,7 @@ window.__PDF_MANAGER_VERSION_FEED__ = {
   "date": "2026-08-02T18:17:27Z",
   "downloadUrl": "https://github.com/5451165-bot/PDF-Manager/releases/latest/download/PDF_manager_online.html",
   "offlineDownloadUrl": "https://github.com/5451165-bot/PDF-Manager/releases/latest/download/PDF_manager_offline.html",
-  "windowsVersion": "0.1.12",
-  "windowsDownloadUrl": "https://github.com/5451165-bot/PDF-Manager/releases/tag/windows-v0.1.12",
-  "updatedAt": "2026-08-02T18:17:38.129Z"
+  "windowsVersion": "0.1.13",
+  "windowsDownloadUrl": "https://github.com/5451165-bot/PDF-Manager/releases/tag/windows-v0.1.13",
+  "updatedAt": "2026-08-03T06:21:21.305Z"
 };
