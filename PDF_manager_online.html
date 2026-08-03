@@ -1198,7 +1198,9 @@
     /*overflow:hidden clips descendants to the panel's own rounded corners.
       Fixed width - not resizable (max-width is just a safety net so it
       can't overflow a very narrow viewport, not a "user can resize" cue).*/
-    .pm-bookmarks-panel { width: 350px; max-width: 92vw; padding: 0; gap: 0; overflow: hidden; }
+    /*min-width overrides .pm-search-panel's own 300px floor, which would
+      otherwise clamp this panel wider than its intended 280px.*/
+    .pm-bookmarks-panel { width: 280px; min-width: 0; max-width: 92vw; padding: 0; gap: 0; overflow: hidden; }
     .pm-bookmarks-header {
       justify-content: space-between;
       padding: 6px 6px 6px 8px;
@@ -4687,7 +4689,7 @@
       cursor: pointer;
       box-shadow: 0 3px 10px rgba(0,0,0,0.3);
       z-index: 95;
-      transition: top 0.15s ease, background 0.15s;
+      transition: top 0.15s ease, left 0.15s ease, background 0.15s;
       -webkit-user-select: none;
       user-select: none;
       touch-action: none;
@@ -10516,10 +10518,28 @@
     //almost always the leftmost one was chosen, not the central one), and a fraction of its width/height,
     //falling on this center - in order to return exactly the same after changing the scale
     //place in the frame. Only for desktop - on the touch screen, pinch-zoom has its own anchoring logic.
+    // Center of #scrollContainer's CONTENT box (excluding padding), not just
+    // its outer bounding box. When the bookmarks popup is open it reserves a
+    // left gutter via padding-left so pages don't render underneath it;
+    // using the raw bounding-box center for zoom anchoring pulled the anchor
+    // into that dead gutter space, so zooming (especially "fit width")
+    // visibly shifted pages to the right of where the user was looking.
+    function scrollContainerContentCenter() {
+      const r = scrollContainer.getBoundingClientRect();
+      const cs = getComputedStyle(scrollContainer);
+      const padL = parseFloat(cs.paddingLeft) || 0;
+      const padR = parseFloat(cs.paddingRight) || 0;
+      const padT = parseFloat(cs.paddingTop) || 0;
+      const padB = parseFloat(cs.paddingBottom) || 0;
+      return {
+        x: r.left + padL + (r.width - padL - padR) / 2,
+        y: r.top + padT + (r.height - padT - padB) / 2,
+      };
+    }
+
     function captureZoomAnchor() {
       const containerRect = scrollContainer.getBoundingClientRect();
-      const centerX = containerRect.left + containerRect.width / 2;
-      const centerY = containerRect.top + containerRect.height / 2;
+      const { x: centerX, y: centerY } = scrollContainerContentCenter();
       const pages = pagesContainer.querySelectorAll('.page');
       let containing = null;
       let best = null, bestDist = Infinity;
@@ -10550,12 +10570,10 @@
       const el = pagesContainer.querySelector('.page[data-index="' + anchor.idx + '"]');
       if (!el || el.style.display === 'none') return;
       void pagesContainer.offsetHeight;
-      const containerRect = scrollContainer.getBoundingClientRect();
       const r = el.getBoundingClientRect();
       const targetX = r.left + anchor.fracX * r.width;
       const targetY = r.top + anchor.fracY * r.height;
-      const centerX = containerRect.left + containerRect.width / 2;
-      const centerY = containerRect.top + containerRect.height / 2;
+      const { x: centerX, y: centerY } = scrollContainerContentCenter();
       scrollContainer.scrollLeft += (targetX - centerX);
       scrollContainer.scrollTop += (targetY - centerY);
     }
@@ -10604,9 +10622,7 @@
         if (el && el.style.display !== 'none') return zoomSessionAnchor;
         zoomSessionAnchor = null;   // anchor page was deleted/hidden mid-session
       }
-      const containerRect = scrollContainer.getBoundingClientRect();
-      const centerX = containerRect.left + containerRect.width / 2;
-      const centerY = containerRect.top + containerRect.height / 2;
+      const { x: centerX, y: centerY } = scrollContainerContentCenter();
       let page = pageAtClientPoint(clientX, clientY);
       let anchor = null;
       if (page) {
@@ -10790,6 +10806,18 @@
       applyScale({ zoomAnchor });
     }
 
+    // "Fit page width" is a live-tracking mode, not a one-shot scale - call
+    // this whenever the available width could have changed (window resize,
+    // the bookmarks gutter opening/closing/resizing) so the page stays
+    // actually fit instead of going stale until the user re-toggles it.
+    function pmReapplyFitWidthIfActive() {
+      if (!fitWidthToggleOn || typeof computeFitWidthScale !== 'function') return;
+      const target = computeFitWidthScale();
+      if (Math.abs(target - currentScale) > 0.25) {
+        applyFitWidthScaleValue(target);
+      }
+    }
+
     /** Page whose center is closest to (clientX, clientY); falls back to best visible. */
     function findNearestPageToPoint(clientX, clientY) {
       const pages = typeof pmVisiblePageEls === 'function'
@@ -10838,9 +10866,9 @@
       let ptrX, ptrY;
       if (opts.anchor === 'viewport-center') {
         if (scrollContainer) {
-          const r = scrollContainer.getBoundingClientRect();
-          ptrX = (r.left + r.right) / 2;
-          ptrY = (r.top + r.bottom) / 2;
+          const center = scrollContainerContentCenter();
+          ptrX = center.x;
+          ptrY = center.y;
         } else {
           ptrX = window.innerWidth / 2;
           ptrY = window.innerHeight / 2;
@@ -12615,6 +12643,7 @@
         updateHeaderLayout();
         ensureThreePagesFit();       // auto-scale adjustment (desktop)
         ensureMobilePagesFill();     // auto-scale adjustment (mobile)
+        if (typeof pmReapplyFitWidthIfActive === 'function') pmReapplyFitWidthIfActive();
         alignRowNumbers();           // align page numbers along lines
         updateStickyFileBar();       // recalculation of the pinned file name strip
         updatePageNumTab();          // recalculation of curtains with page number (1 column)
@@ -12746,19 +12775,29 @@
           if (boxRect.height > 0) top = Math.max(top, boxRect.bottom + 10);
         }
       }
+      // Default left=20px (the buttons' own base CSS) - but while the
+      // bookmarks popup is open (always pinned to the left edge) the arrows
+      // move to sit just right of its live width instead of the popup
+      // dodging them.
+      let left = 20;
+      if (typeof pmBookmarksState !== 'undefined' && pmBookmarksState.open) {
+        const bookmarksPanel = document.getElementById('pmBookmarksPanel');
+        const panelRect = bookmarksPanel ? bookmarksPanel.getBoundingClientRect() : null;
+        if (panelRect && panelRect.width > 0) left = Math.round(panelRect.right + 12);
+      }
       prevBtn.style.top = top + 'px';
+      prevBtn.style.left = left + 'px';
       nextBtn.style.top = (top + 46) + 'px';
+      nextBtn.style.left = left + 'px';
       if (speedEl) {
         speedEl.style.top = top + 'px';
+        speedEl.style.left = (left + 46) + 'px';
         speedEl.style.height = '84px'; // 38 + 8 gap + 38
       }
       const pauseBtn = document.getElementById('pmAutoScrollPauseBtn');
-      if (pauseBtn) pauseBtn.style.top = (top + 84 + 6) + 'px';
-      // Keep the bookmarks popup below these buttons too, if it's open -
-      // it's always auto-positioned now (pinned to the left edge).
-      if (typeof pmBookmarksState !== 'undefined' && pmBookmarksState.open &&
-          typeof pmBookmarksPositionPanel === 'function') {
-        pmBookmarksPositionPanel();
+      if (pauseBtn) {
+        pauseBtn.style.top = (top + 84 + 6) + 'px';
+        pauseBtn.style.left = (left + 46) + 'px';
       }
     }
 
@@ -28891,12 +28930,11 @@ function pmSearchToggleOpen() {
 // pmBookmarksState/pmBookmarksReqToken are declared much earlier, next to
 // pdfDoc - see the comment there for why.
 
-// Left-aligned to the same 20px "left border" used by the prev/next
-// single-column page-jump buttons and the mobile page-count badge, and
-// anchored below whichever header row is on screen (same reference logic
-// as pmPositionPageNavButtons) so it never covers "Страниц: N". If those
-// prev/next buttons are currently showing (high zoom, single column), sit
-// below them too instead of overlapping.
+// Pinned to the left edge and anchored below whichever header row is on
+// screen (sticky file bar once scrolled past the top, otherwise the normal
+// content-header) so it never covers "Страниц: N". The page-nav arrows
+// dodge the panel's own width instead of the panel dodging them - see
+// pmPositionPageNavButtons.
 function pmBookmarksPositionPanel() {
   const panel = document.getElementById('pmBookmarksPanel');
   if (!panel) return;
@@ -28911,14 +28949,32 @@ function pmBookmarksPositionPanel() {
     referenceBottom = (headerRect && headerRect.height > 0) ? headerRect.bottom
       : (typeof stickyBarTop === 'function' ? stickyBarTop() : 0);
   }
-  let top = referenceBottom + 12;
-  const nextNavBtn = document.getElementById('pmPageNextBtn');
-  if (nextNavBtn && nextNavBtn.classList.contains('visible')) {
-    const navRect = nextNavBtn.getBoundingClientRect();
-    if (navRect.height > 0) top = Math.max(top, navRect.bottom + 12);
-  }
+  const top = referenceBottom + 12;
   panel.style.top = Math.round(top) + 'px';
   panel.style.left = '4px'; // pressed against the working area's left edge - keep in sync with pmBookmarksUpdateScrollGutter()'s own "4"
+  // The panel itself never moves for the page-nav arrows any more - they
+  // move out of its way instead (see pmPositionPageNavButtons).
+  if (typeof pmPositionPageNavButtons === 'function') pmPositionPageNavButtons();
+  pmBookmarksUpdateListMaxHeight();
+}
+
+// The list's own max-height is capped to whatever room is actually left
+// between it and the bottom of the working area (viewport), not a fixed
+// vh fraction - a panel that opens low (sticky bar, or a tall header) would
+// otherwise let the list overflow past the bottom edge, while a panel that
+// opens high left a fixed-vh cap unnecessarily short. Below that cap the
+// list already sizes itself to its own content naturally (no explicit
+// height, only max-height), so a short bookmark tree needs no extra logic
+// to "shrink" - it just never reaches the cap in the first place.
+function pmBookmarksUpdateListMaxHeight() {
+  const list = document.getElementById('pmBookmarksList');
+  const status = document.getElementById('pmBookmarksStatus');
+  if (!list) return;
+  const listTop = list.getBoundingClientRect().top;
+  const statusHeight = status ? status.getBoundingClientRect().height : 0;
+  const bottomMargin = 8;
+  const available = window.innerHeight - listTop - statusHeight - bottomMargin;
+  list.style.maxHeight = Math.max(60, Math.round(available)) + 'px';
 }
 
 function pmBookmarksSetStatus(text) {
@@ -29591,12 +29647,13 @@ function pmBookmarksFinishDrag() {
 // don't render underneath it, at any zoom level. left(4, matching the
 // panel's own left anchor in pmBookmarksPositionPanel) + panel width +
 // gap(20), applied to #scrollContainer via a CSS var. Width is fixed at
-// 350px now, but this still recomputes from the actual rendered width in
+// 280px now, but this still recomputes from the actual rendered width in
 // case the max-width:92vw safety net ever clamps it on a narrow viewport.
 function pmBookmarksUpdateScrollGutter() {
   if (!pmBookmarksState.open) {
     document.body.classList.remove('pm-bookmarks-active');
     document.documentElement.style.removeProperty('--pm-bookmarks-scroll-padding');
+    if (typeof pmReapplyFitWidthIfActive === 'function') pmReapplyFitWidthIfActive();
     return;
   }
   const panel = document.getElementById('pmBookmarksPanel');
@@ -29604,6 +29661,7 @@ function pmBookmarksUpdateScrollGutter() {
   document.body.classList.add('pm-bookmarks-active');
   const width = panel.getBoundingClientRect().width;
   document.documentElement.style.setProperty('--pm-bookmarks-scroll-padding', Math.round(4 + width + 20) + 'px');
+  if (typeof pmReapplyFitWidthIfActive === 'function') pmReapplyFitWidthIfActive();
 }
 
 function pmBookmarksOpen() {
@@ -29631,6 +29689,9 @@ function pmBookmarksClose() {
   if (btn) { btn.classList.remove('active-mode'); btn.setAttribute('aria-pressed', 'false'); }
   pmBookmarksCtxClose();
   ++pmBookmarksReqToken; // cancel an in-flight extraction so it can't render into a closed popup
+  // The nav arrows dodge the panel's live width while it's open - move them
+  // back to their default left position now that it's gone.
+  if (typeof pmPositionPageNavButtons === 'function') pmPositionPageNavButtons();
 }
 
 function pmBookmarksToggle() {
@@ -29645,14 +29706,16 @@ function pmBookmarksToggle() {
   closeBtn.addEventListener('click', pmBookmarksClose);
   // The popup's width is fixed and not user-resizable, but the CSS
   // max-width:92vw safety net can still shrink it on a narrow viewport,
-  // which changes which titles are truncated AND how much of a gutter the
-  // page previews need to stay clear of it - re-check both whenever the
-  // panel's own box changes size, regardless of cause.
+  // which changes which titles are truncated, how much of a gutter the
+  // page previews need to stay clear of it, and where the page-nav arrows
+  // (which now dodge the panel's live width) should sit - re-check all of
+  // that whenever the panel's own box changes size, regardless of cause.
   if (typeof ResizeObserver === 'function') {
     new ResizeObserver(() => {
       if (!pmBookmarksState.open) return;
       pmBookmarksRefreshTitleTooltips();
       pmBookmarksUpdateScrollGutter();
+      if (typeof pmPositionPageNavButtons === 'function') pmPositionPageNavButtons();
     }).observe(panel);
   }
   window.addEventListener('resize', () => {
