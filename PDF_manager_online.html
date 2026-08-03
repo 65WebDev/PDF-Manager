@@ -21595,6 +21595,9 @@
     let thumbFlushQueue = new Set();
     let thumbFlushTimer = null;
     let thumbFlushBusy = false;
+    // Bumped on every new rotate so an in-flight thumbnail refresh from an
+    // intermediate angle cannot overwrite the final CSS/pdf-lib state.
+    let rotateThumbGen = 0;
     const rotateThumbPrefetch = new Map();
 
     function getPageRotateState(div) {
@@ -21623,10 +21626,13 @@
     }
 
     function cancelPageThumbnailFlush(indices) {
+      let touched = false;
       indices.forEach(i => {
+        if (thumbFlushQueue.has(i) || rotateThumbPrefetch.has(i)) touched = true;
         thumbFlushQueue.delete(i);
         rotateThumbPrefetch.delete(i);
       });
+      if (touched || indices.length) rotateThumbGen++;
       if (!thumbFlushQueue.size) clearTimeout(thumbFlushTimer);
     }
 
@@ -21706,6 +21712,13 @@
     }
 
     async function flushRotateThumbnails() {
+      // Never overlap flushes — a slower older save/render must not apply after
+      // a newer one (rapid Q/W then reverse caused a ~1s snap to a prior step).
+      if (thumbFlushBusy) {
+        clearTimeout(thumbFlushTimer);
+        thumbFlushTimer = setTimeout(flushRotateThumbnails, 80);
+        return;
+      }
       for (const idx of thumbFlushQueue) {
         const div = document.querySelector(`.page[data-index="${idx}"]`);
         const st = div && pageRotateState.get(div);
@@ -21717,14 +21730,21 @@
       const batch = [...thumbFlushQueue];
       if (!batch.length) return;
       thumbFlushQueue.clear();
+      const gen = rotateThumbGen;
       thumbFlushBusy = true;
       try {
       const shouldAbort = () => {
+        if (gen !== rotateThumbGen) return true;
         for (const idx of batch) {
           const div = document.querySelector(`.page[data-index="${idx}"]`);
           if (isPageRotateBusy(pageRotateState.get(div))) return true;
         }
         return false;
+      };
+      const requeueAndRetry = () => {
+        batch.forEach(i => thumbFlushQueue.add(i));
+        clearTimeout(thumbFlushTimer);
+        thumbFlushTimer = setTimeout(flushRotateThumbnails, 80);
       };
       const thumbs = new Map();
       const needRefresh = [];
@@ -21733,6 +21753,10 @@
         if (pref) {
           const t = await pref;
           rotateThumbPrefetch.delete(idx);
+          if (gen !== rotateThumbGen) {
+            requeueAndRetry();
+            return;
+          }
           if (t) thumbs.set(idx, t);
           else needRefresh.push(idx);
         } else {
@@ -21742,18 +21766,24 @@
           batch.forEach(i => {
             if (!thumbs.has(i)) thumbFlushQueue.add(i);
           });
+          clearTimeout(thumbFlushTimer);
           thumbFlushTimer = setTimeout(flushRotateThumbnails, 80);
           return;
         }
       }
       if (needRefresh.length) {
         const more = await refreshThumbnails(needRefresh, shouldAbort);
-        if (!more || !more.size) {
+        if (gen !== rotateThumbGen || !more || !more.size) {
           batch.forEach(i => { if (!thumbs.has(i)) thumbFlushQueue.add(i); });
+          clearTimeout(thumbFlushTimer);
           thumbFlushTimer = setTimeout(flushRotateThumbnails, 80);
           return;
         }
         more.forEach((v, k) => thumbs.set(k, v));
+      }
+      if (gen !== rotateThumbGen) {
+        requeueAndRetry();
+        return;
       }
       const entries = [];
       for (const idx of batch) {
@@ -21766,11 +21796,16 @@
         const thumb = thumbs.get(idx);
         if (div && thumb) entries.push({ div, thumb });
       }
+      if (gen !== rotateThumbGen) {
+        requeueAndRetry();
+        return;
+      }
       applyThumbnailsBatch(entries);
       } finally {
         thumbFlushBusy = false;
       }
       if (thumbFlushQueue.size) {
+        clearTimeout(thumbFlushTimer);
         thumbFlushTimer = setTimeout(flushRotateThumbnails, 80);
       } else if (typeof scheduleSnapshotFill === 'function') {
         // The live render is completed - let’s complete the remaining pending steps (intermediate
@@ -21951,6 +21986,7 @@
         if (shouldAbort && shouldAbort()) return new Map();
         const idx = indices[i];
         result.set(idx, await renderPageThumbnailData(pdfjsDoc, idx));
+        if (shouldAbort && shouldAbort()) return new Map();
         if (i < indices.length - 1) {
           await new Promise(r => setTimeout(r, 0));
         }
@@ -21960,6 +21996,8 @@
 
     function rotatePagesWithAnimation(indices, degrees) {
       const valid = indices.filter(i => !Number.isNaN(i));
+      // Invalidate any in-flight thumbnail flush from a previous angle.
+      rotateThumbGen++;
       const divs = valid
         .map(idx => document.querySelector(`.page[data-index="${idx}"]`))
         .filter(Boolean);
