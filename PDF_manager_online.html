@@ -21007,6 +21007,7 @@
         const copied = await newDoc.copyPages(pdfDoc, remaining);
         copied.forEach(p => newDoc.addPage(p));
         if (typeof peMigrateEditorMeta === 'function') peMigrateEditorMeta(pdfDoc, newDoc, remaining);
+        if (typeof pmBookmarksMigrateOnReorder === 'function') pmBookmarksMigrateOnReorder(pdfDoc, newDoc, remaining, copied);
         pdfDoc = newDoc;
         invalidateHQ();   // pages rearranged - old cache of pdf.js document (magnifier, HQ) is invalid
 
@@ -21027,6 +21028,15 @@
         // indicator stayed dead until that finished.
         renumberVisiblePages();
         updateInfo();
+        // If the bookmarks popup is open while this happens, its displayed
+        // page numbers are a snapshot from whenever it was last opened -
+        // refresh it now instead of leaving it stale until the next
+        // close+reopen (the underlying links themselves are already correct
+        // either way, via pmBookmarksMigrateOnReorder above).
+        if (typeof pmBookmarksState !== 'undefined' && pmBookmarksState.open &&
+            typeof pmBookmarksLoadAndRender === 'function') {
+          pmBookmarksLoadAndRender();
+        }
       } finally {
         pageMoveAnimActive = false;
         pagesContainer.classList.remove('page-reordering');
@@ -29014,6 +29024,10 @@ function pmBookmarksPositionPanel() {
 // list already sizes itself to its own content naturally (no explicit
 // height, only max-height), so a short bookmark tree needs no extra logic
 // to "shrink" - it just never reaches the cap in the first place.
+// The bottom boundary is #scrollContainer's own CONTENT edge (clientHeight,
+// which excludes its horizontal scrollbar), not window.innerHeight - the
+// scrollbar sits inside scrollContainer's own border box, below its content
+// box, so capping against the full viewport let the list overlap it.
 function pmBookmarksUpdateListMaxHeight() {
   const list = document.getElementById('pmBookmarksList');
   const status = document.getElementById('pmBookmarksStatus');
@@ -29021,7 +29035,11 @@ function pmBookmarksUpdateListMaxHeight() {
   const listTop = list.getBoundingClientRect().top;
   const statusHeight = status ? status.getBoundingClientRect().height : 0;
   const bottomMargin = 8;
-  const available = window.innerHeight - listTop - statusHeight - bottomMargin;
+  const workAreaBottom = (typeof scrollContainer !== 'undefined' && scrollContainer)
+    ? scrollContainer.getBoundingClientRect().top + scrollContainer.clientHeight
+    : window.innerHeight;
+  const bottomLimit = Math.min(workAreaBottom, window.innerHeight);
+  const available = bottomLimit - listTop - statusHeight - bottomMargin;
   list.style.maxHeight = Math.max(60, Math.round(available)) + 'px';
 }
 
@@ -29466,6 +29484,110 @@ function pmBookmarksSerializeToDoc() {
   pdfDoc.catalog.set(PDFName.of('Outlines'), rootRef);
   pmBookmarksState.writtenRefs = written;
   pmBookmarksMarkDirty();
+}
+
+// Page reorder rebuilds the document via PDFDocument.create() + copyPages()
+// (see the page-move commit code), which copies each page into a BRAND NEW
+// page object with its own new ref, and starts the new document from an
+// empty catalog - the old document's /Outlines is not carried over at all,
+// so without this a reorder would silently drop every bookmark instead of
+// just misaligning it. This clones the old /Outlines subtree directly
+// (title/flags/underline untouched) into the new document, rewriting only
+// each node's /Dest page reference via the SAME old-index->new-page
+// permutation the reorder itself just used - so a bookmark keeps pointing
+// at the actual page it was linked to, wherever that page ends up.
+// `copiedPages` is copyPages()'s own return value: copiedPages[newIdx] is
+// the new page object for whatever page was at orderedOldIndices[newIdx].
+// Works directly off the raw pdf-lib catalog, independent of whether the
+// bookmarks popup is even open (pmBookmarksState.tree is popup-only UI
+// state, irrelevant here).
+function pmBookmarksMigrateOnReorder(srcDoc, tgtDoc, orderedOldIndices, copiedPages) {
+  if (!srcDoc || !tgtDoc || typeof PDFLib === 'undefined') return;
+  if (!orderedOldIndices || !orderedOldIndices.length) return;
+  const PDFName = PDFLib.PDFName;
+  const srcCtx = srcDoc.context;
+  const outlinesRef = srcDoc.catalog.get(PDFName.of('Outlines'));
+  if (!outlinesRef) return;
+  const outlinesDict = srcCtx.lookup(outlinesRef);
+  if (!outlinesDict) return;
+
+  const refMap = new Map();
+  orderedOldIndices.forEach((oldIdx, newIdx) => {
+    try {
+      const oldRef = srcDoc.getPage(oldIdx).ref;
+      const newRef = copiedPages[newIdx].ref;
+      refMap.set(oldRef, newRef);
+    } catch (_) {}
+  });
+
+  const tgtCtx = tgtDoc.context;
+
+  // Clones one outline node (and its children/siblings chain) into tgtDoc;
+  // returns { ref, count } for the same reasons pmBookmarksSerializeToDoc's
+  // own buildNode() does - /Count needs each ancestor's total open
+  // descendant count, only known after recursing into the children.
+  function cloneChain(firstSrcRef, tgtParentRef) {
+    let srcRef = firstSrcRef;
+    let prevTgtRef = null, firstTgtRef = null, totalOpen = 0;
+    while (srcRef) {
+      const srcDict = srcCtx.lookup(srcRef);
+      if (!srcDict) break;
+      const tgtDict = tgtCtx.obj({});
+      const tgtRef = tgtCtx.register(tgtDict);
+
+      const title = srcDict.get(PDFName.of('Title'));
+      if (title) tgtDict.set(PDFName.of('Title'), title);
+      if (tgtParentRef) tgtDict.set(PDFName.of('Parent'), tgtParentRef);
+      const flags = srcDict.get(PDFName.of('F'));
+      if (flags) tgtDict.set(PDFName.of('F'), flags);
+      const pmu = srcDict.get(PDFName.of('PMU'));
+      if (pmu) tgtDict.set(PDFName.of('PMU'), pmu);
+
+      const destArr = srcDict.get(PDFName.of('Dest'));
+      if (destArr) {
+        const newPageRef = refMap.get(destArr.get(0));
+        // If the linked page no longer exists (deleted elsewhere, not just
+        // reordered), drop the link rather than pointing at the wrong page.
+        if (newPageRef) {
+          tgtDict.set(PDFName.of('Dest'), tgtCtx.obj([newPageRef, PDFName.of('XYZ'), null, null, null]));
+        }
+      }
+
+      const srcFirstChild = srcDict.get(PDFName.of('First'));
+      if (srcFirstChild) {
+        const built = cloneChain(srcFirstChild, tgtRef);
+        if (built.firstRef) {
+          tgtDict.set(PDFName.of('First'), built.firstRef);
+          tgtDict.set(PDFName.of('Last'), built.lastRef);
+          tgtDict.set(PDFName.of('Count'), PDFLib.PDFNumber.of(built.count));
+        }
+        totalOpen += 1 + built.count;
+      } else {
+        totalOpen += 1;
+      }
+
+      if (!firstTgtRef) firstTgtRef = tgtRef;
+      if (prevTgtRef) {
+        tgtCtx.lookup(prevTgtRef).set(PDFName.of('Next'), tgtRef);
+        tgtCtx.lookup(tgtRef).set(PDFName.of('Prev'), prevTgtRef);
+      }
+      prevTgtRef = tgtRef;
+
+      srcRef = srcDict.get(PDFName.of('Next')) || null;
+    }
+    return { firstRef: firstTgtRef, lastRef: prevTgtRef, count: totalOpen };
+  }
+
+  const srcFirst = outlinesDict.get(PDFName.of('First'));
+  if (!srcFirst) return;
+  const tgtRootDict = tgtCtx.obj({ Type: PDFName.of('Outlines') });
+  const tgtRootRef = tgtCtx.register(tgtRootDict);
+  const built = cloneChain(srcFirst, tgtRootRef);
+  if (!built.firstRef) return;
+  tgtRootDict.set(PDFName.of('First'), built.firstRef);
+  tgtRootDict.set(PDFName.of('Last'), built.lastRef);
+  tgtRootDict.set(PDFName.of('Count'), PDFLib.PDFNumber.of(built.count));
+  tgtDoc.catalog.set(PDFName.of('Outlines'), tgtRootRef);
 }
 
 function pmBookmarksMarkDirty() {
