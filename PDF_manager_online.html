@@ -21061,7 +21061,7 @@
         const copied = await newDoc.copyPages(pdfDoc, remaining);
         copied.forEach(p => newDoc.addPage(p));
         if (typeof peMigrateEditorMeta === 'function') peMigrateEditorMeta(pdfDoc, newDoc, remaining);
-        if (typeof pmBookmarksMigrateOnReorder === 'function') pmBookmarksMigrateOnReorder(pdfDoc, newDoc, remaining, copied);
+        if (typeof pmBookmarksMigrateOnReorder === 'function') await pmBookmarksMigrateOnReorder(pdfDoc, newDoc, remaining, copied);
         pdfDoc = newDoc;
         invalidateHQ();   // pages rearranged - old cache of pdf.js document (magnifier, HQ) is invalid
 
@@ -29545,17 +29545,24 @@ function pmBookmarksSerializeToDoc() {
 // page object with its own new ref, and starts the new document from an
 // empty catalog - the old document's /Outlines is not carried over at all,
 // so without this a reorder would silently drop every bookmark instead of
-// just misaligning it. This clones the old /Outlines subtree directly
-// (title/flags/underline untouched) into the new document, rewriting only
-// each node's /Dest page reference via the SAME old-index->new-page
-// permutation the reorder itself just used - so a bookmark keeps pointing
-// at the actual page it was linked to, wherever that page ends up.
-// `copiedPages` is copyPages()'s own return value: copiedPages[newIdx] is
-// the new page object for whatever page was at orderedOldIndices[newIdx].
-// Works directly off the raw pdf-lib catalog, independent of whether the
-// bookmarks popup is even open (pmBookmarksState.tree is popup-only UI
-// state, irrelevant here).
-function pmBookmarksMigrateOnReorder(srcDoc, tgtDoc, orderedOldIndices, copiedPages) {
+// just misaligning it.
+//
+// Destinations get resolved through REAL pdf.js (same call pmBookmarksBuildTree
+// uses to parse the outline on open) rather than hand-walking the raw /Dest
+// key, because plenty of real-world PDFs (this is how most manuals authored
+// in FrameMaker/Acrobat/Distiller do it) don't store a direct [pageRef, ...]
+// array on every node - they use a named destination (/Dest as a string,
+// resolved through the document's name tree) or a /A GoTo action instead of
+// /Dest outright. The old hand-walking version only understood the direct
+// array form, so for any document built the other way, EVERY node silently
+// lost its target the moment a single page moved, not just the one for the
+// moved page - that's the bug this rewrite fixes. pdf.js's outline parser
+// already normalizes all three forms into a plain `dest`, so reusing it here
+// gets the exact same resolution power pmBookmarksBuildTree already has.
+// `copiedPages` is copyPages()'s own return value, unused for ref-mapping
+// now (pdf.js resolves against page INDEX, not ref identity) but kept as a
+// parameter for call-site symmetry with performPageMove.
+async function pmBookmarksMigrateOnReorder(srcDoc, tgtDoc, orderedOldIndices, copiedPages) {
   if (!srcDoc || !tgtDoc || typeof PDFLib === 'undefined') return;
   if (!orderedOldIndices || !orderedOldIndices.length) return;
   const PDFName = PDFLib.PDFName;
@@ -29565,83 +29572,139 @@ function pmBookmarksMigrateOnReorder(srcDoc, tgtDoc, orderedOldIndices, copiedPa
   const outlinesDict = srcCtx.lookup(outlinesRef);
   if (!outlinesDict) return;
 
-  const refMap = new Map();
-  orderedOldIndices.forEach((oldIdx, newIdx) => {
-    try {
-      const oldRef = srcDoc.getPage(oldIdx).ref;
-      const newRef = copiedPages[newIdx].ref;
-      refMap.set(oldRef, newRef);
-    } catch (_) {}
-  });
-
-  const tgtCtx = tgtDoc.context;
-
-  // Clones one outline node (and its children/siblings chain) into tgtDoc;
-  // returns { ref, count } for the same reasons pmBookmarksSerializeToDoc's
-  // own buildNode() does - /Count needs each ancestor's total open
-  // descendant count, only known after recursing into the children.
-  function cloneChain(firstSrcRef, tgtParentRef) {
-    let srcRef = firstSrcRef;
-    let prevTgtRef = null, firstTgtRef = null, totalOpen = 0;
-    while (srcRef) {
-      const srcDict = srcCtx.lookup(srcRef);
-      if (!srcDict) break;
-      const tgtDict = tgtCtx.obj({});
-      const tgtRef = tgtCtx.register(tgtDict);
-
-      const title = srcDict.get(PDFName.of('Title'));
-      if (title) tgtDict.set(PDFName.of('Title'), title);
-      if (tgtParentRef) tgtDict.set(PDFName.of('Parent'), tgtParentRef);
-      const flags = srcDict.get(PDFName.of('F'));
-      if (flags) tgtDict.set(PDFName.of('F'), flags);
-      const pmu = srcDict.get(PDFName.of('PMU'));
-      if (pmu) tgtDict.set(PDFName.of('PMU'), pmu);
-
-      const destArr = srcDict.get(PDFName.of('Dest'));
-      if (destArr) {
-        const newPageRef = refMap.get(destArr.get(0));
-        // If the linked page no longer exists (deleted elsewhere, not just
-        // reordered), drop the link rather than pointing at the wrong page.
-        if (newPageRef) {
-          tgtDict.set(PDFName.of('Dest'), tgtCtx.obj([newPageRef, PDFName.of('XYZ'), null, null, null]));
-        }
+  let resolvedTree;
+  try {
+    const bytes = await srcDoc.save();
+    const jsDoc = await pdfjsLib.getDocument({ data: bytes }).promise;
+    const rawOutline = await jsDoc.getOutline();
+    if (!rawOutline || !rawOutline.length) return;
+    async function walk(nodes) {
+      const out = [];
+      for (const node of nodes) {
+        let pageIndex = null;
+        try {
+          let dest = node.dest;
+          if (typeof dest === 'string') dest = await jsDoc.getDestination(dest);
+          if (Array.isArray(dest) && dest[0] != null) {
+            pageIndex = await jsDoc.getPageIndex(dest[0]);
+          }
+        } catch (_) {}
+        const children = (node.items && node.items.length) ? await walk(node.items) : [];
+        out.push({ title: node.title || '', pageIndex, bold: !!node.bold, italic: !!node.italic, underline: false, children });
       }
-
-      const srcFirstChild = srcDict.get(PDFName.of('First'));
-      if (srcFirstChild) {
-        const built = cloneChain(srcFirstChild, tgtRef);
-        if (built.firstRef) {
-          tgtDict.set(PDFName.of('First'), built.firstRef);
-          tgtDict.set(PDFName.of('Last'), built.lastRef);
-          tgtDict.set(PDFName.of('Count'), PDFLib.PDFNumber.of(built.count));
-        }
-        totalOpen += 1 + built.count;
-      } else {
-        totalOpen += 1;
-      }
-
-      if (!firstTgtRef) firstTgtRef = tgtRef;
-      if (prevTgtRef) {
-        tgtCtx.lookup(prevTgtRef).set(PDFName.of('Next'), tgtRef);
-        tgtCtx.lookup(tgtRef).set(PDFName.of('Prev'), prevTgtRef);
-      }
-      prevTgtRef = tgtRef;
-
-      srcRef = srcDict.get(PDFName.of('Next')) || null;
+      return out;
     }
-    return { firstRef: firstTgtRef, lastRef: prevTgtRef, count: totalOpen };
+    resolvedTree = await walk(rawOutline);
+  } catch (_) {
+    return;
+  }
+  if (!resolvedTree.length) return;
+
+  // /PMU (underline) is our own custom key, invisible to pdf.js's outline
+  // parser - read it straight off the raw chain, in the same First/Next+
+  // recurse-into-children order pdf.js walks in, so it zips back onto
+  // resolvedTree correctly (identical pairing trick pmBookmarksBuildTree
+  // already relies on via pmBookmarksReadUnderlineFlags).
+  const underlineFlags = [];
+  (function walkChain(ref) {
+    while (ref) {
+      const dict = srcCtx.lookup(ref);
+      if (!dict) break;
+      const u = dict.get(PDFName.of('PMU'));
+      underlineFlags.push(!!(u && typeof u.asBoolean === 'function' && u.asBoolean()));
+      const first = dict.get(PDFName.of('First'));
+      if (first) walkChain(first);
+      ref = dict.get(PDFName.of('Next'));
+    }
+  })(outlinesDict.get(PDFName.of('First')));
+  let uIdx = 0;
+  (function stampUnderline(nodes) {
+    nodes.forEach((n) => {
+      n.underline = !!underlineFlags[uIdx]; uIdx++;
+      if (n.children.length) stampUnderline(n.children);
+    });
+  })(resolvedTree);
+
+  // Remap each node's page through the SAME old-index->new-index permutation
+  // the reorder itself just used, so a bookmark keeps pointing at the actual
+  // page it was linked to, wherever that page ends up.
+  const oldToNew = new Map();
+  orderedOldIndices.forEach((oldIdx, newIdx) => oldToNew.set(oldIdx, newIdx));
+  (function remap(nodes) {
+    nodes.forEach((n) => {
+      n.pageIndex = (n.pageIndex != null && oldToNew.has(n.pageIndex)) ? oldToNew.get(n.pageIndex) : null;
+      if (n.children.length) remap(n.children);
+    });
+  })(resolvedTree);
+
+  // Write the resolved+remapped tree into tgtDoc - same builder shape as
+  // pmBookmarksSerializeToDoc's own buildNode(), just against an explicit
+  // doc/context instead of the global pdfDoc (which hasn't been swapped to
+  // tgtDoc yet at this point in the reorder). The refs registered here are
+  // handed back so the caller can seed pmBookmarksState.writtenRefs - without
+  // that, the next in-popup edit wouldn't know these nodes exist and would
+  // leave them as orphaned, undeleted objects in the saved PDF.
+  const PDFString = PDFLib.PDFString;
+  const PDFNumber = PDFLib.PDFNumber;
+  const PDFBool = PDFLib.PDFBool;
+  const tgtCtx = tgtDoc.context;
+  const written = [];
+  function buildNode(node, parentRef) {
+    const dict = tgtCtx.obj({});
+    const ref = tgtCtx.register(dict);
+    written.push(ref);
+    dict.set(PDFName.of('Title'), PDFString.of(node.title || ''));
+    dict.set(PDFName.of('Parent'), parentRef);
+    let flags = 0;
+    if (node.italic) flags |= 1;
+    if (node.bold) flags |= 2;
+    if (flags) dict.set(PDFName.of('F'), PDFNumber.of(flags));
+    if (node.underline) dict.set(PDFName.of('PMU'), PDFBool.True);
+    if (node.pageIndex != null) {
+      try {
+        const page = tgtDoc.getPage(node.pageIndex);
+        dict.set(PDFName.of('Dest'), tgtCtx.obj([page.ref, PDFName.of('XYZ'), null, null, null]));
+      } catch (_) {}
+    }
+    let openCount = 0;
+    if (node.children.length) {
+      let prevRef = null, firstRef = null;
+      node.children.forEach((child, i) => {
+        const built = buildNode(child, ref);
+        openCount += 1 + built.count;
+        if (i === 0) firstRef = built.ref;
+        if (prevRef) {
+          tgtCtx.lookup(prevRef).set(PDFName.of('Next'), built.ref);
+          tgtCtx.lookup(built.ref).set(PDFName.of('Prev'), prevRef);
+        }
+        prevRef = built.ref;
+      });
+      dict.set(PDFName.of('First'), firstRef);
+      dict.set(PDFName.of('Last'), prevRef);
+      dict.set(PDFName.of('Count'), PDFNumber.of(openCount));
+    }
+    return { ref, count: openCount };
   }
 
-  const srcFirst = outlinesDict.get(PDFName.of('First'));
-  if (!srcFirst) return;
   const tgtRootDict = tgtCtx.obj({ Type: PDFName.of('Outlines') });
   const tgtRootRef = tgtCtx.register(tgtRootDict);
-  const built = cloneChain(srcFirst, tgtRootRef);
-  if (!built.firstRef) return;
-  tgtRootDict.set(PDFName.of('First'), built.firstRef);
-  tgtRootDict.set(PDFName.of('Last'), built.lastRef);
-  tgtRootDict.set(PDFName.of('Count'), PDFLib.PDFNumber.of(built.count));
+  written.push(tgtRootRef);
+  let prevRef = null, firstRef = null, totalOpen = 0;
+  resolvedTree.forEach((node, i) => {
+    const built = buildNode(node, tgtRootRef);
+    totalOpen += 1 + built.count;
+    if (i === 0) firstRef = built.ref;
+    if (prevRef) {
+      tgtCtx.lookup(prevRef).set(PDFName.of('Next'), built.ref);
+      tgtCtx.lookup(built.ref).set(PDFName.of('Prev'), prevRef);
+    }
+    prevRef = built.ref;
+  });
+  tgtRootDict.set(PDFName.of('First'), firstRef);
+  tgtRootDict.set(PDFName.of('Last'), prevRef);
+  tgtRootDict.set(PDFName.of('Count'), PDFNumber.of(totalOpen));
   tgtDoc.catalog.set(PDFName.of('Outlines'), tgtRootRef);
+  if (typeof pmBookmarksState !== 'undefined') pmBookmarksState.writtenRefs = written;
 }
 
 function pmBookmarksMarkDirty() {
