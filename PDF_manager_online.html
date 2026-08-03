@@ -1052,6 +1052,15 @@
     .top-menu .img-save-btn--compress.pm-compress-unavailable:hover {
       background: #232d38;
     }
+    /* While the estimate is still computing (right after hover, before the
+       outcome is known) - visually neutral, not yet claiming either "worth
+       it" (the notable ring below) or "confirmed unavailable" (the darkened
+       disabled look above), so the button doesn't misleadingly sit in
+       whichever state it happened to last be in while genuinely undecided.
+       Swapped for the real state the instant the estimate resolves. */
+    .top-menu .img-save-btn--compress.pm-compress-calculating svg {
+      opacity: .6;
+    }
     /*Three popup buttons stacked top to bottom (e.g. "as images" + "compress"
        + "encrypt"), matching the mode-switch widget's own vertical
        .rl-slot-popup stacking instead of the previous side-by-side layout -
@@ -1248,7 +1257,23 @@
       display: flex; flex-direction: column; gap: 1px;
       max-height: 50vh; overflow-y: auto;
       padding: 0 5px 5px;
+      /*The panel's own background stays the same fixed dark slate-blue in
+        both the light and dark app theme (see .pm-search-panel above) - a
+        plain native scrollbar instead follows html[data-theme] (light-ish
+        by default, only switching to a dark native style under the dark
+        theme), so it never actually matches this panel's chrome either way.
+        Styled explicitly instead, reusing the same subtle white-on-dark
+        rgba family already used for this panel's own borders/separators.*/
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,0.3) transparent;
     }
+    .pm-bookmarks-list::-webkit-scrollbar { width: 6px; }
+    .pm-bookmarks-list::-webkit-scrollbar-track { background: transparent; }
+    .pm-bookmarks-list::-webkit-scrollbar-thumb {
+      background: rgba(255,255,255,0.3);
+      border-radius: 3px;
+    }
+    .pm-bookmarks-list::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.45); }
     .pm-bookmarks-list.pm-bookmarks-reordering .pm-bookmarks-item { cursor: grabbing; }
     .pm-bookmarks-row.pm-bookmarks-selected .pm-bookmarks-item { background: rgba(52,152,219,0.28); }
     .pm-bookmarks-row.pm-bookmarks-drag-source { opacity: 0.4; }
@@ -6427,7 +6452,7 @@
       <!--Central zone: icon buttons-->
       <div class="centered-actions">
         <!--Bookmarks / table of contents-->
-        <button id="bookmarksBtn" class="icon-btn mode-sep" onclick="pmBookmarksToggle()" disabled title="Закладки" data-i18n-title="bookmarksPanel"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12a1 1 0 0 1 1 1v16l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg></button>
+        <button id="bookmarksBtn" class="icon-btn mode-sep" onclick="pmBookmarksToggle()" disabled title="Закладки (B)" data-i18n-title="bookmarksPanelKey"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12a1 1 0 0 1 1 1v16l-7-4-7 4V4a1 1 0 0 1 1-1z"/></svg></button>
         <!--Operating modes: reading, page selection (cursor) and navigation (palm)-->
         <div class="readmode-wrapper mode-sep">
           <button id="selectModeBtn" class="icon-btn mode-btn rl-slot-main active-mode" onclick="setMode('select')" disabled title="Режим выбора (C)" data-i18n-title="selectMode"><svg viewBox="-1 0 24 24" width="30" height="30" fill="currentColor"><path d="M7 4 L7 19 L11 15.2 L13.7 21.2 L16 20.2 L13.4 14.4 L18 14 Z"/></svg></button>
@@ -7052,6 +7077,13 @@
     <div class="pm-search-row pm-bookmarks-header">
       <span class="pm-bookmarks-title" data-i18n="bookmarksPanel">Закладки</span>
       <div class="pm-bookmarks-header-actions">
+        <button id="pmBookmarksExpandAllBtn" type="button" class="pm-search-icon-btn" title="Развернуть закладки" aria-label="Развернуть закладки" data-i18n-title="bookmarksExpandAll" data-i18n-aria="bookmarksExpandAll">
+          <svg class="pm-search-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 6 12 11 17 6"/><polyline points="7 13 12 18 17 13"/></svg>
+        </button>
+        <button id="pmBookmarksCollapseAllBtn" type="button" class="pm-search-icon-btn" title="Свернуть закладки" aria-label="Свернуть закладки" data-i18n-title="bookmarksCollapseAll" data-i18n-aria="bookmarksCollapseAll">
+          <svg class="pm-search-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 18 12 13 17 18"/><polyline points="7 11 12 6 17 11"/></svg>
+        </button>
+        <span class="pm-bookmarks-header-sep" aria-hidden="true"></span>
         <button id="pmBookmarksAddBtn" type="button" class="pm-search-icon-btn" title="Добавить закладку" aria-label="Добавить закладку" data-i18n-title="bookmarksAdd" data-i18n-aria="bookmarksAdd">
           <svg class="pm-search-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         </button>
@@ -7202,6 +7234,7 @@
       <div class="help-subtitle" data-i18n="helpSubtitleGeneral">Общие:</div>
       <div class="help-row" data-i18n-html="helpP"><span class="hk">P</span> — Печать</div>
       <div class="help-row" data-i18n-html="helpS"><span class="hk">S</span> — Сохранить документ</div>
+      <div class="help-row" data-i18n-html="helpB"><span class="hk">B</span> — закладки</div>
       <div class="help-row" data-i18n-html="helpCtrlF"><span class="hk">Ctrl + F</span> — поиск по документу</div>
       <div class="help-row" data-i18n-html="helpCtrlZ"><span class="hk">Ctrl + Z</span> — вернуть на шаг назад</div>
       <div class="help-row" data-i18n-html="helpCtrlY"><span class="hk">Ctrl + Y</span> — отмена возврата</div>
@@ -7284,12 +7317,16 @@
     // tree and its id counter (re-parsed fresh on every open);
     // selectedId/editingId/ctxTargetId/rowDrag are transient UI state
     // reset on close; writtenRefs tracks the pdf-lib objects we last
-    // wrote, so they can be cleaned up before a rebuild.
+    // wrote, so they can be cleaned up before a rebuild. pendingCollapseAll
+    // starts true so the very first popup open of the session defaults to
+    // fully collapsed too; loadPDF() re-arms it for every later document,
+    // while reopening the popup on the SAME still-open document leaves
+    // whatever the user last expanded/collapsed alone.
     let pmBookmarksState = {
       open: false, wrapNames: false, collapsedPaths: new Set(),
       tree: [], nextId: 1, selectedId: null, editingId: null,
       ctxTargetId: null, rowDrag: null, suppressNextClick: false,
-      writtenRefs: [],
+      writtenRefs: [], pendingCollapseAll: true,
     };
     let pmBookmarksReqToken = 0;
     // Same reasoning again: pmBookmarksClose() -> pmBookmarksUpdateScrollGutter()
@@ -7590,6 +7627,7 @@
         helpShiftSelect: 'Удерживайте <span class="hk">Shift</span> — выделить диапазон страниц',
         helpCtrlSelect: 'Удерживайте <span class="hk">Ctrl</span> — выделить отдельные страницы',
         helpP: '<span class="hk">P</span> — Печать', helpS: '<span class="hk">S</span> — Сохранить документ',
+        helpB: '<span class="hk">B</span> — закладки',
         helpCtrlF: '<span class="hk">Ctrl + F</span> — поиск по документу',
         helpCtrlZ: '<span class="hk">Ctrl + Z</span> — вернуть на шаг назад',
         helpCtrlY: '<span class="hk">Ctrl + Y</span> — отмена возврата',
@@ -7628,10 +7666,11 @@
         searchPlaceholder: 'Поиск по документу', searchFind: 'Найти (Enter)',
         searchPrev: 'Предыдущее совпадение (Shift+Enter)', searchNext: 'Следующее совпадение (Enter)',
         searchClose: 'Закрыть (Esc)', searchAllTabs: 'Искать по всем вкладкам',
-        bookmarksPanel: 'Закладки', bookmarksClose: 'Закрыть закладки',
+        bookmarksPanel: 'Закладки', bookmarksPanelKey: 'Закладки (B)', bookmarksClose: 'Закрыть закладки',
         bookmarksEmpty: 'В документе нет закладок', bookmarksLoading: 'Загрузка…',
         bookmarksExpandGroup: 'Развернуть группу', bookmarksCollapseGroup: 'Свернуть группу',
         bookmarksAdd: 'Добавить закладку', bookmarksDeleteBtn: 'Удалить закладку',
+        bookmarksExpandAll: 'Развернуть закладки', bookmarksCollapseAll: 'Свернуть закладки',
         bookmarksWrapNames: 'Перенос длинных имён закладок на следующую строку',
         bookmarksGoTo: 'Перейти к закладке', bookmarksRename: 'Переименовать', bookmarksDelete: 'Удалить',
         bookmarksLinkCurrent: 'Связать с текущим местом',
@@ -7867,6 +7906,7 @@
         helpShiftSelect: 'Hold <span class="hk">Shift</span> — select a range of pages',
         helpCtrlSelect: 'Hold <span class="hk">Ctrl</span> — select individual pages',
         helpP: '<span class="hk">P</span> — print', helpS: '<span class="hk">S</span> — save',
+        helpB: '<span class="hk">B</span> — bookmarks',
         helpCtrlF: '<span class="hk">Ctrl + F</span> — search',
         helpCtrlZ: '<span class="hk">Ctrl + Z</span> — undo',
         helpCtrlY: '<span class="hk">Ctrl + Y</span> — redo',
@@ -7905,10 +7945,11 @@
         searchPlaceholder: 'Search text', searchFind: 'Find (Enter)',
         searchPrev: 'Previous match (Shift+Enter)', searchNext: 'Next match (Enter)',
         searchClose: 'Close (Esc)', searchAllTabs: 'Search all tabs',
-        bookmarksPanel: 'Bookmarks', bookmarksClose: 'Close bookmarks',
+        bookmarksPanel: 'Bookmarks', bookmarksPanelKey: 'Bookmarks (B)', bookmarksClose: 'Close bookmarks',
         bookmarksEmpty: 'No bookmarks in this document', bookmarksLoading: 'Loading…',
         bookmarksExpandGroup: 'Expand group', bookmarksCollapseGroup: 'Collapse group',
         bookmarksAdd: 'Add bookmark', bookmarksDeleteBtn: 'Delete bookmark',
+        bookmarksExpandAll: 'Expand bookmarks', bookmarksCollapseAll: 'Collapse bookmarks',
         bookmarksWrapNames: 'Wrap long bookmark names to the next line',
         bookmarksGoTo: 'Go to bookmark', bookmarksRename: 'Rename', bookmarksDelete: 'Delete',
         bookmarksLinkCurrent: 'Link to current position',
@@ -15392,6 +15433,7 @@
         case 'KeyF': e.preventDefault(); loadNewPDF(); break;
         case 'KeyM': e.preventDefault(); mergeAnotherPDF(); break;
         case 'KeyS': e.preventDefault(); click(document.getElementById('saveBtn')); break;
+        case 'KeyB': e.preventDefault(); click(document.getElementById('bookmarksBtn')); break;
         case 'KeyR': // reading mode
           e.preventDefault();
           if (readModeActive) {
@@ -16192,6 +16234,7 @@
       markedForDeletion.clear();
       lastSelectedIndex = null;
       if (typeof pmPosHistoryReset === 'function') pmPosHistoryReset();
+      if (typeof pmBookmarksState !== 'undefined') pmBookmarksState.pendingCollapseAll = true;
 
       // Resetting the zoom to standard when opening a new file
       currentScale = 100;
@@ -29967,7 +30010,12 @@ async function pmBookmarksLoadAndRender() {
   try { tree = await pmBookmarksBuildTree(); } catch (_) { tree = []; }
   if (token !== pmBookmarksReqToken) return; // popup closed/reopened, or doc changed, meanwhile
   pmBookmarksState.tree = tree;
-  pmBookmarksRenderList(pmBookmarksFlatten(tree));
+  const flat = pmBookmarksFlatten(tree);
+  if (pmBookmarksState.pendingCollapseAll) {
+    pmBookmarksState.pendingCollapseAll = false;
+    pmBookmarksState.collapsedPaths = new Set(flat.filter((it) => it.hasChildren).map((it) => it.path));
+  }
+  pmBookmarksRenderList(flat);
   if (list) list.scrollTop = savedScrollTop;
 }
 
@@ -30235,6 +30283,20 @@ function pmBookmarksMarkDirty() {
 
 function pmBookmarksRerender() {
   pmBookmarksRenderList(pmBookmarksFlatten(pmBookmarksState.tree));
+}
+
+function pmBookmarksExpandAll() {
+  if (!pmBookmarksState.collapsedPaths.size) return;
+  pmBookmarksState.collapsedPaths.clear();
+  pmBookmarksRerender();
+}
+
+function pmBookmarksCollapseAll() {
+  const flat = pmBookmarksFlatten(pmBookmarksState.tree);
+  const groupPaths = flat.filter((it) => it.hasChildren).map((it) => it.path);
+  if (!groupPaths.length) return;
+  pmBookmarksState.collapsedPaths = new Set(groupPaths);
+  pmBookmarksRerender();
 }
 
 // ── Add / delete / rename ───────────────────────────────────────────────
@@ -30530,6 +30592,11 @@ function pmBookmarksToggle() {
     if (!pmBookmarksState.open) return;
     pmBookmarksPositionPanel();
   });
+
+  const expandAllBtn = document.getElementById('pmBookmarksExpandAllBtn');
+  const collapseAllBtn = document.getElementById('pmBookmarksCollapseAllBtn');
+  if (expandAllBtn) expandAllBtn.addEventListener('click', pmBookmarksExpandAll);
+  if (collapseAllBtn) collapseAllBtn.addEventListener('click', pmBookmarksCollapseAll);
 
   const addBtn = document.getElementById('pmBookmarksAddBtn');
   const deleteBtn = document.getElementById('pmBookmarksDeleteBtn');
@@ -52323,23 +52390,28 @@ function pmRefreshCompressEstimateTooltip(scope, btn) {
     if (!indices.length) {
       pmApplyCompressEstimateToButton(btn, null);
       pmApplyCompressHighlight(btn, null);
-      btn.classList.remove('pm-compress-unavailable');
+      btn.classList.remove('pm-compress-unavailable', 'pm-compress-calculating');
       return;
     }
     selKey = indices.join(',');
   }
   const apply = (entry) => {
+    btn.classList.remove('pm-compress-calculating');
     pmApplyCompressEstimateToButton(btn, entry);
     pmApplyCompressHighlight(btn, entry);
     pmSyncCompressButtonsUnavailable();
   };
   if (pmCompressEstimateIsFresh(scope, selKey)) { apply(pmCompressEstimateCache[scope]); return; }
   // No fresh number yet and it isn't instant to compute - say so up front
-  // rather than leaving the old/static text sitting there looking stale,
-  // and don't leave the button looking blocked while the outcome is
-  // genuinely still unknown.
+  // rather than leaving the old/static text sitting there looking stale.
+  // Also strip whatever the button happened to be showing from a PREVIOUS
+  // estimate (the notable ring, or the unavailable dimming) so it doesn't
+  // sit in a stale, no-longer-meaningful state throughout this genuinely
+  // still-unknown wait - swapped for the real state (see apply() above) the
+  // instant pmComputeCompressEstimate resolves.
   btn.title = t('compressPdfEstimating');
-  btn.classList.remove('pm-compress-unavailable');
+  btn.classList.remove('pm-compress-unavailable', 'pm-compress-notable');
+  btn.classList.add('pm-compress-calculating');
   pmComputeCompressEstimate(scope).then(entry => apply(entry));
 }
 
