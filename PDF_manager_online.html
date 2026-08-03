@@ -4295,6 +4295,37 @@
       justify-content: center;
       padding: 0;
       box-sizing: border-box;
+      /* Anchor for .pm-link-layer (internal-document-link hotzones), which
+         needs position:absolute at every zoom level and mode, not only the
+         narrower zoom-text-select-active state the text-selection layer
+         scopes its own position:relative rule to below. */
+      position: relative;
+    }
+
+    /* Internal-document-link hotzones - clickable rectangles over a page's
+       PDF Link annotations, active in select mode at any zoom (unlike the
+       text-selection layer, not gated to a high-zoom threshold). Hidden
+       during nav/read mode the same way the text layer is - setMode('nav')
+       and enterReadMode() both set body.nav-mode-active. */
+    .pm-link-layer {
+      position: absolute;
+      overflow: hidden;
+      pointer-events: none;
+      z-index: 3;
+    }
+    .pm-link-hotzone {
+      position: absolute;
+      pointer-events: auto;
+      cursor: pointer;
+      background: transparent;
+      transition: background-color 0.1s ease;
+    }
+    .pm-link-hotzone:hover {
+      background: rgba(37, 99, 235, 0.14);
+    }
+    body.nav-mode-active .pm-link-layer {
+      display: none !important;
+      pointer-events: none !important;
     }
 
     /*Preview sheet: keep the page's true aspect ratio (CropBox may not be A4
@@ -11463,6 +11494,7 @@
       // visually glued to the new size in the same tick instead of letting
       // them lag until the debounced rebuild lands.
       if (typeof syncPreviewTextLayersLiveScale === 'function') syncPreviewTextLayersLiveScale();
+      if (typeof pmLinksSyncLayerPositions === 'function') pmLinksSyncLayerPositions();
 
       if (pinchActive) {
         return;
@@ -11697,6 +11729,7 @@
       hqUpgraded.clear();
       gridClearPdfPageImagesCache();
       if (typeof invalidatePageTextLayers === 'function') invalidatePageTextLayers();
+      if (typeof pmLinksClearPageCache === 'function') pmLinksClearPageCache();
     }
 
     // Raster/pdf.js cache only — text layer stays (glyphs unchanged). Used when
@@ -11707,6 +11740,7 @@
       hqPdfjsDoc = null;
       hqUpgraded.clear();
       gridClearPdfPageImagesCache();
+      if (typeof pmLinksClearPageCache === 'function') pmLinksClearPageCache();
     }
 
     //Lazy loading of cached pdf.js document from current pdfDoc.
@@ -11817,6 +11851,171 @@
         console.warn('gridLoadPdfPageImages', pageIdx, err);
       }
       return out;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // INTERNAL DOCUMENT LINKS (select mode, any zoom)
+    // Clickable hotzones over a page's PDF Link annotations, jumping to
+    // their target page - common in manuals/instructions authored with
+    // an embedded table of contents or cross-references.
+    // ═══════════════════════════════════════════════════════════════════
+    let pmLinksPageCache = new Map();
+
+    function pmLinksClearPageCache() {
+      pmLinksPageCache.clear();
+    }
+
+    // Resolves through real pdf.js (same as pmBookmarksBuildTree resolves
+    // outline destinations) so named destinations and /A GoTo actions work
+    // here too, not just a direct [pageRef, ...] /Dest array - hand-walking
+    // the raw annotation dict missed those forms for bookmarks (see
+    // pmBookmarksMigrateOnReorder's fix) and would miss them here the same
+    // way. Cached per hqPdfjsToken, same pattern as gridLoadPdfPageImages.
+    // Returns { aspectRatio, links: [{ pageIndex, left, top, width, height }] }
+    // with left/top/width/height as 0..1 fractions of the page's own
+    // (rotation-applied) box, ready to place as percentage-positioned
+    // hotzones inside the box getPageImgDisplayMetrics computes for it.
+    async function pmLinksLoadPage(pageIdx) {
+      const token = hqPdfjsToken;
+      const cacheKey = pageIdx + ':' + token;
+      if (pmLinksPageCache.has(cacheKey)) return pmLinksPageCache.get(cacheKey);
+      const promise = (async () => {
+        const empty = { aspectRatio: 0, links: [] };
+        try {
+          if (!pdfjsLib || typeof getHQPdfjsDoc !== 'function') return empty;
+          const doc = await getHQPdfjsDoc(token);
+          if (!doc || token !== hqPdfjsToken) return empty;
+          const page = await doc.getPage(pageIdx + 1);
+          if (token !== hqPdfjsToken) return empty;
+          const rot = typeof page.rotate === 'number' ? page.rotate : 0;
+          const viewport = page.getViewport({ scale: 1, rotation: rot });
+          const aspectRatio = viewport.height > 0 ? viewport.width / viewport.height : 0;
+          const annots = await page.getAnnotations({ intent: 'display' });
+          if (token !== hqPdfjsToken) return { aspectRatio, links: [] };
+          const links = [];
+          for (const a of annots) {
+            if (a.subtype !== 'Link' || a.dest == null) continue;
+            let dest = a.dest;
+            let targetPageIndex;
+            try {
+              if (typeof dest === 'string') dest = await doc.getDestination(dest);
+              if (token !== hqPdfjsToken) return { aspectRatio, links: [] };
+              if (!Array.isArray(dest) || dest[0] == null) continue;
+              targetPageIndex = await doc.getPageIndex(dest[0]);
+              if (token !== hqPdfjsToken) return { aspectRatio, links: [] };
+            } catch (_) { continue; }
+            if (targetPageIndex == null) continue;
+            // convertToViewportRectangle maps PDF-space corners into the
+            // rotated viewport pairwise (x1->x1', y1->y1', ...) WITHOUT
+            // re-sorting into min/max order - a flipped y-axis (and, under
+            // rotation, a swapped axis) means the "first" corner can end up
+            // larger than the "second" one, so min/max must be taken here.
+            const r = viewport.convertToViewportRectangle(a.rect);
+            const left = Math.min(r[0], r[2]) / viewport.width;
+            const top = Math.min(r[1], r[3]) / viewport.height;
+            const width = Math.abs(r[2] - r[0]) / viewport.width;
+            const height = Math.abs(r[3] - r[1]) / viewport.height;
+            if (!(width > 0) || !(height > 0)) continue;
+            links.push({ pageIndex: targetPageIndex, left, top, width, height });
+          }
+          return { aspectRatio, links };
+        } catch (err) {
+          console.warn('pmLinksLoadPage', pageIdx, err);
+          return empty;
+        }
+      })();
+      pmLinksPageCache.set(cacheKey, promise);
+      return promise;
+    }
+
+    // Builds (or removes, if the page has no links) the .pm-link-layer for
+    // one page card. Visibility/interactivity itself is CSS-only
+    // (body.nav-mode-active hides it) so this can run unconditionally
+    // whenever page content might have changed, without tracking mode
+    // switches - switching into select mode shows an already-built layer
+    // with no extra delay.
+    async function pmLinksBuildLayerForPage(pageDiv) {
+      const idx = parseInt(pageDiv.dataset.index, 10);
+      if (Number.isNaN(idx)) return;
+      const wrapper = pageDiv.querySelector('.img-wrapper');
+      const img = wrapper ? wrapper.querySelector('img') : null;
+      if (!wrapper || !img || !img.naturalWidth || !img.naturalHeight) return;
+      const token = hqPdfjsToken;
+      const { aspectRatio, links } = await pmLinksLoadPage(idx);
+      if (token !== hqPdfjsToken) return; // doc changed mid-flight
+      let layer = wrapper.querySelector('.pm-link-layer');
+      if (!links.length) {
+        if (layer) layer.remove();
+        return;
+      }
+      const metrics = getPageImgDisplayMetrics(img, wrapper, aspectRatio);
+      if (!metrics || !metrics.width || !metrics.height) return;
+      if (!layer) {
+        layer = document.createElement('div');
+        layer.className = 'pm-link-layer';
+        wrapper.appendChild(layer);
+      }
+      layer.dataset.trueAspectRatio = String(aspectRatio);
+      layer.style.left = metrics.left + 'px';
+      layer.style.top = metrics.top + 'px';
+      layer.style.width = metrics.width + 'px';
+      layer.style.height = metrics.height + 'px';
+      layer.innerHTML = '';
+      links.forEach((link) => {
+        const zone = document.createElement('div');
+        zone.className = 'pm-link-hotzone';
+        zone.style.left = (link.left * 100) + '%';
+        zone.style.top = (link.top * 100) + '%';
+        zone.style.width = (link.width * 100) + '%';
+        zone.style.height = (link.height * 100) + '%';
+        zone.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (typeof pmBookmarksGoTo === 'function') pmBookmarksGoTo(link.pageIndex);
+        });
+        layer.appendChild(zone);
+      });
+    }
+
+    let pmLinksBuildTimer = null;
+
+    // Debounced rebuild of every currently-loaded page's link layer - called
+    // from the same content-changed signals schedulePageTextLayerBuild()
+    // already reacts to (lazy image load, HQ upgrade, edits/undo/redo, ...).
+    function schedulePageLinkLayerBuild() {
+      clearTimeout(pmLinksBuildTimer);
+      pmLinksBuildTimer = setTimeout(runPageLinkLayerBuild, 140);
+    }
+
+    async function runPageLinkLayerBuild() {
+      if (!pdfDoc) return;
+      const token = hqPdfjsToken;
+      const pages = Array.from(pagesContainer.querySelectorAll('.page'));
+      for (const pageDiv of pages) {
+        if (token !== hqPdfjsToken) return;
+        if (pageDiv.classList.contains('page-lazy-pending')) continue; // image not loaded yet
+        await pmLinksBuildLayerForPage(pageDiv);
+      }
+    }
+
+    // Keeps each already-built link layer's pixel box glued to its page
+    // card's live size (scale-slider drag, fit-width, window resize) - the
+    // hotzones inside are percentage-positioned, so only the outer box needs
+    // updating here, unlike the text layer's per-glyph rebuild.
+    function pmLinksSyncLayerPositions() {
+      const layers = pagesContainer.querySelectorAll('.page .pm-link-layer');
+      if (!layers.length) return;
+      layers.forEach((layer) => {
+        const wrapper = layer.parentElement;
+        const img = wrapper ? wrapper.querySelector('img') : null;
+        if (!img || !img.naturalWidth || !img.naturalHeight) return;
+        const aspectRatio = parseFloat(layer.dataset.trueAspectRatio) || 0;
+        const metrics = getPageImgDisplayMetrics(img, wrapper, aspectRatio);
+        if (!metrics || !metrics.width || !metrics.height) return;
+        layer.style.left = metrics.left + 'px';
+        layer.style.top = metrics.top + 'px';
+        layer.style.width = metrics.width + 'px';
+        layer.style.height = metrics.height + 'px';
+      });
     }
 
     /** Client rect of the visible page bitmap in preview (object-fit: contain letterboxing). */
@@ -12151,6 +12350,7 @@
           img.src = canvas.toDataURL('image/jpeg', 0.92);
           hqUpgraded.add(idx);
           if (typeof schedulePageTextLayerBuild === 'function') schedulePageTextLayerBuild();
+          if (typeof schedulePageLinkLayerBuild === 'function') schedulePageLinkLayerBuild();
         } catch (e) {
           console.error('HQ render error for page', idx, e);
         }
@@ -12763,6 +12963,11 @@
         updateMobileScrollRail();
         if (typeof updateUndoRedoUI === 'function') updateUndoRedoUI();
         if (typeof updateZoomPanHandBadge === 'function') updateZoomPanHandBadge();
+        // A window resize can change how many page cards fit per row (and so
+        // each card's own box) without necessarily going through applyScale's
+        // own live-sync call - keep any built link hotzones glued to their
+        // page card the same way.
+        if (typeof pmLinksSyncLayerPositions === 'function') pmLinksSyncLayerPositions();
       });
     }
 
@@ -13011,6 +13216,9 @@
             try { updateZoomPanMode(); } catch (_) {}
           } else if (typeof schedulePageTextLayerBuild === 'function') {
             try { schedulePageTextLayerBuild(); } catch (_) {}
+          }
+          if (typeof schedulePageLinkLayerBuild === 'function') {
+            try { schedulePageLinkLayerBuild(); } catch (_) {}
           }
         }
       } else {
@@ -15606,6 +15814,7 @@
       if (!target || !target.closest) return false;
       if (target.closest('.quick-actions')) return true;
       if (target.closest('.selection-checkbox') && !multiSelectMode) return true;
+      if (target.closest('.pm-link-hotzone')) return true;
       return false;
     }
 
@@ -16565,6 +16774,7 @@
       lazyThumbLoaded.add(idx);
 
       if (typeof schedulePageTextLayerBuild === 'function') schedulePageTextLayerBuild();
+      if (typeof schedulePageLinkLayerBuild === 'function') schedulePageLinkLayerBuild();
 
       if (isLoading && !isLoadingCancelled && lazyThumbNumPages) {
         showLoading(t('loadingPagesProgress', { cur: lazyThumbLoaded.size, total: lazyThumbNumPages }));
@@ -18498,6 +18708,7 @@
 
     scrollContainer.addEventListener('scroll', () => {
       if (typeof schedulePageTextLayerBuild === 'function') schedulePageTextLayerBuild();
+      if (typeof schedulePageLinkLayerBuild === 'function') schedulePageLinkLayerBuild();
     }, { passive: true });
 
     if (isTouchDevice) {
@@ -33345,6 +33556,7 @@ function editSelectedPage() {
         pj = null;
       }
       if (typeof schedulePageTextLayerBuild === 'function') schedulePageTextLayerBuild();
+      if (typeof schedulePageLinkLayerBuild === 'function') schedulePageLinkLayerBuild();
     } catch (e) {
       console.error('preview markup refresh failed', e);
     } finally {
