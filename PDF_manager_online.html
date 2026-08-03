@@ -12740,6 +12740,16 @@
         updateStickyFileBar();       // recalculation of the pinned file name strip
         updatePageNumTab();          // recalculation of curtains with page number (1 column)
         if (typeof pmUpdatePageNavButtons === 'function') pmUpdatePageNavButtons();
+        // The bookmarks popup anchors below the sticky bar / content-header,
+        // whichever is on screen (see pmBookmarksPositionPanel) - hiding the
+        // top menu or entering/exiting Read mode changes that reference
+        // point, but neither one calls the popup's own positioning directly,
+        // so without this it stayed stuck at its old top offset instead of
+        // rising into the space that opened up above it.
+        if (typeof pmBookmarksState !== 'undefined' && pmBookmarksState.open &&
+            typeof pmBookmarksPositionPanel === 'function') {
+          pmBookmarksPositionPanel();
+        }
         updateMobileQuickActions();
         updateMobilePagesRowOverflow();
         updateDesktopPagesAlignment();
