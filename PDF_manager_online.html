@@ -1303,7 +1303,7 @@
       zoom/column layout (this only touches #scrollContainer's own padding,
       independent of however .pages centers/wraps pages within it).*/
     body.pm-bookmarks-active #scrollContainer {
-      padding-left: var(--pm-bookmarks-scroll-padding, 20px);
+      padding-left: var(--pm-bookmarks-scroll-padding, 6px);
     }
     /*Right-click menu on a bookmark row - same visual language as #pageCtxMenu.*/
     #pmBookmarksCtxMenu {
@@ -29694,9 +29694,11 @@ function pmBookmarksFinishDrag() {
 // it's open, the page-preview area needs a matching left gutter so pages
 // don't render underneath it, at any zoom level. left(4, matching the
 // panel's own left anchor in pmBookmarksPositionPanel) + panel width +
-// gap(20), applied to #scrollContainer via a CSS var. Width is fixed at
-// 280px now, but this still recomputes from the actual rendered width in
-// case the max-width:92vw safety net ever clamps it on a narrow viewport.
+// gap(6, matching .main's own left/right edge margin so the page sits as
+// close to the panel as it does to the working area's own edges),
+// applied to #scrollContainer via a CSS var. Width is fixed at 280px now,
+// but this still recomputes from the actual rendered width in case the
+// max-width:92vw safety net ever clamps it on a narrow viewport.
 function pmBookmarksUpdateScrollGutter() {
   if (!pmBookmarksState.open) {
     document.body.classList.remove('pm-bookmarks-active');
@@ -29708,7 +29710,7 @@ function pmBookmarksUpdateScrollGutter() {
   if (!panel) return;
   document.body.classList.add('pm-bookmarks-active');
   const width = panel.getBoundingClientRect().width;
-  document.documentElement.style.setProperty('--pm-bookmarks-scroll-padding', Math.round(4 + width + 20) + 'px');
+  document.documentElement.style.setProperty('--pm-bookmarks-scroll-padding', Math.round(4 + width + 6) + 'px');
   if (typeof pmReapplyFitWidthIfActive === 'function') pmReapplyFitWidthIfActive();
 }
 
