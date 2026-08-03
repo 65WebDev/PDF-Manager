@@ -990,16 +990,18 @@
       height: 42px;
       z-index: 129;
     }
-    /*Three popup buttons (e.g. "as images" + "compress" + "encrypt") - common
-       area, including the gaps between them: 3 * 42px + 2 * 6px gap = 138px.*/
+    /*Three popup buttons (e.g. "as images" + "compress" + "encrypt"), now
+       stacked vertically (see .img-save-btn--left/--mid/--right below) -
+       common hover area is 42px wide and spans all three top to bottom,
+       including the gaps between them: 3 * 42px + 2 * 6px gap = 138px tall.*/
     .top-menu .img-save-wrapper--multi:has(.img-save-btn.show)::after {
       content: '';
       position: absolute;
       top: calc(100% + 6px);
       left: 50%;
       transform: translateX(-50%);
-      width: 138px;
-      height: 42px;
+      width: 42px;
+      height: 138px;
       z-index: 129;
     }
     .top-menu .img-save-btn {
@@ -1050,14 +1052,17 @@
     .top-menu .img-save-btn--compress.pm-compress-unavailable:hover {
       background: #232d38;
     }
-    /*Three popup buttons side by side (e.g. "as images" + "compress" + "encrypt") -
-       offset the outer two 42px-wide buttons 48px either side of the wrapper's own
-       center (42px button + 6px gap), leaving the 6px gaps the --multi bridge above
-       already accounts for. The middle button (--mid) needs no offset - it keeps
-       the plain centered left:50% every .img-save-btn already has. A wrapper with a
-       single popup button (no --left/--right/--mid) also keeps that plain center.*/
-    .top-menu .img-save-btn--left { left: calc(50% - 48px); }
-    .top-menu .img-save-btn--right { left: calc(50% + 48px); }
+    /*Three popup buttons stacked top to bottom (e.g. "as images" + "compress"
+       + "encrypt"), matching the mode-switch widget's own vertical
+       .rl-slot-popup stacking instead of the previous side-by-side layout -
+       each step down is one 42px button + 6px gap = 48px. Class names are
+       kept as --left/--mid/--right (their DOM order, top to bottom) rather
+       than renamed, to avoid touching every call site that references them.
+       --left needs no offset - it keeps the plain top: calc(100% + 6px)
+       every .img-save-btn already has, same as a wrapper with just a single
+       popup button (no --left/--mid/--right at all).*/
+    .top-menu .img-save-btn--mid { top: calc(100% + 6px + 48px); }
+    .top-menu .img-save-btn--right { top: calc(100% + 6px + 96px); }
     /*Shown state - managed from JS*/
     .top-menu .img-save-btn.show {
       opacity: 1;
@@ -15130,6 +15135,16 @@
       if (pmPosHistoryJumping || readModeActive) return;
       clearTimeout(pmPosHistorySaveTimer);
       pmPosHistorySaveTimer = setTimeout(pmPosHistoryRecordCurrent, 1500);
+    }
+
+    // For discrete "jump" navigations (bookmarks, internal document links) -
+    // unlike ordinary scrolling, these are a deliberate destination, not
+    // something reached by settling after moving around, so the 1.5s idle
+    // wait doesn't apply: the position is recorded right away.
+    function pmPosHistoryRecordJumpNow() {
+      if (!pdfDoc || !scrollContainer || readModeActive) return;
+      clearTimeout(pmPosHistorySaveTimer);
+      pmPosHistoryRecordCurrent();
     }
 
     // Moves to a recorded index and scrolls there - intentionally touches
@@ -29440,7 +29455,14 @@ function pmBookmarksSetStatus(text) {
 function pmBookmarksGoTo(pageIndex) {
   if (pageIndex == null) return;
   const pageEl = pagesContainer.querySelector('.page[data-index="' + pageIndex + '"]');
-  if (pageEl && typeof scrollPageIntoViewTop === 'function') scrollPageIntoViewTop(pageEl);
+  if (!pageEl || typeof scrollPageIntoViewTop !== 'function') return;
+  // Bookmark/internal-link jumps are a discrete destination, not something
+  // reached by settling after scrolling - record both where this jump
+  // started from and where it landed immediately, rather than waiting on
+  // the ordinary 1.5s idle debounce (see pmPosHistoryRecordJumpNow).
+  if (typeof pmPosHistoryRecordJumpNow === 'function') pmPosHistoryRecordJumpNow();
+  scrollPageIntoViewTop(pageEl);
+  if (typeof pmPosHistoryRecordJumpNow === 'function') pmPosHistoryRecordJumpNow();
 }
 
 // The page currently centered in the work area - used to link a new/updated
