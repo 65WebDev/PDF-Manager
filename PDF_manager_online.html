@@ -7295,6 +7295,13 @@
     let dragSourceDiv = null;
     let dragWasActive = false;
     let pageMoveAnimActive = false;
+    // A page-reorder's own showLoading() call would otherwise trip the same
+    // "no document / loading" auto-close updateUIState() applies to the
+    // bookmarks popup on real doc-close - set for the whole performPageMove
+    // duration so the popup stays open and visibly updates through the move,
+    // per the user's request, instead of vanishing and only showing the
+    // (by-then-correct) result on next open.
+    let pmBookmarksSuppressAutoClose = false;
     //Declared before the first updateUIState() - updateMobileQuickActions reads them on touch devices.
     let rubberActive = false;
     let rubberArmed = false;
@@ -8759,7 +8766,7 @@
       const bookmarksBtnEl = document.getElementById('bookmarksBtn');
       if (bookmarksBtnEl) {
         bookmarksBtnEl.disabled = readModeDisabled;
-        if (readModeDisabled && typeof pmBookmarksClose === 'function') pmBookmarksClose();
+        if (readModeDisabled && !pmBookmarksSuppressAutoClose && typeof pmBookmarksClose === 'function') pmBookmarksClose();
       }
       if (!isTouchDevice && selectModeBtn && navModeBtn) {
         selectModeBtn.disabled = modeBtnsDisabled;
@@ -21018,83 +21025,94 @@
         return;
       }
 
-      scrollPosition = scrollContainer.scrollTop;
-      showLoading("Перемещение страницы...");
-
-      const numPages = pdfDoc.getPageCount();
-      let indicesToMove = (selectedPages.size > 0 && selectedPages.has(draggedIndex)) 
-        ? Array.from(selectedPages).sort((a,b) => a - b) 
-        : [draggedIndex];
-      indicesToMove = indicesToMove.filter(i => i >= 0 && i < numPages);
-      if (!indicesToMove.length) {
-        hideLoading();
-        return;
-      }
-
-      const remaining = [];
-      for (let i = 0; i < numPages; i++) {
-        if (!indicesToMove.includes(i)) remaining.push(i);
-      }
-
-      let targetPos = remaining.indexOf(targetIndex);
-      if (targetPos === -1) targetPos = remaining.length;
-
-      let insertPos = insertBeforeTarget ? targetPos : targetPos + 1;
-
-      if (insertBeforeTarget && targetPos === 0) {
-        insertPos = 0;
-      }
-
-      const originalPos = remaining.indexOf(draggedIndex);
-      if (originalPos !== -1 && (insertPos === originalPos || insertPos === originalPos + 1)) {
-        hideLoading();
-        return;
-      }
-
-      remaining.splice(insertPos, 0, ...indicesToMove);
-      setDocumentDirty(true);
-      pageMoveAnimActive = true;
-      clearInsertIndicators();
-
+      // Covers the whole operation (including the showLoading() call right
+      // below, which would otherwise trip the bookmarks popup's own
+      // "no document / loading" auto-close) so the popup - if open - stays
+      // open and visibly updates through the move instead of vanishing.
+      pmBookmarksSuppressAutoClose = true;
       try {
-        const newDoc = await PDFLib.PDFDocument.create();
-        const copied = await newDoc.copyPages(pdfDoc, remaining);
-        copied.forEach(p => newDoc.addPage(p));
-        if (typeof peMigrateEditorMeta === 'function') peMigrateEditorMeta(pdfDoc, newDoc, remaining);
-        if (typeof pmBookmarksMigrateOnReorder === 'function') await pmBookmarksMigrateOnReorder(pdfDoc, newDoc, remaining, copied);
-        pdfDoc = newDoc;
-        invalidateHQ();   // pages rearranged - old cache of pdf.js document (magnifier, HQ) is invalid
+        scrollPosition = scrollContainer.scrollTop;
+        showLoading("Перемещение страницы...");
 
-        const newMarked = new Set();
-        remaining.forEach((oldIdx, newIdx) => {
-          if (markedForDeletion.has(oldIdx)) newMarked.add(newIdx);
-        });
-        markedForDeletion = newMarked;
+        const numPages = pdfDoc.getPageCount();
+        let indicesToMove = (selectedPages.size > 0 && selectedPages.has(draggedIndex))
+          ? Array.from(selectedPages).sort((a,b) => a - b)
+          : [draggedIndex];
+        indicesToMove = indicesToMove.filter(i => i >= 0 && i < numPages);
+        if (!indicesToMove.length) {
+          hideLoading();
+          return;
+        }
 
-        selectedPages.clear();
+        const remaining = [];
+        for (let i = 0; i < numPages; i++) {
+          if (!indicesToMove.includes(i)) remaining.push(i);
+        }
 
-        hideLoading();
-        await reorderPageElementsAnimated(remaining, indicesToMove);
+        let targetPos = remaining.indexOf(targetIndex);
+        if (targetPos === -1) targetPos = remaining.length;
 
-        // DOM cards (and their images) already moved with reorderPageElements.
-        // Do NOT await a full refreshThumbnails() here: it re-saves/re-renders every
-        // page and used to keep pageMoveAnimActive stuck, so the blue insert
-        // indicator stayed dead until that finished.
-        renumberVisiblePages();
-        updateInfo();
-        // If the bookmarks popup is open while this happens, its displayed
-        // page numbers are a snapshot from whenever it was last opened -
-        // refresh it now instead of leaving it stale until the next
-        // close+reopen (the underlying links themselves are already correct
-        // either way, via pmBookmarksMigrateOnReorder above).
-        if (typeof pmBookmarksState !== 'undefined' && pmBookmarksState.open &&
-            typeof pmBookmarksLoadAndRender === 'function') {
-          pmBookmarksLoadAndRender();
+        let insertPos = insertBeforeTarget ? targetPos : targetPos + 1;
+
+        if (insertBeforeTarget && targetPos === 0) {
+          insertPos = 0;
+        }
+
+        const originalPos = remaining.indexOf(draggedIndex);
+        if (originalPos !== -1 && (insertPos === originalPos || insertPos === originalPos + 1)) {
+          hideLoading();
+          return;
+        }
+
+        remaining.splice(insertPos, 0, ...indicesToMove);
+        setDocumentDirty(true);
+        pageMoveAnimActive = true;
+        clearInsertIndicators();
+
+        try {
+          const newDoc = await PDFLib.PDFDocument.create();
+          const copied = await newDoc.copyPages(pdfDoc, remaining);
+          copied.forEach(p => newDoc.addPage(p));
+          if (typeof peMigrateEditorMeta === 'function') peMigrateEditorMeta(pdfDoc, newDoc, remaining);
+          if (typeof pmBookmarksMigrateOnReorder === 'function') await pmBookmarksMigrateOnReorder(pdfDoc, newDoc, remaining, copied);
+          pdfDoc = newDoc;
+          invalidateHQ();   // pages rearranged - old cache of pdf.js document (magnifier, HQ) is invalid
+
+          const newMarked = new Set();
+          remaining.forEach((oldIdx, newIdx) => {
+            if (markedForDeletion.has(oldIdx)) newMarked.add(newIdx);
+          });
+          markedForDeletion = newMarked;
+
+          selectedPages.clear();
+
+          hideLoading();
+          await reorderPageElementsAnimated(remaining, indicesToMove);
+
+          // DOM cards (and their images) already moved with reorderPageElements.
+          // Do NOT await a full refreshThumbnails() here: it re-saves/re-renders every
+          // page and used to keep pageMoveAnimActive stuck, so the blue insert
+          // indicator stayed dead until that finished.
+          renumberVisiblePages();
+          updateInfo();
+          // If the bookmarks popup is open while this happens, its displayed
+          // page numbers are a snapshot from whenever it was last opened -
+          // refresh it now instead of leaving it stale until the next
+          // close+reopen (the underlying links themselves are already correct
+          // either way, via pmBookmarksMigrateOnReorder above). The popup no
+          // longer auto-closes during the move (see pmBookmarksSuppressAutoClose
+          // above), so this is what actually keeps it live for the user.
+          if (typeof pmBookmarksState !== 'undefined' && pmBookmarksState.open &&
+              typeof pmBookmarksLoadAndRender === 'function') {
+            pmBookmarksLoadAndRender();
+          }
+        } finally {
+          pageMoveAnimActive = false;
+          pagesContainer.classList.remove('page-reordering');
+          clearInsertIndicators();
         }
       } finally {
-        pageMoveAnimActive = false;
-        pagesContainer.classList.remove('page-reordering');
-        clearInsertIndicators();
+        pmBookmarksSuppressAutoClose = false;
       }
     }
 
@@ -29443,6 +29461,10 @@ async function pmBookmarksBuildTree() {
 async function pmBookmarksLoadAndRender() {
   const token = ++pmBookmarksReqToken;
   const list = document.getElementById('pmBookmarksList');
+  // Preserved across the rebuild below - otherwise a mid-session refresh
+  // (e.g. after a page reorder while the popup is left open) snaps the
+  // list back to the top instead of staying where the user was looking.
+  const savedScrollTop = list ? list.scrollTop : 0;
   if (list) list.innerHTML = '';
   pmBookmarksSetStatus(t('bookmarksLoading'));
   let tree = [];
@@ -29450,6 +29472,7 @@ async function pmBookmarksLoadAndRender() {
   if (token !== pmBookmarksReqToken) return; // popup closed/reopened, or doc changed, meanwhile
   pmBookmarksState.tree = tree;
   pmBookmarksRenderList(pmBookmarksFlatten(tree));
+  if (list) list.scrollTop = savedScrollTop;
 }
 
 // Rebuilds the ENTIRE /Outlines dictionary tree from pmBookmarksState.tree
