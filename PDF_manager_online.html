@@ -3691,6 +3691,16 @@
       min-height: 0;             /*necessary for correct scrolling inside flex*/
       position: relative;
     }
+    /*"Fit page width" on a document with no landscape pages: the page
+      already fills the available width exactly, so there is nothing
+      legitimate to scroll horizontally - block it outright (wheel, touch,
+      scrollbar drag) rather than relying on every input mode's own handler
+      to individually decide not to move sideways. This alone does not stop
+      nav/pan-mode's own hand-drag code, which assigns scrollLeft directly
+      via script (overflow:hidden only blocks user-agent-driven scrolling,
+      not programmatic scrollLeft) - see the accompanying 'scroll' listener
+      (pmGuardVerticalOnlyScroll) that snaps it back for that case.*/
+    body.pm-fitwidth-vertical-only #scrollContainer { overflow-x: hidden; }
     .content-header {
       display: flex;
       align-items: center;
@@ -10804,7 +10814,40 @@
       ).forEach((el) => {
         el.classList.toggle('active-mode', !!fitWidthToggleOn);
       });
+      pmUpdateVerticalOnlyScrollLock();
     }
+
+    // With "fit page width" on and no landscape page in the document, the
+    // page already fills the available width exactly - there is nothing
+    // legitimate to scroll sideways to, in any interaction mode (select,
+    // nav/pan, read, loupe). Locks it out at the CSS level (see
+    // body.pm-fitwidth-vertical-only) rather than each mode's own
+    // scroll/pan/swipe handler having to individually refuse to move
+    // sideways. Re-checked wherever fit-width's own scale gets
+    // reconsidered (toggle on/off, window resize, bookmarks gutter
+    // changes), since orientation-affecting content doesn't change any
+    // more often than that in practice.
+    function pmUpdateVerticalOnlyScrollLock() {
+      const lock = !!fitWidthToggleOn &&
+        typeof pmAllPagesPortrait === 'function' && pmAllPagesPortrait();
+      document.body.classList.toggle('pm-fitwidth-vertical-only', lock);
+    }
+
+    // overflow-x:hidden (see body.pm-fitwidth-vertical-only above) only
+    // blocks user-agent-driven scrolling (wheel, touch, scrollbar drag) -
+    // it does not stop script from assigning scrollLeft directly, which is
+    // exactly how nav/pan-mode's own hand-drag panning works. Snap it back
+    // to 0 whenever the lock is active and something nudges it away,
+    // regardless of what triggered the nudge.
+    (function pmInitVerticalOnlyScrollGuard() {
+      if (!scrollContainer) return;
+      scrollContainer.addEventListener('scroll', () => {
+        if (scrollContainer.scrollLeft !== 0 &&
+            document.body.classList.contains('pm-fitwidth-vertical-only')) {
+          scrollContainer.scrollLeft = 0;
+        }
+      }, { passive: true });
+    })();
 
     function computeFitWidthScale() {
       if (typeof computeReadModeDesktopScale !== 'function') return currentScale;
@@ -10851,6 +10894,7 @@
     // actually fit instead of going stale until the user re-toggles it.
     function pmReapplyFitWidthIfActive() {
       if (!fitWidthToggleOn || typeof computeFitWidthScale !== 'function') return;
+      pmUpdateVerticalOnlyScrollLock();
       const target = computeFitWidthScale();
       if (Math.abs(target - currentScale) > 0.25) {
         applyFitWidthScaleValue(target);
