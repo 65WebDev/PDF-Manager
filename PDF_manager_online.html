@@ -7228,6 +7228,13 @@
       writtenRefs: [],
     };
     let pmBookmarksReqToken = 0;
+    // Same reasoning again: pmBookmarksClose() -> pmBookmarksUpdateScrollGutter()
+    // -> pmReapplyFitWidthIfActive() reads fitWidthToggleOn on that very
+    // first synchronous updateUIState() call, before a declaration further
+    // down the script would have run yet.
+    let fitWidthToggleOn = false;
+    let fitWidthSavedScale = null;
+    let fitWidthPointer = { x: null, y: null };
     let pdfjsPreloadTask = null;   //parallel parsing of pdf.js when opening a file
     //“Dirty” state of the document: were there any changes (rotation/movement/insertion/
     //deletion) after the last save. Resets to false when saving.
@@ -10717,10 +10724,9 @@
       applyScale({ zoomAnchor });
     }
 
-    /** Fit-width toggle (toolbar / double-click / context menus). */
-    let fitWidthToggleOn = false;
-    let fitWidthSavedScale = null;
-    let fitWidthPointer = { x: null, y: null };
+    /** Fit-width toggle (toolbar / double-click / context menus).
+     * fitWidthToggleOn/fitWidthSavedScale/fitWidthPointer are declared much
+     * earlier, next to pdfDoc/pmBookmarksState - see the comment there. */
     const PM_FIT_WIDTH_DEFAULT_KEY = 'pmFitWidthDefaultOpen';
 
     function isFitWidthDefaultOn() {
