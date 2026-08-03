@@ -58,9 +58,15 @@
       overflow: hidden;         /*remove the external (browser) scrollbar*/
     }
     .top-menu {
-      background: #2c3e50; padding: 8px 20px; 
-      box-shadow: 0 2px 8px rgba(0,0,0,0.15); 
-      position: relative; z-index: 100;
+      background: #2c3e50; padding: 8px 20px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      /*Above panels like the bookmarks/search popup (z-index 9200, position:fixed
+        siblings elsewhere in the DOM) but below the modal tier (9996+) - a
+        stacking context (position + z-index) traps EVERY descendant's own
+        z-index, however high, so the toolbar's own popups (mode-switch
+        dropdown, Delete/Save flyouts, ...) could never render above a
+        higher-numbered sibling panel without this being raised too.*/
+      position: relative; z-index: 9300;
       flex: 0 0 auto;          /*the menu takes its height and does not shrink*/
       display: flex;
       flex-direction: column;
@@ -844,7 +850,9 @@
       position: absolute;
       top: calc(100% + 6px);
       left: 0;
-      z-index: 210;
+      /*Same reasoning as .rl-slot-popup above - render above panels like the
+        bookmarks/search popup (z-index 9200) rather than behind them.*/
+      z-index: 99998;
       opacity: 0;
       transform: translateY(-6px);
       pointer-events: none;
@@ -875,7 +883,10 @@
       position: absolute;
       top: calc(100% + 6px + var(--rl-slot-index, 0) * (var(--pm-menu-ctrl-h, 42px) + 6px));
       left: 0;
-      z-index: 210;
+      /*Matches the app's other floating popups (context menus, #pmBookmarksCtxMenu)
+        so it renders above panels like the bookmarks/search popup (z-index 9200)
+        instead of being clipped behind them when they overlap.*/
+      z-index: 99998;
       opacity: 0;
       transform: translateY(-6px);
       pointer-events: none;
@@ -993,7 +1004,9 @@
       transform: translateX(-50%) translateY(-6px);
       opacity: 0;
       pointer-events: none;
-      z-index: 130;
+      /*Same reasoning as .rl-slot-popup above - render above panels like the
+        bookmarks/search popup (z-index 9200) rather than behind them.*/
+      z-index: 99998;
       transition: opacity 0.15s, transform 0.15s, background 0.15s;
     }
     /*Invisible “bridge” in the gap so that the cursor does not fall into the dead zone
@@ -1195,55 +1208,36 @@
       overflow-wrap: break-word;
     }
     /*Bookmarks popup - reuses .pm-search-panel's box/positioning, own content layout*/
-    /*overflow:hidden clips the drag/resize strips' hover highlights to the
-      panel's own rounded corners instead of them poking out as sharp
-      rectangles past the curve.*/
-    .pm-bookmarks-panel { width: 340px; min-width: 220px; max-width: 92vw; padding: 0; gap: 0; overflow: hidden; }
-    .pm-bookmarks-panel.pm-bookmarks-dragging,
-    .pm-bookmarks-panel.pm-bookmarks-resizing { user-select: none; }
-    /*Grab strips along the right AND left edges to resize the popup's width.*/
-    .pm-bookmarks-resize-handle {
-      position: absolute; top: 0; right: 0; bottom: 0; width: 8px;
-      cursor: ew-resize;
-    }
-    .pm-bookmarks-resize-handle-left { right: auto; left: 0; }
-    .pm-bookmarks-resize-handle:hover,
-    .pm-bookmarks-panel.pm-bookmarks-resizing .pm-bookmarks-resize-handle {
-      background: rgba(52, 152, 219, 0.4);
-    }
-    /*Grab strip along the top edge, same idea as the page-editor's .pe-props-drag
-      (there it's a strip on the left; here it's on top) - lets the popup be
-      repositioned instead of only ever sitting in its computed default spot.*/
-    .pm-bookmarks-drag {
-      flex: 0 0 auto; height: 14px; width: 100%;
-      display: flex; align-items: center; justify-content: center;
-      cursor: grab; border-radius: 10px 10px 0 0;
-      background: rgba(255, 255, 255, 0.06);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-    }
-    .pm-bookmarks-drag:hover { background: rgba(255, 255, 255, 0.1); }
-    .pm-bookmarks-panel.pm-bookmarks-dragging .pm-bookmarks-drag,
-    .pm-bookmarks-drag:active { cursor: grabbing; background: rgba(255, 255, 255, 0.12); }
-    .pm-bookmarks-drag-grips {
-      width: 16px; height: 8px;
-      background-image: radial-gradient(circle, currentColor 1.15px, transparent 1.25px);
-      background-size: 5.3px 4px;
-      background-position: 0 0;
-      opacity: 0.95; pointer-events: none;
-      color: rgba(255, 255, 255, 0.55);
-    }
+    /*overflow:hidden clips descendants to the panel's own rounded corners.
+      Fixed width - not resizable (max-width is just a safety net so it
+      can't overflow a very narrow viewport, not a "user can resize" cue).*/
+    /*min-width overrides .pm-search-panel's own 300px floor, which would
+      otherwise clamp this panel wider than its intended 280px.*/
+    .pm-bookmarks-panel { width: 280px; min-width: 0; max-width: 92vw; padding: 0; gap: 0; overflow: hidden; }
     .pm-bookmarks-header {
       justify-content: space-between;
-      padding: 8px 10px 6px;
+      padding: 6px 6px 6px 8px;
       margin-bottom: 4px;
       border-bottom: 1px solid rgba(255,255,255,0.15);
     }
     .pm-bookmarks-title { font-weight: 600; font-size: 13px; }
+    /*Add/Delete/(separator)/Wrap-toggle sit right next to each other,
+      separate from the title↔actions↔close space-between distribution.*/
+    .pm-bookmarks-header-actions { display: flex; align-items: center; gap: 2px; }
+    .pm-bookmarks-header-sep { width: 1px; height: 18px; margin: 0 2px; background: rgba(255,255,255,0.25); flex-shrink: 0; }
+    #pmBookmarksWrapBtn.active-mode { background: #3498db; }
+    /*Wrap toggle: long titles break onto extra lines instead of being
+      ellipsis-truncated (see #pmBookmarksWrapBtn) - this only needs to
+      touch the title span, everything else in the row already tolerates
+      a taller row via align-items on .pm-bookmarks-row/.pm-bookmarks-item.*/
+    .pm-bookmarks-list.pm-bookmarks-wrap-names .pm-bookmarks-item-title {
+      white-space: normal; overflow: visible; text-overflow: clip;
+    }
     .pm-bookmarks-list {
       position: relative; /*containing block for #pmBookmarksInsertLine*/
       display: flex; flex-direction: column; gap: 1px;
       max-height: 50vh; overflow-y: auto;
-      padding: 0 8px 8px;
+      padding: 0 5px 5px;
     }
     .pm-bookmarks-list.pm-bookmarks-reordering .pm-bookmarks-item { cursor: grabbing; }
     .pm-bookmarks-row.pm-bookmarks-selected .pm-bookmarks-item { background: rgba(52,152,219,0.28); }
@@ -1253,14 +1247,14 @@
       outline: 2px solid #3498db; outline-offset: -2px;
     }
     .pm-bookmarks-insert-line {
-      position: absolute; left: 8px; right: 8px; height: 2px;
+      position: absolute; left: 5px; right: 5px; height: 2px;
       background: #3498db; border-radius: 1px;
       display: none; pointer-events: none; z-index: 5;
     }
     .pm-bookmarks-insert-line.visible { display: block; }
     /*In-place rename: a text input swapped in for the title button, filled
       and fully selected so typing immediately replaces the placeholder.*/
-    .pm-bookmarks-rename-wrap { flex: 1; min-width: 0; padding: 2px 8px; }
+    .pm-bookmarks-rename-wrap { flex: 1; min-width: 0; padding: 2px 6px; }
     .pm-bookmarks-rename-input {
       width: 100%; box-sizing: border-box;
       background: rgba(255,255,255,0.12); border: 1px solid #3498db; border-radius: 5px;
@@ -1270,9 +1264,9 @@
     .pm-bookmarks-row.pm-bookmarks-hidden { display: none; }
     /*Expand/collapse toggle for a group's children, and a same-width blank
       spacer on leaf entries so titles still line up at a consistent indent.*/
-    .pm-bookmarks-toggle, .pm-bookmarks-toggle-spacer { flex: 0 0 28px; width: 28px; }
+    .pm-bookmarks-toggle, .pm-bookmarks-toggle-spacer { flex: 0 0 20px; width: 20px; }
     .pm-bookmarks-toggle {
-      height: 28px; padding: 0; margin-right: 2px;
+      height: 20px; padding: 0; margin-right: 2px;
       display: flex; align-items: center; justify-content: center;
       border: none; border-radius: 5px; background: transparent;
       color: rgba(255,255,255,0.65); cursor: pointer;
@@ -1283,7 +1277,7 @@
     .pm-bookmarks-item {
       display: flex; align-items: baseline; gap: 6px;
       flex: 1; min-width: 0; box-sizing: border-box;
-      padding: 6px 8px; border: none; border-radius: 6px;
+      padding: 6px; border: none; border-radius: 6px;
       background: transparent; color: #fff; text-align: left;
       font-size: 13px; cursor: pointer;
     }
@@ -1299,9 +1293,18 @@
     }
     .pm-bookmarks-status {
       display: none;
-      padding: 14px 8px; opacity: .7; font-size: 12px; text-align: center;
+      padding: 14px 6px; opacity: .7; font-size: 12px; text-align: center;
     }
     .pm-bookmarks-status.has-content { display: block; }
+    /*The popup is always pinned to the left edge and never repositioned -
+      while it's open, reserve a matching gutter on the page-preview area
+      (--pm-bookmarks-scroll-padding is kept in sync with the panel's
+      current width by JS) so previews never render underneath it, at any
+      zoom/column layout (this only touches #scrollContainer's own padding,
+      independent of however .pages centers/wraps pages within it).*/
+    body.pm-bookmarks-active #scrollContainer {
+      padding-left: var(--pm-bookmarks-scroll-padding, 6px);
+    }
     /*Right-click menu on a bookmark row - same visual language as #pageCtxMenu.*/
     #pmBookmarksCtxMenu {
       position: fixed; z-index: 99998; display: none;
@@ -3680,14 +3683,24 @@
 
     /*.scale-control::after - the vertical bar has been removed at the user's request*/
 
-    .main { 
-      padding: 10px 20px 20px; 
+    .main {
+      padding: 10px 6px 20px;    /*left/right tightened to match the mobile value below - more of the working area for the page itself*/
       overflow: auto;            /*the only scrollbar is inside the editor*/
       overflow-anchor: none;     /*we do not allow the browser to “anchor” the scroll when changing the scale*/
       flex: 1 1 auto;            /*takes up all the remaining space under the menu*/
       min-height: 0;             /*necessary for correct scrolling inside flex*/
       position: relative;
     }
+    /*"Fit page width" on a document with no landscape pages: the page
+      already fills the available width exactly, so there is nothing
+      legitimate to scroll horizontally - block it outright (wheel, touch,
+      scrollbar drag) rather than relying on every input mode's own handler
+      to individually decide not to move sideways. This alone does not stop
+      nav/pan-mode's own hand-drag code, which assigns scrollLeft directly
+      via script (overflow:hidden only blocks user-agent-driven scrolling,
+      not programmatic scrollLeft) - see the accompanying 'scroll' listener
+      (pmGuardVerticalOnlyScroll) that snaps it back for that case.*/
+    body.pm-fitwidth-vertical-only #scrollContainer { overflow-x: hidden; }
     .content-header {
       display: flex;
       align-items: center;
@@ -4699,7 +4712,7 @@
       cursor: pointer;
       box-shadow: 0 3px 10px rgba(0,0,0,0.3);
       z-index: 95;
-      transition: top 0.15s ease, background 0.15s;
+      transition: top 0.15s ease, left 0.15s ease, background 0.15s;
       -webkit-user-select: none;
       user-select: none;
       touch-action: none;
@@ -6992,19 +7005,23 @@
     <div id="pmSearchStatus" class="pm-search-status"></div>
   </div>
 
-  <!--Bookmarks / table of contents popup (opened from #bookmarksBtn)-->
+  <!--Bookmarks / table of contents popup (opened from #bookmarksBtn) - always
+       pinned to the left edge, fixed width, not repositionable or resizable.-->
   <div id="pmBookmarksPanel" class="pm-search-panel pm-bookmarks-panel" role="dialog" aria-hidden="true" aria-label="Закладки">
-    <div class="pm-bookmarks-drag" id="pmBookmarksDragHandle" title="Переместить панель. Двойной клик — вернуть на место по умолчанию" aria-hidden="true">
-      <span class="pm-bookmarks-drag-grips"></span>
-    </div>
     <div class="pm-search-row pm-bookmarks-header">
       <span class="pm-bookmarks-title" data-i18n="bookmarksPanel">Закладки</span>
-      <button id="pmBookmarksAddBtn" type="button" class="pm-search-icon-btn" title="Добавить закладку" aria-label="Добавить закладку" data-i18n-title="bookmarksAdd" data-i18n-aria="bookmarksAdd">
-        <svg class="pm-search-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-      </button>
-      <button id="pmBookmarksDeleteBtn" type="button" class="pm-search-icon-btn" title="Удалить закладку" aria-label="Удалить закладку" data-i18n-title="bookmarksDeleteBtn" data-i18n-aria="bookmarksDeleteBtn" disabled>
-        <svg class="pm-search-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
-      </button>
+      <div class="pm-bookmarks-header-actions">
+        <button id="pmBookmarksAddBtn" type="button" class="pm-search-icon-btn" title="Добавить закладку" aria-label="Добавить закладку" data-i18n-title="bookmarksAdd" data-i18n-aria="bookmarksAdd">
+          <svg class="pm-search-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        </button>
+        <button id="pmBookmarksDeleteBtn" type="button" class="pm-search-icon-btn" title="Удалить закладку" aria-label="Удалить закладку" data-i18n-title="bookmarksDeleteBtn" data-i18n-aria="bookmarksDeleteBtn" disabled>
+          <svg class="pm-search-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+        </button>
+        <span class="pm-bookmarks-header-sep" aria-hidden="true"></span>
+        <button id="pmBookmarksWrapBtn" type="button" class="pm-search-icon-btn" title="Перенос длинных имён закладок на следующую строку" aria-label="Перенос длинных имён закладок на следующую строку" aria-pressed="false" data-i18n-title="bookmarksWrapNames" data-i18n-aria="bookmarksWrapNames">
+          <svg class="pm-search-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M3 18h13a3 3 0 0 0 0-6"/><polyline points="13 15 10 18 13 21"/></svg>
+        </button>
+      </div>
       <button id="pmBookmarksCloseBtn" type="button" title="Закрыть (Esc)" aria-label="Закрыть закладки" data-i18n-title="searchClose" data-i18n-aria="bookmarksClose">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
@@ -7013,8 +7030,6 @@
       <div id="pmBookmarksInsertLine" class="pm-bookmarks-insert-line" aria-hidden="true"></div>
     </div>
     <div id="pmBookmarksStatus" class="pm-bookmarks-status"></div>
-    <div class="pm-bookmarks-resize-handle" id="pmBookmarksResizeHandle" title="Изменить ширину" aria-hidden="true"></div>
-    <div class="pm-bookmarks-resize-handle pm-bookmarks-resize-handle-left" id="pmBookmarksResizeHandleLeft" title="Изменить ширину" aria-hidden="true"></div>
   </div>
 
   <!--Right-click context menu for a bookmark row-->
@@ -7221,20 +7236,28 @@
     // Same reasoning as pmCompressEstimateCache above: updateUIState() calls
     // pmBookmarksClose() (hoisted function, safe) which reaches into this
     // state object - it must exist before that first synchronous call too.
-    // pos/width hold the user's manually dragged/resized layout (null = not
-    // customized yet, use the computed default) - remembered for as long as
-    // the page stays loaded, restored on every subsequent open. tree/nextId
-    // are the live editable bookmark tree and its id counter (re-parsed
-    // fresh on every open); selectedId/editingId/ctxTargetId/rowDrag are
-    // transient UI state reset on close; writtenRefs tracks the pdf-lib
-    // objects we last wrote, so they can be cleaned up before a rebuild.
+    // The popup is always pinned to the left edge at a fixed width - not
+    // repositionable or resizable. wrapNames/collapsedPaths are display
+    // preferences that persist for as long as the page stays loaded
+    // (not reset on close). tree/nextId are the live editable bookmark
+    // tree and its id counter (re-parsed fresh on every open);
+    // selectedId/editingId/ctxTargetId/rowDrag are transient UI state
+    // reset on close; writtenRefs tracks the pdf-lib objects we last
+    // wrote, so they can be cleaned up before a rebuild.
     let pmBookmarksState = {
-      open: false, pos: null, width: null, collapsedPaths: new Set(),
+      open: false, wrapNames: false, collapsedPaths: new Set(),
       tree: [], nextId: 1, selectedId: null, editingId: null,
       ctxTargetId: null, rowDrag: null, suppressNextClick: false,
       writtenRefs: [],
     };
     let pmBookmarksReqToken = 0;
+    // Same reasoning again: pmBookmarksClose() -> pmBookmarksUpdateScrollGutter()
+    // -> pmReapplyFitWidthIfActive() reads fitWidthToggleOn on that very
+    // first synchronous updateUIState() call, before a declaration further
+    // down the script would have run yet.
+    let fitWidthToggleOn = false;
+    let fitWidthSavedScale = null;
+    let fitWidthPointer = { x: null, y: null };
     let pdfjsPreloadTask = null;   //parallel parsing of pdf.js when opening a file
     //“Dirty” state of the document: were there any changes (rotation/movement/insertion/
     //deletion) after the last save. Resets to false when saving.
@@ -7561,6 +7584,7 @@
         bookmarksEmpty: 'В документе нет закладок', bookmarksLoading: 'Загрузка…',
         bookmarksExpandGroup: 'Развернуть группу', bookmarksCollapseGroup: 'Свернуть группу',
         bookmarksAdd: 'Добавить закладку', bookmarksDeleteBtn: 'Удалить закладку',
+        bookmarksWrapNames: 'Перенос длинных имён закладок на следующую строку',
         bookmarksGoTo: 'Перейти к закладке', bookmarksRename: 'Переименовать', bookmarksDelete: 'Удалить',
         bookmarksLinkCurrent: 'Связать с текущим местом',
         bookmarksConfirmLink: 'Связать эту закладку с текущим положением в документе?',
@@ -7837,6 +7861,7 @@
         bookmarksEmpty: 'No bookmarks in this document', bookmarksLoading: 'Loading…',
         bookmarksExpandGroup: 'Expand group', bookmarksCollapseGroup: 'Collapse group',
         bookmarksAdd: 'Add bookmark', bookmarksDeleteBtn: 'Delete bookmark',
+        bookmarksWrapNames: 'Wrap long bookmark names to the next line',
         bookmarksGoTo: 'Go to bookmark', bookmarksRename: 'Rename', bookmarksDelete: 'Delete',
         bookmarksLinkCurrent: 'Link to current position',
         bookmarksConfirmLink: 'Link this bookmark to the current position in the document?',
@@ -10523,10 +10548,28 @@
     //almost always the leftmost one was chosen, not the central one), and a fraction of its width/height,
     //falling on this center - in order to return exactly the same after changing the scale
     //place in the frame. Only for desktop - on the touch screen, pinch-zoom has its own anchoring logic.
+    // Center of #scrollContainer's CONTENT box (excluding padding), not just
+    // its outer bounding box. When the bookmarks popup is open it reserves a
+    // left gutter via padding-left so pages don't render underneath it;
+    // using the raw bounding-box center for zoom anchoring pulled the anchor
+    // into that dead gutter space, so zooming (especially "fit width")
+    // visibly shifted pages to the right of where the user was looking.
+    function scrollContainerContentCenter() {
+      const r = scrollContainer.getBoundingClientRect();
+      const cs = getComputedStyle(scrollContainer);
+      const padL = parseFloat(cs.paddingLeft) || 0;
+      const padR = parseFloat(cs.paddingRight) || 0;
+      const padT = parseFloat(cs.paddingTop) || 0;
+      const padB = parseFloat(cs.paddingBottom) || 0;
+      return {
+        x: r.left + padL + (r.width - padL - padR) / 2,
+        y: r.top + padT + (r.height - padT - padB) / 2,
+      };
+    }
+
     function captureZoomAnchor() {
       const containerRect = scrollContainer.getBoundingClientRect();
-      const centerX = containerRect.left + containerRect.width / 2;
-      const centerY = containerRect.top + containerRect.height / 2;
+      const { x: centerX, y: centerY } = scrollContainerContentCenter();
       const pages = pagesContainer.querySelectorAll('.page');
       let containing = null;
       let best = null, bestDist = Infinity;
@@ -10557,12 +10600,10 @@
       const el = pagesContainer.querySelector('.page[data-index="' + anchor.idx + '"]');
       if (!el || el.style.display === 'none') return;
       void pagesContainer.offsetHeight;
-      const containerRect = scrollContainer.getBoundingClientRect();
       const r = el.getBoundingClientRect();
       const targetX = r.left + anchor.fracX * r.width;
       const targetY = r.top + anchor.fracY * r.height;
-      const centerX = containerRect.left + containerRect.width / 2;
-      const centerY = containerRect.top + containerRect.height / 2;
+      const { x: centerX, y: centerY } = scrollContainerContentCenter();
       scrollContainer.scrollLeft += (targetX - centerX);
       scrollContainer.scrollTop += (targetY - centerY);
     }
@@ -10611,9 +10652,7 @@
         if (el && el.style.display !== 'none') return zoomSessionAnchor;
         zoomSessionAnchor = null;   // anchor page was deleted/hidden mid-session
       }
-      const containerRect = scrollContainer.getBoundingClientRect();
-      const centerX = containerRect.left + containerRect.width / 2;
-      const centerY = containerRect.top + containerRect.height / 2;
+      const { x: centerX, y: centerY } = scrollContainerContentCenter();
       let page = pageAtClientPoint(clientX, clientY);
       let anchor = null;
       if (page) {
@@ -10708,10 +10747,9 @@
       applyScale({ zoomAnchor });
     }
 
-    /** Fit-width toggle (toolbar / double-click / context menus). */
-    let fitWidthToggleOn = false;
-    let fitWidthSavedScale = null;
-    let fitWidthPointer = { x: null, y: null };
+    /** Fit-width toggle (toolbar / double-click / context menus).
+     * fitWidthToggleOn/fitWidthSavedScale/fitWidthPointer are declared much
+     * earlier, next to pdfDoc/pmBookmarksState - see the comment there. */
     const PM_FIT_WIDTH_DEFAULT_KEY = 'pmFitWidthDefaultOpen';
 
     function isFitWidthDefaultOn() {
@@ -10776,7 +10814,40 @@
       ).forEach((el) => {
         el.classList.toggle('active-mode', !!fitWidthToggleOn);
       });
+      pmUpdateVerticalOnlyScrollLock();
     }
+
+    // With "fit page width" on and no landscape page in the document, the
+    // page already fills the available width exactly - there is nothing
+    // legitimate to scroll sideways to, in any interaction mode (select,
+    // nav/pan, read, loupe). Locks it out at the CSS level (see
+    // body.pm-fitwidth-vertical-only) rather than each mode's own
+    // scroll/pan/swipe handler having to individually refuse to move
+    // sideways. Re-checked wherever fit-width's own scale gets
+    // reconsidered (toggle on/off, window resize, bookmarks gutter
+    // changes), since orientation-affecting content doesn't change any
+    // more often than that in practice.
+    function pmUpdateVerticalOnlyScrollLock() {
+      const lock = !!fitWidthToggleOn &&
+        typeof pmAllPagesPortrait === 'function' && pmAllPagesPortrait();
+      document.body.classList.toggle('pm-fitwidth-vertical-only', lock);
+    }
+
+    // overflow-x:hidden (see body.pm-fitwidth-vertical-only above) only
+    // blocks user-agent-driven scrolling (wheel, touch, scrollbar drag) -
+    // it does not stop script from assigning scrollLeft directly, which is
+    // exactly how nav/pan-mode's own hand-drag panning works. Snap it back
+    // to 0 whenever the lock is active and something nudges it away,
+    // regardless of what triggered the nudge.
+    (function pmInitVerticalOnlyScrollGuard() {
+      if (!scrollContainer) return;
+      scrollContainer.addEventListener('scroll', () => {
+        if (scrollContainer.scrollLeft !== 0 &&
+            document.body.classList.contains('pm-fitwidth-vertical-only')) {
+          scrollContainer.scrollLeft = 0;
+        }
+      }, { passive: true });
+    })();
 
     function computeFitWidthScale() {
       if (typeof computeReadModeDesktopScale !== 'function') return currentScale;
@@ -10795,6 +10866,39 @@
       const rms = document.getElementById('readModeScaleSlider');
       if (rms) rms.value = sliderVal;
       applyScale({ zoomAnchor });
+      pmRecenterFitWidthPage();
+    }
+
+    // "Fit page width" should always end up perfectly horizontally centered
+    // (no leftover horizontal scroll) unless the page is genuinely too wide
+    // to fit even fully zoomed out (pages-row-overflow, meant for panning).
+    // The general zoom-anchor restore (captureZoomAnchor/restoreZoomAnchor)
+    // runs against the OLD scale's overflow/few-cols classes and can drift
+    // slightly across a jump this large - correct that directly once
+    // everything has settled, one frame after the anchor restore's own late
+    // (rAF) pass (see applyZoomLayoutAndRestore).
+    function pmRecenterFitWidthPage() {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (!scrollContainer || !pagesContainer) return;
+          if (!pagesContainer.classList.contains('pages-row-overflow')) {
+            scrollContainer.scrollLeft = 0;
+          }
+        });
+      });
+    }
+
+    // "Fit page width" is a live-tracking mode, not a one-shot scale - call
+    // this whenever the available width could have changed (window resize,
+    // the bookmarks gutter opening/closing/resizing) so the page stays
+    // actually fit instead of going stale until the user re-toggles it.
+    function pmReapplyFitWidthIfActive() {
+      if (!fitWidthToggleOn || typeof computeFitWidthScale !== 'function') return;
+      pmUpdateVerticalOnlyScrollLock();
+      const target = computeFitWidthScale();
+      if (Math.abs(target - currentScale) > 0.25) {
+        applyFitWidthScaleValue(target);
+      }
     }
 
     /** Page whose center is closest to (clientX, clientY); falls back to best visible. */
@@ -10845,9 +10949,9 @@
       let ptrX, ptrY;
       if (opts.anchor === 'viewport-center') {
         if (scrollContainer) {
-          const r = scrollContainer.getBoundingClientRect();
-          ptrX = (r.left + r.right) / 2;
-          ptrY = (r.top + r.bottom) / 2;
+          const center = scrollContainerContentCenter();
+          ptrX = center.x;
+          ptrY = center.y;
         } else {
           ptrX = window.innerWidth / 2;
           ptrY = window.innerHeight / 2;
@@ -11461,9 +11565,18 @@
 
       let overflow = false;
 
-      // One column: count by scale (without getBoundingClientRect) + hysteresis
+      // One column: count by scale (without getBoundingClientRect) + hysteresis.
+      // For an all-portrait document the visible page content is narrower
+      // than the square card by design (see portraitPreviewWidth) - basing
+      // this on the card's own width would call it "overflowing" (and force
+      // flex-start, losing centering) even when the actually-visible image
+      // fits the width fine, which is exactly what "fit page width" targets.
       if (isMobilePagesSingleColumn() || isPagesSingleColumnLayout()) {
-        const cardW = cardRowWidth(currentScale, 1);
+        const portraitAspect = (typeof pmAllPagesPortrait === 'function' && pmAllPagesPortrait())
+          ? pmMaxPortraitAspect() : null;
+        const cardW = portraitAspect
+          ? portraitPreviewWidth(currentScale, portraitAspect)
+          : cardRowWidth(currentScale, 1);
         const hyst = pagesContainer.classList.contains('pages-row-overflow') ? -16 : 16;
         overflow = cardW > avail + hyst;
       } else {
@@ -12622,6 +12735,7 @@
         updateHeaderLayout();
         ensureThreePagesFit();       // auto-scale adjustment (desktop)
         ensureMobilePagesFill();     // auto-scale adjustment (mobile)
+        if (typeof pmReapplyFitWidthIfActive === 'function') pmReapplyFitWidthIfActive();
         alignRowNumbers();           // align page numbers along lines
         updateStickyFileBar();       // recalculation of the pinned file name strip
         updatePageNumTab();          // recalculation of curtains with page number (1 column)
@@ -12753,19 +12867,29 @@
           if (boxRect.height > 0) top = Math.max(top, boxRect.bottom + 10);
         }
       }
+      // Default left=20px (the buttons' own base CSS) - but while the
+      // bookmarks popup is open (always pinned to the left edge) the arrows
+      // move to sit just right of its live width instead of the popup
+      // dodging them.
+      let left = 20;
+      if (typeof pmBookmarksState !== 'undefined' && pmBookmarksState.open) {
+        const bookmarksPanel = document.getElementById('pmBookmarksPanel');
+        const panelRect = bookmarksPanel ? bookmarksPanel.getBoundingClientRect() : null;
+        if (panelRect && panelRect.width > 0) left = Math.round(panelRect.right + 12);
+      }
       prevBtn.style.top = top + 'px';
+      prevBtn.style.left = left + 'px';
       nextBtn.style.top = (top + 46) + 'px';
+      nextBtn.style.left = left + 'px';
       if (speedEl) {
         speedEl.style.top = top + 'px';
+        speedEl.style.left = (left + 46) + 'px';
         speedEl.style.height = '84px'; // 38 + 8 gap + 38
       }
       const pauseBtn = document.getElementById('pmAutoScrollPauseBtn');
-      if (pauseBtn) pauseBtn.style.top = (top + 84 + 6) + 'px';
-      // Keep the bookmarks popup below these buttons too if it's open and
-      // the user hasn't manually dragged it elsewhere.
-      if (typeof pmBookmarksState !== 'undefined' && pmBookmarksState.open && !pmBookmarksState.pos &&
-          typeof pmBookmarksPositionPanel === 'function') {
-        pmBookmarksPositionPanel();
+      if (pauseBtn) {
+        pauseBtn.style.top = (top + 84 + 6) + 'px';
+        pauseBtn.style.left = (left + 46) + 'px';
       }
     }
 
@@ -15893,28 +16017,86 @@
       });
     }
 
+    // True only when every rendered page is portrait (none flagged
+    // .page-rotated, i.e. none end up wider than tall after applying
+    // /Rotate) - the same per-page orientation signal already used to pick
+    // the thumbnail letterboxing rule (.page.page-rotated img).
+    function pmAllPagesPortrait() {
+      if (!pagesContainer) return false;
+      const pages = pagesContainer.querySelectorAll('.page');
+      if (!pages.length) return false;
+      for (const p of pages) {
+        if (p.classList.contains('page-rotated')) return false;
+      }
+      return true;
+    }
+
+    // Widest aspect ratio (naturalWidth/naturalHeight) among the currently
+    // rendered portrait pages, or null if none have a decoded image yet.
+    // Using the widest (closest to square) of them as the fit target means
+    // every narrower portrait page in the same document still ends up
+    // within the available width, not overflowing it.
+    function pmMaxPortraitAspect() {
+      if (!pagesContainer) return null;
+      let maxAspect = 0;
+      const imgs = pagesContainer.querySelectorAll('.page:not(.page-rotated) img');
+      for (const img of imgs) {
+        if (img.naturalWidth > 0 && img.naturalHeight > 0) {
+          const a = img.naturalWidth / img.naturalHeight;
+          if (a > maxAspect) maxAspect = a;
+        }
+      }
+      return maxAspect > 0 ? maxAspect : null;
+    }
+
+    // Real rendered preview width at `scale` for a page with the given
+    // aspect ratio - as opposed to cardRowWidth()'s outer SQUARE card width,
+    // which is orientation-agnostic by design (a mixed portrait/landscape
+    // document needs a uniform card size). Mirrors the exact --page-inner-h /
+    // --preview-inset math applyScale() sets on #pagesContainer, so a
+    // portrait-only document can be scaled until its actual page content -
+    // not the surrounding square card - reaches the available width.
+    function portraitPreviewWidth(scale, aspect) {
+      const scaleFactor = scale / 100;
+      const thumb = Math.round(154 * scaleFactor);
+      const numH = Math.min(thumb * 0.16, 32);
+      const innerH = thumb * 1.35 - numH;
+      const inset = computePreviewInset(scaleFactor, scale);
+      const previewLong = innerH - inset;
+      return previewLong * aspect;
+    }
+
     // Calculate target zoom for reading mode on desktop:
     // the maximum possible at which one page's square card still fits the
-    // available working-area width (same "fit the square block" logic as mobile).
+    // available working-area width (same "fit the square block" logic as
+    // mobile) - unless the whole document is portrait, in which case the
+    // page's own (narrower) rendered width is used instead, so "fit width"
+    // zooms further and actually fills the working area with visible page
+    // content rather than stopping once the surrounding square card fits.
     function computeReadModeDesktopScale() {
       const avail = getScrollAvailWidth();
       if (avail <= 0) return clampScale(1300);
+      const aspect = pmAllPagesPortrait() ? pmMaxPortraitAspect() : null;
       let best = 70;
       for (let s = 70; s <= 1300; s++) {
-        if (cardRowWidth(s, 1) <= avail) best = s;
+        const w = aspect ? portraitPreviewWidth(s, aspect) : cardRowWidth(s, 1);
+        if (w <= avail) best = s;
         else break;
       }
       return best;
     }
 
     // Calculate target zoom for reading mode on mobile:
-    // the maximum possible at which one page fits in width.
+    // the maximum possible at which one page fits in width (same
+    // portrait-aware exception as computeReadModeDesktopScale above).
     function computeReadModeMobileScale() {
       const avail = getScrollAvailWidth();
       if (avail <= 0) return clampScale(700);
+      const aspect = pmAllPagesPortrait() ? pmMaxPortraitAspect() : null;
       let best = 70;
       for (let s = 70; s <= 700; s++) {
-        if (cardRowWidth(s, 1) <= avail) best = s;
+        const w = aspect ? portraitPreviewWidth(s, aspect) : cardRowWidth(s, 1);
+        if (w <= avail) best = s;
         else break;
       }
       return best;
@@ -20869,6 +21051,7 @@
         const copied = await newDoc.copyPages(pdfDoc, remaining);
         copied.forEach(p => newDoc.addPage(p));
         if (typeof peMigrateEditorMeta === 'function') peMigrateEditorMeta(pdfDoc, newDoc, remaining);
+        if (typeof pmBookmarksMigrateOnReorder === 'function') pmBookmarksMigrateOnReorder(pdfDoc, newDoc, remaining, copied);
         pdfDoc = newDoc;
         invalidateHQ();   // pages rearranged - old cache of pdf.js document (magnifier, HQ) is invalid
 
@@ -20889,6 +21072,15 @@
         // indicator stayed dead until that finished.
         renumberVisiblePages();
         updateInfo();
+        // If the bookmarks popup is open while this happens, its displayed
+        // page numbers are a snapshot from whenever it was last opened -
+        // refresh it now instead of leaving it stale until the next
+        // close+reopen (the underlying links themselves are already correct
+        // either way, via pmBookmarksMigrateOnReorder above).
+        if (typeof pmBookmarksState !== 'undefined' && pmBookmarksState.open &&
+            typeof pmBookmarksLoadAndRender === 'function') {
+          pmBookmarksLoadAndRender();
+        }
       } finally {
         pageMoveAnimActive = false;
         pagesContainer.classList.remove('page-reordering');
@@ -28840,12 +29032,11 @@ function pmSearchToggleOpen() {
 // pmBookmarksState/pmBookmarksReqToken are declared much earlier, next to
 // pdfDoc - see the comment there for why.
 
-// Left-aligned to the same 20px "left border" used by the prev/next
-// single-column page-jump buttons and the mobile page-count badge, and
-// anchored below whichever header row is on screen (same reference logic
-// as pmPositionPageNavButtons) so it never covers "Страниц: N". If those
-// prev/next buttons are currently showing (high zoom, single column), sit
-// below them too instead of overlapping.
+// Pinned to the left edge and anchored below whichever header row is on
+// screen (sticky file bar once scrolled past the top, otherwise the normal
+// content-header) so it never covers "Страниц: N". The page-nav arrows
+// dodge the panel's own width instead of the panel dodging them - see
+// pmPositionPageNavButtons.
 function pmBookmarksPositionPanel() {
   const panel = document.getElementById('pmBookmarksPanel');
   if (!panel) return;
@@ -28860,14 +29051,40 @@ function pmBookmarksPositionPanel() {
     referenceBottom = (headerRect && headerRect.height > 0) ? headerRect.bottom
       : (typeof stickyBarTop === 'function' ? stickyBarTop() : 0);
   }
-  let top = referenceBottom + 12;
-  const nextNavBtn = document.getElementById('pmPageNextBtn');
-  if (nextNavBtn && nextNavBtn.classList.contains('visible')) {
-    const navRect = nextNavBtn.getBoundingClientRect();
-    if (navRect.height > 0) top = Math.max(top, navRect.bottom + 12);
-  }
+  const top = referenceBottom + 12;
   panel.style.top = Math.round(top) + 'px';
-  panel.style.left = '20px';
+  panel.style.left = '4px'; // pressed against the working area's left edge - keep in sync with pmBookmarksUpdateScrollGutter()'s own "4"
+  // The panel itself never moves for the page-nav arrows any more - they
+  // move out of its way instead (see pmPositionPageNavButtons).
+  if (typeof pmPositionPageNavButtons === 'function') pmPositionPageNavButtons();
+  pmBookmarksUpdateListMaxHeight();
+}
+
+// The list's own max-height is capped to whatever room is actually left
+// between it and the bottom of the working area (viewport), not a fixed
+// vh fraction - a panel that opens low (sticky bar, or a tall header) would
+// otherwise let the list overflow past the bottom edge, while a panel that
+// opens high left a fixed-vh cap unnecessarily short. Below that cap the
+// list already sizes itself to its own content naturally (no explicit
+// height, only max-height), so a short bookmark tree needs no extra logic
+// to "shrink" - it just never reaches the cap in the first place.
+// The bottom boundary is #scrollContainer's own CONTENT edge (clientHeight,
+// which excludes its horizontal scrollbar), not window.innerHeight - the
+// scrollbar sits inside scrollContainer's own border box, below its content
+// box, so capping against the full viewport let the list overlap it.
+function pmBookmarksUpdateListMaxHeight() {
+  const list = document.getElementById('pmBookmarksList');
+  const status = document.getElementById('pmBookmarksStatus');
+  if (!list) return;
+  const listTop = list.getBoundingClientRect().top;
+  const statusHeight = status ? status.getBoundingClientRect().height : 0;
+  const bottomMargin = 8;
+  const workAreaBottom = (typeof scrollContainer !== 'undefined' && scrollContainer)
+    ? scrollContainer.getBoundingClientRect().top + scrollContainer.clientHeight
+    : window.innerHeight;
+  const bottomLimit = Math.min(workAreaBottom, window.innerHeight);
+  const available = bottomLimit - listTop - statusHeight - bottomMargin;
+  list.style.maxHeight = Math.max(60, Math.round(available)) + 'px';
 }
 
 function pmBookmarksSetStatus(text) {
@@ -29064,7 +29281,7 @@ function pmBookmarksRenderList(flatItems) {
     row.dataset.path = it.path;
     row.dataset.id = String(node.id);
     row.dataset.level = String(it.level);
-    row.style.paddingLeft = (8 + it.level * 14) + 'px';
+    row.style.paddingLeft = (it.level * 14) + 'px';
     if (node.id === pmBookmarksState.selectedId) row.classList.add('pm-bookmarks-selected');
 
     if (it.hasChildren) {
@@ -29074,7 +29291,7 @@ function pmBookmarksRenderList(flatItems) {
       toggle.className = 'pm-bookmarks-toggle' + (collapsed ? ' collapsed' : '');
       toggle.dataset.path = it.path;
       toggle.setAttribute('aria-label', t(collapsed ? 'bookmarksExpandGroup' : 'bookmarksCollapseGroup'));
-      toggle.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
+      toggle.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
       toggle.addEventListener('click', (e) => {
         e.stopPropagation();
         pmBookmarksToggleGroup(it.path);
@@ -29122,6 +29339,7 @@ function pmBookmarksRenderList(flatItems) {
     if (typeof peBindPointerDown === 'function') {
       peBindPointerDown(btn, (e) => pmBookmarksRowPointerDown(e, node.id));
     }
+    btn.addEventListener('dblclick', () => pmBookmarksStartRename(node.id));
     row.appendChild(btn);
     frag.appendChild(row);
   });
@@ -29310,6 +29528,110 @@ function pmBookmarksSerializeToDoc() {
   pdfDoc.catalog.set(PDFName.of('Outlines'), rootRef);
   pmBookmarksState.writtenRefs = written;
   pmBookmarksMarkDirty();
+}
+
+// Page reorder rebuilds the document via PDFDocument.create() + copyPages()
+// (see the page-move commit code), which copies each page into a BRAND NEW
+// page object with its own new ref, and starts the new document from an
+// empty catalog - the old document's /Outlines is not carried over at all,
+// so without this a reorder would silently drop every bookmark instead of
+// just misaligning it. This clones the old /Outlines subtree directly
+// (title/flags/underline untouched) into the new document, rewriting only
+// each node's /Dest page reference via the SAME old-index->new-page
+// permutation the reorder itself just used - so a bookmark keeps pointing
+// at the actual page it was linked to, wherever that page ends up.
+// `copiedPages` is copyPages()'s own return value: copiedPages[newIdx] is
+// the new page object for whatever page was at orderedOldIndices[newIdx].
+// Works directly off the raw pdf-lib catalog, independent of whether the
+// bookmarks popup is even open (pmBookmarksState.tree is popup-only UI
+// state, irrelevant here).
+function pmBookmarksMigrateOnReorder(srcDoc, tgtDoc, orderedOldIndices, copiedPages) {
+  if (!srcDoc || !tgtDoc || typeof PDFLib === 'undefined') return;
+  if (!orderedOldIndices || !orderedOldIndices.length) return;
+  const PDFName = PDFLib.PDFName;
+  const srcCtx = srcDoc.context;
+  const outlinesRef = srcDoc.catalog.get(PDFName.of('Outlines'));
+  if (!outlinesRef) return;
+  const outlinesDict = srcCtx.lookup(outlinesRef);
+  if (!outlinesDict) return;
+
+  const refMap = new Map();
+  orderedOldIndices.forEach((oldIdx, newIdx) => {
+    try {
+      const oldRef = srcDoc.getPage(oldIdx).ref;
+      const newRef = copiedPages[newIdx].ref;
+      refMap.set(oldRef, newRef);
+    } catch (_) {}
+  });
+
+  const tgtCtx = tgtDoc.context;
+
+  // Clones one outline node (and its children/siblings chain) into tgtDoc;
+  // returns { ref, count } for the same reasons pmBookmarksSerializeToDoc's
+  // own buildNode() does - /Count needs each ancestor's total open
+  // descendant count, only known after recursing into the children.
+  function cloneChain(firstSrcRef, tgtParentRef) {
+    let srcRef = firstSrcRef;
+    let prevTgtRef = null, firstTgtRef = null, totalOpen = 0;
+    while (srcRef) {
+      const srcDict = srcCtx.lookup(srcRef);
+      if (!srcDict) break;
+      const tgtDict = tgtCtx.obj({});
+      const tgtRef = tgtCtx.register(tgtDict);
+
+      const title = srcDict.get(PDFName.of('Title'));
+      if (title) tgtDict.set(PDFName.of('Title'), title);
+      if (tgtParentRef) tgtDict.set(PDFName.of('Parent'), tgtParentRef);
+      const flags = srcDict.get(PDFName.of('F'));
+      if (flags) tgtDict.set(PDFName.of('F'), flags);
+      const pmu = srcDict.get(PDFName.of('PMU'));
+      if (pmu) tgtDict.set(PDFName.of('PMU'), pmu);
+
+      const destArr = srcDict.get(PDFName.of('Dest'));
+      if (destArr) {
+        const newPageRef = refMap.get(destArr.get(0));
+        // If the linked page no longer exists (deleted elsewhere, not just
+        // reordered), drop the link rather than pointing at the wrong page.
+        if (newPageRef) {
+          tgtDict.set(PDFName.of('Dest'), tgtCtx.obj([newPageRef, PDFName.of('XYZ'), null, null, null]));
+        }
+      }
+
+      const srcFirstChild = srcDict.get(PDFName.of('First'));
+      if (srcFirstChild) {
+        const built = cloneChain(srcFirstChild, tgtRef);
+        if (built.firstRef) {
+          tgtDict.set(PDFName.of('First'), built.firstRef);
+          tgtDict.set(PDFName.of('Last'), built.lastRef);
+          tgtDict.set(PDFName.of('Count'), PDFLib.PDFNumber.of(built.count));
+        }
+        totalOpen += 1 + built.count;
+      } else {
+        totalOpen += 1;
+      }
+
+      if (!firstTgtRef) firstTgtRef = tgtRef;
+      if (prevTgtRef) {
+        tgtCtx.lookup(prevTgtRef).set(PDFName.of('Next'), tgtRef);
+        tgtCtx.lookup(tgtRef).set(PDFName.of('Prev'), prevTgtRef);
+      }
+      prevTgtRef = tgtRef;
+
+      srcRef = srcDict.get(PDFName.of('Next')) || null;
+    }
+    return { firstRef: firstTgtRef, lastRef: prevTgtRef, count: totalOpen };
+  }
+
+  const srcFirst = outlinesDict.get(PDFName.of('First'));
+  if (!srcFirst) return;
+  const tgtRootDict = tgtCtx.obj({ Type: PDFName.of('Outlines') });
+  const tgtRootRef = tgtCtx.register(tgtRootDict);
+  const built = cloneChain(srcFirst, tgtRootRef);
+  if (!built.firstRef) return;
+  tgtRootDict.set(PDFName.of('First'), built.firstRef);
+  tgtRootDict.set(PDFName.of('Last'), built.lastRef);
+  tgtRootDict.set(PDFName.of('Count'), PDFLib.PDFNumber.of(built.count));
+  tgtDoc.catalog.set(PDFName.of('Outlines'), tgtRootRef);
 }
 
 function pmBookmarksMarkDirty() {
@@ -29534,6 +29856,30 @@ function pmBookmarksFinishDrag() {
   pmBookmarksSerializeToDoc();
 }
 
+// The popup is always pinned to the left edge (not repositionable) - while
+// it's open, the page-preview area needs a matching left gutter so pages
+// don't render underneath it, at any zoom level. left(4, matching the
+// panel's own left anchor in pmBookmarksPositionPanel) + panel width +
+// gap(6, matching .main's own left/right edge margin so the page sits as
+// close to the panel as it does to the working area's own edges),
+// applied to #scrollContainer via a CSS var. Width is fixed at 280px now,
+// but this still recomputes from the actual rendered width in case the
+// max-width:92vw safety net ever clamps it on a narrow viewport.
+function pmBookmarksUpdateScrollGutter() {
+  if (!pmBookmarksState.open) {
+    document.body.classList.remove('pm-bookmarks-active');
+    document.documentElement.style.removeProperty('--pm-bookmarks-scroll-padding');
+    if (typeof pmReapplyFitWidthIfActive === 'function') pmReapplyFitWidthIfActive();
+    return;
+  }
+  const panel = document.getElementById('pmBookmarksPanel');
+  if (!panel) return;
+  document.body.classList.add('pm-bookmarks-active');
+  const width = panel.getBoundingClientRect().width;
+  document.documentElement.style.setProperty('--pm-bookmarks-scroll-padding', Math.round(4 + width + 6) + 'px');
+  if (typeof pmReapplyFitWidthIfActive === 'function') pmReapplyFitWidthIfActive();
+}
+
 function pmBookmarksOpen() {
   if (!pdfDoc) return;
   const panel = document.getElementById('pmBookmarksPanel');
@@ -29541,21 +29887,12 @@ function pmBookmarksOpen() {
   pmBookmarksState.open = true;
   pmBookmarksState.selectedId = null;
   pmBookmarksState.editingId = null;
-  // Restore a remembered manual size/position, if any; otherwise fall back
-  // to the CSS default width and the computed default position.
-  panel.style.width = pmBookmarksState.width != null ? pmBookmarksState.width + 'px' : '';
   panel.classList.add('open');
   panel.setAttribute('aria-hidden', 'false');
   const btn = document.getElementById('bookmarksBtn');
   if (btn) { btn.classList.add('active-mode'); btn.setAttribute('aria-pressed', 'true'); }
-  if (pmBookmarksState.pos) {
-    // Re-clamp in case the viewport was resized while the popup was closed.
-    const c = pmBookmarksClampPos(pmBookmarksState.pos.left, pmBookmarksState.pos.top, panel);
-    panel.style.left = c.left + 'px';
-    panel.style.top = c.top + 'px';
-  } else {
-    pmBookmarksPositionPanel();
-  }
+  pmBookmarksPositionPanel();
+  pmBookmarksUpdateScrollGutter();
   pmBookmarksLoadAndRender();
 }
 
@@ -29563,10 +29900,14 @@ function pmBookmarksClose() {
   const panel = document.getElementById('pmBookmarksPanel');
   if (panel) { panel.classList.remove('open'); panel.setAttribute('aria-hidden', 'true'); }
   pmBookmarksState.open = false;
+  pmBookmarksUpdateScrollGutter();
   const btn = document.getElementById('bookmarksBtn');
   if (btn) { btn.classList.remove('active-mode'); btn.setAttribute('aria-pressed', 'false'); }
   pmBookmarksCtxClose();
   ++pmBookmarksReqToken; // cancel an in-flight extraction so it can't render into a closed popup
+  // The nav arrows dodge the panel's live width while it's open - move them
+  // back to their default left position now that it's gone.
+  if (typeof pmPositionPageNavButtons === 'function') pmPositionPageNavButtons();
 }
 
 function pmBookmarksToggle() {
@@ -29574,147 +29915,46 @@ function pmBookmarksToggle() {
   pmBookmarksOpen();
 }
 
-// Keeps the popup within the working area during a drag - it must not be
-// dragged up over the top menu/toolbar, and stays inside the viewport
-// otherwise (there's no sidebar to also avoid).
-function pmBookmarksClampPos(left, top, panel) {
-  const w = panel.offsetWidth, h = panel.offsetHeight;
-  const menu = document.querySelector('.top-menu');
-  const minTop = menu ? Math.max(8, menu.getBoundingClientRect().bottom) : 8;
-  const maxLeft = Math.max(8, window.innerWidth - w - 8);
-  const maxTop = Math.max(minTop, window.innerHeight - h - 8);
-  return { left: Math.min(Math.max(8, left), maxLeft), top: Math.min(Math.max(minTop, top), maxTop) };
-}
-
-// Resizing only ever grows/shrinks from the right edge (left edge is fixed),
-// so the ceiling is however much room is left between the panel's current
-// left edge and the right side of the viewport.
-function pmBookmarksClampWidth(width, panelLeft) {
-  const maxWidth = Math.max(220, window.innerWidth - panelLeft - 8);
-  return Math.min(Math.max(220, width), maxWidth);
-}
-
-// Resizing from the left edge keeps the RIGHT edge fixed instead - the
-// ceiling is however much room is left between the viewport's left margin
-// and that fixed right edge.
-function pmBookmarksClampLeftResize(width, rightEdge) {
-  const maxWidth = Math.max(220, rightEdge - 8);
-  return Math.min(Math.max(220, width), maxWidth);
-}
-
 (function pmBookmarksInit() {
   const panel = document.getElementById('pmBookmarksPanel');
   const closeBtn = document.getElementById('pmBookmarksCloseBtn');
-  const dragHandle = document.getElementById('pmBookmarksDragHandle');
-  const resizeHandle = document.getElementById('pmBookmarksResizeHandle');
-  const resizeHandleLeft = document.getElementById('pmBookmarksResizeHandleLeft');
   if (!panel || !closeBtn) return;
   closeBtn.addEventListener('click', pmBookmarksClose);
-  // Resizing the popup's width (left/right handles) changes which titles
-  // are truncated - re-check tooltips whenever the panel's own box changes
-  // size, regardless of what caused it.
+  // The popup's width is fixed and not user-resizable, but the CSS
+  // max-width:92vw safety net can still shrink it on a narrow viewport,
+  // which changes which titles are truncated, how much of a gutter the
+  // page previews need to stay clear of it, and where the page-nav arrows
+  // (which now dodge the panel's live width) should sit - re-check all of
+  // that whenever the panel's own box changes size, regardless of cause.
   if (typeof ResizeObserver === 'function') {
     new ResizeObserver(() => {
-      if (pmBookmarksState.open) pmBookmarksRefreshTitleTooltips();
+      if (!pmBookmarksState.open) return;
+      pmBookmarksRefreshTitleTooltips();
+      pmBookmarksUpdateScrollGutter();
+      if (typeof pmPositionPageNavButtons === 'function') pmPositionPageNavButtons();
     }).observe(panel);
   }
   window.addEventListener('resize', () => {
     if (!pmBookmarksState.open) return;
-    if (pmBookmarksState.pos) {
-      // Keep the remembered position but re-clamp it to the new viewport size.
-      const c = pmBookmarksClampPos(pmBookmarksState.pos.left, pmBookmarksState.pos.top, panel);
-      panel.style.left = c.left + 'px';
-      panel.style.top = c.top + 'px';
-    } else {
-      pmBookmarksPositionPanel();
-    }
+    pmBookmarksPositionPanel();
   });
-
-  if (dragHandle && typeof peBindPointerDown === 'function') {
-    let drag = null;
-    peBindPointerDown(dragHandle, (e) => {
-      const rect = panel.getBoundingClientRect();
-      drag = { startX: e.clientX, startY: e.clientY, startLeft: rect.left, startTop: rect.top };
-      panel.classList.add('pm-bookmarks-dragging');
-      if (typeof peCapturePointer === 'function') peCapturePointer(e, dragHandle);
-      e.preventDefault();
-    });
-    peBindPointerMoveUp((e) => {
-      if (!drag) return;
-      const c = pmBookmarksClampPos(drag.startLeft + (e.clientX - drag.startX), drag.startTop + (e.clientY - drag.startY), panel);
-      panel.style.left = c.left + 'px';
-      panel.style.top = c.top + 'px';
-      pmBookmarksState.pos = { left: c.left, top: c.top };
-    }, () => {
-      if (!drag) return;
-      drag = null;
-      panel.classList.remove('pm-bookmarks-dragging');
-    });
-  }
-
-  if (dragHandle) {
-    // Double-click the drag strip: back to the default position (width is
-    // untouched - resizing and moving are reset independently).
-    dragHandle.addEventListener('dblclick', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      pmBookmarksState.pos = null;
-      pmBookmarksPositionPanel();
-    });
-  }
-
-  if (resizeHandle && typeof peBindPointerDown === 'function') {
-    let resize = null;
-    peBindPointerDown(resizeHandle, (e) => {
-      const rect = panel.getBoundingClientRect();
-      resize = { startX: e.clientX, startWidth: rect.width, panelLeft: rect.left };
-      panel.classList.add('pm-bookmarks-resizing');
-      if (typeof peCapturePointer === 'function') peCapturePointer(e, resizeHandle);
-      e.preventDefault();
-      e.stopPropagation();
-    });
-    peBindPointerMoveUp((e) => {
-      if (!resize) return;
-      const w = pmBookmarksClampWidth(resize.startWidth + (e.clientX - resize.startX), resize.panelLeft);
-      panel.style.width = w + 'px';
-      pmBookmarksState.width = w;
-    }, () => {
-      if (!resize) return;
-      resize = null;
-      panel.classList.remove('pm-bookmarks-resizing');
-    });
-  }
-
-  if (resizeHandleLeft && typeof peBindPointerDown === 'function') {
-    let resizeLeft = null;
-    peBindPointerDown(resizeHandleLeft, (e) => {
-      const rect = panel.getBoundingClientRect();
-      resizeLeft = { startX: e.clientX, startWidth: rect.width, rightEdge: rect.left + rect.width };
-      panel.classList.add('pm-bookmarks-resizing');
-      if (typeof peCapturePointer === 'function') peCapturePointer(e, resizeHandleLeft);
-      e.preventDefault();
-      e.stopPropagation();
-    });
-    peBindPointerMoveUp((e) => {
-      if (!resizeLeft) return;
-      const dx = e.clientX - resizeLeft.startX;
-      const w = pmBookmarksClampLeftResize(resizeLeft.startWidth - dx, resizeLeft.rightEdge);
-      const left = resizeLeft.rightEdge - w;
-      panel.style.width = w + 'px';
-      panel.style.left = left + 'px';
-      pmBookmarksState.width = w;
-      pmBookmarksState.pos = { left, top: parseFloat(panel.style.top) || 0 };
-    }, () => {
-      if (!resizeLeft) return;
-      resizeLeft = null;
-      panel.classList.remove('pm-bookmarks-resizing');
-    });
-  }
 
   const addBtn = document.getElementById('pmBookmarksAddBtn');
   const deleteBtn = document.getElementById('pmBookmarksDeleteBtn');
   if (addBtn) addBtn.addEventListener('click', pmBookmarksAdd);
   if (deleteBtn) deleteBtn.addEventListener('click', pmBookmarksDeleteSelected);
+
+  const wrapBtn = document.getElementById('pmBookmarksWrapBtn');
+  if (wrapBtn) {
+    wrapBtn.addEventListener('click', () => {
+      pmBookmarksState.wrapNames = !pmBookmarksState.wrapNames;
+      wrapBtn.classList.toggle('active-mode', pmBookmarksState.wrapNames);
+      wrapBtn.setAttribute('aria-pressed', String(pmBookmarksState.wrapNames));
+      const listEl = document.getElementById('pmBookmarksList');
+      if (listEl) listEl.classList.toggle('pm-bookmarks-wrap-names', pmBookmarksState.wrapNames);
+      pmBookmarksRefreshTitleTooltips();
+    });
+  }
 
   const list = document.getElementById('pmBookmarksList');
   if (list) {
