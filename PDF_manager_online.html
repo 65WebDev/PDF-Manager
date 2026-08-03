@@ -778,6 +778,11 @@
       width: 19px;
       height: 19px;
     }
+    /*Export SVG icon size – kept close to the emoji glyph it replaced (21px)*/
+    #topMenu #exportBtn .btn-ico svg {
+      width: 21px;
+      height: 21px;
+    }
 
     .top-menu button, .top-menu label { 
       padding: 10px 16px; font-size: 16px; cursor: pointer; border: none; border-radius: 6px; 
@@ -985,16 +990,18 @@
       height: 42px;
       z-index: 129;
     }
-    /*Three popup buttons (e.g. "as images" + "compress" + "encrypt") - common
-       area, including the gaps between them: 3 * 42px + 2 * 6px gap = 138px.*/
+    /*Three popup buttons (e.g. "as images" + "compress" + "encrypt"), now
+       stacked vertically (see .img-save-btn--left/--mid/--right below) -
+       common hover area is 42px wide and spans all three top to bottom,
+       including the gaps between them: 3 * 42px + 2 * 6px gap = 138px tall.*/
     .top-menu .img-save-wrapper--multi:has(.img-save-btn.show)::after {
       content: '';
       position: absolute;
       top: calc(100% + 6px);
       left: 50%;
       transform: translateX(-50%);
-      width: 138px;
-      height: 42px;
+      width: 42px;
+      height: 138px;
       z-index: 129;
     }
     .top-menu .img-save-btn {
@@ -1045,14 +1052,17 @@
     .top-menu .img-save-btn--compress.pm-compress-unavailable:hover {
       background: #232d38;
     }
-    /*Three popup buttons side by side (e.g. "as images" + "compress" + "encrypt") -
-       offset the outer two 42px-wide buttons 48px either side of the wrapper's own
-       center (42px button + 6px gap), leaving the 6px gaps the --multi bridge above
-       already accounts for. The middle button (--mid) needs no offset - it keeps
-       the plain centered left:50% every .img-save-btn already has. A wrapper with a
-       single popup button (no --left/--right/--mid) also keeps that plain center.*/
-    .top-menu .img-save-btn--left { left: calc(50% - 48px); }
-    .top-menu .img-save-btn--right { left: calc(50% + 48px); }
+    /*Three popup buttons stacked top to bottom (e.g. "as images" + "compress"
+       + "encrypt"), matching the mode-switch widget's own vertical
+       .rl-slot-popup stacking instead of the previous side-by-side layout -
+       each step down is one 42px button + 6px gap = 48px. Class names are
+       kept as --left/--mid/--right (their DOM order, top to bottom) rather
+       than renamed, to avoid touching every call site that references them.
+       --left needs no offset - it keeps the plain top: calc(100% + 6px)
+       every .img-save-btn already has, same as a wrapper with just a single
+       popup button (no --left/--mid/--right at all).*/
+    .top-menu .img-save-btn--mid { top: calc(100% + 6px + 48px); }
+    .top-menu .img-save-btn--right { top: calc(100% + 6px + 96px); }
     /*Shown state - managed from JS*/
     .top-menu .img-save-btn.show {
       opacity: 1;
@@ -4295,6 +4305,37 @@
       justify-content: center;
       padding: 0;
       box-sizing: border-box;
+      /* Anchor for .pm-link-layer (internal-document-link hotzones), which
+         needs position:absolute at every zoom level and mode, not only the
+         narrower zoom-text-select-active state the text-selection layer
+         scopes its own position:relative rule to below. */
+      position: relative;
+    }
+
+    /* Internal-document-link hotzones - clickable rectangles over a page's
+       PDF Link annotations, active in select mode at any zoom (unlike the
+       text-selection layer, not gated to a high-zoom threshold). Hidden
+       during nav/read mode the same way the text layer is - setMode('nav')
+       and enterReadMode() both set body.nav-mode-active. */
+    .pm-link-layer {
+      position: absolute;
+      overflow: hidden;
+      pointer-events: none;
+      z-index: 3;
+    }
+    .pm-link-hotzone {
+      position: absolute;
+      pointer-events: auto;
+      cursor: pointer;
+      background: transparent;
+      transition: background-color 0.1s ease;
+    }
+    .pm-link-hotzone:hover {
+      background: rgba(37, 99, 235, 0.14);
+    }
+    body.nav-mode-active .pm-link-layer {
+      display: none !important;
+      pointer-events: none !important;
     }
 
     /*Preview sheet: keep the page's true aspect ratio (CropBox may not be A4
@@ -6423,7 +6464,7 @@
       <div class="right-actions">
         <button id="replaceBtn" class="compact-btn" onclick="replaceSelectedPages()" disabled title="Заменить выбранные страницы (Shift+C)" data-i18n-title="replaceSelectedPages"><span class="btn-ico"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></span><span class="btn-label" data-i18n="replace">Заменить</span></button>
         <div class="img-save-wrapper img-save-wrapper--multi">
-          <button id="exportBtn" class="compact-btn" onclick="exportSelectedPages()" disabled title="Экспорт выделенных страниц в один PDF (Shift+E)" data-i18n-title="exportSelectedPages"><span class="btn-ico">📥</span><span class="btn-label" data-i18n="export">Экспорт</span></button>
+          <button id="exportBtn" class="compact-btn" onclick="exportSelectedPages()" disabled title="Экспорт выделенных страниц в один PDF (Shift+E)" data-i18n-title="exportSelectedPages"><span class="btn-ico"><svg viewBox="0 0 114.06 122.88" width="21" height="21" fill="currentColor"><path fill-rule="evenodd" d="M66,67.42H104.7a9.39,9.39,0,0,1,9.36,9.37v36.72a9.39,9.39,0,0,1-9.36,9.37H66a9.39,9.39,0,0,1-9.37-9.37V76.79A9.4,9.4,0,0,1,66,67.42Zm-45.5.16a2.9,2.9,0,0,1-2.74-3,2.85,2.85,0,0,1,2.74-3H43.88a2.9,2.9,0,0,1,2.74,3,2.85,2.85,0,0,1-2.74,3ZM87.79,18.19h9.83a6.89,6.89,0,0,1,4.94,2.06,7,7,0,0,1,2.07,4.95V58.38h-6V25.2a1,1,0,0,0-.29-.72,1,1,0,0,0-.71-.28H87.76V58.38h-6V7a1,1,0,0,0-1-1H7a1,1,0,0,0-.71.29A1,1,0,0,0,6,7V90.36a1,1,0,0,0,1,1H45.85v6h-23v11.17a1,1,0,0,0,1,1h22v6h-22a7.05,7.05,0,0,1-7-7V97.37H7a7.05,7.05,0,0,1-7-7V7A6.93,6.93,0,0,1,2.06,2.06,7,7,0,0,1,7,0H80.78a6.91,6.91,0,0,1,5,2.06A7,7,0,0,1,87.79,7V18.19ZM20.43,28.65a2.9,2.9,0,0,1-2.74-3,2.84,2.84,0,0,1,2.74-3H67.26a2.9,2.9,0,0,1,2.74,3,2.85,2.85,0,0,1-2.74,3Zm0,19.46a2.89,2.89,0,0,1-2.74-3,2.84,2.84,0,0,1,2.74-3H67.26a2.89,2.89,0,0,1,2.74,3,2.84,2.84,0,0,1-2.74,3Zm60.89,62h8.1a2.92,2.92,0,0,0,2.91-2.91V97.94h5.14a2.4,2.4,0,0,0,2.06-1c1.08-1.61-.39-3.21-1.42-4.34-2.9-3.18-9.47-8.95-10.9-10.63a2.36,2.36,0,0,0-3.71,0C82,83.72,75.09,89.84,72.33,92.94c-1,1.07-2.14,2.54-1.14,4a2.4,2.4,0,0,0,2.06,1h5.16v9.26a2.92,2.92,0,0,0,2.91,2.91Z"/></svg></span><span class="btn-label" data-i18n="export">Экспорт</span></button>
           <button class="img-save-btn img-save-btn--images img-save-btn--left" onclick="exportSelectedPages(true)" title="Экспорт как изображения&#10;(экспорт выделенных страниц в PDF, где страницы сохранены как изображения)" aria-label="Экспорт как изображения" data-i18n-title="exportAsImagesHint" data-i18n-aria="exportAsImages"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></button>
           <button class="img-save-btn img-save-btn--compress img-save-btn--mid" onclick="if (!this.classList.contains('pm-compress-unavailable')) exportSelectedPages('compress')" title="Сжать PDF&#10;(уменьшить размер файла без потери качества)" aria-label="Сжать PDF" data-i18n-title="compressPdfHint" data-i18n-aria="compressPdf"><svg viewBox="0 0 48 48" width="20" height="20" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M8.92 8.714C8.495 7.39 9.476 6 10.867 6h26.266c1.391 0 2.372 1.39 1.947 2.714C37.9 12.4 36 19.09 36 24s1.9 11.6 3.08 15.286c.425 1.325-.556 2.714-1.947 2.714H10.867c-1.391 0-2.372-1.39-1.947-2.714C10.1 35.6 12 28.91 12 24S10.1 12.4 8.92 8.714ZM4 15c1.5 2 2 6 2 9s-.5 7-2 9"/><path d="M18 15.5h12M18 24h12m-12 8h4"/><path d="M44 15c-1.5 2-2 6-2 9s.5 6 2 9"/></svg></button>
           <button class="img-save-btn img-save-btn--encrypt img-save-btn--right" onclick="exportSelectedPages('encrypt')" title="Зашифровать файл паролем" aria-label="Зашифровать файл паролем" data-i18n-title="encryptFileTooltip" data-i18n-aria="encryptFileTooltip"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></button>
@@ -7295,6 +7336,13 @@
     let dragSourceDiv = null;
     let dragWasActive = false;
     let pageMoveAnimActive = false;
+    // A page-reorder's own showLoading() call would otherwise trip the same
+    // "no document / loading" auto-close updateUIState() applies to the
+    // bookmarks popup on real doc-close - set for the whole performPageMove
+    // duration so the popup stays open and visibly updates through the move,
+    // per the user's request, instead of vanishing and only showing the
+    // (by-then-correct) result on next open.
+    let pmBookmarksSuppressAutoClose = false;
     //Declared before the first updateUIState() - updateMobileQuickActions reads them on touch devices.
     let rubberActive = false;
     let rubberArmed = false;
@@ -8759,7 +8807,7 @@
       const bookmarksBtnEl = document.getElementById('bookmarksBtn');
       if (bookmarksBtnEl) {
         bookmarksBtnEl.disabled = readModeDisabled;
-        if (readModeDisabled && typeof pmBookmarksClose === 'function') pmBookmarksClose();
+        if (readModeDisabled && !pmBookmarksSuppressAutoClose && typeof pmBookmarksClose === 'function') pmBookmarksClose();
       }
       if (!isTouchDevice && selectModeBtn && navModeBtn) {
         selectModeBtn.disabled = modeBtnsDisabled;
@@ -11456,6 +11504,7 @@
       // visually glued to the new size in the same tick instead of letting
       // them lag until the debounced rebuild lands.
       if (typeof syncPreviewTextLayersLiveScale === 'function') syncPreviewTextLayersLiveScale();
+      if (typeof pmLinksSyncLayerPositions === 'function') pmLinksSyncLayerPositions();
 
       if (pinchActive) {
         return;
@@ -11690,6 +11739,7 @@
       hqUpgraded.clear();
       gridClearPdfPageImagesCache();
       if (typeof invalidatePageTextLayers === 'function') invalidatePageTextLayers();
+      if (typeof pmLinksClearPageCache === 'function') pmLinksClearPageCache();
     }
 
     // Raster/pdf.js cache only — text layer stays (glyphs unchanged). Used when
@@ -11700,6 +11750,7 @@
       hqPdfjsDoc = null;
       hqUpgraded.clear();
       gridClearPdfPageImagesCache();
+      if (typeof pmLinksClearPageCache === 'function') pmLinksClearPageCache();
     }
 
     //Lazy loading of cached pdf.js document from current pdfDoc.
@@ -11810,6 +11861,171 @@
         console.warn('gridLoadPdfPageImages', pageIdx, err);
       }
       return out;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // INTERNAL DOCUMENT LINKS (select mode, any zoom)
+    // Clickable hotzones over a page's PDF Link annotations, jumping to
+    // their target page - common in manuals/instructions authored with
+    // an embedded table of contents or cross-references.
+    // ═══════════════════════════════════════════════════════════════════
+    let pmLinksPageCache = new Map();
+
+    function pmLinksClearPageCache() {
+      pmLinksPageCache.clear();
+    }
+
+    // Resolves through real pdf.js (same as pmBookmarksBuildTree resolves
+    // outline destinations) so named destinations and /A GoTo actions work
+    // here too, not just a direct [pageRef, ...] /Dest array - hand-walking
+    // the raw annotation dict missed those forms for bookmarks (see
+    // pmBookmarksMigrateOnReorder's fix) and would miss them here the same
+    // way. Cached per hqPdfjsToken, same pattern as gridLoadPdfPageImages.
+    // Returns { aspectRatio, links: [{ pageIndex, left, top, width, height }] }
+    // with left/top/width/height as 0..1 fractions of the page's own
+    // (rotation-applied) box, ready to place as percentage-positioned
+    // hotzones inside the box getPageImgDisplayMetrics computes for it.
+    async function pmLinksLoadPage(pageIdx) {
+      const token = hqPdfjsToken;
+      const cacheKey = pageIdx + ':' + token;
+      if (pmLinksPageCache.has(cacheKey)) return pmLinksPageCache.get(cacheKey);
+      const promise = (async () => {
+        const empty = { aspectRatio: 0, links: [] };
+        try {
+          if (!pdfjsLib || typeof getHQPdfjsDoc !== 'function') return empty;
+          const doc = await getHQPdfjsDoc(token);
+          if (!doc || token !== hqPdfjsToken) return empty;
+          const page = await doc.getPage(pageIdx + 1);
+          if (token !== hqPdfjsToken) return empty;
+          const rot = typeof page.rotate === 'number' ? page.rotate : 0;
+          const viewport = page.getViewport({ scale: 1, rotation: rot });
+          const aspectRatio = viewport.height > 0 ? viewport.width / viewport.height : 0;
+          const annots = await page.getAnnotations({ intent: 'display' });
+          if (token !== hqPdfjsToken) return { aspectRatio, links: [] };
+          const links = [];
+          for (const a of annots) {
+            if (a.subtype !== 'Link' || a.dest == null) continue;
+            let dest = a.dest;
+            let targetPageIndex;
+            try {
+              if (typeof dest === 'string') dest = await doc.getDestination(dest);
+              if (token !== hqPdfjsToken) return { aspectRatio, links: [] };
+              if (!Array.isArray(dest) || dest[0] == null) continue;
+              targetPageIndex = await doc.getPageIndex(dest[0]);
+              if (token !== hqPdfjsToken) return { aspectRatio, links: [] };
+            } catch (_) { continue; }
+            if (targetPageIndex == null) continue;
+            // convertToViewportRectangle maps PDF-space corners into the
+            // rotated viewport pairwise (x1->x1', y1->y1', ...) WITHOUT
+            // re-sorting into min/max order - a flipped y-axis (and, under
+            // rotation, a swapped axis) means the "first" corner can end up
+            // larger than the "second" one, so min/max must be taken here.
+            const r = viewport.convertToViewportRectangle(a.rect);
+            const left = Math.min(r[0], r[2]) / viewport.width;
+            const top = Math.min(r[1], r[3]) / viewport.height;
+            const width = Math.abs(r[2] - r[0]) / viewport.width;
+            const height = Math.abs(r[3] - r[1]) / viewport.height;
+            if (!(width > 0) || !(height > 0)) continue;
+            links.push({ pageIndex: targetPageIndex, left, top, width, height });
+          }
+          return { aspectRatio, links };
+        } catch (err) {
+          console.warn('pmLinksLoadPage', pageIdx, err);
+          return empty;
+        }
+      })();
+      pmLinksPageCache.set(cacheKey, promise);
+      return promise;
+    }
+
+    // Builds (or removes, if the page has no links) the .pm-link-layer for
+    // one page card. Visibility/interactivity itself is CSS-only
+    // (body.nav-mode-active hides it) so this can run unconditionally
+    // whenever page content might have changed, without tracking mode
+    // switches - switching into select mode shows an already-built layer
+    // with no extra delay.
+    async function pmLinksBuildLayerForPage(pageDiv) {
+      const idx = parseInt(pageDiv.dataset.index, 10);
+      if (Number.isNaN(idx)) return;
+      const wrapper = pageDiv.querySelector('.img-wrapper');
+      const img = wrapper ? wrapper.querySelector('img') : null;
+      if (!wrapper || !img || !img.naturalWidth || !img.naturalHeight) return;
+      const token = hqPdfjsToken;
+      const { aspectRatio, links } = await pmLinksLoadPage(idx);
+      if (token !== hqPdfjsToken) return; // doc changed mid-flight
+      let layer = wrapper.querySelector('.pm-link-layer');
+      if (!links.length) {
+        if (layer) layer.remove();
+        return;
+      }
+      const metrics = getPageImgDisplayMetrics(img, wrapper, aspectRatio);
+      if (!metrics || !metrics.width || !metrics.height) return;
+      if (!layer) {
+        layer = document.createElement('div');
+        layer.className = 'pm-link-layer';
+        wrapper.appendChild(layer);
+      }
+      layer.dataset.trueAspectRatio = String(aspectRatio);
+      layer.style.left = metrics.left + 'px';
+      layer.style.top = metrics.top + 'px';
+      layer.style.width = metrics.width + 'px';
+      layer.style.height = metrics.height + 'px';
+      layer.innerHTML = '';
+      links.forEach((link) => {
+        const zone = document.createElement('div');
+        zone.className = 'pm-link-hotzone';
+        zone.style.left = (link.left * 100) + '%';
+        zone.style.top = (link.top * 100) + '%';
+        zone.style.width = (link.width * 100) + '%';
+        zone.style.height = (link.height * 100) + '%';
+        zone.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (typeof pmBookmarksGoTo === 'function') pmBookmarksGoTo(link.pageIndex);
+        });
+        layer.appendChild(zone);
+      });
+    }
+
+    let pmLinksBuildTimer = null;
+
+    // Debounced rebuild of every currently-loaded page's link layer - called
+    // from the same content-changed signals schedulePageTextLayerBuild()
+    // already reacts to (lazy image load, HQ upgrade, edits/undo/redo, ...).
+    function schedulePageLinkLayerBuild() {
+      clearTimeout(pmLinksBuildTimer);
+      pmLinksBuildTimer = setTimeout(runPageLinkLayerBuild, 140);
+    }
+
+    async function runPageLinkLayerBuild() {
+      if (!pdfDoc) return;
+      const token = hqPdfjsToken;
+      const pages = Array.from(pagesContainer.querySelectorAll('.page'));
+      for (const pageDiv of pages) {
+        if (token !== hqPdfjsToken) return;
+        if (pageDiv.classList.contains('page-lazy-pending')) continue; // image not loaded yet
+        await pmLinksBuildLayerForPage(pageDiv);
+      }
+    }
+
+    // Keeps each already-built link layer's pixel box glued to its page
+    // card's live size (scale-slider drag, fit-width, window resize) - the
+    // hotzones inside are percentage-positioned, so only the outer box needs
+    // updating here, unlike the text layer's per-glyph rebuild.
+    function pmLinksSyncLayerPositions() {
+      const layers = pagesContainer.querySelectorAll('.page .pm-link-layer');
+      if (!layers.length) return;
+      layers.forEach((layer) => {
+        const wrapper = layer.parentElement;
+        const img = wrapper ? wrapper.querySelector('img') : null;
+        if (!img || !img.naturalWidth || !img.naturalHeight) return;
+        const aspectRatio = parseFloat(layer.dataset.trueAspectRatio) || 0;
+        const metrics = getPageImgDisplayMetrics(img, wrapper, aspectRatio);
+        if (!metrics || !metrics.width || !metrics.height) return;
+        layer.style.left = metrics.left + 'px';
+        layer.style.top = metrics.top + 'px';
+        layer.style.width = metrics.width + 'px';
+        layer.style.height = metrics.height + 'px';
+      });
     }
 
     /** Client rect of the visible page bitmap in preview (object-fit: contain letterboxing). */
@@ -12144,6 +12360,7 @@
           img.src = canvas.toDataURL('image/jpeg', 0.92);
           hqUpgraded.add(idx);
           if (typeof schedulePageTextLayerBuild === 'function') schedulePageTextLayerBuild();
+          if (typeof schedulePageLinkLayerBuild === 'function') schedulePageLinkLayerBuild();
         } catch (e) {
           console.error('HQ render error for page', idx, e);
         }
@@ -12740,12 +12957,27 @@
         updateStickyFileBar();       // recalculation of the pinned file name strip
         updatePageNumTab();          // recalculation of curtains with page number (1 column)
         if (typeof pmUpdatePageNavButtons === 'function') pmUpdatePageNavButtons();
+        // The bookmarks popup anchors below the sticky bar / content-header,
+        // whichever is on screen (see pmBookmarksPositionPanel) - hiding the
+        // top menu or entering/exiting Read mode changes that reference
+        // point, but neither one calls the popup's own positioning directly,
+        // so without this it stayed stuck at its old top offset instead of
+        // rising into the space that opened up above it.
+        if (typeof pmBookmarksState !== 'undefined' && pmBookmarksState.open &&
+            typeof pmBookmarksPositionPanel === 'function') {
+          pmBookmarksPositionPanel();
+        }
         updateMobileQuickActions();
         updateMobilePagesRowOverflow();
         updateDesktopPagesAlignment();
         updateMobileScrollRail();
         if (typeof updateUndoRedoUI === 'function') updateUndoRedoUI();
         if (typeof updateZoomPanHandBadge === 'function') updateZoomPanHandBadge();
+        // A window resize can change how many page cards fit per row (and so
+        // each card's own box) without necessarily going through applyScale's
+        // own live-sync call - keep any built link hotzones glued to their
+        // page card the same way.
+        if (typeof pmLinksSyncLayerPositions === 'function') pmLinksSyncLayerPositions();
       });
     }
 
@@ -12994,6 +13226,9 @@
             try { updateZoomPanMode(); } catch (_) {}
           } else if (typeof schedulePageTextLayerBuild === 'function') {
             try { schedulePageTextLayerBuild(); } catch (_) {}
+          }
+          if (typeof schedulePageLinkLayerBuild === 'function') {
+            try { schedulePageLinkLayerBuild(); } catch (_) {}
           }
         }
       } else {
@@ -14852,6 +15087,99 @@
       qa.style.opacity = opacity.toFixed(3);
     });
 
+    // ─── Scroll position history (Alt+←/→) ─────────────────────────────
+    // Browser-back/forward-style history over the preview grid's scroll
+    // position. A spot is recorded after the user sits idle (no scroll) for
+    // 1.5s; Alt+Left/Right step through recorded spots. Deliberately tracks
+    // ONLY scrollTop - currentScale/zoom is never read or written here, so
+    // navigating never changes the current zoom level.
+    let pmPosHistory = [];
+    let pmPosHistoryIndex = -1;
+    let pmPosHistorySaveTimer = null;
+    let pmPosHistoryJumpGuardTimer = null;
+    let pmPosHistoryJumping = false;
+    const PM_POS_HISTORY_MAX = 50;
+
+    function pmPosHistoryReset() {
+      pmPosHistory = [];
+      pmPosHistoryIndex = -1;
+      clearTimeout(pmPosHistorySaveTimer);
+      clearTimeout(pmPosHistoryJumpGuardTimer);
+      pmPosHistoryJumping = false;
+    }
+
+    // Records the current scrollTop as a new history entry, unless it's
+    // within a few px of the entry already at the current index (avoids
+    // piling up near-duplicates from tiny idle-to-idle drift). Diverging
+    // from the middle of the stack (having gone back, then settling
+    // somewhere new) truncates the abandoned "forward" entries first -
+    // same branching behavior as browser session history.
+    function pmPosHistoryRecordCurrent() {
+      if (!pdfDoc || !scrollContainer) return;
+      const top = scrollContainer.scrollTop;
+      const lastVal = pmPosHistoryIndex >= 0 ? pmPosHistory[pmPosHistoryIndex] : null;
+      if (lastVal != null && Math.abs(lastVal - top) < 4) return;
+      if (pmPosHistoryIndex < pmPosHistory.length - 1) {
+        pmPosHistory = pmPosHistory.slice(0, pmPosHistoryIndex + 1);
+      }
+      pmPosHistory.push(top);
+      if (pmPosHistory.length > PM_POS_HISTORY_MAX) pmPosHistory.shift();
+      pmPosHistoryIndex = pmPosHistory.length - 1;
+    }
+
+    // Called from the scroll listener on every scroll tick - debounced so
+    // a position is only actually recorded once scrolling has been idle
+    // for 1.5s. Suppressed while pmPosHistoryJumping (a Alt+←/→ jump's own
+    // scroll shouldn't record a fresh/duplicate entry).
+    function pmPosHistoryScheduleSave() {
+      if (pmPosHistoryJumping || readModeActive) return;
+      clearTimeout(pmPosHistorySaveTimer);
+      pmPosHistorySaveTimer = setTimeout(pmPosHistoryRecordCurrent, 1500);
+    }
+
+    // For discrete "jump" navigations (bookmarks, internal document links) -
+    // unlike ordinary scrolling, these are a deliberate destination, not
+    // something reached by settling after moving around, so the 1.5s idle
+    // wait doesn't apply: the position is recorded right away.
+    function pmPosHistoryRecordJumpNow() {
+      if (!pdfDoc || !scrollContainer || readModeActive) return;
+      clearTimeout(pmPosHistorySaveTimer);
+      pmPosHistoryRecordCurrent();
+    }
+
+    // Moves to a recorded index and scrolls there - intentionally touches
+    // only scrollTop, never currentScale/applyScale, so the zoom level the
+    // user currently has set is left completely alone.
+    function pmPosHistoryJumpTo(index) {
+      if (!scrollContainer || index < 0 || index >= pmPosHistory.length) return;
+      pmPosHistoryIndex = index;
+      pmPosHistoryJumping = true;
+      clearTimeout(pmPosHistoryJumpGuardTimer);
+      scrollContainer.scrollTo({ top: pmPosHistory[index], behavior: 'auto' });
+      if (typeof syncScrollLockFromContainer === 'function') syncScrollLockFromContainer();
+      pmPosHistoryJumpGuardTimer = setTimeout(() => { pmPosHistoryJumping = false; }, 400);
+    }
+
+    function pmPosHistoryGoBack() {
+      if (!pdfDoc || !scrollContainer) return;
+      clearTimeout(pmPosHistorySaveTimer);
+      // Only capture live drift when sitting at the top of the stack - doing
+      // this from the middle would truncate (destroy) the forward entries
+      // still ahead just because of a few px of scroll-settle noise.
+      if (!pmPosHistoryJumping && pmPosHistoryIndex === pmPosHistory.length - 1) {
+        pmPosHistoryRecordCurrent();
+      }
+      if (pmPosHistoryIndex <= 0) return;
+      pmPosHistoryJumpTo(pmPosHistoryIndex - 1);
+    }
+
+    function pmPosHistoryGoForward() {
+      if (!pdfDoc || !scrollContainer) return;
+      clearTimeout(pmPosHistorySaveTimer);
+      if (pmPosHistoryIndex >= pmPosHistory.length - 1) return;
+      pmPosHistoryJumpTo(pmPosHistoryIndex + 1);
+    }
+
     // ─── Hot keys ───────────────────────── ──────────────────────────
     document.addEventListener('keydown', (e) => {
       // Search by document text (Ctrl+F) - completely replaces the standard browser search.
@@ -14954,6 +15282,20 @@
             pmCloseTabsFromKeyboard();
             return;
           }
+        }
+      }
+      // Scroll position history - preview mode only (not Read mode, which
+      // has its own paging UX), pure Alt with no other modifier.
+      if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && pdfDoc && !readModeActive) {
+        if (e.code === 'ArrowLeft') {
+          e.preventDefault();
+          pmPosHistoryGoBack();
+          return;
+        }
+        if (e.code === 'ArrowRight') {
+          e.preventDefault();
+          pmPosHistoryGoForward();
+          return;
         }
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -15589,6 +15931,7 @@
       if (!target || !target.closest) return false;
       if (target.closest('.quick-actions')) return true;
       if (target.closest('.selection-checkbox') && !multiSelectMode) return true;
+      if (target.closest('.pm-link-hotzone')) return true;
       return false;
     }
 
@@ -15819,6 +16162,7 @@
       selectedPages.clear();
       markedForDeletion.clear();
       lastSelectedIndex = null;
+      if (typeof pmPosHistoryReset === 'function') pmPosHistoryReset();
 
       // Resetting the zoom to standard when opening a new file
       currentScale = 100;
@@ -16548,6 +16892,7 @@
       lazyThumbLoaded.add(idx);
 
       if (typeof schedulePageTextLayerBuild === 'function') schedulePageTextLayerBuild();
+      if (typeof schedulePageLinkLayerBuild === 'function') schedulePageLinkLayerBuild();
 
       if (isLoading && !isLoadingCancelled && lazyThumbNumPages) {
         showLoading(t('loadingPagesProgress', { cur: lazyThumbLoaded.size, total: lazyThumbNumPages }));
@@ -18481,6 +18826,8 @@
 
     scrollContainer.addEventListener('scroll', () => {
       if (typeof schedulePageTextLayerBuild === 'function') schedulePageTextLayerBuild();
+      if (typeof schedulePageLinkLayerBuild === 'function') schedulePageLinkLayerBuild();
+      if (typeof pmPosHistoryScheduleSave === 'function') pmPosHistoryScheduleSave();
     }, { passive: true });
 
     if (isTouchDevice) {
@@ -21008,83 +21355,94 @@
         return;
       }
 
-      scrollPosition = scrollContainer.scrollTop;
-      showLoading("Перемещение страницы...");
-
-      const numPages = pdfDoc.getPageCount();
-      let indicesToMove = (selectedPages.size > 0 && selectedPages.has(draggedIndex)) 
-        ? Array.from(selectedPages).sort((a,b) => a - b) 
-        : [draggedIndex];
-      indicesToMove = indicesToMove.filter(i => i >= 0 && i < numPages);
-      if (!indicesToMove.length) {
-        hideLoading();
-        return;
-      }
-
-      const remaining = [];
-      for (let i = 0; i < numPages; i++) {
-        if (!indicesToMove.includes(i)) remaining.push(i);
-      }
-
-      let targetPos = remaining.indexOf(targetIndex);
-      if (targetPos === -1) targetPos = remaining.length;
-
-      let insertPos = insertBeforeTarget ? targetPos : targetPos + 1;
-
-      if (insertBeforeTarget && targetPos === 0) {
-        insertPos = 0;
-      }
-
-      const originalPos = remaining.indexOf(draggedIndex);
-      if (originalPos !== -1 && (insertPos === originalPos || insertPos === originalPos + 1)) {
-        hideLoading();
-        return;
-      }
-
-      remaining.splice(insertPos, 0, ...indicesToMove);
-      setDocumentDirty(true);
-      pageMoveAnimActive = true;
-      clearInsertIndicators();
-
+      // Covers the whole operation (including the showLoading() call right
+      // below, which would otherwise trip the bookmarks popup's own
+      // "no document / loading" auto-close) so the popup - if open - stays
+      // open and visibly updates through the move instead of vanishing.
+      pmBookmarksSuppressAutoClose = true;
       try {
-        const newDoc = await PDFLib.PDFDocument.create();
-        const copied = await newDoc.copyPages(pdfDoc, remaining);
-        copied.forEach(p => newDoc.addPage(p));
-        if (typeof peMigrateEditorMeta === 'function') peMigrateEditorMeta(pdfDoc, newDoc, remaining);
-        if (typeof pmBookmarksMigrateOnReorder === 'function') pmBookmarksMigrateOnReorder(pdfDoc, newDoc, remaining, copied);
-        pdfDoc = newDoc;
-        invalidateHQ();   // pages rearranged - old cache of pdf.js document (magnifier, HQ) is invalid
+        scrollPosition = scrollContainer.scrollTop;
+        showLoading("Перемещение страницы...");
 
-        const newMarked = new Set();
-        remaining.forEach((oldIdx, newIdx) => {
-          if (markedForDeletion.has(oldIdx)) newMarked.add(newIdx);
-        });
-        markedForDeletion = newMarked;
+        const numPages = pdfDoc.getPageCount();
+        let indicesToMove = (selectedPages.size > 0 && selectedPages.has(draggedIndex))
+          ? Array.from(selectedPages).sort((a,b) => a - b)
+          : [draggedIndex];
+        indicesToMove = indicesToMove.filter(i => i >= 0 && i < numPages);
+        if (!indicesToMove.length) {
+          hideLoading();
+          return;
+        }
 
-        selectedPages.clear();
+        const remaining = [];
+        for (let i = 0; i < numPages; i++) {
+          if (!indicesToMove.includes(i)) remaining.push(i);
+        }
 
-        hideLoading();
-        await reorderPageElementsAnimated(remaining, indicesToMove);
+        let targetPos = remaining.indexOf(targetIndex);
+        if (targetPos === -1) targetPos = remaining.length;
 
-        // DOM cards (and their images) already moved with reorderPageElements.
-        // Do NOT await a full refreshThumbnails() here: it re-saves/re-renders every
-        // page and used to keep pageMoveAnimActive stuck, so the blue insert
-        // indicator stayed dead until that finished.
-        renumberVisiblePages();
-        updateInfo();
-        // If the bookmarks popup is open while this happens, its displayed
-        // page numbers are a snapshot from whenever it was last opened -
-        // refresh it now instead of leaving it stale until the next
-        // close+reopen (the underlying links themselves are already correct
-        // either way, via pmBookmarksMigrateOnReorder above).
-        if (typeof pmBookmarksState !== 'undefined' && pmBookmarksState.open &&
-            typeof pmBookmarksLoadAndRender === 'function') {
-          pmBookmarksLoadAndRender();
+        let insertPos = insertBeforeTarget ? targetPos : targetPos + 1;
+
+        if (insertBeforeTarget && targetPos === 0) {
+          insertPos = 0;
+        }
+
+        const originalPos = remaining.indexOf(draggedIndex);
+        if (originalPos !== -1 && (insertPos === originalPos || insertPos === originalPos + 1)) {
+          hideLoading();
+          return;
+        }
+
+        remaining.splice(insertPos, 0, ...indicesToMove);
+        setDocumentDirty(true);
+        pageMoveAnimActive = true;
+        clearInsertIndicators();
+
+        try {
+          const newDoc = await PDFLib.PDFDocument.create();
+          const copied = await newDoc.copyPages(pdfDoc, remaining);
+          copied.forEach(p => newDoc.addPage(p));
+          if (typeof peMigrateEditorMeta === 'function') peMigrateEditorMeta(pdfDoc, newDoc, remaining);
+          if (typeof pmBookmarksMigrateOnReorder === 'function') await pmBookmarksMigrateOnReorder(pdfDoc, newDoc, remaining, copied);
+          pdfDoc = newDoc;
+          invalidateHQ();   // pages rearranged - old cache of pdf.js document (magnifier, HQ) is invalid
+
+          const newMarked = new Set();
+          remaining.forEach((oldIdx, newIdx) => {
+            if (markedForDeletion.has(oldIdx)) newMarked.add(newIdx);
+          });
+          markedForDeletion = newMarked;
+
+          selectedPages.clear();
+
+          hideLoading();
+          await reorderPageElementsAnimated(remaining, indicesToMove);
+
+          // DOM cards (and their images) already moved with reorderPageElements.
+          // Do NOT await a full refreshThumbnails() here: it re-saves/re-renders every
+          // page and used to keep pageMoveAnimActive stuck, so the blue insert
+          // indicator stayed dead until that finished.
+          renumberVisiblePages();
+          updateInfo();
+          // If the bookmarks popup is open while this happens, its displayed
+          // page numbers are a snapshot from whenever it was last opened -
+          // refresh it now instead of leaving it stale until the next
+          // close+reopen (the underlying links themselves are already correct
+          // either way, via pmBookmarksMigrateOnReorder above). The popup no
+          // longer auto-closes during the move (see pmBookmarksSuppressAutoClose
+          // above), so this is what actually keeps it live for the user.
+          if (typeof pmBookmarksState !== 'undefined' && pmBookmarksState.open &&
+              typeof pmBookmarksLoadAndRender === 'function') {
+            pmBookmarksLoadAndRender();
+          }
+        } finally {
+          pageMoveAnimActive = false;
+          pagesContainer.classList.remove('page-reordering');
+          clearInsertIndicators();
         }
       } finally {
-        pageMoveAnimActive = false;
-        pagesContainer.classList.remove('page-reordering');
-        clearInsertIndicators();
+        pmBookmarksSuppressAutoClose = false;
       }
     }
 
@@ -29097,7 +29455,14 @@ function pmBookmarksSetStatus(text) {
 function pmBookmarksGoTo(pageIndex) {
   if (pageIndex == null) return;
   const pageEl = pagesContainer.querySelector('.page[data-index="' + pageIndex + '"]');
-  if (pageEl && typeof scrollPageIntoViewTop === 'function') scrollPageIntoViewTop(pageEl);
+  if (!pageEl || typeof scrollPageIntoViewTop !== 'function') return;
+  // Bookmark/internal-link jumps are a discrete destination, not something
+  // reached by settling after scrolling - record both where this jump
+  // started from and where it landed immediately, rather than waiting on
+  // the ordinary 1.5s idle debounce (see pmPosHistoryRecordJumpNow).
+  if (typeof pmPosHistoryRecordJumpNow === 'function') pmPosHistoryRecordJumpNow();
+  scrollPageIntoViewTop(pageEl);
+  if (typeof pmPosHistoryRecordJumpNow === 'function') pmPosHistoryRecordJumpNow();
 }
 
 // The page currently centered in the work area - used to link a new/updated
@@ -29433,6 +29798,10 @@ async function pmBookmarksBuildTree() {
 async function pmBookmarksLoadAndRender() {
   const token = ++pmBookmarksReqToken;
   const list = document.getElementById('pmBookmarksList');
+  // Preserved across the rebuild below - otherwise a mid-session refresh
+  // (e.g. after a page reorder while the popup is left open) snaps the
+  // list back to the top instead of staying where the user was looking.
+  const savedScrollTop = list ? list.scrollTop : 0;
   if (list) list.innerHTML = '';
   pmBookmarksSetStatus(t('bookmarksLoading'));
   let tree = [];
@@ -29440,6 +29809,7 @@ async function pmBookmarksLoadAndRender() {
   if (token !== pmBookmarksReqToken) return; // popup closed/reopened, or doc changed, meanwhile
   pmBookmarksState.tree = tree;
   pmBookmarksRenderList(pmBookmarksFlatten(tree));
+  if (list) list.scrollTop = savedScrollTop;
 }
 
 // Rebuilds the ENTIRE /Outlines dictionary tree from pmBookmarksState.tree
@@ -29535,17 +29905,24 @@ function pmBookmarksSerializeToDoc() {
 // page object with its own new ref, and starts the new document from an
 // empty catalog - the old document's /Outlines is not carried over at all,
 // so without this a reorder would silently drop every bookmark instead of
-// just misaligning it. This clones the old /Outlines subtree directly
-// (title/flags/underline untouched) into the new document, rewriting only
-// each node's /Dest page reference via the SAME old-index->new-page
-// permutation the reorder itself just used - so a bookmark keeps pointing
-// at the actual page it was linked to, wherever that page ends up.
-// `copiedPages` is copyPages()'s own return value: copiedPages[newIdx] is
-// the new page object for whatever page was at orderedOldIndices[newIdx].
-// Works directly off the raw pdf-lib catalog, independent of whether the
-// bookmarks popup is even open (pmBookmarksState.tree is popup-only UI
-// state, irrelevant here).
-function pmBookmarksMigrateOnReorder(srcDoc, tgtDoc, orderedOldIndices, copiedPages) {
+// just misaligning it.
+//
+// Destinations get resolved through REAL pdf.js (same call pmBookmarksBuildTree
+// uses to parse the outline on open) rather than hand-walking the raw /Dest
+// key, because plenty of real-world PDFs (this is how most manuals authored
+// in FrameMaker/Acrobat/Distiller do it) don't store a direct [pageRef, ...]
+// array on every node - they use a named destination (/Dest as a string,
+// resolved through the document's name tree) or a /A GoTo action instead of
+// /Dest outright. The old hand-walking version only understood the direct
+// array form, so for any document built the other way, EVERY node silently
+// lost its target the moment a single page moved, not just the one for the
+// moved page - that's the bug this rewrite fixes. pdf.js's outline parser
+// already normalizes all three forms into a plain `dest`, so reusing it here
+// gets the exact same resolution power pmBookmarksBuildTree already has.
+// `copiedPages` is copyPages()'s own return value, unused for ref-mapping
+// now (pdf.js resolves against page INDEX, not ref identity) but kept as a
+// parameter for call-site symmetry with performPageMove.
+async function pmBookmarksMigrateOnReorder(srcDoc, tgtDoc, orderedOldIndices, copiedPages) {
   if (!srcDoc || !tgtDoc || typeof PDFLib === 'undefined') return;
   if (!orderedOldIndices || !orderedOldIndices.length) return;
   const PDFName = PDFLib.PDFName;
@@ -29555,83 +29932,139 @@ function pmBookmarksMigrateOnReorder(srcDoc, tgtDoc, orderedOldIndices, copiedPa
   const outlinesDict = srcCtx.lookup(outlinesRef);
   if (!outlinesDict) return;
 
-  const refMap = new Map();
-  orderedOldIndices.forEach((oldIdx, newIdx) => {
-    try {
-      const oldRef = srcDoc.getPage(oldIdx).ref;
-      const newRef = copiedPages[newIdx].ref;
-      refMap.set(oldRef, newRef);
-    } catch (_) {}
-  });
-
-  const tgtCtx = tgtDoc.context;
-
-  // Clones one outline node (and its children/siblings chain) into tgtDoc;
-  // returns { ref, count } for the same reasons pmBookmarksSerializeToDoc's
-  // own buildNode() does - /Count needs each ancestor's total open
-  // descendant count, only known after recursing into the children.
-  function cloneChain(firstSrcRef, tgtParentRef) {
-    let srcRef = firstSrcRef;
-    let prevTgtRef = null, firstTgtRef = null, totalOpen = 0;
-    while (srcRef) {
-      const srcDict = srcCtx.lookup(srcRef);
-      if (!srcDict) break;
-      const tgtDict = tgtCtx.obj({});
-      const tgtRef = tgtCtx.register(tgtDict);
-
-      const title = srcDict.get(PDFName.of('Title'));
-      if (title) tgtDict.set(PDFName.of('Title'), title);
-      if (tgtParentRef) tgtDict.set(PDFName.of('Parent'), tgtParentRef);
-      const flags = srcDict.get(PDFName.of('F'));
-      if (flags) tgtDict.set(PDFName.of('F'), flags);
-      const pmu = srcDict.get(PDFName.of('PMU'));
-      if (pmu) tgtDict.set(PDFName.of('PMU'), pmu);
-
-      const destArr = srcDict.get(PDFName.of('Dest'));
-      if (destArr) {
-        const newPageRef = refMap.get(destArr.get(0));
-        // If the linked page no longer exists (deleted elsewhere, not just
-        // reordered), drop the link rather than pointing at the wrong page.
-        if (newPageRef) {
-          tgtDict.set(PDFName.of('Dest'), tgtCtx.obj([newPageRef, PDFName.of('XYZ'), null, null, null]));
-        }
+  let resolvedTree;
+  try {
+    const bytes = await srcDoc.save();
+    const jsDoc = await pdfjsLib.getDocument({ data: bytes }).promise;
+    const rawOutline = await jsDoc.getOutline();
+    if (!rawOutline || !rawOutline.length) return;
+    async function walk(nodes) {
+      const out = [];
+      for (const node of nodes) {
+        let pageIndex = null;
+        try {
+          let dest = node.dest;
+          if (typeof dest === 'string') dest = await jsDoc.getDestination(dest);
+          if (Array.isArray(dest) && dest[0] != null) {
+            pageIndex = await jsDoc.getPageIndex(dest[0]);
+          }
+        } catch (_) {}
+        const children = (node.items && node.items.length) ? await walk(node.items) : [];
+        out.push({ title: node.title || '', pageIndex, bold: !!node.bold, italic: !!node.italic, underline: false, children });
       }
-
-      const srcFirstChild = srcDict.get(PDFName.of('First'));
-      if (srcFirstChild) {
-        const built = cloneChain(srcFirstChild, tgtRef);
-        if (built.firstRef) {
-          tgtDict.set(PDFName.of('First'), built.firstRef);
-          tgtDict.set(PDFName.of('Last'), built.lastRef);
-          tgtDict.set(PDFName.of('Count'), PDFLib.PDFNumber.of(built.count));
-        }
-        totalOpen += 1 + built.count;
-      } else {
-        totalOpen += 1;
-      }
-
-      if (!firstTgtRef) firstTgtRef = tgtRef;
-      if (prevTgtRef) {
-        tgtCtx.lookup(prevTgtRef).set(PDFName.of('Next'), tgtRef);
-        tgtCtx.lookup(tgtRef).set(PDFName.of('Prev'), prevTgtRef);
-      }
-      prevTgtRef = tgtRef;
-
-      srcRef = srcDict.get(PDFName.of('Next')) || null;
+      return out;
     }
-    return { firstRef: firstTgtRef, lastRef: prevTgtRef, count: totalOpen };
+    resolvedTree = await walk(rawOutline);
+  } catch (_) {
+    return;
+  }
+  if (!resolvedTree.length) return;
+
+  // /PMU (underline) is our own custom key, invisible to pdf.js's outline
+  // parser - read it straight off the raw chain, in the same First/Next+
+  // recurse-into-children order pdf.js walks in, so it zips back onto
+  // resolvedTree correctly (identical pairing trick pmBookmarksBuildTree
+  // already relies on via pmBookmarksReadUnderlineFlags).
+  const underlineFlags = [];
+  (function walkChain(ref) {
+    while (ref) {
+      const dict = srcCtx.lookup(ref);
+      if (!dict) break;
+      const u = dict.get(PDFName.of('PMU'));
+      underlineFlags.push(!!(u && typeof u.asBoolean === 'function' && u.asBoolean()));
+      const first = dict.get(PDFName.of('First'));
+      if (first) walkChain(first);
+      ref = dict.get(PDFName.of('Next'));
+    }
+  })(outlinesDict.get(PDFName.of('First')));
+  let uIdx = 0;
+  (function stampUnderline(nodes) {
+    nodes.forEach((n) => {
+      n.underline = !!underlineFlags[uIdx]; uIdx++;
+      if (n.children.length) stampUnderline(n.children);
+    });
+  })(resolvedTree);
+
+  // Remap each node's page through the SAME old-index->new-index permutation
+  // the reorder itself just used, so a bookmark keeps pointing at the actual
+  // page it was linked to, wherever that page ends up.
+  const oldToNew = new Map();
+  orderedOldIndices.forEach((oldIdx, newIdx) => oldToNew.set(oldIdx, newIdx));
+  (function remap(nodes) {
+    nodes.forEach((n) => {
+      n.pageIndex = (n.pageIndex != null && oldToNew.has(n.pageIndex)) ? oldToNew.get(n.pageIndex) : null;
+      if (n.children.length) remap(n.children);
+    });
+  })(resolvedTree);
+
+  // Write the resolved+remapped tree into tgtDoc - same builder shape as
+  // pmBookmarksSerializeToDoc's own buildNode(), just against an explicit
+  // doc/context instead of the global pdfDoc (which hasn't been swapped to
+  // tgtDoc yet at this point in the reorder). The refs registered here are
+  // handed back so the caller can seed pmBookmarksState.writtenRefs - without
+  // that, the next in-popup edit wouldn't know these nodes exist and would
+  // leave them as orphaned, undeleted objects in the saved PDF.
+  const PDFString = PDFLib.PDFString;
+  const PDFNumber = PDFLib.PDFNumber;
+  const PDFBool = PDFLib.PDFBool;
+  const tgtCtx = tgtDoc.context;
+  const written = [];
+  function buildNode(node, parentRef) {
+    const dict = tgtCtx.obj({});
+    const ref = tgtCtx.register(dict);
+    written.push(ref);
+    dict.set(PDFName.of('Title'), PDFString.of(node.title || ''));
+    dict.set(PDFName.of('Parent'), parentRef);
+    let flags = 0;
+    if (node.italic) flags |= 1;
+    if (node.bold) flags |= 2;
+    if (flags) dict.set(PDFName.of('F'), PDFNumber.of(flags));
+    if (node.underline) dict.set(PDFName.of('PMU'), PDFBool.True);
+    if (node.pageIndex != null) {
+      try {
+        const page = tgtDoc.getPage(node.pageIndex);
+        dict.set(PDFName.of('Dest'), tgtCtx.obj([page.ref, PDFName.of('XYZ'), null, null, null]));
+      } catch (_) {}
+    }
+    let openCount = 0;
+    if (node.children.length) {
+      let prevRef = null, firstRef = null;
+      node.children.forEach((child, i) => {
+        const built = buildNode(child, ref);
+        openCount += 1 + built.count;
+        if (i === 0) firstRef = built.ref;
+        if (prevRef) {
+          tgtCtx.lookup(prevRef).set(PDFName.of('Next'), built.ref);
+          tgtCtx.lookup(built.ref).set(PDFName.of('Prev'), prevRef);
+        }
+        prevRef = built.ref;
+      });
+      dict.set(PDFName.of('First'), firstRef);
+      dict.set(PDFName.of('Last'), prevRef);
+      dict.set(PDFName.of('Count'), PDFNumber.of(openCount));
+    }
+    return { ref, count: openCount };
   }
 
-  const srcFirst = outlinesDict.get(PDFName.of('First'));
-  if (!srcFirst) return;
   const tgtRootDict = tgtCtx.obj({ Type: PDFName.of('Outlines') });
   const tgtRootRef = tgtCtx.register(tgtRootDict);
-  const built = cloneChain(srcFirst, tgtRootRef);
-  if (!built.firstRef) return;
-  tgtRootDict.set(PDFName.of('First'), built.firstRef);
-  tgtRootDict.set(PDFName.of('Last'), built.lastRef);
-  tgtRootDict.set(PDFName.of('Count'), PDFLib.PDFNumber.of(built.count));
+  written.push(tgtRootRef);
+  let prevRef = null, firstRef = null, totalOpen = 0;
+  resolvedTree.forEach((node, i) => {
+    const built = buildNode(node, tgtRootRef);
+    totalOpen += 1 + built.count;
+    if (i === 0) firstRef = built.ref;
+    if (prevRef) {
+      tgtCtx.lookup(prevRef).set(PDFName.of('Next'), built.ref);
+      tgtCtx.lookup(built.ref).set(PDFName.of('Prev'), prevRef);
+    }
+    prevRef = built.ref;
+  });
+  tgtRootDict.set(PDFName.of('First'), firstRef);
+  tgtRootDict.set(PDFName.of('Last'), prevRef);
+  tgtRootDict.set(PDFName.of('Count'), PDFNumber.of(totalOpen));
   tgtDoc.catalog.set(PDFName.of('Outlines'), tgtRootRef);
+  if (typeof pmBookmarksState !== 'undefined') pmBookmarksState.writtenRefs = written;
 }
 
 function pmBookmarksMarkDirty() {
@@ -33249,6 +33682,7 @@ function editSelectedPage() {
         pj = null;
       }
       if (typeof schedulePageTextLayerBuild === 'function') schedulePageTextLayerBuild();
+      if (typeof schedulePageLinkLayerBuild === 'function') schedulePageLinkLayerBuild();
     } catch (e) {
       console.error('preview markup refresh failed', e);
     } finally {
