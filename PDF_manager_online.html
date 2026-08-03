@@ -1195,24 +1195,10 @@
       overflow-wrap: break-word;
     }
     /*Bookmarks popup - reuses .pm-search-panel's box/positioning, own content layout*/
-    /*overflow:hidden clips the resize strip's hover highlight to the
-      panel's own rounded corners instead of it poking out as a sharp
-      rectangle past the curve. width:auto - shrink-wraps to content
-      (up to max-width) rather than defaulting to a fixed wide box; a
-      manual resize (see .pm-bookmarks-resize-handle) overrides this
-      with an explicit inline width, remembered across reopens.*/
-    .pm-bookmarks-panel { width: fit-content; min-width: 220px; max-width: 92vw; padding: 0; gap: 0; overflow: hidden; }
-    .pm-bookmarks-panel.pm-bookmarks-resizing { user-select: none; }
-    /*Grab strip along the right edge to resize the popup's width - the left
-      edge is not draggable, the popup always stays pinned to the left.*/
-    .pm-bookmarks-resize-handle {
-      position: absolute; top: 0; right: 0; bottom: 0; width: 8px;
-      cursor: ew-resize;
-    }
-    .pm-bookmarks-resize-handle:hover,
-    .pm-bookmarks-panel.pm-bookmarks-resizing .pm-bookmarks-resize-handle {
-      background: rgba(52, 152, 219, 0.4);
-    }
+    /*overflow:hidden clips descendants to the panel's own rounded corners.
+      Fixed width - not resizable (max-width is just a safety net so it
+      can't overflow a very narrow viewport, not a "user can resize" cue).*/
+    .pm-bookmarks-panel { width: 350px; max-width: 92vw; padding: 0; gap: 0; overflow: hidden; }
     .pm-bookmarks-header {
       justify-content: space-between;
       padding: 6px 6px 6px 8px;
@@ -1220,9 +1206,18 @@
       border-bottom: 1px solid rgba(255,255,255,0.15);
     }
     .pm-bookmarks-title { font-weight: 600; font-size: 13px; }
-    /*Add/Delete sit right next to each other, separate from the
-      title↔actions↔close space-between distribution.*/
-    .pm-bookmarks-header-actions { display: flex; gap: 2px; }
+    /*Add/Delete/(separator)/Wrap-toggle sit right next to each other,
+      separate from the title↔actions↔close space-between distribution.*/
+    .pm-bookmarks-header-actions { display: flex; align-items: center; gap: 2px; }
+    .pm-bookmarks-header-sep { width: 1px; height: 18px; margin: 0 2px; background: rgba(255,255,255,0.25); flex-shrink: 0; }
+    #pmBookmarksWrapBtn.active-mode { background: #3498db; }
+    /*Wrap toggle: long titles break onto extra lines instead of being
+      ellipsis-truncated (see #pmBookmarksWrapBtn) - this only needs to
+      touch the title span, everything else in the row already tolerates
+      a taller row via align-items on .pm-bookmarks-row/.pm-bookmarks-item.*/
+    .pm-bookmarks-list.pm-bookmarks-wrap-names .pm-bookmarks-item-title {
+      white-space: normal; overflow: visible; text-overflow: clip;
+    }
     .pm-bookmarks-list {
       position: relative; /*containing block for #pmBookmarksInsertLine*/
       display: flex; flex-direction: column; gap: 1px;
@@ -6986,7 +6981,7 @@
   </div>
 
   <!--Bookmarks / table of contents popup (opened from #bookmarksBtn) - always
-       pinned to the left edge, not repositionable, only resizable (right edge).-->
+       pinned to the left edge, fixed width, not repositionable or resizable.-->
   <div id="pmBookmarksPanel" class="pm-search-panel pm-bookmarks-panel" role="dialog" aria-hidden="true" aria-label="Закладки">
     <div class="pm-search-row pm-bookmarks-header">
       <span class="pm-bookmarks-title" data-i18n="bookmarksPanel">Закладки</span>
@@ -6997,6 +6992,10 @@
         <button id="pmBookmarksDeleteBtn" type="button" class="pm-search-icon-btn" title="Удалить закладку" aria-label="Удалить закладку" data-i18n-title="bookmarksDeleteBtn" data-i18n-aria="bookmarksDeleteBtn" disabled>
           <svg class="pm-search-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
         </button>
+        <span class="pm-bookmarks-header-sep" aria-hidden="true"></span>
+        <button id="pmBookmarksWrapBtn" type="button" class="pm-search-icon-btn" title="Перенос длинных имён закладок на следующую строку" aria-label="Перенос длинных имён закладок на следующую строку" aria-pressed="false" data-i18n-title="bookmarksWrapNames" data-i18n-aria="bookmarksWrapNames">
+          <svg class="pm-search-icon" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M3 18h13a3 3 0 0 0 0-6"/><polyline points="13 15 10 18 13 21"/></svg>
+        </button>
       </div>
       <button id="pmBookmarksCloseBtn" type="button" title="Закрыть (Esc)" aria-label="Закрыть закладки" data-i18n-title="searchClose" data-i18n-aria="bookmarksClose">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
@@ -7006,7 +7005,6 @@
       <div id="pmBookmarksInsertLine" class="pm-bookmarks-insert-line" aria-hidden="true"></div>
     </div>
     <div id="pmBookmarksStatus" class="pm-bookmarks-status"></div>
-    <div class="pm-bookmarks-resize-handle" id="pmBookmarksResizeHandle" title="Изменить ширину" aria-hidden="true"></div>
   </div>
 
   <!--Right-click context menu for a bookmark row-->
@@ -7213,16 +7211,16 @@
     // Same reasoning as pmCompressEstimateCache above: updateUIState() calls
     // pmBookmarksClose() (hoisted function, safe) which reaches into this
     // state object - it must exist before that first synchronous call too.
-    // The popup is always pinned to the left edge (not repositionable) -
-    // width holds a manually resized width (null = not customized yet, use
-    // the CSS shrink-to-fit default), remembered for as long as the page
-    // stays loaded, restored on every subsequent open. tree/nextId are the
-    // live editable bookmark tree and its id counter (re-parsed fresh on
-    // every open); selectedId/editingId/ctxTargetId/rowDrag are transient UI
-    // state reset on close; writtenRefs tracks the pdf-lib objects we last
+    // The popup is always pinned to the left edge at a fixed width - not
+    // repositionable or resizable. wrapNames/collapsedPaths are display
+    // preferences that persist for as long as the page stays loaded
+    // (not reset on close). tree/nextId are the live editable bookmark
+    // tree and its id counter (re-parsed fresh on every open);
+    // selectedId/editingId/ctxTargetId/rowDrag are transient UI state
+    // reset on close; writtenRefs tracks the pdf-lib objects we last
     // wrote, so they can be cleaned up before a rebuild.
     let pmBookmarksState = {
-      open: false, width: null, collapsedPaths: new Set(),
+      open: false, wrapNames: false, collapsedPaths: new Set(),
       tree: [], nextId: 1, selectedId: null, editingId: null,
       ctxTargetId: null, rowDrag: null, suppressNextClick: false,
       writtenRefs: [],
@@ -7554,6 +7552,7 @@
         bookmarksEmpty: 'В документе нет закладок', bookmarksLoading: 'Загрузка…',
         bookmarksExpandGroup: 'Развернуть группу', bookmarksCollapseGroup: 'Свернуть группу',
         bookmarksAdd: 'Добавить закладку', bookmarksDeleteBtn: 'Удалить закладку',
+        bookmarksWrapNames: 'Перенос длинных имён закладок на следующую строку',
         bookmarksGoTo: 'Перейти к закладке', bookmarksRename: 'Переименовать', bookmarksDelete: 'Удалить',
         bookmarksLinkCurrent: 'Связать с текущим местом',
         bookmarksConfirmLink: 'Связать эту закладку с текущим положением в документе?',
@@ -7830,6 +7829,7 @@
         bookmarksEmpty: 'No bookmarks in this document', bookmarksLoading: 'Loading…',
         bookmarksExpandGroup: 'Expand group', bookmarksCollapseGroup: 'Collapse group',
         bookmarksAdd: 'Add bookmark', bookmarksDeleteBtn: 'Delete bookmark',
+        bookmarksWrapNames: 'Wrap long bookmark names to the next line',
         bookmarksGoTo: 'Go to bookmark', bookmarksRename: 'Rename', bookmarksDelete: 'Delete',
         bookmarksLinkCurrent: 'Link to current position',
         bookmarksConfirmLink: 'Link this bookmark to the current position in the document?',
@@ -28860,7 +28860,7 @@ function pmBookmarksPositionPanel() {
     if (navRect.height > 0) top = Math.max(top, navRect.bottom + 12);
   }
   panel.style.top = Math.round(top) + 'px';
-  panel.style.left = '20px';
+  panel.style.left = '4px'; // pressed against the working area's left edge - keep in sync with pmBookmarksUpdateScrollGutter()'s own "4"
 }
 
 function pmBookmarksSetStatus(text) {
@@ -29115,6 +29115,7 @@ function pmBookmarksRenderList(flatItems) {
     if (typeof peBindPointerDown === 'function') {
       peBindPointerDown(btn, (e) => pmBookmarksRowPointerDown(e, node.id));
     }
+    btn.addEventListener('dblclick', () => pmBookmarksStartRename(node.id));
     row.appendChild(btn);
     frag.appendChild(row);
   });
@@ -29529,9 +29530,11 @@ function pmBookmarksFinishDrag() {
 
 // The popup is always pinned to the left edge (not repositionable) - while
 // it's open, the page-preview area needs a matching left gutter so pages
-// don't render underneath it, at any zoom level. left(20) + panel width +
-// gap(20), applied to #scrollContainer via a CSS var so it's cheap to keep
-// in sync as the panel is resized.
+// don't render underneath it, at any zoom level. left(4, matching the
+// panel's own left anchor in pmBookmarksPositionPanel) + panel width +
+// gap(20), applied to #scrollContainer via a CSS var. Width is fixed at
+// 350px now, but this still recomputes from the actual rendered width in
+// case the max-width:92vw safety net ever clamps it on a narrow viewport.
 function pmBookmarksUpdateScrollGutter() {
   if (!pmBookmarksState.open) {
     document.body.classList.remove('pm-bookmarks-active');
@@ -29542,7 +29545,7 @@ function pmBookmarksUpdateScrollGutter() {
   if (!panel) return;
   document.body.classList.add('pm-bookmarks-active');
   const width = panel.getBoundingClientRect().width;
-  document.documentElement.style.setProperty('--pm-bookmarks-scroll-padding', Math.round(20 + width + 20) + 'px');
+  document.documentElement.style.setProperty('--pm-bookmarks-scroll-padding', Math.round(4 + width + 20) + 'px');
 }
 
 function pmBookmarksOpen() {
@@ -29552,10 +29555,6 @@ function pmBookmarksOpen() {
   pmBookmarksState.open = true;
   pmBookmarksState.selectedId = null;
   pmBookmarksState.editingId = null;
-  // Restore a remembered manual width, if any; otherwise the CSS default
-  // (shrink-wrapped to content). Position is never remembered - always
-  // pinned to the left edge, computed fresh below.
-  panel.style.width = pmBookmarksState.width != null ? pmBookmarksState.width + 'px' : '';
   panel.classList.add('open');
   panel.setAttribute('aria-hidden', 'false');
   const btn = document.getElementById('bookmarksBtn');
@@ -29581,23 +29580,16 @@ function pmBookmarksToggle() {
   pmBookmarksOpen();
 }
 
-// Resizing only ever grows/shrinks from the right edge - the popup is
-// always pinned to the left edge, so the ceiling is however much room is
-// left between that fixed left edge and the right side of the viewport.
-function pmBookmarksClampWidth(width, panelLeft) {
-  const maxWidth = Math.max(220, window.innerWidth - panelLeft - 8);
-  return Math.min(Math.max(220, width), maxWidth);
-}
-
 (function pmBookmarksInit() {
   const panel = document.getElementById('pmBookmarksPanel');
   const closeBtn = document.getElementById('pmBookmarksCloseBtn');
-  const resizeHandle = document.getElementById('pmBookmarksResizeHandle');
   if (!panel || !closeBtn) return;
   closeBtn.addEventListener('click', pmBookmarksClose);
-  // Resizing the popup's width changes which titles are truncated AND how
-  // much of a gutter the page previews need to stay clear of it - re-check
-  // both whenever the panel's own box changes size, regardless of cause.
+  // The popup's width is fixed and not user-resizable, but the CSS
+  // max-width:92vw safety net can still shrink it on a narrow viewport,
+  // which changes which titles are truncated AND how much of a gutter the
+  // page previews need to stay clear of it - re-check both whenever the
+  // panel's own box changes size, regardless of cause.
   if (typeof ResizeObserver === 'function') {
     new ResizeObserver(() => {
       if (!pmBookmarksState.open) return;
@@ -29610,33 +29602,22 @@ function pmBookmarksClampWidth(width, panelLeft) {
     pmBookmarksPositionPanel();
   });
 
-  if (resizeHandle && typeof peBindPointerDown === 'function') {
-    let resize = null;
-    peBindPointerDown(resizeHandle, (e) => {
-      const rect = panel.getBoundingClientRect();
-      resize = { startX: e.clientX, startWidth: rect.width, panelLeft: rect.left };
-      panel.classList.add('pm-bookmarks-resizing');
-      if (typeof peCapturePointer === 'function') peCapturePointer(e, resizeHandle);
-      e.preventDefault();
-      e.stopPropagation();
-    });
-    peBindPointerMoveUp((e) => {
-      if (!resize) return;
-      const w = pmBookmarksClampWidth(resize.startWidth + (e.clientX - resize.startX), resize.panelLeft);
-      panel.style.width = w + 'px';
-      pmBookmarksState.width = w;
-      pmBookmarksUpdateScrollGutter();
-    }, () => {
-      if (!resize) return;
-      resize = null;
-      panel.classList.remove('pm-bookmarks-resizing');
-    });
-  }
-
   const addBtn = document.getElementById('pmBookmarksAddBtn');
   const deleteBtn = document.getElementById('pmBookmarksDeleteBtn');
   if (addBtn) addBtn.addEventListener('click', pmBookmarksAdd);
   if (deleteBtn) deleteBtn.addEventListener('click', pmBookmarksDeleteSelected);
+
+  const wrapBtn = document.getElementById('pmBookmarksWrapBtn');
+  if (wrapBtn) {
+    wrapBtn.addEventListener('click', () => {
+      pmBookmarksState.wrapNames = !pmBookmarksState.wrapNames;
+      wrapBtn.classList.toggle('active-mode', pmBookmarksState.wrapNames);
+      wrapBtn.setAttribute('aria-pressed', String(pmBookmarksState.wrapNames));
+      const listEl = document.getElementById('pmBookmarksList');
+      if (listEl) listEl.classList.toggle('pm-bookmarks-wrap-names', pmBookmarksState.wrapNames);
+      pmBookmarksRefreshTitleTooltips();
+    });
+  }
 
   const list = document.getElementById('pmBookmarksList');
   if (list) {
