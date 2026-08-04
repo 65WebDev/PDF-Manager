@@ -10971,7 +10971,37 @@
     // rather than each mode's own scroll/pan/swipe handler having to
     // individually refuse to move sideways.
     function pmUpdateVerticalOnlyScrollLock() {
-      document.body.classList.toggle('pm-vertical-scroll-lock', pmShouldLockHorizontalScroll());
+      const shouldLock = pmShouldLockHorizontalScroll();
+      const wasLocked = document.body.classList.contains('pm-vertical-scroll-lock');
+      document.body.classList.toggle('pm-vertical-scroll-lock', shouldLock);
+      // Engaging the lock via the fit-width BUTTON always arrives through
+      // pmRecenterFitWidthPage(), which explicitly re-centers scrollLeft to
+      // 0 first - but engaging it by organically wheel/slider-zooming onto
+      // the magnet does not go through that path at all. Without this, a
+      // scrollLeft the user had panned to (e.g. viewing the right edge of
+      // a wide illustration before zooming back down into the magnet)
+      // simply freezes in place the instant overflow-x:hidden takes over,
+      // since nothing can un-shift it once horizontal scrolling is locked
+      // out - the content visibly jumps off-center instead of being
+      // centered like the fit-width-button path always was.
+      if (shouldLock && !wasLocked && scrollContainer) {
+        // updatePagesRowOverflow()'s hysteresis is biased to STAY
+        // "overflowing" once already there (avoids flicker during a
+        // gradual zoom drag) - having just zoomed in past the magnet
+        // before coming back down onto it, pages-row-overflow can still
+        // be stuck true, keeping flex-start alignment active instead of
+        // centered. scrollLeft=0 alone then just shows the flex-start-
+        // positioned (wider-than-avail) card's own left portion, which
+        // leaves its actual (centered-within-the-card) image content
+        // visibly shifted right of true center - same root cause as the
+        // high-zoom "Fit page width" bug fixed in pmRecenterFitWidthPage,
+        // fixed the same way: force a fresh, hysteresis-free re-check.
+        if (typeof updatePagesRowOverflow === 'function' && pagesContainer) {
+          pagesContainer.classList.remove('pages-row-overflow');
+          updatePagesRowOverflow();
+        }
+        scrollContainer.scrollLeft = 0;
+      }
     }
 
     // True when: (1) the page grid is a single column (only one card fits
