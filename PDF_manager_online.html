@@ -10870,7 +10870,9 @@
       const zoomAnchor = !isTouchDevice
         ? beginOrContinueZoomSession(opts.clientX, opts.clientY)
         : null;
+      const prevScale = currentScale;
       currentScale = clampScale(sliderToScale(value));
+      if (typeof pmSnapToZoomMagnet === 'function') currentScale = pmSnapToZoomMagnet(prevScale, currentScale);
       scaleUserLocked = true;
       autoScaleEnabled = false;
       if (scaleSlider) scaleSlider.value = Math.max(0, Math.min(200, scaleToSlider(currentScale)));
@@ -16558,6 +16560,21 @@
       return maxAspect > 0 ? maxAspect : null;
     }
 
+    // --preview-long itself (see the .page img / .page.page-rotated img CSS
+    // rule pair): the long-axis budget shared by both orientations. A
+    // portrait page's rendered WIDTH is narrower than this (constrained by
+    // HEIGHT instead, see portraitPreviewWidth below) - a LANDSCAPE page's
+    // rendered WIDTH is capped to exactly this value (`width: var(--preview-
+    // long)` in the .page-rotated rule), independent of its aspect ratio.
+    function pmPreviewLongPx(scale) {
+      const scaleFactor = scale / 100;
+      const thumb = Math.round(154 * scaleFactor);
+      const numH = Math.min(thumb * 0.16, 32);
+      const innerH = thumb * 1.35 - numH;
+      const inset = computePreviewInset(scaleFactor, scale);
+      return innerH - inset;
+    }
+
     // Real rendered preview width at `scale` for a page with the given
     // aspect ratio - as opposed to cardRowWidth()'s outer SQUARE card width,
     // which is orientation-agnostic by design (a mixed portrait/landscape
@@ -16566,13 +16583,7 @@
     // portrait-only document can be scaled until its actual page content -
     // not the surrounding square card - reaches the available width.
     function portraitPreviewWidth(scale, aspect) {
-      const scaleFactor = scale / 100;
-      const thumb = Math.round(154 * scaleFactor);
-      const numH = Math.min(thumb * 0.16, 32);
-      const innerH = thumb * 1.35 - numH;
-      const inset = computePreviewInset(scaleFactor, scale);
-      const previewLong = innerH - inset;
-      return previewLong * aspect;
+      return pmPreviewLongPx(scale) * aspect;
     }
 
     // Calculate target zoom for reading mode on desktop:
@@ -16591,6 +16602,86 @@
         const w = aspect ? portraitPreviewWidth(s, aspect) : cardRowWidth(s, 1);
         if (w <= avail) best = s;
         else break;
+      }
+      return best;
+    }
+
+    // Largest integer scale in [70, 1300] at which widthFn(scale) still
+    // fits avail - same brute-force scan computeReadModeDesktopScale uses,
+    // generalized so the desktop zoom-magnet targets below can reuse it for
+    // all three width formulas without duplicating the loop three times.
+    function pmMaxScaleFittingWidth(widthFn, avail) {
+      let best = null;
+      for (let s = 70; s <= 1300; s++) {
+        if (widthFn(s) <= avail) best = s;
+        else break;
+      }
+      return best;
+    }
+
+    // Desktop wheel/slider zoom "magnets" - the three single-column scale
+    // levels where zooming past them changes what perfectly fills the
+    // available width: (1) the outer SQUARE preview card itself (always
+    // relevant - the same boundary isPagesSingleColumnLayout() tracks),
+    // (2) a landscape page's actual content width (narrower than the
+    // square - see pmPreviewLongPx), only present when the document has at
+    // least one landscape/rotated page, and (3) a portrait page's actual
+    // content width (portraitPreviewWidth), only present when it has at
+    // least one portrait page. A mixed-orientation document can have all
+    // three as genuinely distinct scales at once.
+    function pmZoomMagnetTargets() {
+      // Desktop-only (wheel/slider) - mobile zoom goes through the separate
+      // pinch fill-snap mechanism (applyMobilePinchScaleSnap et al.), which
+      // already handles its own column-count-based snapping.
+      if (isTouchDevice || !pdfDoc || !pagesContainer) return [];
+      const avail = getScrollAvailWidth();
+      if (avail <= 0) return [];
+      const targets = [pmMaxScaleFittingWidth((s) => cardRowWidth(s, 1), avail)];
+      const hasLandscape = !!pagesContainer.querySelector('.page.page-rotated img');
+      if (hasLandscape) {
+        targets.push(pmMaxScaleFittingWidth((s) => pmPreviewLongPx(s), avail));
+      }
+      const portraitAspect = pmMaxPortraitAspect();
+      if (portraitAspect && pagesContainer.querySelector('.page:not(.page-rotated) img')) {
+        targets.push(pmMaxScaleFittingWidth((s) => portraitPreviewWidth(s, portraitAspect), avail));
+      }
+      return targets.filter((t) => t != null);
+    }
+
+    // Fallback tolerance (scale percentage points) for when a step lands
+    // CLOSE to a magnet without actually crossing it (e.g. a slider drag
+    // released just short of it). Symmetric either direction.
+    const ZOOM_MAGNET_TOLERANCE = 4;
+
+    // A single wheel notch's slider-to-scale gearing gets steep at high
+    // zoom (one notch can jump 100+ scale points there), so checking
+    // "landed within ZOOM_MAGNET_TOLERANCE of a target" alone would almost
+    // never fire from wheel input - a coarse notch routinely leaps clean
+    // over the whole tolerance window in one step. Checking whether the
+    // target lies BETWEEN the step's start and end scale instead catches
+    // every crossing regardless of step size, which is what actually makes
+    // "from both sides" true for wheel zooming, not just fine slider drags.
+    // If a step crosses more than one target, snaps to whichever is
+    // nearest the step's START - the first one the user would feel while
+    // sweeping through.
+    function pmSnapToZoomMagnet(prevScale, candidateScale) {
+      const targets = pmZoomMagnetTargets();
+      if (!targets.length) return candidateScale;
+      const lo = Math.min(prevScale, candidateScale);
+      const hi = Math.max(prevScale, candidateScale);
+      // Excludes t === prevScale: right after a snap, prevScale IS the
+      // target, so it would sit at one end of every subsequent [lo, hi]
+      // range and trivially "re-cross" itself forever, permanently
+      // sticking the magnet instead of releasing on the next step away.
+      const crossed = targets.filter((t) => t !== prevScale && t >= lo && t <= hi);
+      if (crossed.length) {
+        crossed.sort((a, b) => Math.abs(a - prevScale) - Math.abs(b - prevScale));
+        return crossed[0];
+      }
+      let best = candidateScale, bestDist = ZOOM_MAGNET_TOLERANCE + 1;
+      for (const t of targets) {
+        const d = Math.abs(candidateScale - t);
+        if (d <= ZOOM_MAGNET_TOLERANCE && d < bestDist) { best = t; bestDist = d; }
       }
       return best;
     }
