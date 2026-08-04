@@ -7560,6 +7560,22 @@
     let readModeMenuManuallyShown = false; //flag: user manually opened menu in reading mode
     let _readModeToggleGuard = false;    //prevents recursion when restoring menus
     let currentScale = 100;
+    // True when currentScale was last set by changeScale() snapping onto
+    // the VERTICAL (portrait-content-width) zoom magnet specifically (as
+    // opposed to the square-card or landscape-content-width magnets, or no
+    // magnet at all). pmReapplyFitWidthIfActive() uses this to keep the
+    // scale matching that magnet's own live target as the available width
+    // changes (bookmarks gutter, window resize, ...) - the same "live, not
+    // one-shot" philosophy the fit-width BUTTON already has for an
+    // all-portrait document, just reachable via organic wheel/slider zoom
+    // too. Managed only by changeScale() itself; left alone by other
+    // scale-changing paths (setScaleProgrammatic, applyFitWidthScaleValue,
+    // pinch) since those already have their own, separate handling.
+    // Declared here (very early, well before updateUIState()'s initial
+    // synchronous call - which reaches pmReapplyFitWidthIfActive() through
+    // pmBookmarksClose()) rather than alongside the other zoom-session state
+    // further down, to avoid a temporal-dead-zone reference on first load.
+    let pmVerticalMagnetActive = false;
     let mobileMinScale = 35;      //mobile: bottom border pinch zoom-out (4/8 columns)
     let autoScaleEnabled = true;  //auto-zoom out for 3 pages in a row
     let scaleUserLocked = false;  //the user manually touched the slider → auto off
@@ -10781,7 +10797,6 @@
     // declarations).
     let pmLastRawSliderValue = null;
     let pmLastRawSliderValueScale = null;
-
     function resetZoomSession() {
       clearTimeout(zoomSessionResetTimer);
       zoomSessionResetTimer = null;
@@ -10891,6 +10906,7 @@
       // call to tell whether its own raw-value history is still trustworthy
       // (see that function's own comment).
       pmLastRawSliderValueScale = currentScale;
+      pmVerticalMagnetActive = snapped != null && typeof pmVerticalMagnetTarget === 'function' && snapped === pmVerticalMagnetTarget();
       scaleUserLocked = true;
       autoScaleEnabled = false;
       if (scaleSlider) scaleSlider.value = Math.max(0, Math.min(200, scaleToSlider(currentScale)));
@@ -10990,7 +11006,6 @@
     // individually refuse to move sideways.
     function pmUpdateVerticalOnlyScrollLock() {
       const shouldLock = pmShouldLockHorizontalScroll();
-      const wasLocked = document.body.classList.contains('pm-vertical-scroll-lock');
       document.body.classList.toggle('pm-vertical-scroll-lock', shouldLock);
       // Engaging the lock via the fit-width BUTTON always arrives through
       // pmRecenterFitWidthPage(), which explicitly re-centers scrollLeft to
@@ -11002,7 +11017,22 @@
       // since nothing can un-shift it once horizontal scrolling is locked
       // out - the content visibly jumps off-center instead of being
       // centered like the fit-width-button path always was.
-      if (shouldLock && !wasLocked && scrollContainer) {
+      //
+      // Runs whenever shouldLock is true, not just on the off->on
+      // transition - the available width can also change WHILE the lock
+      // stays continuously engaged (most commonly: the bookmarks panel
+      // opening/closing/resizing adds or removes padding-left on
+      // #scrollContainer, which shifts already-rendered content right
+      // independent of scrollLeft; pmReapplyFitWidthIfActive() calls this
+      // function on every such gutter change for exactly this reason). A
+      // transition-only recenter would miss that case entirely, since the
+      // lock's own on/off state never flips across it. When truly nothing
+      // needs correcting (the overwhelmingly common case - every ordinary
+      // scroll tick while locked also reaches here), updatePagesRowOverflow()
+      // itself no-ops on its own hadOverflow-matches-overflow check, and
+      // reassigning scrollLeft = 0 when it's already 0 does not fire a
+      // 'scroll' event - so this stays cheap.
+      if (shouldLock && scrollContainer) {
         // updatePagesRowOverflow()'s hysteresis is biased to STAY
         // "overflowing" once already there (avoids flicker during a
         // gradual zoom drag) - having just zoomed in past the magnet
@@ -11039,14 +11069,27 @@
     // width formula, so it was always a special case of this broader one.
     // Re-checked wherever the scale changes (applyScale) or the user
     // scrolls (pmInitVerticalOnlyScrollGuard below) - either can flip it.
+    // The "vertical" zoom magnet's own target scale for the CURRENT
+    // available width - the scale at which a portrait page's actual
+    // content (not the wider surrounding square card) exactly fills it.
+    // Factored out so pmShouldLockHorizontalScroll and the live-tracking
+    // re-snap in pmReapplyFitWidthIfActive share one computation instead
+    // of drifting apart.
+    function pmVerticalMagnetTarget() {
+      if (isTouchDevice || !pdfDoc) return null;
+      const avail = getScrollAvailWidth();
+      if (avail <= 0) return null;
+      const portraitAspect = typeof pmMaxPortraitAspect === 'function' ? pmMaxPortraitAspect() : null;
+      if (!portraitAspect) return null;
+      return pmMaxScaleFittingWidth((s) => portraitPreviewWidth(s, portraitAspect), avail);
+    }
+
     function pmShouldLockHorizontalScroll() {
       if (isTouchDevice || !pdfDoc || !pagesContainer || !scrollContainer) return false;
       if (typeof isPagesSingleColumnLayout !== 'function' || !isPagesSingleColumnLayout()) return false;
       const avail = getScrollAvailWidth();
       if (avail <= 0) return false;
-      const portraitAspect = typeof pmMaxPortraitAspect === 'function' ? pmMaxPortraitAspect() : null;
-      if (!portraitAspect) return false;
-      const portraitTarget = pmMaxScaleFittingWidth((s) => portraitPreviewWidth(s, portraitAspect), avail);
+      const portraitTarget = pmVerticalMagnetTarget();
       if (portraitTarget == null || currentScale !== portraitTarget) return false;
       const host = scrollContainer.getBoundingClientRect();
       const pages = pagesContainer.querySelectorAll('.page');
@@ -11089,11 +11132,20 @@
         : computeReadModeDesktopScale();
     }
 
-    function applyFitWidthScaleValue(scale) {
+    function applyFitWidthScaleValue(scale, opts) {
       const zoomAnchor = !isTouchDevice ? captureZoomAnchor() : null;
       currentScale = clampScale(scale);
       scaleUserLocked = true;
       autoScaleEnabled = false;
+      // Every caller here sets the scale via its OWN formula (the fit-width
+      // button's computeFitWidthScale, or the vertical-magnet live re-snap
+      // below) rather than through changeScale's own magnet-snap detection,
+      // so pmVerticalMagnetActive must be explicitly told which case this
+      // is instead of silently keeping whatever stale value changeScale
+      // last left behind - otherwise a later reapply could forcibly snap
+      // the scale back onto the vertical magnet even after the user (or the
+      // fit-width button) deliberately moved away from it.
+      pmVerticalMagnetActive = !!(opts && opts.viaVerticalMagnet);
       const sliderVal = Math.max(0, Math.min(200, scaleToSlider(currentScale)));
       if (scaleSlider) scaleSlider.value = sliderVal;
       const rms = document.getElementById('readModeScaleSlider');
@@ -11142,9 +11194,38 @@
     // this whenever the available width could have changed (window resize,
     // the bookmarks gutter opening/closing/resizing) so the page stays
     // actually fit instead of going stale until the user re-toggles it.
+    //
+    // The vertical-only scroll lock's own re-check runs UNCONDITIONALLY
+    // here, before the fitWidthToggleOn gate below - it depends on
+    // currentScale matching the vertical zoom MAGNET (pmZoomMagnetTargets),
+    // which the user can land on via plain wheel/slider zoom, with the fit-
+    // width button never touched. The bookmarks gutter opening adds
+    // padding-left to #scrollContainer, which shifts already-rendered
+    // content right independent of scrollLeft - if the lock was already
+    // engaged through organic zoom (not this function's own fitWidthToggleOn
+    // path) and stayed engaged (both before and after the gutter appeared,
+    // so pmUpdateVerticalOnlyScrollLock's own off->on-transition recenter
+    // never re-fires), the resulting shift used to have nothing left in
+    // this function to correct it once the early return below skipped
+    // straight past the recenter call for a non-fit-width-button session.
     function pmReapplyFitWidthIfActive() {
+      // Mirror image of the fitWidthToggleOn tracking below, but for a
+      // scale reached organically (wheel/slider) by snapping onto the
+      // vertical/portrait magnet - pmVerticalMagnetActive means currentScale
+      // was last set that way, so if the available width just changed (e.g.
+      // the bookmarks gutter opening/closing) the magnet's own target scale
+      // may have moved too, and currentScale needs to follow it or the
+      // layout is left mismatched against the new width (visibly shifted,
+      // partially off-screen). Skipped while the fit-width BUTTON is on -
+      // that has its own target formula below and owns the scale then.
+      if (pmVerticalMagnetActive && !fitWidthToggleOn && typeof pmVerticalMagnetTarget === 'function') {
+        const magnetTarget = pmVerticalMagnetTarget();
+        if (magnetTarget != null && Math.abs(magnetTarget - currentScale) > 0.25) {
+          applyFitWidthScaleValue(magnetTarget, { viaVerticalMagnet: true });
+        }
+      }
+      if (typeof pmUpdateVerticalOnlyScrollLock === 'function') pmUpdateVerticalOnlyScrollLock();
       if (!fitWidthToggleOn || typeof computeFitWidthScale !== 'function') return;
-      pmUpdateVerticalOnlyScrollLock();
       const target = computeFitWidthScale();
       if (Math.abs(target - currentScale) > 0.25) {
         applyFitWidthScaleValue(target);
