@@ -7167,7 +7167,6 @@
         <span id="headerPageCountValue" class="header-page-count-value">0</span>
       </div>
       <div id="info" class="info" style="display:none;"></div>
-      <h1>Менеджер документов PDF</h1>
     </div>
     <div id="dropZone" class="drop-zone"><span class="dz-desktop" data-i18n="dropZoneDesktop">Нажмите здесь или перетащите в эту область один или несколько файлов для открытия</span><span class="dz-mobile" data-i18n="dropZoneMobile">Нажмите здесь для выбора одного или нескольких файлов</span><br><span data-i18n="dropZoneFormats" style="font-size:14px;color:#888;margin-top:8px;display:block;">Поддерживаются: PDF, Word (.docx), Excel (.xls, .xlsx), письма (.eml, .msg), изображения (PNG, JPEG, BMP, GIF, WEBP, TIFF)</span></div>
     <div id="pagesContainer" class="pages"></div>
@@ -12716,6 +12715,19 @@
     function updateStickyFileBar() {
       const bar = document.getElementById('stickyFileBar');
       if (!bar) return;
+      // Desktop: the floating strip is retired entirely - file name/page
+      // count only ever show in .content-header, at the very top of the
+      // document. (Mobile keeps the sticky bar, handled by the branches
+      // below - isTouchDevice is checked throughout the rest of this file.)
+      if (!isTouchDevice) {
+        bar.classList.remove('visible');
+        bar.removeAttribute('title');
+        applyStickyOffset(false);
+        refreshDesktopHeaderPageCount();
+        if (typeof updateZoomPanHandBadge === 'function') updateZoomPanHandBadge();
+        if (typeof updateUndoRedoUI === 'function') updateUndoRedoUI();
+        return;
+      }
       const header = document.querySelector('.content-header');
       const docOpen = !!pdfDoc && infoDiv && infoDiv.style.display !== 'none';
 
@@ -13145,21 +13157,15 @@
       const nextBtn = document.getElementById('pmPageNextBtn');
       const speedEl = document.getElementById('pmAutoScrollSpeed');
       if (!prevBtn || !nextBtn) return;
-      // Sit right below whichever "header row" is currently on screen: the
-      // sticky file-name bar once scrolled past the top, otherwise the
-      // normal content-header (page counter / file name / title) - using
-      // just the menu's bottom edge left them floating over that header's
-      // text (e.g. "Страниц: N") whenever the page hadn't been scrolled yet.
-      const bar = document.getElementById('stickyFileBar');
-      const barActive = bar && bar.classList.contains('visible');
-      let referenceBottom;
-      if (barActive) {
-        referenceBottom = bar.getBoundingClientRect().bottom;
-      } else {
-        const header = document.querySelector('.content-header');
-        const headerRect = header ? header.getBoundingClientRect() : null;
-        referenceBottom = (headerRect && headerRect.height > 0) ? headerRect.bottom : stickyBarTop();
-      }
+      // Sit right below whichever is lower on screen: the (fixed) top menu,
+      // or the content-header (page counter / file name) - the latter only
+      // while it's actually still below the menu, i.e. before the page has
+      // scrolled it away. Just the menu's bottom edge left them floating
+      // over that header's text (e.g. "Страниц: N") whenever the page
+      // hadn't been scrolled yet.
+      const referenceBottom = typeof pmBookmarksReferenceBottom === 'function'
+        ? pmBookmarksReferenceBottom()
+        : stickyBarTop();
       let top = referenceBottom + 12;
       // Mobile: don't sit on top of the (possibly pinned) page-count badge.
       if (isTouchDevice) {
@@ -13812,6 +13818,15 @@
         }
       }
       updateStickyFileBar();
+      // The popup is position:fixed but anchored to a value that depends on
+      // the scroll-dependent content-header rect (see
+      // pmBookmarksReferenceBottom) - without this it only caught up on
+      // open/resize, so it visibly lagged behind the top menu while
+      // scrolling instead of tracking it live.
+      if (typeof pmBookmarksState !== 'undefined' && pmBookmarksState.open &&
+          typeof pmBookmarksPositionPanel === 'function') {
+        pmBookmarksPositionPanel();
+      }
       // Unpinned counter block is hidden when scrolling (only visible at the top)
       refreshPageCountVisibility();
       updatePageNumTab();
@@ -29619,21 +29634,25 @@ function pmSearchToggleOpen() {
 // content-header) so it never covers "Страниц: N". The page-nav arrows
 // dodge the panel's own width instead of the panel dodging them - see
 // pmPositionPageNavButtons.
+// referenceBottom sits just below whichever is lower on screen: the (fixed,
+// always-visible) top menu, or the content-header - the latter only while
+// it's actually still below the menu, i.e. before the page has scrolled it
+// away. Purely geometric and scroll-position-correct on every call (unlike
+// tracking "is the sticky bar active", which went stale between scroll
+// ticks for a position:fixed panel anchored to a value that changes as the
+// page scrolls - see pmBookmarksPositionPanel's own scroll-listener hookup).
+function pmBookmarksReferenceBottom() {
+  const header = document.querySelector('.content-header');
+  const headerRect = header ? header.getBoundingClientRect() : null;
+  const headerBottom = (headerRect && headerRect.height > 0) ? headerRect.bottom : 0;
+  const menuBottom = typeof stickyBarTop === 'function' ? stickyBarTop() : 0;
+  return Math.max(headerBottom, menuBottom);
+}
+
 function pmBookmarksPositionPanel() {
   const panel = document.getElementById('pmBookmarksPanel');
   if (!panel) return;
-  const bar = document.getElementById('stickyFileBar');
-  const barActive = bar && bar.classList.contains('visible');
-  let referenceBottom;
-  if (barActive) {
-    referenceBottom = bar.getBoundingClientRect().bottom;
-  } else {
-    const header = document.querySelector('.content-header');
-    const headerRect = header ? header.getBoundingClientRect() : null;
-    referenceBottom = (headerRect && headerRect.height > 0) ? headerRect.bottom
-      : (typeof stickyBarTop === 'function' ? stickyBarTop() : 0);
-  }
-  const top = referenceBottom + 12;
+  const top = pmBookmarksReferenceBottom() + 12;
   panel.style.top = Math.round(top) + 'px';
   panel.style.left = '4px'; // pressed against the working area's left edge - keep in sync with pmBookmarksUpdateScrollGutter()'s own "4"
   // The panel itself never moves for the page-nav arrows any more - they
