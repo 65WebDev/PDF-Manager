@@ -1321,6 +1321,10 @@
     .pm-bookmarks-item-title {
       flex: 1; min-width: 0;
       overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      /* At 13px the panel's default font renders letters tight enough to
+         look merged - a small positive tracking fixes readability without
+         visibly widening the row. */
+      letter-spacing: 0.3px;
     }
     .pm-bookmarks-item-page {
       flex-shrink: 0; opacity: .6;
@@ -11016,6 +11020,23 @@
       requestAnimationFrame(() => {
         requestAnimationFrame(() => {
           if (!scrollContainer || !pagesContainer) return;
+          // updatePagesRowOverflow()'s hysteresis is biased to STAY
+          // "overflowing" once already there (avoids flicker during a
+          // gradual zoom drag) - its -16px margin means it can never clear
+          // pages-row-overflow after a fit-width jump FROM a heavily
+          // zoomed-in state, even once the page genuinely fits, because the
+          // fit-width target width is always right around (sometimes
+          // fractionally over) avail, never 16px under it. Fit-width is a
+          // deliberate snap, not a gradual drag, so force a fresh,
+          // hysteresis-free re-check here rather than trusting whatever the
+          // sticky class was left at - otherwise flex-start alignment stays
+          // stuck on, leaving the page uncentered with real content pushed
+          // off the right edge instead of the centered layout scenario this
+          // is supposed to produce.
+          if (typeof updatePagesRowOverflow === 'function') {
+            pagesContainer.classList.remove('pages-row-overflow');
+            updatePagesRowOverflow();
+          }
           if (!pagesContainer.classList.contains('pages-row-overflow')) {
             scrollContainer.scrollLeft = 0;
           }
@@ -30031,6 +30052,62 @@ function pmBookmarksRenderList(flatItems) {
 // Any failure here (malformed outline, doc has no /PMU at all, doc was
 // never touched by this app) just means every entry falls back to "not
 // underlined" - never fatal to loading bookmarks.
+// pdf.js's own outline parser (used for node.title below) decodes /Title
+// per spec: UTF-16BE if it sees the BOM, else PDFDocEncoding - there is no
+// third option, because the PDF spec gives no way to signal "this is raw
+// UTF-8". Several real-world non-Adobe authoring tools write outline
+// titles as raw UTF-8 anyway (no BOM), which a compliant PDFDocEncoding
+// decode turns into 2-3 garbled glyphs per multi-byte character (an en
+// dash's 3 UTF-8 bytes E2 80 93 individually resolve to â•ﬁ, for example).
+// Recovers those by re-decoding each raw /Title byte string as UTF-8 and
+// using that instead whenever it's both present and (a) not already a
+// UTF-16BE-BOM string, which decodes correctly already, and (b) contains
+// a byte >=0x80, so plain-ASCII titles (the overwhelming common case)
+// never pay for this at all; and (c) IS valid UTF-8 (fatal decode) - a
+// standalone non-UTF-8 high byte throws and is left to pdf.js's own
+// (correct, for genuine PDFDocEncoding) decode untouched. Traverses the
+// same First/Next chain, in the same depth-first order, as pdf.js's own
+// outline walk below, so the two can be zipped together by index.
+function pmBookmarksReadUtf8RecoveredTitles() {
+  if (!pdfDoc || typeof PDFLib === 'undefined') return [];
+  try {
+    const PDFName = PDFLib.PDFName;
+    const ctx = pdfDoc.context;
+    const outlinesRef = pdfDoc.catalog.get(PDFName.of('Outlines'));
+    if (!outlinesRef) return [];
+    const root = ctx.lookup(outlinesRef);
+    if (!root) return [];
+    const titles = [];
+    const decoder = (typeof TextDecoder !== 'undefined') ? new TextDecoder('utf-8', { fatal: true }) : null;
+    function walkChain(ref) {
+      while (ref) {
+        const dict = ctx.lookup(ref);
+        if (!dict) break;
+        let recovered = null;
+        if (decoder) {
+          try {
+            const titleObj = dict.get(PDFName.of('Title'));
+            const bytes = (titleObj && typeof titleObj.asBytes === 'function') ? titleObj.asBytes() : null;
+            const hasBOM = bytes && bytes.length >= 2 && bytes[0] === 0xFE && bytes[1] === 0xFF;
+            const hasHighByte = bytes && Array.prototype.some.call(bytes, (b) => b >= 0x80);
+            if (bytes && !hasBOM && hasHighByte) {
+              recovered = decoder.decode(bytes);
+            }
+          } catch (_) { recovered = null; }
+        }
+        titles.push(recovered);
+        const first = dict.get(PDFName.of('First'));
+        if (first) walkChain(first);
+        ref = dict.get(PDFName.of('Next'));
+      }
+    }
+    walkChain(root.get(PDFName.of('First')));
+    return titles;
+  } catch (_) {
+    return [];
+  }
+}
+
 function pmBookmarksReadUnderlineFlags() {
   if (!pdfDoc || typeof PDFLib === 'undefined') return [];
   try {
@@ -30073,6 +30150,7 @@ async function pmBookmarksBuildTree() {
   const rawOutline = await doc.getOutline();
   if (!rawOutline || !rawOutline.length) return [];
   const underlineFlags = pmBookmarksReadUnderlineFlags();
+  const utf8RecoveredTitles = pmBookmarksReadUtf8RecoveredTitles();
   let uIdx = 0;
   async function walk(nodes) {
     const out = [];
@@ -30085,11 +30163,13 @@ async function pmBookmarksBuildTree() {
           pageIndex = await doc.getPageIndex(dest[0]);
         }
       } catch (_) {}
-      const underline = !!underlineFlags[uIdx]; uIdx++;
+      const underline = !!underlineFlags[uIdx];
+      const recoveredTitle = utf8RecoveredTitles[uIdx];
+      uIdx++;
       const children = (node.items && node.items.length) ? await walk(node.items) : [];
       out.push({
         id: pmBookmarksState.nextId++,
-        title: node.title || '',
+        title: (recoveredTitle != null ? recoveredTitle : (node.title || '')),
         pageIndex,
         bold: !!node.bold,
         italic: !!node.italic,
@@ -30104,10 +30184,6 @@ async function pmBookmarksBuildTree() {
 
 async function pmBookmarksLoadAndRender() {
   const list = document.getElementById('pmBookmarksList');
-  // Preserved across the rebuild below - otherwise a mid-session refresh
-  // (e.g. after a page reorder while the popup is left open) snaps the
-  // list back to the top instead of staying where the user was looking.
-  const savedScrollTop = list ? list.scrollTop : 0;
 
   // Per-tab cache of the last-parsed tree, keyed by the tab's own session
   // object so it's freed automatically when the tab closes. A background
@@ -30121,6 +30197,19 @@ async function pmBookmarksLoadAndRender() {
   // already-visited tab instant instead of re-parsing every time.
   const activeTab = (typeof pmTabs !== 'undefined' && typeof pmActiveId !== 'undefined')
     ? pmTabs.find(x => x.id === pmActiveId) : null;
+  // Restoring the LIST's own current scrollTop (as opposed to each tab's
+  // own remembered position, kept live-updated by the 'scroll' listener in
+  // pmBookmarksInit) would be correct for a same-tab refresh (e.g. after a
+  // page reorder while the popup is left open) but WRONG right after a tab
+  // switch, where the list still visually shows whatever scrollTop the
+  // OUTGOING tab was left at - restoring that onto the newly-active tab's
+  // freshly-loaded content just borrows a stranger's scroll position. Since
+  // pmActivate() re-points pmActiveId at the new tab BEFORE calling this,
+  // activeTab is already correct in both cases, and its own remembered
+  // value equals the list's current scrollTop for the same-tab-refresh
+  // case anyway (the listener kept it in sync), so this one lookup covers
+  // both.
+  const restoreScrollTop = (activeTab && activeTab.bookmarksScrollTop != null) ? activeTab.bookmarksScrollTop : 0;
   if (activeTab && activeTab.bookmarksTreeCache && activeTab.bookmarksTreeCacheHistoryIndex === docHistoryIndex) {
     pmBookmarksState.tree = activeTab.bookmarksTreeCache;
     const flat = pmBookmarksFlatten(activeTab.bookmarksTreeCache);
@@ -30129,7 +30218,7 @@ async function pmBookmarksLoadAndRender() {
       pmBookmarksState.collapsedPaths = new Set(flat.filter((it) => it.hasChildren).map((it) => it.path));
     }
     pmBookmarksRenderList(flat);
-    if (list) list.scrollTop = savedScrollTop;
+    if (list) list.scrollTop = restoreScrollTop;
     return;
   }
 
@@ -30150,7 +30239,7 @@ async function pmBookmarksLoadAndRender() {
     pmBookmarksState.collapsedPaths = new Set(flat.filter((it) => it.hasChildren).map((it) => it.path));
   }
   pmBookmarksRenderList(flat);
-  if (list) list.scrollTop = savedScrollTop;
+  if (list) list.scrollTop = restoreScrollTop;
 }
 
 // Rebuilds the ENTIRE /Outlines dictionary tree from pmBookmarksState.tree
@@ -30455,11 +30544,29 @@ function pmBookmarksCollapseAll() {
 
 // ── Add / delete / rename ───────────────────────────────────────────────
 
+// Scans the WHOLE tree (not just top-level or siblings) for the highest
+// "Закладка N" default name already in use, so repeated adds count up
+// (1, 2, 3, ...) instead of every new bookmark landing on the same name.
+// A renamed-away bookmark frees its number back up, same as most editors'
+// "new folder"/"new file" numbering.
+function pmBookmarksNextDefaultTitle() {
+  const re = /^Закладка (\d+)$/;
+  let max = 0;
+  (function walk(nodes) {
+    (nodes || []).forEach((n) => {
+      const m = re.exec(n.title || '');
+      if (m) max = Math.max(max, parseInt(m[1], 10));
+      if (n.children && n.children.length) walk(n.children);
+    });
+  })(pmBookmarksState.tree);
+  return 'Закладка ' + (max + 1);
+}
+
 function pmBookmarksAdd() {
   if (!pdfDoc) return;
   const node = {
     id: pmBookmarksState.nextId++,
-    title: 'Закладка 1',
+    title: pmBookmarksNextDefaultTitle(),
     pageIndex: pmBookmarksCurrentPageIndex(),
     bold: false, italic: false, underline: false,
     children: [],
@@ -30777,6 +30884,15 @@ function pmBookmarksToggle() {
       e.preventDefault();
       pmBookmarksCtxOpen(parseInt(row.dataset.id, 10), e.clientX, e.clientY);
     });
+    // Keeps each tab's OWN scroll position live-updated on its session
+    // object, so pmBookmarksLoadAndRender() can restore the right one when
+    // switching back to a tab instead of inheriting whatever position the
+    // list happened to be left at by a different tab.
+    list.addEventListener('scroll', () => {
+      const activeTab = (typeof pmTabs !== 'undefined' && typeof pmActiveId !== 'undefined')
+        ? pmTabs.find(x => x.id === pmActiveId) : null;
+      if (activeTab) activeTab.bookmarksScrollTop = list.scrollTop;
+    }, { passive: true });
   }
 
   const ctxMenu = document.getElementById('pmBookmarksCtxMenu');
