@@ -29879,6 +29879,20 @@ function pmBookmarksIsVisible(path, collapsedPaths) {
   return true;
 }
 
+// Recomputed fresh on every call (not cached at render time) - expanding
+// or collapsing a group is a CSS-only visibility toggle
+// (pmBookmarksToggleGroup -> pmBookmarksApplyVisibility), it does not
+// re-render the list, so a snapshot taken once when the rows were built
+// goes stale the moment the user expands/collapses anything afterward.
+// Shift-range selection needs the CURRENT set, not whatever it was at
+// render time (which, at the default collapsed-on-open state, would
+// wrongly exclude every nested bookmark from ranging entirely).
+function pmBookmarksVisibleIds() {
+  return pmBookmarksFlatten(pmBookmarksState.tree)
+    .filter((it) => pmBookmarksIsVisible(it.path, pmBookmarksState.collapsedPaths))
+    .map((it) => it.node.id);
+}
+
 function pmBookmarksApplyVisibility() {
   document.querySelectorAll('#pmBookmarksList .pm-bookmarks-row').forEach((row) => {
     const visible = pmBookmarksIsVisible(row.dataset.path, pmBookmarksState.collapsedPaths);
@@ -29973,12 +29987,6 @@ function pmBookmarksRenderList(flatItems) {
   }
   pmBookmarksSetStatus('');
   const frag = document.createDocumentFragment();
-  // Shift-range selection walks CURRENTLY VISIBLE rows in display order
-  // (skipping anything hidden under a collapsed ancestor), matching what
-  // the user actually sees between the anchor and the clicked row.
-  const visibleIds = flatItems
-    .filter((it) => pmBookmarksIsVisible(it.path, pmBookmarksState.collapsedPaths))
-    .map((it) => it.node.id);
   flatItems.forEach((it) => {
     const node = it.node;
     const row = document.createElement('div');
@@ -30034,6 +30042,7 @@ function pmBookmarksRenderList(flatItems) {
     }
     btn.addEventListener('click', (e) => {
       if (pmBookmarksState.suppressNextClick) { pmBookmarksState.suppressNextClick = false; return; }
+      const visibleIds = pmBookmarksVisibleIds();
       if (e.shiftKey && pmBookmarksState.selectedId != null && visibleIds.includes(pmBookmarksState.selectedId)) {
         // Range-select from the anchor (last plain/Ctrl click) to this row,
         // in on-screen order - the anchor itself doesn't move, so repeated
