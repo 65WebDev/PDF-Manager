@@ -30350,11 +30350,19 @@ async function pmBookmarksMigrateOnReorder(srcDoc, tgtDoc, orderedOldIndices, co
   if (typeof pmBookmarksState !== 'undefined') pmBookmarksState.writtenRefs = written;
 }
 
+// Was a hand-rolled near-duplicate of setDocumentDirty() (same
+// documentDirty/updateInfo/updateStickyFileBar/pmOnDocumentDirtyChanged
+// side effects) that never called scheduleHistoryPush() - so a bookmark
+// edit mutated the live pdfDoc but never landed in docHistory. Undo and,
+// worse, switching tabs (pmActivate/pmCaptureActive capture and restore
+// docHistory, not the live pdfDoc object) then silently lost it: the
+// bookmark was never wrong on save, only invisible again the moment
+// another tab's restoreDocSnapshot() reloaded pdfDoc from the last
+// snapshot that actually existed. Delegating here fixes every mutation
+// path at once (add/delete/rename/reorder/format all funnel through
+// pmBookmarksSerializeToDoc(), which calls this).
 function pmBookmarksMarkDirty() {
-  if (typeof documentDirty !== 'undefined') documentDirty = true;
-  if (typeof updateInfo === 'function') updateInfo();
-  if (typeof updateStickyFileBar === 'function') updateStickyFileBar();
-  if (typeof pmOnDocumentDirtyChanged === 'function') pmOnDocumentDirtyChanged();
+  if (typeof setDocumentDirty === 'function') setDocumentDirty(true);
 }
 
 function pmBookmarksRerender() {
