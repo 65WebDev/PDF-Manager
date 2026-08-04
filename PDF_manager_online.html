@@ -11935,15 +11935,36 @@
 
       let overflow = false;
 
-      // One column: count by scale (without getBoundingClientRect) + hysteresis.
-      // For an all-portrait document the visible page content is narrower
+      // One column: for a portrait page the visible page content is narrower
       // than the square card by design (see portraitPreviewWidth) - basing
       // this on the card's own width would call it "overflowing" (and force
       // flex-start, losing centering) even when the actually-visible image
       // fits the width fine, which is exactly what "fit page width" targets.
+      //
+      // pmAllPagesPortrait() alone isn't enough: it requires EVERY page in
+      // the whole document to be portrait, so a single landscape page
+      // anywhere - even scrolled far out of view - used to fall this whole
+      // branch back to the wider square-card width even while the pages
+      // actually ON SCREEN were all portrait and their real content already
+      // fit avail. cardRowWidth(scale,1) is always wider than avail at the
+      // portrait magnet's own scale (that gap is exactly what makes the
+      // square and portrait magnets two distinct targets), so this reported
+      // a false overflow, forcing flex-start alignment and shifting the
+      // page - the same symptom the vertical scroll lock exists to avoid,
+      // and it reproduced with any mixed-orientation document even while
+      // the lock itself was correctly engaged. What actually matters is
+      // whether a wider-than-portrait page is in the CURRENT scroll
+      // viewport - the same test pmShouldLockHorizontalScroll already uses
+      // for its own "no wider page in view" rule.
       if (isMobilePagesSingleColumn() || isPagesSingleColumnLayout()) {
-        const portraitAspect = (typeof pmAllPagesPortrait === 'function' && pmAllPagesPortrait())
-          ? pmMaxPortraitAspect() : null;
+        const host = scrollContainer.getBoundingClientRect();
+        const inViewport = pages.filter((p) => {
+          const r = p.getBoundingClientRect();
+          return r.bottom > host.top && r.top < host.bottom;
+        });
+        const noWiderPageInView = inViewport.length > 0 &&
+          inViewport.every((p) => !p.classList.contains('page-rotated'));
+        const portraitAspect = noWiderPageInView ? pmMaxPortraitAspect() : null;
         const cardW = portraitAspect
           ? portraitPreviewWidth(currentScale, portraitAspect)
           : cardRowWidth(currentScale, 1);
