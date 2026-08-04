@@ -3739,7 +3739,7 @@
       via script (overflow:hidden only blocks user-agent-driven scrolling,
       not programmatic scrollLeft) - see the accompanying 'scroll' listener
       (pmGuardVerticalOnlyScroll) that snaps it back for that case.*/
-    body.pm-fitwidth-vertical-only #scrollContainer { overflow-x: hidden; }
+    body.pm-vertical-scroll-lock #scrollContainer { overflow-x: hidden; }
     .content-header {
       display: flex;
       align-items: center;
@@ -10964,23 +10964,55 @@
       pmUpdateVerticalOnlyScrollLock();
     }
 
-    // With "fit page width" on and no landscape page in the document, the
-    // page already fills the available width exactly - there is nothing
-    // legitimate to scroll sideways to, in any interaction mode (select,
-    // nav/pan, read, loupe). Locks it out at the CSS level (see
-    // body.pm-fitwidth-vertical-only) rather than each mode's own
-    // scroll/pan/swipe handler having to individually refuse to move
-    // sideways. Re-checked wherever fit-width's own scale gets
-    // reconsidered (toggle on/off, window resize, bookmarks gutter
-    // changes), since orientation-affecting content doesn't change any
-    // more often than that in practice.
+    // With the page's own content filling the available width exactly and
+    // nothing wider on screen, there is nothing legitimate to scroll
+    // sideways to, in any interaction mode (select, nav/pan, read, loupe).
+    // Locks it out at the CSS level (see body.pm-vertical-scroll-lock)
+    // rather than each mode's own scroll/pan/swipe handler having to
+    // individually refuse to move sideways.
     function pmUpdateVerticalOnlyScrollLock() {
-      const lock = !!fitWidthToggleOn &&
-        typeof pmAllPagesPortrait === 'function' && pmAllPagesPortrait();
-      document.body.classList.toggle('pm-fitwidth-vertical-only', lock);
+      document.body.classList.toggle('pm-vertical-scroll-lock', pmShouldLockHorizontalScroll());
     }
 
-    // overflow-x:hidden (see body.pm-fitwidth-vertical-only above) only
+    // True when: (1) the page grid is a single column (only one card fits
+    // per row), (2) currentScale exactly equals the scale where a
+    // PORTRAIT page's own content - not the surrounding square card,
+    // which is wider - reaches the available width (the "vertical" zoom
+    // magnet from pmZoomMagnetTargets()), and (3) no page CURRENTLY IN THE
+    // VIEWPORT actually needs its own horizontal scroll at this scale - a
+    // landscape page's content is wider than a portrait page's at the
+    // same scale (its width is CSS-capped to the shared --preview-long
+    // budget directly, not narrowed by aspect - see pmPreviewLongPx vs
+    // portraitPreviewWidth), so one scrolling into view immediately
+    // releases the lock, and one scrolling back out of view re-engages it.
+    // Explicitly toggling "Fit page width" on an all-portrait document
+    // (the original, narrower version of this rule) still satisfies this:
+    // that path computes currentScale via the exact same portrait-content-
+    // width formula, so it was always a special case of this broader one.
+    // Re-checked wherever the scale changes (applyScale) or the user
+    // scrolls (pmInitVerticalOnlyScrollGuard below) - either can flip it.
+    function pmShouldLockHorizontalScroll() {
+      if (isTouchDevice || !pdfDoc || !pagesContainer || !scrollContainer) return false;
+      if (typeof isPagesSingleColumnLayout !== 'function' || !isPagesSingleColumnLayout()) return false;
+      const avail = getScrollAvailWidth();
+      if (avail <= 0) return false;
+      const portraitAspect = typeof pmMaxPortraitAspect === 'function' ? pmMaxPortraitAspect() : null;
+      if (!portraitAspect) return false;
+      const portraitTarget = pmMaxScaleFittingWidth((s) => portraitPreviewWidth(s, portraitAspect), avail);
+      if (portraitTarget == null || currentScale !== portraitTarget) return false;
+      const host = scrollContainer.getBoundingClientRect();
+      const pages = pagesContainer.querySelectorAll('.page');
+      for (const p of pages) {
+        if (p.style.display === 'none') continue;
+        const r = p.getBoundingClientRect();
+        if (r.bottom <= host.top || r.top >= host.bottom) continue; // not in the viewport
+        const img = p.querySelector('.img-wrapper img');
+        if (img && img.getBoundingClientRect().width > avail + 1) return false;
+      }
+      return true;
+    }
+
+    // overflow-x:hidden (see body.pm-vertical-scroll-lock above) only
     // blocks user-agent-driven scrolling (wheel, touch, scrollbar drag) -
     // it does not stop script from assigning scrollLeft directly, which is
     // exactly how nav/pan-mode's own hand-drag panning works. Snap it back
@@ -10989,8 +11021,14 @@
     (function pmInitVerticalOnlyScrollGuard() {
       if (!scrollContainer) return;
       scrollContainer.addEventListener('scroll', () => {
+        // Scrolling vertically can bring a wider (e.g. landscape) page
+        // into view, or scroll one back out - re-evaluate the lock itself
+        // here, not just its scrollLeft-snap-back consequence below, so it
+        // releases the instant a wider page appears and re-engages once
+        // it's scrolled back out of the viewport.
+        if (typeof pmUpdateVerticalOnlyScrollLock === 'function') pmUpdateVerticalOnlyScrollLock();
         if (scrollContainer.scrollLeft !== 0 &&
-            document.body.classList.contains('pm-fitwidth-vertical-only')) {
+            document.body.classList.contains('pm-vertical-scroll-lock')) {
           scrollContainer.scrollLeft = 0;
         }
       }, { passive: true });
@@ -11603,6 +11641,19 @@
 
     function applyScale(opts) {
       opts = opts || {};
+      // Re-checked on every scale change regardless of which branch below
+      // actually handles the rest of the work (the wheel/slider zoom path
+      // returns early via the opts.zoomAnchor branch further down) - a
+      // changed zoom level is one of the two things that must immediately
+      // re-evaluate the horizontal scroll lock (see
+      // pmShouldLockHorizontalScroll's own comment for the other: a wider
+      // page scrolling into view). Deferred a frame, matching
+      // updateDesktopPagesAlignment below, so it reads the settled layout
+      // from ITS OWN reflow rather than forcing an extra synchronous one
+      // back to back with the CSS var writes just below.
+      if (typeof pmUpdateVerticalOnlyScrollLock === 'function') {
+        requestAnimationFrame(pmUpdateVerticalOnlyScrollLock);
+      }
       const scaleFactor = currentScale / 100;
       //The base width has been reduced so that the default 100% matches the previous 70%
       pagesContainer.style.setProperty('--thumb-width', Math.round(154 * scaleFactor) + 'px');
