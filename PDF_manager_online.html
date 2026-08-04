@@ -7336,16 +7336,22 @@
     // preferences that persist for as long as the page stays loaded
     // (not reset on close). tree/nextId are the live editable bookmark
     // tree and its id counter (re-parsed fresh on every open);
-    // selectedId/editingId/ctxTargetId/rowDrag are transient UI state
-    // reset on close; writtenRefs tracks the pdf-lib objects we last
+    // selectedId/selectedIds/editingId/ctxTargetId/rowDrag are transient UI
+    // state reset on close; writtenRefs tracks the pdf-lib objects we last
     // wrote, so they can be cleaned up before a rebuild. pendingCollapseAll
     // starts true so the very first popup open of the session defaults to
     // fully collapsed too; loadPDF() re-arms it for every later document,
     // while reopening the popup on the SAME still-open document leaves
     // whatever the user last expanded/collapsed alone.
+    // selectedId is the "anchor"/primary item (last plain- or Ctrl-clicked
+    // row) - used as the Shift-range start and by single-target flows
+    // (rename, drag-reorder, Add's auto-select). selectedIds is the FULL
+    // current selection (a plain click collapses it to a singleton
+    // matching selectedId; Ctrl toggles membership; Shift replaces it with
+    // the anchor..target range) and is what bulk actions like Delete act on.
     let pmBookmarksState = {
       open: false, wrapNames: false, collapsedPaths: new Set(),
-      tree: [], nextId: 1, selectedId: null, editingId: null,
+      tree: [], nextId: 1, selectedId: null, selectedIds: new Set(), editingId: null,
       ctxTargetId: null, rowDrag: null, suppressNextClick: false,
       writtenRefs: [], pendingCollapseAll: true,
     };
@@ -29914,7 +29920,7 @@ function pmBookmarksRefreshTitleTooltips() {
 
 function pmBookmarksUpdateDeleteBtnState() {
   const btn = document.getElementById('pmBookmarksDeleteBtn');
-  if (btn) btn.disabled = pmBookmarksState.selectedId == null;
+  if (btn) btn.disabled = pmBookmarksState.selectedIds.size === 0;
 }
 
 // Swaps a row's title button for a text input, pre-filled and fully
@@ -29967,6 +29973,12 @@ function pmBookmarksRenderList(flatItems) {
   }
   pmBookmarksSetStatus('');
   const frag = document.createDocumentFragment();
+  // Shift-range selection walks CURRENTLY VISIBLE rows in display order
+  // (skipping anything hidden under a collapsed ancestor), matching what
+  // the user actually sees between the anchor and the clicked row.
+  const visibleIds = flatItems
+    .filter((it) => pmBookmarksIsVisible(it.path, pmBookmarksState.collapsedPaths))
+    .map((it) => it.node.id);
   flatItems.forEach((it) => {
     const node = it.node;
     const row = document.createElement('div');
@@ -29975,7 +29987,7 @@ function pmBookmarksRenderList(flatItems) {
     row.dataset.id = String(node.id);
     row.dataset.level = String(it.level);
     row.style.paddingLeft = (it.level * 14) + 'px';
-    if (node.id === pmBookmarksState.selectedId) row.classList.add('pm-bookmarks-selected');
+    if (pmBookmarksState.selectedIds.has(node.id)) row.classList.add('pm-bookmarks-selected');
 
     if (it.hasChildren) {
       const collapsed = pmBookmarksState.collapsedPaths.has(it.path);
@@ -30020,14 +30032,35 @@ function pmBookmarksRenderList(flatItems) {
     } else {
       btn.disabled = true;
     }
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', (e) => {
       if (pmBookmarksState.suppressNextClick) { pmBookmarksState.suppressNextClick = false; return; }
-      pmBookmarksState.selectedId = node.id;
+      if (e.shiftKey && pmBookmarksState.selectedId != null && visibleIds.includes(pmBookmarksState.selectedId)) {
+        // Range-select from the anchor (last plain/Ctrl click) to this row,
+        // in on-screen order - the anchor itself doesn't move, so repeated
+        // Shift-clicks keep extending/shrinking from the same start point.
+        const a = visibleIds.indexOf(pmBookmarksState.selectedId);
+        const b = visibleIds.indexOf(node.id);
+        const from = Math.min(a, b), to = Math.max(a, b);
+        pmBookmarksState.selectedIds = new Set(visibleIds.slice(from, to + 1));
+      } else if (e.ctrlKey || e.metaKey) {
+        // Toggle just this row and move the anchor here, so a FOLLOWING
+        // Shift-click ranges from this newest pick.
+        if (pmBookmarksState.selectedIds.has(node.id)) pmBookmarksState.selectedIds.delete(node.id);
+        else pmBookmarksState.selectedIds.add(node.id);
+        pmBookmarksState.selectedId = node.id;
+      } else {
+        pmBookmarksState.selectedIds = new Set([node.id]);
+        pmBookmarksState.selectedId = node.id;
+      }
       document.querySelectorAll('#pmBookmarksList .pm-bookmarks-row.pm-bookmarks-selected')
         .forEach((el) => el.classList.remove('pm-bookmarks-selected'));
-      row.classList.add('pm-bookmarks-selected');
+      document.querySelectorAll('#pmBookmarksList .pm-bookmarks-row').forEach((el) => {
+        if (pmBookmarksState.selectedIds.has(parseInt(el.dataset.id, 10))) el.classList.add('pm-bookmarks-selected');
+      });
       pmBookmarksUpdateDeleteBtnState();
-      pmBookmarksGoTo(node.pageIndex);
+      // A Shift/Ctrl click is about building a selection, not navigating -
+      // only jump to the page on a plain click, same as a file manager.
+      if (!e.shiftKey && !e.ctrlKey && !e.metaKey) pmBookmarksGoTo(node.pageIndex);
     });
     if (typeof peBindPointerDown === 'function') {
       peBindPointerDown(btn, (e) => pmBookmarksRowPointerDown(e, node.id));
@@ -30233,6 +30266,18 @@ async function pmBookmarksLoadAndRender() {
     activeTab.bookmarksTreeCache = tree;
     activeTab.bookmarksTreeCacheHistoryIndex = docHistoryIndex;
   }
+  // pmBookmarksBuildTree() mints a brand-new id for every node on every
+  // real parse (ids aren't derived from anything persistent in the PDF) -
+  // a selection captured against the OLD tree's ids would silently stop
+  // matching anything here, but as a Set it wouldn't LOOK empty, so
+  // pmBookmarksDeleteSelected() could act on stale/nonexistent ids (or,
+  // worse, on unrelated nodes that happen to reuse a freed id) instead of
+  // whatever the UI still shows as selected (nothing, since no row's new
+  // id matches). The cache-HIT path above reuses the same tree object
+  // (ids genuinely unchanged), so it intentionally leaves selection alone.
+  pmBookmarksState.selectedId = null;
+  pmBookmarksState.selectedIds = new Set();
+  pmBookmarksState.editingId = null;
   const flat = pmBookmarksFlatten(tree);
   if (pmBookmarksState.pendingCollapseAll) {
     pmBookmarksState.pendingCollapseAll = false;
@@ -30573,6 +30618,7 @@ function pmBookmarksAdd() {
   };
   pmBookmarksState.tree.push(node);
   pmBookmarksState.selectedId = node.id;
+  pmBookmarksState.selectedIds = new Set([node.id]);
   pmBookmarksState.editingId = node.id;
   pmBookmarksRerender();
   pmBookmarksSerializeToDoc();
@@ -30586,14 +30632,35 @@ function pmBookmarksDeleteNode(id) {
   const idx = found.siblings.indexOf(found.node);
   if (idx !== -1) found.siblings.splice(idx, 1);
   if (pmBookmarksState.selectedId === id) pmBookmarksState.selectedId = null;
+  pmBookmarksState.selectedIds.delete(id);
   if (pmBookmarksState.editingId === id) pmBookmarksState.editingId = null;
   pmBookmarksRerender();
   pmBookmarksSerializeToDoc();
 }
 
+// Deletes every currently-selected bookmark in one pass (one rerender/
+// serialize instead of one per node). Deleting a node whose parent is
+// ALSO selected is safe - pmBookmarksFindNode simply won't find it once
+// the parent's removal already took its whole subtree out, and this
+// silently skips ids that turn up missing rather than erroring.
 function pmBookmarksDeleteSelected() {
-  if (pmBookmarksState.selectedId == null) return;
-  pmBookmarksDeleteNode(pmBookmarksState.selectedId);
+  const ids = pmBookmarksState.selectedIds.size
+    ? Array.from(pmBookmarksState.selectedIds)
+    : (pmBookmarksState.selectedId != null ? [pmBookmarksState.selectedId] : []);
+  if (!ids.length) return;
+  let removedAny = false;
+  ids.forEach((id) => {
+    const found = pmBookmarksFindNode(id);
+    if (!found) return;
+    const idx = found.siblings.indexOf(found.node);
+    if (idx !== -1) { found.siblings.splice(idx, 1); removedAny = true; }
+  });
+  if (!removedAny) return;
+  pmBookmarksState.selectedIds = new Set();
+  pmBookmarksState.selectedId = null;
+  pmBookmarksState.editingId = null;
+  pmBookmarksRerender();
+  pmBookmarksSerializeToDoc();
 }
 
 function pmBookmarksStartRename(id) {
@@ -30801,6 +30868,7 @@ function pmBookmarksOpen() {
   if (!panel) return;
   pmBookmarksState.open = true;
   pmBookmarksState.selectedId = null;
+  pmBookmarksState.selectedIds = new Set();
   pmBookmarksState.editingId = null;
   panel.classList.add('open');
   panel.setAttribute('aria-hidden', 'false');
