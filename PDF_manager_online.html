@@ -8266,6 +8266,20 @@
     const CONCURRENCY_LIMIT = 6;
     const THUMBNAIL_SCALE = 0.75;
     const THUMBNAIL_JPEG_QUALITY = 0.82;
+    // The base thumbnail canvas is rasterized once (at THUMBNAIL_SCALE) and
+    // then CSS-scaled to fit the current zoom level - on a HiDPI/Retina
+    // display, a canvas sized for 1 device pixel per CSS pixel is under-
+    // resolved even at 100% UI zoom, reading noticeably softer than a
+    // native PDF viewer (Adobe Acrobat etc.) that re-rasterizes for the
+    // actual device pixel density. Applied only where the canvas is
+    // actually rasterized (renderPageImageInto) - NOT folded into
+    // THUMBNAIL_SCALE itself, which other call sites also use for CSS-px
+    // layout math (shell placeholder sizing, editor object normalization)
+    // that must stay in logical pixels. Capped at 2 - the separate HQ
+    // upgrade (>400% UI zoom, HQ_RENDER_SCALE) already provides full
+    // sharpness there, so a higher cap here would only multiply canvas
+    // memory/render cost per thumbnail for imperceptible extra gain.
+    const PM_THUMBNAIL_DPR = Math.min(window.devicePixelRatio || 1, 2);
     const LAZY_THUMB_CONCURRENCY = 6;
     const LAZY_THUMB_INITIAL_WAIT = 4;
     const LAZY_THUMB_INITIAL_MARGIN = 120;
@@ -17947,7 +17961,11 @@
         }
       }
 
-      const viewport = page.getViewport({ scale: renderScale, rotation: effectiveRotation });
+      // Rasterize at renderScale * device pixel ratio (see PM_THUMBNAIL_DPR)
+      // - everything below keys off viewport.width/height, so this is the
+      // only place the DPR bump needs to happen for the whole canvas to
+      // come out sharper on HiDPI displays.
+      const viewport = page.getViewport({ scale: renderScale * PM_THUMBNAIL_DPR, rotation: effectiveRotation });
       if (pdfPageIndex != null && typeof peSetPageNormSize === 'function') {
         const vp1 = page.getViewport({ scale: 1, rotation: effectiveRotation });
         peSetPageNormSize(pdfPageIndex, effectiveRotation, { W: vp1.width, H: vp1.height });
