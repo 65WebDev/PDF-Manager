@@ -4364,6 +4364,13 @@
     .pm-link-hotzone:hover {
       background: rgba(37, 99, 235, 0.14);
     }
+    /* Internal links jump to another page - only makes sense to advertise
+       and allow that when pages are stacked one-per-row; in a multi-column
+       grid, clicking near a link's spot on a page is far more likely to be
+       an accidental click meant for a neighboring card. */
+    body.pm-links-multi-column .pm-link-layer {
+      pointer-events: none !important;
+    }
     body.nav-mode-active .pm-link-layer {
       display: none !important;
       pointer-events: none !important;
@@ -12052,6 +12059,7 @@
         zone.style.height = (link.height * 100) + '%';
         zone.addEventListener('click', (e) => {
           e.stopPropagation();
+          if (typeof isPagesSingleColumnLayout === 'function' && !isPagesSingleColumnLayout()) return;
           if (typeof pmBookmarksGoTo === 'function') pmBookmarksGoTo(link.pageIndex);
         });
         layer.appendChild(zone);
@@ -12068,8 +12076,18 @@
       pmLinksBuildTimer = setTimeout(runPageLinkLayerBuild, 140);
     }
 
+    // Reflects the current single/multi-column page layout onto <body> so
+    // the body.pm-links-multi-column CSS rule above can gate hotzone
+    // interactivity - re-run from both the build path and the sync-on-
+    // scroll/resize path so it tracks zoom and window-size changes too.
+    function pmLinksUpdateColumnGate() {
+      const single = typeof isPagesSingleColumnLayout === 'function' && isPagesSingleColumnLayout();
+      document.body.classList.toggle('pm-links-multi-column', !single);
+    }
+
     async function runPageLinkLayerBuild() {
       if (!pdfDoc) return;
+      pmLinksUpdateColumnGate();
       const token = hqPdfjsToken;
       const pages = Array.from(pagesContainer.querySelectorAll('.page'));
       for (const pageDiv of pages) {
@@ -12084,6 +12102,7 @@
     // hotzones inside are percentage-positioned, so only the outer box needs
     // updating here, unlike the text layer's per-glyph rebuild.
     function pmLinksSyncLayerPositions() {
+      pmLinksUpdateColumnGate();
       const layers = pagesContainer.querySelectorAll('.page .pm-link-layer');
       if (!layers.length) return;
       layers.forEach((layer) => {
@@ -30125,7 +30144,13 @@ function pmBookmarksSerializeToDoc() {
     const dict = ctx.obj({});
     const ref = ctx.register(dict);
     written.push(ref);
-    dict.set(PDFName.of('Title'), PDFString.of(node.title || ''));
+    // UTF-16BE hex string (via pePdfAnnotText), not PDFString.of - a plain
+    // PDFString truncates each UTF-16 code unit to a byte, so Cyrillic (or
+    // any non-Latin1) titles come back as garbage the moment the outline is
+    // actually re-parsed from saved bytes (invisible in the live UI, which
+    // reads pmBookmarksState.tree directly - but surfaces the moment a tab
+    // switch reloads pdfDoc from a docHistory snapshot, or on a real Save).
+    dict.set(PDFName.of('Title'), typeof pePdfAnnotText === 'function' ? pePdfAnnotText(node.title || '') : PDFString.of(node.title || ''));
     dict.set(PDFName.of('Parent'), parentRef);
     let flags = 0;
     if (node.italic) flags |= 1;
@@ -30296,7 +30321,13 @@ async function pmBookmarksMigrateOnReorder(srcDoc, tgtDoc, orderedOldIndices, co
     const dict = tgtCtx.obj({});
     const ref = tgtCtx.register(dict);
     written.push(ref);
-    dict.set(PDFName.of('Title'), PDFString.of(node.title || ''));
+    // UTF-16BE hex string (via pePdfAnnotText), not PDFString.of - a plain
+    // PDFString truncates each UTF-16 code unit to a byte, so Cyrillic (or
+    // any non-Latin1) titles come back as garbage the moment the outline is
+    // actually re-parsed from saved bytes (invisible in the live UI, which
+    // reads pmBookmarksState.tree directly - but surfaces the moment a tab
+    // switch reloads pdfDoc from a docHistory snapshot, or on a real Save).
+    dict.set(PDFName.of('Title'), typeof pePdfAnnotText === 'function' ? pePdfAnnotText(node.title || '') : PDFString.of(node.title || ''));
     dict.set(PDFName.of('Parent'), parentRef);
     let flags = 0;
     if (node.italic) flags |= 1;
