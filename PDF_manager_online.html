@@ -11125,6 +11125,31 @@
       }, { passive: true });
     })();
 
+    // pmMaxPortraitAspect() (used by pmVerticalMagnetTarget) only scans
+    // <img>s that have actually finished decoding (naturalWidth/Height set)
+    // - thumbnails render lazily (renderThumbnailsLazy/loadLazyThumbnail),
+    // page by page, often well AFTER the user has already zoomed to what
+    // looked like the correct vertical magnet at the time. Once a later
+    // page finishes loading and turns out narrower/wider than every
+    // portrait page known so far, the true magnet target can shift out from
+    // under an already-settled scale with nothing else to catch it - the
+    // scroll/resize/bookmarks-gutter hooks above only fire on THEIR OWN
+    // triggers, not on an image finishing decode. 'load' doesn't bubble, so
+    // this needs the capture phase; debounced since a document can finish
+    // dozens of thumbnails in a fast burst (initial open, background
+    // prefetch) and each one only needs the LATEST state re-checked once.
+    (function pmInitVerticalMagnetImageLoadGuard() {
+      if (!pagesContainer) return;
+      let debounceTimer = null;
+      pagesContainer.addEventListener('load', (e) => {
+        if (!e.target || e.target.tagName !== 'IMG') return;
+        clearTimeout(debounceTimer);
+        debounceTimer = setTimeout(() => {
+          if (typeof pmReapplyFitWidthIfActive === 'function') pmReapplyFitWidthIfActive();
+        }, 150);
+      }, true);
+    })();
+
     function computeFitWidthScale() {
       if (typeof computeReadModeDesktopScale !== 'function') return currentScale;
       return isTouchDevice
