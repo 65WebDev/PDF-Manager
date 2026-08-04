@@ -3741,8 +3741,14 @@
       align-items: center;
       justify-content: flex-end;
       gap: 16px;
-      margin: 2px 0 15px;
-      min-height: 34px;
+      /* Sized to fit the h1 title that used to live here (22px font) - now
+         that it's gone, only the small 14px page-count line remains, so
+         this used to reserve far more empty vertical space than anything
+         inside it actually needs (see the matching .compact/.menu-hidden
+         min-height below, and pmBookmarksReferenceBottom() downstream,
+         which anchors the bookmarks popup right below this box). */
+      margin: 2px 0 8px;
+      min-height: 22px;
       user-select: none;
       position: relative;
     }
@@ -3786,7 +3792,7 @@
     /*In the compact, the file name is positioned absolutely, and the title is hidden -
        without min-height, the header collapses and the pages run over the counter/name.*/
     .content-header.compact {
-      min-height: 34px;
+      min-height: 22px;
     }
     .content-header.compact .info {
       left: auto;
@@ -3797,7 +3803,7 @@
     }
 
     /*Menu collapsed (desktop): the title is hidden, the file name is strictly in the center*/
-    .content-header.menu-hidden { justify-content: center; min-height: 34px; }
+    .content-header.menu-hidden { justify-content: center; min-height: 22px; }
     .content-header.menu-hidden h1 { display: none; }
     .content-header.menu-hidden .info {
       left: 50%;
@@ -16263,6 +16269,12 @@
       const isImage = isImageExt(ext);
       const isEmail = isEmailExt(ext);
 
+      // Covers the whole load (including showLoading() below, which would
+      // otherwise trip the bookmarks popup's own "no document / loading"
+      // auto-close the same way a page reorder used to) so a popup left
+      // open while adding another tab survives the load instead of
+      // silently vanishing.
+      pmBookmarksSuppressAutoClose = true;
       try {
         let pdfBytes;
         historyPushSuspended = true;
@@ -16312,6 +16324,14 @@
         if (typeof pdfManagerMaximizeDesktopWindow === 'function') {
           pdfManagerMaximizeDesktopWindow();
         }
+        // The popup no longer auto-closes during the load (see
+        // pmBookmarksSuppressAutoClose above) - if it was left open, it's
+        // now showing whatever tab was active BEFORE this one loaded, so
+        // refresh it against the document that just finished loading.
+        if (typeof pmBookmarksState !== 'undefined' && pmBookmarksState.open &&
+            typeof pmBookmarksLoadAndRender === 'function') {
+          pmBookmarksLoadAndRender();
+        }
 
       } catch (e) {
         console.error(e);
@@ -16323,6 +16343,8 @@
         hideLoading();
         wasCreatingNewDocument = false;
         updateUIState();
+      } finally {
+        pmBookmarksSuppressAutoClose = false;
       }
     }
 
@@ -27290,6 +27312,14 @@ async function pmActivate(id, skipCapture, keepSelection) {
   applyMarkedForDeletionToDOM();
   updateUIState(); updateInfo(); updateUndoRedoUI();
   pmRenderBar(); pmSyncLayout();
+  // The popup doesn't reload its tree just because pdfDoc got swapped out
+  // from under it - without this, switching tabs while it's open kept
+  // showing the PREVIOUS tab's bookmarks until the popup was closed and
+  // reopened.
+  if (typeof pmBookmarksState !== 'undefined' && pmBookmarksState.open &&
+      typeof pmBookmarksLoadAndRender === 'function') {
+    pmBookmarksLoadAndRender();
+  }
 
   const top = t.scrollTop || 0;
   scrollContainer.scrollTop = top;
@@ -29641,12 +29671,17 @@ function pmSearchToggleOpen() {
 // tracking "is the sticky bar active", which went stale between scroll
 // ticks for a position:fixed panel anchored to a value that changes as the
 // page scrolls - see pmBookmarksPositionPanel's own scroll-listener hookup).
+// Just the (fixed, always-visible) top menu's own bottom edge - NOT also
+// clamped against .content-header's rect the way this used to be. While
+// the popup is open, body.pm-bookmarks-active reserves a matching gutter
+// on #scrollContainer's own left padding (see that rule's own comment),
+// which content-header sits inside of just like the page thumbnails - so
+// its page-count/file-name text already renders clear of the panel's own
+// column horizontally, and there's nothing left to avoid vertically by
+// pushing the panel down below it too. Doing that anyway just left an
+// oversized gap between the menu and the panel.
 function pmBookmarksReferenceBottom() {
-  const header = document.querySelector('.content-header');
-  const headerRect = header ? header.getBoundingClientRect() : null;
-  const headerBottom = (headerRect && headerRect.height > 0) ? headerRect.bottom : 0;
-  const menuBottom = typeof stickyBarTop === 'function' ? stickyBarTop() : 0;
-  return Math.max(headerBottom, menuBottom);
+  return typeof stickyBarTop === 'function' ? stickyBarTop() : 0;
 }
 
 function pmBookmarksPositionPanel() {
