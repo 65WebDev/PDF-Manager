@@ -7584,6 +7584,13 @@
     // pmBookmarksClose()) rather than alongside the other zoom-session state
     // further down, to avoid a temporal-dead-zone reference on first load.
     let pmVerticalMagnetActive = false;
+    // Same idea as pmVerticalMagnetActive, but for the LANDSCAPE-content-
+    // width magnet - a landscape page's own rendered width (pmPreviewLongPx)
+    // exactly filling the available width, the horizontal-format analogue of
+    // the vertical scroll lock. Kept as a separate flag rather than folding
+    // into one "which magnet" enum so both live-tracking paths in
+    // pmReapplyFitWidthIfActive stay independent and symmetric.
+    let pmLandscapeMagnetActive = false;
     let mobileMinScale = 35;      //mobile: bottom border pinch zoom-out (4/8 columns)
     let autoScaleEnabled = true;  //auto-zoom out for 3 pages in a row
     let scaleUserLocked = false;  //the user manually touched the slider → auto off
@@ -10929,6 +10936,7 @@
       // (see that function's own comment).
       pmLastRawSliderValueScale = currentScale;
       pmVerticalMagnetActive = snapped != null && typeof pmVerticalMagnetTarget === 'function' && snapped === pmVerticalMagnetTarget();
+      pmLandscapeMagnetActive = snapped != null && typeof pmLandscapeMagnetTarget === 'function' && snapped === pmLandscapeMagnetTarget();
       scaleUserLocked = true;
       autoScaleEnabled = false;
       if (scaleSlider) scaleSlider.value = Math.max(0, Math.min(200, scaleToSlider(currentScale)));
@@ -11106,13 +11114,35 @@
       return pmMaxScaleFittingWidth((s) => portraitPreviewWidth(s, portraitAspect), avail);
     }
 
+    // The horizontal-format counterpart: the scale at which a LANDSCAPE
+    // page's own rendered width (pmPreviewLongPx - capped directly to the
+    // shared long-axis budget, not narrowed by aspect the way portrait is)
+    // exactly fills the available width. Unlike pmVerticalMagnetTarget,
+    // this doesn't depend on any particular page's aspect ratio - only on
+    // whether a landscape page exists at all (gated the same way
+    // pmZoomMagnetTargets gates its own landscape entry) - so, unlike the
+    // portrait target, it can't drift as MORE landscape pages happen to
+    // finish loading later; it only ever needs to go from null to a real
+    // number once the first landscape page's thumbnail has rendered.
+    function pmLandscapeMagnetTarget() {
+      if (isTouchDevice || !pdfDoc || !pagesContainer) return null;
+      const avail = getScrollAvailWidth();
+      if (avail <= 0) return null;
+      const hasLandscape = !!pagesContainer.querySelector('.page.page-rotated img');
+      if (!hasLandscape) return null;
+      return pmMaxScaleFittingWidth((s) => pmPreviewLongPx(s), avail);
+    }
+
     function pmShouldLockHorizontalScroll() {
       if (isTouchDevice || !pdfDoc || !pagesContainer || !scrollContainer) return false;
       if (typeof isPagesSingleColumnLayout !== 'function' || !isPagesSingleColumnLayout()) return false;
       const avail = getScrollAvailWidth();
       if (avail <= 0) return false;
       const portraitTarget = pmVerticalMagnetTarget();
-      if (portraitTarget == null || currentScale !== portraitTarget) return false;
+      const landscapeTarget = pmLandscapeMagnetTarget();
+      const onPortraitMagnet = portraitTarget != null && currentScale === portraitTarget;
+      const onLandscapeMagnet = landscapeTarget != null && currentScale === landscapeTarget;
+      if (!onPortraitMagnet && !onLandscapeMagnet) return false;
       const host = scrollContainer.getBoundingClientRect();
       const pages = pagesContainer.querySelectorAll('.page');
       for (const p of pages) {
@@ -11185,14 +11215,15 @@
       scaleUserLocked = true;
       autoScaleEnabled = false;
       // Every caller here sets the scale via its OWN formula (the fit-width
-      // button's computeFitWidthScale, or the vertical-magnet live re-snap
+      // button's computeFitWidthScale, or one of the magnet live re-snaps
       // below) rather than through changeScale's own magnet-snap detection,
-      // so pmVerticalMagnetActive must be explicitly told which case this
-      // is instead of silently keeping whatever stale value changeScale
-      // last left behind - otherwise a later reapply could forcibly snap
-      // the scale back onto the vertical magnet even after the user (or the
-      // fit-width button) deliberately moved away from it.
+      // so pmVerticalMagnetActive/pmLandscapeMagnetActive must be explicitly
+      // told which case this is instead of silently keeping whatever stale
+      // value changeScale last left behind - otherwise a later reapply
+      // could forcibly snap the scale back onto a magnet even after the
+      // user (or the fit-width button) deliberately moved away from it.
       pmVerticalMagnetActive = !!(opts && opts.viaVerticalMagnet);
+      pmLandscapeMagnetActive = !!(opts && opts.viaLandscapeMagnet);
       const sliderVal = Math.max(0, Math.min(200, scaleToSlider(currentScale)));
       if (scaleSlider) scaleSlider.value = sliderVal;
       const rms = document.getElementById('readModeScaleSlider');
@@ -11269,6 +11300,16 @@
         const magnetTarget = pmVerticalMagnetTarget();
         if (magnetTarget != null && Math.abs(magnetTarget - currentScale) > 0.25) {
           applyFitWidthScaleValue(magnetTarget, { viaVerticalMagnet: true });
+        }
+      }
+      // Same live-tracking, horizontal-format counterpart: currentScale was
+      // last set by snapping onto the LANDSCAPE-content-width magnet -
+      // re-snap it to that magnet's own live target too if the available
+      // width just moved.
+      if (pmLandscapeMagnetActive && !fitWidthToggleOn && typeof pmLandscapeMagnetTarget === 'function') {
+        const landscapeTarget = pmLandscapeMagnetTarget();
+        if (landscapeTarget != null && Math.abs(landscapeTarget - currentScale) > 0.25) {
+          applyFitWidthScaleValue(landscapeTarget, { viaLandscapeMagnet: true });
         }
       }
       if (typeof pmUpdateVerticalOnlyScrollLock === 'function') pmUpdateVerticalOnlyScrollLock();
@@ -11957,39 +11998,38 @@
 
       let overflow = false;
 
-      // One column: for a portrait page the visible page content is narrower
-      // than the square card by design (see portraitPreviewWidth) - basing
-      // this on the card's own width would call it "overflowing" (and force
-      // flex-start, losing centering) even when the actually-visible image
-      // fits the width fine, which is exactly what "fit page width" targets.
+      // One column: a page's actual visible content (portrait or landscape)
+      // is narrower than the square card by design (see portraitPreviewWidth
+      // / pmPreviewLongPx) - basing this on the card's own width would call
+      // it "overflowing" (and force flex-start, losing centering) even when
+      // the actually-visible image fits the width fine, which is exactly
+      // what "fit page width" targets.
       //
-      // pmAllPagesPortrait() alone isn't enough: it requires EVERY page in
-      // the whole document to be portrait, so a single landscape page
-      // anywhere - even scrolled far out of view - used to fall this whole
-      // branch back to the wider square-card width even while the pages
-      // actually ON SCREEN were all portrait and their real content already
-      // fit avail. cardRowWidth(scale,1) is always wider than avail at the
-      // portrait magnet's own scale (that gap is exactly what makes the
-      // square and portrait magnets two distinct targets), so this reported
-      // a false overflow, forcing flex-start alignment and shifting the
-      // page - the same symptom the vertical scroll lock exists to avoid,
-      // and it reproduced with any mixed-orientation document even while
-      // the lock itself was correctly engaged. What actually matters is
-      // whether a wider-than-portrait page is in the CURRENT scroll
-      // viewport - the same test pmShouldLockHorizontalScroll already uses
-      // for its own "no wider page in view" rule.
+      // Measured directly off whatever pages are actually in the CURRENT
+      // scroll viewport rather than guessed from a per-orientation formula:
+      // an earlier version special-cased "all visible pages portrait" vs
+      // "all visible pages landscape" and fell back to the wide square-card
+      // width for anything else, including the ordinary case of a portrait
+      // and a landscape page both partially in view at once (e.g. scrolled
+      // to the boundary between them) - even though NEITHER page's own
+      // content actually exceeded avail, that fallback still reported a
+      // false overflow, forcing flex-start alignment and shifting the page
+      // sideways - the same symptom the vertical scroll lock exists to
+      // avoid. Reading each visible image's real rendered width sidesteps
+      // needing to special-case every combination of what's in view.
       if (isMobilePagesSingleColumn() || isPagesSingleColumnLayout()) {
         const host = scrollContainer.getBoundingClientRect();
         const inViewport = pages.filter((p) => {
           const r = p.getBoundingClientRect();
           return r.bottom > host.top && r.top < host.bottom;
         });
-        const noWiderPageInView = inViewport.length > 0 &&
-          inViewport.every((p) => !p.classList.contains('page-rotated'));
-        const portraitAspect = noWiderPageInView ? pmMaxPortraitAspect() : null;
-        const cardW = portraitAspect
-          ? portraitPreviewWidth(currentScale, portraitAspect)
-          : cardRowWidth(currentScale, 1);
+        const inViewportWidths = inViewport
+          .map((p) => p.querySelector('.img-wrapper img'))
+          .filter(Boolean)
+          .map((img) => img.getBoundingClientRect().width);
+        // No page actually in view (mid-transition) - fall back to the
+        // conservative full-card width rather than treating 0 as "fits".
+        const cardW = inViewportWidths.length > 0 ? Math.max(...inViewportWidths) : cardRowWidth(currentScale, 1);
         const hyst = pagesContainer.classList.contains('pages-row-overflow') ? -16 : 16;
         overflow = cardW > avail + hyst;
       } else {
