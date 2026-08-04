@@ -4367,8 +4367,13 @@
     /* Internal links jump to another page - only makes sense to advertise
        and allow that when pages are stacked one-per-row; in a multi-column
        grid, clicking near a link's spot on a page is far more likely to be
-       an accidental click meant for a neighboring card. */
-    body.pm-links-multi-column .pm-link-layer {
+       an accidental click meant for a neighboring card. Both selectors are
+       needed: .pm-link-hotzone's own pointer-events:auto below is a literal
+       (not inherited) value, so it overrides the layer's :none for itself
+       unless targeted directly too - the layer-only rule left hover/click
+       still reaching the hotzone. */
+    body.pm-links-multi-column .pm-link-layer,
+    body.pm-links-multi-column .pm-link-hotzone {
       pointer-events: none !important;
     }
     body.nav-mode-active .pm-link-layer {
@@ -7441,9 +7446,14 @@
     function isZoomPanMode() {
       return currentScale >= getZoomPanThreshold();
     }
-    /** High-zoom text selection in select mode (preview), desktop and mobile. */
+    /** High-zoom text selection in select mode (preview), desktop and mobile.
+        Also requires a single-column layout - on a very wide/ultrawide
+        monitor two columns can still fit even past the zoom-pan threshold,
+        and a page click there should always mean page selection, never
+        text-selection (same principle as the internal-link hotzone gate). */
     function isZoomTextSelect() {
-      return isZoomPanMode() && interactionMode === 'select';
+      return isZoomPanMode() && interactionMode === 'select' &&
+        (typeof isPagesSingleColumnLayout !== 'function' || isPagesSingleColumnLayout());
     }
     /** Desktop-only helpers (blank-area pan, RMB image copy, etc.). */
     function isDesktopZoomTextSelect() {
@@ -30093,18 +30103,47 @@ async function pmBookmarksBuildTree() {
 }
 
 async function pmBookmarksLoadAndRender() {
-  const token = ++pmBookmarksReqToken;
   const list = document.getElementById('pmBookmarksList');
   // Preserved across the rebuild below - otherwise a mid-session refresh
   // (e.g. after a page reorder while the popup is left open) snaps the
   // list back to the top instead of staying where the user was looking.
   const savedScrollTop = list ? list.scrollTop : 0;
+
+  // Per-tab cache of the last-parsed tree, keyed by the tab's own session
+  // object so it's freed automatically when the tab closes. A background
+  // tab's docHistory/docHistoryIndex can only change while IT is the
+  // active tab (pmCaptureActive/pmActivate are the sole place they move
+  // between the globals and the session object) - so as long as the
+  // index we cached against still matches, nothing could have touched
+  // that tab's bookmarks since, and the pdf.js re-parse in
+  // pmBookmarksBuildTree() (itself preceded by a full pdfDoc.save()) can
+  // be skipped entirely. This is what makes switching back to an
+  // already-visited tab instant instead of re-parsing every time.
+  const activeTab = (typeof pmTabs !== 'undefined' && typeof pmActiveId !== 'undefined')
+    ? pmTabs.find(x => x.id === pmActiveId) : null;
+  if (activeTab && activeTab.bookmarksTreeCache && activeTab.bookmarksTreeCacheHistoryIndex === docHistoryIndex) {
+    pmBookmarksState.tree = activeTab.bookmarksTreeCache;
+    const flat = pmBookmarksFlatten(activeTab.bookmarksTreeCache);
+    if (pmBookmarksState.pendingCollapseAll) {
+      pmBookmarksState.pendingCollapseAll = false;
+      pmBookmarksState.collapsedPaths = new Set(flat.filter((it) => it.hasChildren).map((it) => it.path));
+    }
+    pmBookmarksRenderList(flat);
+    if (list) list.scrollTop = savedScrollTop;
+    return;
+  }
+
+  const token = ++pmBookmarksReqToken;
   if (list) list.innerHTML = '';
   pmBookmarksSetStatus(t('bookmarksLoading'));
   let tree = [];
   try { tree = await pmBookmarksBuildTree(); } catch (_) { tree = []; }
   if (token !== pmBookmarksReqToken) return; // popup closed/reopened, or doc changed, meanwhile
   pmBookmarksState.tree = tree;
+  if (activeTab) {
+    activeTab.bookmarksTreeCache = tree;
+    activeTab.bookmarksTreeCacheHistoryIndex = docHistoryIndex;
+  }
   const flat = pmBookmarksFlatten(tree);
   if (pmBookmarksState.pendingCollapseAll) {
     pmBookmarksState.pendingCollapseAll = false;
