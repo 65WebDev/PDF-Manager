@@ -10770,11 +10770,24 @@
     let zoomSessionAnchor = null;
     let zoomSessionResetTimer = null;
     const ZOOM_SESSION_IDLE_MS = 700;
+    // Last RAW slider value changeScale() received (before any zoom-magnet
+    // snapping), and the currentScale it left behind right after - see
+    // pmSnapToZoomMagnet further down for how the pair together detect a
+    // stale history (something OTHER than changeScale - setScaleProgrammatic,
+    // applyFitWidthScaleValue, pinch, ... - changed currentScale in
+    // between calls). Declared here, alongside the other zoom-session
+    // state, so resetZoomSession() can clear them without any risk of a
+    // temporal-dead-zone reference (they're `let`s, not hoisted function
+    // declarations).
+    let pmLastRawSliderValue = null;
+    let pmLastRawSliderValueScale = null;
 
     function resetZoomSession() {
       clearTimeout(zoomSessionResetTimer);
       zoomSessionResetTimer = null;
       zoomSessionAnchor = null;
+      pmLastRawSliderValue = null;
+      pmLastRawSliderValueScale = null;
     }
 
     function pageAtClientPoint(x, y) {
@@ -10870,9 +10883,14 @@
       const zoomAnchor = !isTouchDevice
         ? beginOrContinueZoomSession(opts.clientX, opts.clientY)
         : null;
-      const prevScale = currentScale;
-      currentScale = clampScale(sliderToScale(value));
-      if (typeof pmSnapToZoomMagnet === 'function') currentScale = pmSnapToZoomMagnet(prevScale, currentScale);
+      const rawValue = parseFloat(value);
+      const snapped = typeof pmSnapToZoomMagnet === 'function' ? pmSnapToZoomMagnet(rawValue) : null;
+      currentScale = snapped != null ? snapped : clampScale(sliderToScale(rawValue));
+      // Records what currentScale actually ended up as, right after this
+      // assignment - pmSnapToZoomMagnet compares against this on its NEXT
+      // call to tell whether its own raw-value history is still trustworthy
+      // (see that function's own comment).
+      pmLastRawSliderValueScale = currentScale;
       scaleUserLocked = true;
       autoScaleEnabled = false;
       if (scaleSlider) scaleSlider.value = Math.max(0, Math.min(200, scaleToSlider(currentScale)));
@@ -16729,40 +16747,75 @@
       return targets.filter((t) => t != null);
     }
 
-    // Fallback tolerance (scale percentage points) for when a step lands
-    // CLOSE to a magnet without actually crossing it (e.g. a slider drag
-    // released just short of it). Symmetric either direction.
-    const ZOOM_MAGNET_TOLERANCE = 4;
+    // Fallback tolerance, in SLIDER UNITS (0-200), for when a step lands
+    // close to a magnet's own slider position without crossing it outright
+    // (e.g. a slider drag released just short of it). NOT scale percentage
+    // points - see pmSnapToZoomMagnet's own comment for why.
+    const ZOOM_MAGNET_SLIDER_TOLERANCE = 2;
 
-    // A single wheel notch's slider-to-scale gearing gets steep at high
-    // zoom (one notch can jump 100+ scale points there), so checking
-    // "landed within ZOOM_MAGNET_TOLERANCE of a target" alone would almost
-    // never fire from wheel input - a coarse notch routinely leaps clean
-    // over the whole tolerance window in one step. Checking whether the
-    // target lies BETWEEN the step's start and end scale instead catches
-    // every crossing regardless of step size, which is what actually makes
-    // "from both sides" true for wheel zooming, not just fine slider drags.
-    // If a step crosses more than one target, snaps to whichever is
-    // nearest the step's START - the first one the user would feel while
-    // sweeping through.
-    function pmSnapToZoomMagnet(prevScale, candidateScale) {
+    // pmLastRawSliderValue itself is declared earlier, alongside
+    // zoomSessionAnchor, so resetZoomSession() can clear it safely (see
+    // that declaration's own comment). This app's own zoom slider is only
+    // ~80px wide for a 70%-1300% scale range, so the scale-per-slider-unit
+    // ratio swings wildly across it -
+    // one physical pixel of drag (or one wheel notch) can move the
+    // resulting SCALE by 100+ points at the high end. A magnet check done
+    // in SCALE-percent space is nearly useless there: the tolerance window
+    // is either meaninglessly tiny (barely wider than the noise) or the
+    // step leaps clean over it before the browser even fires the next
+    // input event - confirmed empirically: dragging one pixel at a time
+    // through a magnet zone landed on the exact target scale for exactly
+    // one of ~250 physical pixels of drag, then jumped 100+ points away on
+    // the very next one. Checking in SLIDER-VALUE space instead - what the
+    // user is actually, physically dragging - makes the sticky zone's
+    // width consistent in mouse-pixel terms everywhere on the range,
+    // regardless of how coarse the local scale-per-unit ratio gets, and
+    // returns the target's own exact scale rather than a value re-derived
+    // through a lossy scale<->slider round trip (which can land a couple
+    // of scale points short even when the slider truly is centered on the
+    // magnet). Whether crossed or just within tolerance, this is what
+    // makes the slider itself visibly "jump to" a magnet, not just the
+    // rendered content quietly matching it internally.
+    // Returns the target's scale to snap to, or null if none apply.
+    function pmSnapToZoomMagnet(rawValue) {
       const targets = pmZoomMagnetTargets();
-      if (!targets.length) return candidateScale;
-      const lo = Math.min(prevScale, candidateScale);
-      const hi = Math.max(prevScale, candidateScale);
-      // Excludes t === prevScale: right after a snap, prevScale IS the
-      // target, so it would sit at one end of every subsequent [lo, hi]
-      // range and trivially "re-cross" itself forever, permanently
-      // sticking the magnet instead of releasing on the next step away.
-      const crossed = targets.filter((t) => t !== prevScale && t >= lo && t <= hi);
+      // On the FIRST event of a fresh gesture (no history yet), OR when
+      // something other than this function's own last call changed
+      // currentScale in between (setScaleProgrammatic, applyFitWidthScaleValue,
+      // pinch, ... - anything that doesn't go through changeScale), fall
+      // back to wherever the zoom actually IS right now rather than
+      // trusting stale history. A plain "assume no movement yet" default
+      // would give a fresh gesture's first call a zero-width
+      // [rawValue, rawValue] range, unable to detect a crossing even
+      // though a native range input's very first 'input' event after a
+      // click-and-drag can already land far from the pre-drag position
+      // (confirmed empirically: it jumped straight past a magnet on the
+      // first captured event of a fresh drag, before any two-point
+      // history existed to notice) - and trusting a genuinely stale
+      // pmLastRawSliderValue left over from an unrelated earlier
+      // gesture could just as easily manufacture a crossing that never
+      // really happened. pmLastRawSliderValueScale (set in changeScale
+      // right after currentScale is actually assigned) is what currentScale
+      // was immediately after THIS function's own previous call - if it no
+      // longer matches, the history isn't ours to trust anymore.
+      const historyValid = pmLastRawSliderValue != null && pmLastRawSliderValueScale === currentScale;
+      const prevRawValue = historyValid ? pmLastRawSliderValue : scaleToSlider(currentScale);
+      pmLastRawSliderValue = rawValue;
+      if (!targets.length) return null;
+      const withSliderPos = targets.map((t) => ({ scale: t, sliderVal: scaleToSlider(t) }));
+      const lo = Math.min(prevRawValue, rawValue);
+      const hi = Math.max(prevRawValue, rawValue);
+      // Whichever crossed target is nearest the step's START is the first
+      // one the user would actually feel while sweeping through.
+      const crossed = withSliderPos.filter((x) => x.sliderVal >= lo && x.sliderVal <= hi);
       if (crossed.length) {
-        crossed.sort((a, b) => Math.abs(a - prevScale) - Math.abs(b - prevScale));
-        return crossed[0];
+        crossed.sort((a, b) => Math.abs(a.sliderVal - prevRawValue) - Math.abs(b.sliderVal - prevRawValue));
+        return crossed[0].scale;
       }
-      let best = candidateScale, bestDist = ZOOM_MAGNET_TOLERANCE + 1;
-      for (const t of targets) {
-        const d = Math.abs(candidateScale - t);
-        if (d <= ZOOM_MAGNET_TOLERANCE && d < bestDist) { best = t; bestDist = d; }
+      let best = null, bestDist = ZOOM_MAGNET_SLIDER_TOLERANCE + 1;
+      for (const x of withSliderPos) {
+        const d = Math.abs(rawValue - x.sliderVal);
+        if (d <= ZOOM_MAGNET_SLIDER_TOLERANCE && d < bestDist) { best = x.scale; bestDist = d; }
       }
       return best;
     }
