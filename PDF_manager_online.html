@@ -44851,7 +44851,26 @@ function peObjMouseDown(e, o) {
       peUpdatePanUi();
       return;
     }
-    peBeginInlineEdit(o);
+    // Desktop: mirror the touch branch above instead of entering edit mode
+    // outright - peBeginInlineEdit() focuses the block as contenteditable
+    // immediately, so a mousedown that turns into a hold-and-drag ended up
+    // dragging a text *selection* inside the block instead of moving the
+    // block itself. Arm a move-pending drag like every other object type;
+    // if it never crosses the threshold (see the pointerup handler's
+    // matching move-pending/textToolClickToEdit check), it resolves as a
+    // plain click and THEN enters edit mode.
+    peSelect(o, { keepTool: true });
+    {
+      const pt = peStagePoint(e);
+      peState.drag = {
+        kind: 'move-pending', obj: o,
+        startX: pt.x, startY: pt.y,
+        ox: o.x, oy: o.y, ow: o.w || 0, oh: o.h || 0,
+        threshold: 4,
+        textToolClickToEdit: true
+      };
+    }
+    peUpdatePanUi();
     return;
   }
   if (peState.inlineEditId === o.id) return;
@@ -45612,6 +45631,13 @@ function peObjMouseDown(e, o) {
     if (d.kind === 'move-pending' && d.cycleOnClick && d.cycleIds && d.cycleIds.length >= 2) {
       // Click without drag on a stacked hit → cycle to the next overlapping object.
       peCycleOverlapSelection(d.cycleIds, d.obj);
+    }
+    if (d.kind === 'move-pending' && d.textToolClickToEdit && d.obj) {
+      // Text tool, desktop: the mousedown armed a potential drag instead of
+      // entering edit immediately (see peObjMouseDown) - it never crossed
+      // the move threshold, so this was a plain click, not a drag. Enter
+      // edit now, same as the old immediate-edit behavior for that case.
+      peBeginInlineEdit(d.obj);
     }
     if (d.kind === 'highlight-draw' && d.obj && (d.obj.w < 0.005 || d.obj.h < 0.005)) {
       peState.objects = peState.objects.filter(o => o !== d.obj);
