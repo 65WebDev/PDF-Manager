@@ -7473,10 +7473,18 @@
     function isMobileZoomPan() {
       return false;
     }
-    const HQ_RENDER_SCALE = 2.0;      //high quality render scale
+    const HQ_RENDER_SCALE = 2.0;      //minimum high quality render scale
     let hqPdfjsDoc = null;            //pdf.js document cache for single-page rendering
     let hqPdfjsToken = 0;             //cache validity token (increases as the document changes)
     let hqUpgraded = new Set();       //data-index of pages already improved in the current mode
+    // idx -> the raster scale runHQUpgrade() actually rendered that page at
+    // last time. HQ upgrading now runs at every zoom level and the scale it
+    // targets grows with the CURRENT displayed size (see runHQUpgrade), not
+    // a single fixed constant - a page rendered sharp enough for 100% zoom
+    // is not sharp enough once the user zooms to 1300%, so this - not just
+    // membership in hqUpgraded - is what decides whether a visible page
+    // needs re-rendering. Cleared everywhere hqUpgraded itself is cleared.
+    let hqRenderedScale = new Map();
     let hqScheduleTimer = null;
     let pageTextLayerTimer = null;
     let pageTextLayerToken = 0;
@@ -12093,6 +12101,7 @@
       hqPdfjsToken++;
       hqPdfjsDoc = null;
       hqUpgraded.clear();
+      hqRenderedScale.clear();
       gridClearPdfPageImagesCache();
       if (typeof invalidatePageTextLayers === 'function') invalidatePageTextLayers();
       if (typeof pmLinksClearPageCache === 'function') pmLinksClearPageCache();
@@ -12105,6 +12114,7 @@
       hqPdfjsToken++;
       hqPdfjsDoc = null;
       hqUpgraded.clear();
+      hqRenderedScale.clear();
       gridClearPdfPageImagesCache();
       if (typeof pmLinksClearPageCache === 'function') pmLinksClearPageCache();
     }
@@ -12675,16 +12685,15 @@
     function scheduleHQUpgrade(opts) {
       clearTimeout(hqScheduleTimer);
       const force = !!(opts && opts.force);
-      // If we go below the threshold, we don’t do anything (low-quality previews remain,
-      // they are drawn at a standard scale and are sufficient) — unless forced
-      // (page-nav auto-scroll upgrades whatever is on screen).
-      if (!force && currentScale < HQ_SCALE_THRESHOLD) return;
+      // Runs at every zoom level now, not just above HQ_SCALE_THRESHOLD -
+      // runHQUpgrade itself decides per-page whether a re-render is
+      // actually needed (see its own comment), so there is nothing left to
+      // gate here.
       hqScheduleTimer = setTimeout(() => runHQUpgrade({ force }), force ? 60 : 180);
     }
 
     async function runHQUpgrade(opts) {
-      const force = !!(opts && opts.force);
-      if (!pdfDoc || (!force && currentScale < HQ_SCALE_THRESHOLD)) return;
+      if (!pdfDoc) return;
       if (typeof whenPdfDocIdle === 'function') await whenPdfDocIdle();
       const token = hqPdfjsToken;
 
@@ -12698,15 +12707,11 @@
       });
       if (!visible.length) return;
 
-      //You only need to improve those that have not yet been improved in this mode
-      const todo = visible.filter(p => !hqUpgraded.has(parseInt(p.dataset.index)));
-      if (!todo.length) return;
-
       const doc = await getHQPdfjsDoc(token);
       if (!doc || token !== hqPdfjsToken) return;
 
-      for (const div of todo) {
-        if (token !== hqPdfjsToken || (!force && currentScale < HQ_SCALE_THRESHOLD)) return;
+      for (const div of visible) {
+        if (token !== hqPdfjsToken) return;
         const idx = parseInt(div.dataset.index);
         // Skip pages still showing a CSS rotate (animating OR waiting for raster
         // swap). Writing a baked /Rotate image under a non-zero transform doubles
@@ -12716,13 +12721,31 @@
             : isPageRotateBusy(pageRotateState.get(div))) continue;
         const img = div.querySelector('.img-wrapper img');
         if (!img) continue;
+        // The raster only needs to match what's actually ON SCREEN right
+        // now - skip pages with no displayed width yet (mid-layout).
+        const displayWidth = img.getBoundingClientRect().width;
+        if (!displayWidth) continue;
         try {
           //We render the idx page (pdf.js: idx+1) in high quality into an offscreen image,
           //then we seamlessly replace the src of the existing <img> (the card is not rebuilt).
           const page = await doc.getPage(idx + 1);
           if (token !== hqPdfjsToken) return;
           const effectiveRotation = typeof page.rotate === 'number' ? page.rotate : 0;
-          const viewport = page.getViewport({ scale: HQ_RENDER_SCALE, rotation: effectiveRotation });
+          // Match the raster to the CURRENT zoom level rather than a single
+          // fixed constant - HQ_RENDER_SCALE is only a floor. A page
+          // rendered sharp enough at 400% zoom is under-resolved again by
+          // the time the user keeps zooming up to 1300%; without tracking
+          // the actual scale each page was last rendered at (hqRenderedScale)
+          // and re-rendering once the display genuinely outgrows it, the
+          // page would stay pinned at whatever resolution it first got
+          // upgraded to no matter how far past that the user zooms.
+          const vp1 = page.getViewport({ scale: 1, rotation: effectiveRotation });
+          const neededScale = Math.max(HQ_RENDER_SCALE, (displayWidth * PM_THUMBNAIL_DPR) / vp1.width);
+          const cachedScale = hqRenderedScale.get(idx);
+          // Small tolerance so a fractional zoom tick during a smooth drag
+          // doesn't re-render every already-good-enough page on screen.
+          if (cachedScale != null && cachedScale >= neededScale * 0.97) continue;
+          const viewport = page.getViewport({ scale: neededScale, rotation: effectiveRotation });
           const canvas = document.createElement('canvas');
           canvas.width = viewport.width; canvas.height = viewport.height;
           await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
@@ -12732,6 +12755,7 @@
           }
           img.src = canvas.toDataURL('image/jpeg', 0.92);
           hqUpgraded.add(idx);
+          hqRenderedScale.set(idx, neededScale);
           if (typeof schedulePageTextLayerBuild === 'function') schedulePageTextLayerBuild();
           if (typeof schedulePageLinkLayerBuild === 'function') schedulePageLinkLayerBuild();
         } catch (e) {
@@ -34719,6 +34743,7 @@ function editSelectedPage() {
 
       if (typeof hqPdfjsToken === 'number') hqPdfjsToken++;
       if (typeof hqUpgraded !== 'undefined' && hqUpgraded && hqUpgraded.clear) hqUpgraded.clear();
+      if (typeof hqRenderedScale !== 'undefined' && hqRenderedScale && hqRenderedScale.clear) hqRenderedScale.clear();
 
       await applyMarkupBytesToPreview(pageIdx, bytesBeforeReload);
 
@@ -34794,6 +34819,7 @@ function editSelectedPage() {
 
       if (typeof hqPdfjsToken === 'number') hqPdfjsToken++;
       if (typeof hqUpgraded !== 'undefined' && hqUpgraded && hqUpgraded.clear) hqUpgraded.clear();
+      if (typeof hqRenderedScale !== 'undefined' && hqRenderedScale && hqRenderedScale.clear) hqRenderedScale.clear();
 
       await applyMarkupBytesToPreview(pageIdx, bytes);
 
@@ -34880,6 +34906,7 @@ function editSelectedPage() {
 
       if (typeof hqPdfjsToken === 'number') hqPdfjsToken++;
       if (typeof hqUpgraded !== 'undefined' && hqUpgraded && hqUpgraded.clear) hqUpgraded.clear();
+      if (typeof hqRenderedScale !== 'undefined' && hqRenderedScale && hqRenderedScale.clear) hqRenderedScale.clear();
 
       await applyMarkupBytesToPreview(pageIdx, bytesBeforeReload);
 
