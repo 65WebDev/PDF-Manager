@@ -2229,6 +2229,17 @@
       box-sizing: border-box;
       position: relative;
     }
+    /* Dragging an image file from the OS over the page editor. */
+    .pe-stage-wrap.pe-stage-drop-active::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      z-index: 89;
+      pointer-events: none;
+      background: rgba(52, 152, 219, .08);
+      border: 2px dashed #3498db;
+      box-sizing: border-box;
+    }
     /* Mobile page-change swipe hint (fit zoom only). Hidden on desktop. */
     #pePageSwipeHint {
       display: none;
@@ -41793,6 +41804,66 @@ async function pePasteAtStage(stageX, stageY) {
   return false;
 }
 
+function peLoadImageFile(file) {
+  return new Promise((resolve, reject) => {
+    const rd = new FileReader();
+    rd.onload = () => {
+      const im = new Image();
+      im.onload = () => resolve({ dataUrl: rd.result, im });
+      im.onerror = reject;
+      im.src = rd.result;
+    };
+    rd.onerror = reject;
+    rd.readAsDataURL(file);
+  });
+}
+
+// Inserts one or more dropped/picked image files as page-editor objects, anchored
+// at (xFrac, yFrac) in stage-fraction coordinates (top-left of the first image;
+// each subsequent image cascades slightly so multi-file drops don't stack exactly).
+async function peInsertImageFilesAtFrac(files, xFrac, yFrac) {
+  if (!peState) return;
+  const imgFiles = Array.from(files || []).filter(f => f.type && f.type.startsWith('image/'));
+  if (!imgFiles.length) return;
+  const { w: W, h: H } = peStageSize();
+  const created = [];
+  for (let i = 0; i < imgFiles.length; i++) {
+    let loaded;
+    try {
+      loaded = await peLoadImageFile(imgFiles[i]);
+    } catch (_) {
+      continue; // skip unreadable/corrupt file, keep processing the rest
+    }
+    if (!peState) return;
+    const { dataUrl, im } = loaded;
+    const wFrac = 0.4;
+    const hFrac = wFrac * (im.naturalHeight / im.naturalWidth) * (W / H);
+    const off = i * 0.03;
+    const o = {
+      id: ++peState.seq, type: 'image', dataUrl, imgEl: im,
+      x: Math.max(0, Math.min(0.98, xFrac + off)), y: Math.max(0, Math.min(0.98, yFrac + off)),
+      w: wFrac, h: Math.min(hFrac, 0.9), rot: 0
+    };
+    peState.objects.push(o);
+    created.push(o);
+  }
+  if (!created.length) return;
+  // After insert, land in Object-select so the image(s) can be moved
+  // (Hand mode would keep pan gestures and block useful dragging).
+  peState.modeBeforeTool = null;
+  if (created.length === 1) {
+    peSelect(created[0]);
+  } else {
+    peState.sel = created[0];
+    peState.multiSel = created.slice(1);
+    peRedrawObjects();
+    peUpdateProps();
+    peUpdatePanUi();
+  }
+  peEnterObjSelectKeepingSelection();
+  peCommitEditorHistory();
+}
+
 function peHideObjCtxMenu() {
   const menu = document.getElementById('peObjCtxMenu');
   if (!menu) return;
@@ -47026,28 +47097,54 @@ function peObjMouseDown(e, o) {
     const f = e.target.files && e.target.files[0];
     e.target.value = '';
     if (!f || !peState) return;
-    const rd = new FileReader();
-    rd.onload = () => {
-      const im = new Image();
-      im.onload = () => {
-        if (!peState) return;
-        const { w: W, h: H } = peStageSize();
-        const wFrac = 0.4;
-        const hFrac = wFrac * (im.naturalHeight / im.naturalWidth) * (W / H);
-        const o = { id: ++peState.seq, type: 'image', dataUrl: rd.result, imgEl: im,
-                    x: 0.3, y: 0.3, w: wFrac, h: Math.min(hFrac, 0.9), rot: 0 };
-        peState.objects.push(o);
-        // After insert, land in Object-select so the image can be moved
-        // (Hand mode would keep pan gestures and block useful dragging).
-        peState.modeBeforeTool = null;
-        peSelect(o);
-        peEnterObjSelectKeepingSelection();
-        peCommitEditorHistory();
-      };
-      im.src = rd.result;
-    };
-    rd.readAsDataURL(f);
+    void peInsertImageFilesAtFrac([f], 0.3, 0.3);
   });
+
+  // Drag-and-drop images from the OS file manager straight onto the page.
+  (function initPeImageDrop() {
+    const dropTarget = document.getElementById('peStageWrap');
+    if (!dropTarget) return;
+    let dragDepth = 0;
+    const isImageFileDrag = (e) => {
+      const items = e.dataTransfer && e.dataTransfer.items;
+      if (items && items.length) {
+        return Array.from(items).some(it => it.kind === 'file' && (!it.type || it.type.startsWith('image/')));
+      }
+      return !!(e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files'));
+    };
+    dropTarget.addEventListener('dragenter', (e) => {
+      if (!peState || !isImageFileDrag(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      dragDepth++;
+      dropTarget.classList.add('pe-stage-drop-active');
+    });
+    dropTarget.addEventListener('dragover', (e) => {
+      if (!peState || !isImageFileDrag(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e.dataTransfer.dropEffect = 'copy';
+    });
+    dropTarget.addEventListener('dragleave', (e) => {
+      if (!peState) return;
+      e.stopPropagation();
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) dropTarget.classList.remove('pe-stage-drop-active');
+    });
+    dropTarget.addEventListener('drop', (e) => {
+      if (!peState || !(e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      e._pmOsDropHandled = true;
+      dragDepth = 0;
+      dropTarget.classList.remove('pe-stage-drop-active');
+      const pt = peStagePointFromClient(e.clientX, e.clientY);
+      const { w: W, h: H } = peStageSize();
+      const xFrac = Math.max(0, Math.min(0.98, pt.x / W));
+      const yFrac = Math.max(0, Math.min(0.98, pt.y / H));
+      void peInsertImageFilesAtFrac(e.dataTransfer.files, xFrac, yFrac);
+    });
+  })();
 
   // Properties panel
   // mousedown with preventDefault - otherwise a click on a regular <button> is intercepted
