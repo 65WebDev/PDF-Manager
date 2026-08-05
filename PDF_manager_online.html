@@ -33109,6 +33109,7 @@ function peApplyCropToEditorObjects(cropPdf) {
     w: Math.max(1e-6, (vr.right - vr.left) / W),
     h: Math.max(1e-6, (vr.bottom - vr.top) / H)
   };
+  console.log('[peDebugCrop] stage', W, H, 'viewport', peState.viewport.width, peState.viewport.height, 'cropFrac', JSON.stringify(crop));
   (peState.objects || []).forEach(o => {
     if (o && o.type === 'text') {
       try { peSnapTextBoxSize(o); } catch (_) {}
@@ -33118,7 +33119,9 @@ function peApplyCropToEditorObjects(cropPdf) {
   (peState.objects || []).forEach(o => {
     const b = peGetObjectNormBounds(o);
     if (!peNormRectsIntersect(b, crop)) return;
+    if (o.type === 'image') console.log('[peDebugCrop] image BEFORE remap', o.id, 'x', o.x, 'y', o.y, 'w', o.w, 'h', o.h);
     peRemapObjectForCrop(o, crop);
+    if (o.type === 'image') console.log('[peDebugCrop] image AFTER remap', o.id, 'x', o.x, 'y', o.y, 'w', o.w, 'h', o.h);
     keep.push(o);
   });
   const keepIds = new Set(keep.map(o => o.id));
@@ -35852,6 +35855,8 @@ async function peExpandPageEditHistoryIntoDoc(pageIdx, baseRot, baselineBytes, u
       try {
         doc = await PDFLib.PDFDocument.load(contentBytes.slice());
         const finalSnap = steps[steps.length - 1] || contentSnap;
+        console.log('[peDebugCrop] contentSnap idx', steps.indexOf(contentSnap), 'finalSnap idx', steps.indexOf(finalSnap),
+          'finalSnap image objs', JSON.stringify((finalSnap.objects || []).filter(o => o.type === 'image').map(o => ({ id: o.id, x: o.x, y: o.y, w: o.w, h: o.h }))));
         peApplyEditorHistorySnapToDoc(doc, pageIdx, baseRot, finalSnap);
         pdfDoc = doc;
         if (peState && peState.page) {
@@ -35859,6 +35864,8 @@ async function peExpandPageEditHistoryIntoDoc(pageIdx, baseRot, baselineBytes, u
           const vp1 = peState.page.getViewport({ scale: 1, rotation: rot });
           peSetPageNormSize(pageIdx, rot, { W: vp1.width, H: vp1.height });
         }
+        console.log('[peDebugCrop] doc cropBox after snap-apply', JSON.stringify(doc.getPage(pageIdx).getCropBox()),
+          'metadata images', JSON.stringify((peReadAllEditorMetaFromDoc(doc).pages[String(pageIdx)] || []).filter(o => o.type === 'image').map(o => ({ id: o.id, x: o.x, y: o.y, w: o.w, h: o.h }))));
         lastBytes = new Uint8Array(await doc.save(saveOpts));
         if (typeof originalFileBytes !== 'undefined') originalFileBytes = lastBytes;
         const tip = (docHistoryIndex >= 0) ? docHistory[docHistoryIndex] : null;
@@ -53680,6 +53687,8 @@ async function peFlattenEditorObjectsIntoDoc(targetDoc, sourcePageIndices) {
       let page = workDoc.getPage(targetIdx);
       const rot = page.getRotation().angle || 0;
       const cb = page.getCropBox();
+      console.log('[peDebugCrop] flatten sourceIdx', sourceIdx, 'targetIdx', targetIdx, 'cb', JSON.stringify(cb),
+        'image objs', JSON.stringify(objects.filter(o => o.type === 'image').map(o => ({ id: o.id, x: o.x, y: o.y, w: o.w, h: o.h }))));
       const redacts = objects.filter(o => o.type === 'redact');
       if (redacts.length) {
         for (let ri = 0; ri < redacts.length; ri++) {
