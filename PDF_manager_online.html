@@ -7755,6 +7755,8 @@
         peInsertText: 'Вставить текст', peInsertImage: 'Вставить изображение', peAddShapes: 'Добавить фигуры',
         peShapeRect: 'Прямоугольник', peShapeEllipse: 'Круг / овал', peShapeArrow: 'Стрелка',
         peShapeLine: 'Линия', peShapePlus: 'Плюс', peShapeFreehand: 'Свободная форма', peShapeStar: 'Звезда',
+        peObjLabelText: 'Текст', peObjLabelImage: 'Изображение',
+        peObjLabelRedact: 'Область затирания', peObjLabelShapeGeneric: 'Фигура',
         peCancel: 'Отмена', peSave: 'Сохранить', peCropHint: 'Выделите область кадрирования',
         mergeTitleWithDoc: 'Объединить несколько файлов в один и добавить к текущему (M)',
         mergeTitleNoDoc: 'Объединить несколько файлов в один (M)',
@@ -7811,6 +7813,7 @@
         peDeleteObj: 'Удалить объект',
         peCropCancel: 'Отменить кадрирование',
         peCropConfirm: 'Подтвердить кадрирование',
+        loadingCroppingPage: 'Кадрирование страницы...',
         peCropCtxConfirm: 'Кадрировать',
         peRedactColor: 'Выбрать цвет',
         peRedactConfirm: 'Подтвердить затирание',
@@ -8037,6 +8040,8 @@
         peInsertText: 'Insert text', peInsertImage: 'Insert image', peAddShapes: 'Add shapes',
         peShapeRect: 'Rectangle', peShapeEllipse: 'Circle / oval', peShapeArrow: 'Arrow',
         peShapeLine: 'Line', peShapePlus: 'Plus', peShapeFreehand: 'Freeform', peShapeStar: 'Star',
+        peObjLabelText: 'Text', peObjLabelImage: 'Image',
+        peObjLabelRedact: 'Redaction area', peObjLabelShapeGeneric: 'Shape',
         peCancel: 'Cancel', peSave: 'Save', peCropHint: 'Select crop area',
         mergeTitleWithDoc: 'Merge files and add to the document (M)',
         mergeTitleNoDoc: 'Merge files (M)',
@@ -8093,6 +8098,7 @@
         peDeleteObj: 'Delete object',
         peCropCancel: 'Cancel crop',
         peCropConfirm: 'Confirm crop',
+        loadingCroppingPage: 'Cropping page...',
         peCropCtxConfirm: 'Crop',
         peRedactColor: 'Choose color',
         peRedactConfirm: 'Confirm redaction',
@@ -32329,14 +32335,14 @@ function peUpdateDrawShiftPassthrough(shiftDown) {
   modal.classList.toggle('pe-draw-shift-passthrough', !!shiftDown && peDrawPlacementIgnoresObjects());
 }
 
-const PE_SHAPE_OVERLAP_LABELS = {
-  rect: 'Прямоугольник',
-  ellipse: 'Круг / овал',
-  arrow: 'Стрелка',
-  line: 'Линия',
-  plus: 'Плюс',
-  freehand: 'Свободная форма',
-  star: 'Звезда'
+const PE_SHAPE_OVERLAP_LABEL_KEYS = {
+  rect: 'peShapeRect',
+  ellipse: 'peShapeEllipse',
+  arrow: 'peShapeArrow',
+  line: 'peShapeLine',
+  plus: 'peShapePlus',
+  freehand: 'peShapeFreehand',
+  star: 'peShapeStar'
 };
 
 function peObjOverlapPickType(o) {
@@ -32345,10 +32351,10 @@ function peObjOverlapPickType(o) {
 
 function peObjOverlapLabel(o) {
   if (!o) return '';
-  if (o.type === 'redact') return 'Область затирания';
-  if (o.type === 'text') return 'Текст';
-  if (o.type === 'image') return 'Изображение';
-  if (o.type === 'shape') return PE_SHAPE_OVERLAP_LABELS[o.shape] || 'Фигура';
+  if (o.type === 'redact') return t('peObjLabelRedact');
+  if (o.type === 'text') return t('peObjLabelText');
+  if (o.type === 'image') return t('peObjLabelImage');
+  if (o.type === 'shape') return t(PE_SHAPE_OVERLAP_LABEL_KEYS[o.shape] || 'peObjLabelShapeGeneric');
   return '';
 }
 
@@ -32888,6 +32894,28 @@ function peResetCropSelection() {
   peUpdatePanUi();
 }
 
+// Objects rotate in place around the center of their unrotated (x,y,w,h) box
+// (CSS transform-origin: center center - see peRedrawObjects). For a rotated
+// object that raw box no longer matches where it actually renders, so any
+// caller that needs the true footprint (e.g. the crop keep/drop test below)
+// must rotate its corners around that same center first.
+function peRotatedNormBoundsFromBox(x, y, w, h, rotDeg) {
+  const rot = Number(rotDeg) || 0;
+  if (!rot) return { x, y, w, h };
+  const cx = x + w / 2, cy = y + h / 2;
+  const rad = rot * Math.PI / 180;
+  const cos = Math.cos(rad), sin = Math.sin(rad);
+  const hw = w / 2, hh = h / 2;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].forEach(([dx, dy]) => {
+    const rx = cx + dx * cos - dy * sin;
+    const ry = cy + dx * sin + dy * cos;
+    minX = Math.min(minX, rx); minY = Math.min(minY, ry);
+    maxX = Math.max(maxX, rx); maxY = Math.max(maxY, ry);
+  });
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+
 /** Axis-aligned bounds of an editor object in page-normalized fractions. */
 function peGetObjectNormBounds(o) {
   if (!o) return null;
@@ -32895,7 +32923,7 @@ function peGetObjectNormBounds(o) {
     try { peSnapTextBoxSize(o); } catch (_) {}
     const w = Number(o.boxWFrac) > 0.0005 ? Number(o.boxWFrac) : 0.08;
     const h = Number(o.boxHFrac) > 0.0005 ? Number(o.boxHFrac) : 0.04;
-    return { x: Number(o.x) || 0, y: Number(o.y) || 0, w, h };
+    return peRotatedNormBoundsFromBox(Number(o.x) || 0, Number(o.y) || 0, w, h, o.rot);
   }
   if (o.type === 'callout') {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -32914,6 +32942,10 @@ function peGetObjectNormBounds(o) {
   }
   let x = Number(o.x) || 0, y = Number(o.y) || 0;
   let w = Number(o.w) || 0, h = Number(o.h) || 0;
+  // The object's own footprint must account for rotation before unioning
+  // with its (unrotated) comment box - same reasoning as peRotatedNormBoundsFromBox.
+  const rb = peRotatedNormBoundsFromBox(x, y, w, h, o.rot);
+  x = rb.x; y = rb.y; w = rb.w; h = rb.h;
   if (o.hlComment && o.hlComment.boxX != null) {
     const cx = Number(o.hlComment.boxX) || 0;
     const cy = Number(o.hlComment.boxY) || 0;
@@ -32943,7 +32975,7 @@ function peGetObjectNormBounds(o) {
     const maxX = Math.max(x + w, cx + cw), maxY = Math.max(y + h, cy + ch);
     return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
   }
-  return { x, y, w, h };
+  return rb;
 }
 
 function peNormRectsIntersect(a, b) {
@@ -33061,7 +33093,7 @@ async function peCropConfirm() {
     return;
   }
   try {
-    showLoading('Кадрирование страницы...');
+    showLoading(t('loadingCroppingPage'));
     const idx = peState.idx;
     const page = pdfDoc.getPage(idx);
     const c = peState.cropPdf;
