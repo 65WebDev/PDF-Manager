@@ -28,7 +28,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, '..');
-const REPO_SLUG = '5451165-bot/PDF-Manager';
+const REPO_SLUG = '65WebDev/PDF-Manager';
 const README_PATH = join(root, 'README.md');
 const INDEX_PATH = join(root, 'index.html');
 
