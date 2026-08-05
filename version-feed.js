@@ -5,9 +5,9 @@ window.__PDF_MANAGER_VERSION_FEED__ = {
   "commit": "70a1862d3984424c1cdfdd7ad1c5b94bd23eb5d5",
   "shortCommit": "70a1862",
   "date": "2026-08-05T06:32:40Z",
-  "downloadUrl": "https://github.com/5451165-bot/PDF-Manager/releases/latest/download/PDF_manager_online.html",
-  "offlineDownloadUrl": "https://github.com/5451165-bot/PDF-Manager/releases/latest/download/PDF_manager_offline.html",
+  "downloadUrl": "https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_online.html",
+  "offlineDownloadUrl": "https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_offline.html",
   "windowsVersion": "0.1.14",
-  "windowsDownloadUrl": "https://github.com/5451165-bot/PDF-Manager/releases/tag/windows-v0.1.14",
+  "windowsDownloadUrl": "https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.14",
   "updatedAt": "2026-08-05T06:32:49.371Z"
 };

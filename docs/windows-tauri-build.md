@@ -56,7 +56,7 @@ Test-Path "C:\Program Files\Git\cmd\git.exe"
 Либо вручную: *Параметры → Система → О системе → Доп. параметры → Переменные среды → Path* → добавить `C:\Program Files\Git\cmd`.
 
 **Без Git:** можно скачать ZIP ветки и распаковать:  
-https://github.com/5451165-bot/PDF-Manager/archive/refs/heads/cursor/tauri-windows-shell-1aac.zip
+https://github.com/65WebDev/PDF-Manager/archive/refs/heads/cursor/tauri-windows-shell-1aac.zip
 
 ### 1.3. Rust
 1. https://rustup.rs/ → `rustup-init.exe`, установка stable по умолчанию.
@@ -115,7 +115,7 @@ https://developer.microsoft.com/microsoft-edge/webview2/
 ## 2. Скачать код этой ветки
 
 ```powershell
-git clone https://github.com/5451165-bot/PDF-Manager.git
+git clone https://github.com/65WebDev/PDF-Manager.git
 cd PDF-Manager
 git fetch origin
 git checkout cursor/tauri-windows-shell-1aac
@@ -311,6 +311,6 @@ NSIS‑установщик регистрирует приложение как
 
 ## Связанные ссылки
 
-- PR (обсуждение оболочки): https://github.com/5451165-bot/PDF-Manager/pull/23  
+- PR (обсуждение оболочки): https://github.com/65WebDev/PDF-Manager/pull/23  
 - Ветка: `cursor/tauri-windows-shell-1aac`  
 - Официальные prerequisites Tauri: https://v2.tauri.app/start/prerequisites/

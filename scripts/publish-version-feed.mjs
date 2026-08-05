@@ -75,7 +75,7 @@ function latestWindowsFromGh() {
           windowsVersion: m[1],
           windowsDownloadUrl:
             item.url ||
-            `https://github.com/5451165-bot/PDF-Manager/releases/tag/${tag}`,
+            `https://github.com/65WebDev/PDF-Manager/releases/tag/${tag}`,
         };
       }
     }
@@ -98,12 +98,12 @@ function buildFeed() {
   const downloadUrl = env(
     'DOWNLOAD_URL',
     prev.downloadUrl ||
-      'https://github.com/5451165-bot/PDF-Manager/releases/latest/download/PDF_manager_online.html',
+      'https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_online.html',
   );
   const offlineDownloadUrl = env(
     'OFFLINE_DOWNLOAD_URL',
     prev.offlineDownloadUrl ||
-      'https://github.com/5451165-bot/PDF-Manager/releases/latest/download/PDF_manager_offline.html',
+      'https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_offline.html',
   );
 
   const windowsVersion = env(
