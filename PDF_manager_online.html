@@ -32942,6 +32942,10 @@ function peGetObjectNormBounds(o) {
   }
   let x = Number(o.x) || 0, y = Number(o.y) || 0;
   let w = Number(o.w) || 0, h = Number(o.h) || 0;
+  // The object's own footprint must account for rotation before unioning
+  // with its (unrotated) comment box - same reasoning as peRotatedNormBoundsFromBox.
+  const rb = peRotatedNormBoundsFromBox(x, y, w, h, o.rot);
+  x = rb.x; y = rb.y; w = rb.w; h = rb.h;
   if (o.hlComment && o.hlComment.boxX != null) {
     const cx = Number(o.hlComment.boxX) || 0;
     const cy = Number(o.hlComment.boxY) || 0;
@@ -32971,7 +32975,7 @@ function peGetObjectNormBounds(o) {
     const maxX = Math.max(x + w, cx + cw), maxY = Math.max(y + h, cy + ch);
     return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
   }
-  return peRotatedNormBoundsFromBox(x, y, w, h, o.rot);
+  return rb;
 }
 
 function peNormRectsIntersect(a, b) {
