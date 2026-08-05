@@ -7755,6 +7755,8 @@
         peInsertText: 'Вставить текст', peInsertImage: 'Вставить изображение', peAddShapes: 'Добавить фигуры',
         peShapeRect: 'Прямоугольник', peShapeEllipse: 'Круг / овал', peShapeArrow: 'Стрелка',
         peShapeLine: 'Линия', peShapePlus: 'Плюс', peShapeFreehand: 'Свободная форма', peShapeStar: 'Звезда',
+        peObjLabelText: 'Текст', peObjLabelImage: 'Изображение',
+        peObjLabelRedact: 'Область затирания', peObjLabelShapeGeneric: 'Фигура',
         peCancel: 'Отмена', peSave: 'Сохранить', peCropHint: 'Выделите область кадрирования',
         mergeTitleWithDoc: 'Объединить несколько файлов в один и добавить к текущему (M)',
         mergeTitleNoDoc: 'Объединить несколько файлов в один (M)',
@@ -8038,6 +8040,8 @@
         peInsertText: 'Insert text', peInsertImage: 'Insert image', peAddShapes: 'Add shapes',
         peShapeRect: 'Rectangle', peShapeEllipse: 'Circle / oval', peShapeArrow: 'Arrow',
         peShapeLine: 'Line', peShapePlus: 'Plus', peShapeFreehand: 'Freeform', peShapeStar: 'Star',
+        peObjLabelText: 'Text', peObjLabelImage: 'Image',
+        peObjLabelRedact: 'Redaction area', peObjLabelShapeGeneric: 'Shape',
         peCancel: 'Cancel', peSave: 'Save', peCropHint: 'Select crop area',
         mergeTitleWithDoc: 'Merge files and add to the document (M)',
         mergeTitleNoDoc: 'Merge files (M)',
@@ -32331,14 +32335,14 @@ function peUpdateDrawShiftPassthrough(shiftDown) {
   modal.classList.toggle('pe-draw-shift-passthrough', !!shiftDown && peDrawPlacementIgnoresObjects());
 }
 
-const PE_SHAPE_OVERLAP_LABELS = {
-  rect: 'Прямоугольник',
-  ellipse: 'Круг / овал',
-  arrow: 'Стрелка',
-  line: 'Линия',
-  plus: 'Плюс',
-  freehand: 'Свободная форма',
-  star: 'Звезда'
+const PE_SHAPE_OVERLAP_LABEL_KEYS = {
+  rect: 'peShapeRect',
+  ellipse: 'peShapeEllipse',
+  arrow: 'peShapeArrow',
+  line: 'peShapeLine',
+  plus: 'peShapePlus',
+  freehand: 'peShapeFreehand',
+  star: 'peShapeStar'
 };
 
 function peObjOverlapPickType(o) {
@@ -32347,10 +32351,10 @@ function peObjOverlapPickType(o) {
 
 function peObjOverlapLabel(o) {
   if (!o) return '';
-  if (o.type === 'redact') return 'Область затирания';
-  if (o.type === 'text') return 'Текст';
-  if (o.type === 'image') return 'Изображение';
-  if (o.type === 'shape') return PE_SHAPE_OVERLAP_LABELS[o.shape] || 'Фигура';
+  if (o.type === 'redact') return t('peObjLabelRedact');
+  if (o.type === 'text') return t('peObjLabelText');
+  if (o.type === 'image') return t('peObjLabelImage');
+  if (o.type === 'shape') return t(PE_SHAPE_OVERLAP_LABEL_KEYS[o.shape] || 'peObjLabelShapeGeneric');
   return '';
 }
 
