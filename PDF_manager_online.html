@@ -7811,6 +7811,7 @@
         peDeleteObj: 'Удалить объект',
         peCropCancel: 'Отменить кадрирование',
         peCropConfirm: 'Подтвердить кадрирование',
+        loadingCroppingPage: 'Кадрирование страницы...',
         peCropCtxConfirm: 'Кадрировать',
         peRedactColor: 'Выбрать цвет',
         peRedactConfirm: 'Подтвердить затирание',
@@ -8093,6 +8094,7 @@
         peDeleteObj: 'Delete object',
         peCropCancel: 'Cancel crop',
         peCropConfirm: 'Confirm crop',
+        loadingCroppingPage: 'Cropping page...',
         peCropCtxConfirm: 'Crop',
         peRedactColor: 'Choose color',
         peRedactConfirm: 'Confirm redaction',
@@ -32888,6 +32890,28 @@ function peResetCropSelection() {
   peUpdatePanUi();
 }
 
+// Objects rotate in place around the center of their unrotated (x,y,w,h) box
+// (CSS transform-origin: center center - see peRedrawObjects). For a rotated
+// object that raw box no longer matches where it actually renders, so any
+// caller that needs the true footprint (e.g. the crop keep/drop test below)
+// must rotate its corners around that same center first.
+function peRotatedNormBoundsFromBox(x, y, w, h, rotDeg) {
+  const rot = Number(rotDeg) || 0;
+  if (!rot) return { x, y, w, h };
+  const cx = x + w / 2, cy = y + h / 2;
+  const rad = rot * Math.PI / 180;
+  const cos = Math.cos(rad), sin = Math.sin(rad);
+  const hw = w / 2, hh = h / 2;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].forEach(([dx, dy]) => {
+    const rx = cx + dx * cos - dy * sin;
+    const ry = cy + dx * sin + dy * cos;
+    minX = Math.min(minX, rx); minY = Math.min(minY, ry);
+    maxX = Math.max(maxX, rx); maxY = Math.max(maxY, ry);
+  });
+  return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+}
+
 /** Axis-aligned bounds of an editor object in page-normalized fractions. */
 function peGetObjectNormBounds(o) {
   if (!o) return null;
@@ -32895,7 +32919,7 @@ function peGetObjectNormBounds(o) {
     try { peSnapTextBoxSize(o); } catch (_) {}
     const w = Number(o.boxWFrac) > 0.0005 ? Number(o.boxWFrac) : 0.08;
     const h = Number(o.boxHFrac) > 0.0005 ? Number(o.boxHFrac) : 0.04;
-    return { x: Number(o.x) || 0, y: Number(o.y) || 0, w, h };
+    return peRotatedNormBoundsFromBox(Number(o.x) || 0, Number(o.y) || 0, w, h, o.rot);
   }
   if (o.type === 'callout') {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -32943,7 +32967,7 @@ function peGetObjectNormBounds(o) {
     const maxX = Math.max(x + w, cx + cw), maxY = Math.max(y + h, cy + ch);
     return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
   }
-  return { x, y, w, h };
+  return peRotatedNormBoundsFromBox(x, y, w, h, o.rot);
 }
 
 function peNormRectsIntersect(a, b) {
@@ -33061,7 +33085,7 @@ async function peCropConfirm() {
     return;
   }
   try {
-    showLoading('Кадрирование страницы...');
+    showLoading(t('loadingCroppingPage'));
     const idx = peState.idx;
     const page = pdfDoc.getPage(idx);
     const c = peState.cropPdf;
