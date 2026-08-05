@@ -8322,6 +8322,24 @@
     let lazyThumbQueueHigh = [];
     let lazyThumbQueueLow = [];
     let lazyThumbActiveCount = 0;
+    // Low-priority (background-prefetch) jobs currently reserved for an
+    // idle callback that hasn't fired yet, and ones actually rendering -
+    // see pumpLazyThumbnailQueue's own comment for why these are kept
+    // separate from lazyThumbActiveCount (which also includes high-
+    // priority jobs) and deliberately capped at a low constant rather
+    // than the full concurrency limit.
+    let lazyThumbPendingIdle = 0;
+    let lazyThumbLowActiveCount = 0;
+    // Only ONE background-prefetch render in flight (running OR reserved
+    // for its idle callback) at a time - each one gets its own idle
+    // round-trip to yield back to the browser, rather than several
+    // concurrent idle callbacks that can end up clustering together near
+    // their shared timeout if the page stays continuously busy (measured:
+    // that clustering made frame pacing WORSE, not better, than plain
+    // immediate scheduling). Trades background-fill speed for the actual
+    // goal here - the visible UI never competing with prefetch for the
+    // main thread.
+    const LAZY_THUMB_IDLE_CONCURRENCY = 1;
 
     function openPdfjsForThumbs(bytes) {
       const data = bytes && bytes.buffer ? bytes.slice(0) : bytes;
@@ -17427,25 +17445,79 @@
       lazyThumbQueueHigh = [];
       lazyThumbQueueLow = [];
       lazyThumbActiveCount = 0;
+      lazyThumbPendingIdle = 0;
+      lazyThumbLowActiveCount = 0;
     }
 
     function lazyThumbQueueHas(idx) {
       return lazyThumbQueueHigh.some(j => j.idx === idx) || lazyThumbQueueLow.some(j => j.idx === idx);
     }
 
+    // Runs cb once the browser is actually idle rather than on the next
+    // microtask/macrotask - see pumpLazyThumbnailQueue's own comment for
+    // why the low-priority background-prefetch queue needs this. Safari
+    // has no requestIdleCallback, hence the setTimeout fallback (a fixed
+    // small delay is a reasonable approximation - it still forces a real
+    // yield back to the event loop between renders instead of chaining
+    // straight into the next one).
+    function pmRequestIdle(cb) {
+      if (typeof requestIdleCallback === 'function') {
+        requestIdleCallback(cb, { timeout: 500 });
+      } else {
+        setTimeout(cb, 32);
+      }
+    }
+
+    function startLazyThumbJob(job, isLow) {
+      lazyThumbLoading.add(job.idx);
+      lazyThumbActiveCount++;
+      if (isLow) lazyThumbLowActiveCount++;
+      loadLazyThumbnail(job.idx, job.operationId).finally(() => {
+        lazyThumbLoading.delete(job.idx);
+        lazyThumbActiveCount--;
+        if (isLow) lazyThumbLowActiveCount--;
+        pumpLazyThumbnailQueue();
+      });
+    }
+
     function pumpLazyThumbnailQueue() {
       const limit = lazyThumbConcurrency();
+      // High-priority jobs - pages the user is actually looking at right
+      // now (initial visible/critical wait, or freshly scrolled into
+      // view) - start immediately and uninterrupted, same as before.
       while (lazyThumbActiveCount < limit) {
-        const job = lazyThumbQueueHigh.shift() || lazyThumbQueueLow.shift();
+        const job = lazyThumbQueueHigh.shift();
         if (!job) break;
         if (lazyThumbLoaded.has(job.idx) || lazyThumbLoading.has(job.idx)) continue;
         if (activeOperationId !== job.operationId) continue;
-        lazyThumbLoading.add(job.idx);
-        lazyThumbActiveCount++;
-        loadLazyThumbnail(job.idx, job.operationId).finally(() => {
-          lazyThumbLoading.delete(job.idx);
-          lazyThumbActiveCount--;
-          pumpLazyThumbnailQueue();
+        startLazyThumbJob(job, false);
+      }
+      // Low-priority background-prefetch jobs (every OTHER page in the
+      // document, not currently on screen) used to chain straight into
+      // the next render the instant a slot freed up, same as the high
+      // queue - on a large document (hundreds of pages) that meant
+      // hundreds of back-to-back canvas renders with no gap for the
+      // browser to process scroll/click/paint in between, freezing the
+      // whole editor for as long as the prefetch queue took to drain.
+      // Deferring each one to requestIdleCallback instead means it only
+      // ever runs when the main thread has nothing more urgent to do -
+      // the trade-off is the background prefetch itself finishing later
+      // while the user keeps actively interacting, in exchange for the
+      // UI never freezing to begin with. Capped at
+      // LAZY_THUMB_IDLE_CONCURRENCY (see its own comment for why that's
+      // 1, not `limit`), so at most one is ever reserved-or-running.
+      while (lazyThumbLowActiveCount + lazyThumbPendingIdle < LAZY_THUMB_IDLE_CONCURRENCY && lazyThumbQueueLow.length) {
+        lazyThumbPendingIdle++;
+        pmRequestIdle(() => {
+          lazyThumbPendingIdle--;
+          // Skip anything that went stale (loaded/loading/cancelled)
+          // while this callback was waiting for idle time.
+          let job = lazyThumbQueueLow.shift();
+          while (job && (lazyThumbLoaded.has(job.idx) || lazyThumbLoading.has(job.idx) || activeOperationId !== job.operationId)) {
+            job = lazyThumbQueueLow.shift();
+          }
+          if (job) startLazyThumbJob(job, true);
+          else pumpLazyThumbnailQueue();
         });
       }
     }
