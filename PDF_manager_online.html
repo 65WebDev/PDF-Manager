@@ -53784,15 +53784,6 @@ async function pageEditSave(options) {
       const c = peState.cropPdf;
       peApplyCropToEditorObjects(c);
       page.setCropBox(c.x, c.y, c.w, c.h);
-      // Mirrors peCropConfirm(): a crop applied here (Save clicked with a
-      // pending, not-yet-checkmark-confirmed crop selection) must count as
-      // a real content mutation too. Without this, contentMutated below
-      // stays false, so authoritativeBytes never gets captured and the
-      // expand-history "object-only" fast path is used instead - which
-      // does not carry the new crop box (or the just-applied object list)
-      // into the saved bytes, silently reverting the crop and dropping
-      // whatever objects were only cropped-and-kept by peApplyCropToEditorObjects.
-      peState.cropApplied = true;
     }
 
     // Shapes stay editable metadata now, exactly like text/image/highlight -
