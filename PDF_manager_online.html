@@ -33044,6 +33044,55 @@ function peRemapObjectForCrop(o, crop) {
   }
 }
 
+function peRemapRedactedRegionForCrop(region, cropFrac) {
+  const rx = (v) => (v - cropFrac.x) / cropFrac.w;
+  const ry = (v) => (v - cropFrac.y) / cropFrac.h;
+  const out = region.slice();
+  const x0 = rx(region[0]), x1 = rx(region[2]);
+  const y0 = ry(region[1]), y1 = ry(region[3]);
+  out[0] = Math.min(x0, x1); out[2] = Math.max(x0, x1);
+  out[1] = Math.min(y0, y1); out[3] = Math.max(y0, y1);
+  return out;
+}
+
+// Already-confirmed redactions bake a black plate into the page content AND
+// remember its box as a visual-norm fraction of the page's crop box at
+// PE_REDACTED_REGIONS_KEY / PE_FLATTENED_COVERS_KEY / peSessionRedactedRegions
+// (peScrubEngineParse reads these back at save/export time to locate the
+// plate and verify no text survives under it). Cropping the page changes
+// what "current crop box" means without touching that bookkeeping, so every
+// stored fraction silently starts pointing at the wrong spot: the regional
+// redaction pass compares the (correctly positioned, unmoved) black plate
+// against the now-mislocated remembered box, treats the mismatch as foreign
+// ink under a phantom box, aborts the safe regional path, and the page can
+// fall back to full rasterization - or worse, "verify" against the wrong
+// region entirely. Rebase every stored region into the new crop box's
+// fraction space, the same way peRemapObjectForCrop rebases editor objects.
+function peRemapPageRedactBookkeepingForCrop(page, oldCb, newCropPdf, pageIdx) {
+  if (!page || !oldCb || !newCropPdf) return;
+  try {
+    const rot = page.getRotation().angle || 0;
+    const c1 = pePdfUserToVisualNorm(newCropPdf.x, newCropPdf.y, rot, oldCb);
+    const c2 = pePdfUserToVisualNorm(newCropPdf.x + newCropPdf.w, newCropPdf.y + newCropPdf.h, rot, oldCb);
+    const cropFrac = {
+      x: Math.min(c1.nx, c2.nx), y: Math.min(c1.ny, c2.ny),
+      w: Math.max(1e-6, Math.abs(c2.nx - c1.nx)), h: Math.max(1e-6, Math.abs(c2.ny - c1.ny))
+    };
+    const regions = pePageRedactedRegions(page).map(r => peRemapRedactedRegionForCrop(r, cropFrac));
+    if (regions.length) {
+      page.node.set(PDFLib.PDFName.of(PE_REDACTED_REGIONS_KEY), PDFLib.PDFString.of(JSON.stringify(regions)));
+    }
+    const covers = peGetFlattenedCovers(page).map(cov =>
+      peRemapRedactedRegionForCrop([cov.minX, cov.minY, cov.maxX, cov.maxY], cropFrac));
+    if (covers.length) {
+      peSetFlattenedCovers(page, covers.map(r => ({ minX: r[0], minY: r[1], maxX: r[2], maxY: r[3] })));
+    }
+    if (pageIdx != null && peSessionRedactedRegions[pageIdx] && peSessionRedactedRegions[pageIdx].length) {
+      peSessionRedactedRegions[pageIdx] = peSessionRedactedRegions[pageIdx].map(r => peRemapRedactedRegionForCrop(r, cropFrac));
+    }
+  } catch (_) {}
+}
+
 /**
  * Drop objects fully outside the crop rect and rebase survivors into the
  * new visible-page coordinate system (fractions of the cropped page).
@@ -33097,9 +33146,11 @@ async function peCropConfirm() {
     const idx = peState.idx;
     const page = pdfDoc.getPage(idx);
     const c = peState.cropPdf;
+    const oldCb = page.getCropBox();
     // Cull / rebase objects against the current viewport, then apply crop.
     peApplyCropToEditorObjects(c);
     page.setCropBox(c.x, c.y, c.w, c.h);
+    peRemapPageRedactBookkeepingForCrop(page, oldCb, c, idx);
     setDocumentDirty(true);
 
     const bytes = new Uint8Array(await pdfDoc.save());
