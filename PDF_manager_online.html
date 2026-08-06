@@ -10159,6 +10159,8 @@
     }
 
     async function renderThumbsFromBytes(pdfBytes, indices) {
+      console.log('[peDebugRace] renderThumbsFromBytes ENTER, pdfDocCriticalWriterActive=', pdfDocCriticalWriterActive, 'indices=', JSON.stringify(indices));
+      console.trace('[peDebugRace] renderThumbsFromBytes call stack');
       const result = new Map();
       const pdfjsDoc = await pdfjsLib.getDocument({ data: pdfBytes.slice() }).promise;
       const prevDoc = pdfDoc;
@@ -53946,11 +53948,13 @@ async function pageEditSave(options) {
     // Bake pending redact markers into the live page now (same path as
     // export/print). Keeps the cover in the page stream so HQ / history-thumb
     // fills cannot resurrect a pre-redact raster.
+    console.log('[peDebugRace] persistObjs at pageEditSave start', JSON.stringify((persistObjs || []).map(o => ({ id: o.id, type: o.type }))));
     try {
       pdfDoc = await PDFLib.PDFDocument.load(
         (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
       );
       peSavePageEditorObjects(idx, persistObjs);
+      console.log('[peDebugRace] metadata after first peSavePageEditorObjects', JSON.stringify((peReadAllEditorMetaFromDoc(pdfDoc).pages[String(idx)] || []).map(o => ({ id: o.id, type: o.type }))));
       if (typeof peApplyPendingRedactRasterization === 'function'
           && typeof pePageShouldFullRasterForRedact === 'function'
           && pePageShouldFullRasterForRedact(pdfDoc.getPage(idx), idx)) {
@@ -53958,12 +53962,14 @@ async function pageEditSave(options) {
           (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
         );
         work = await peApplyPendingRedactRasterization(work) || work;
+        console.log('[peDebugRace] metadata in work AFTER peApplyPendingRedactRasterization', JSON.stringify((peReadAllEditorMetaFromDoc(work).pages[String(idx)] || []).map(o => ({ id: o.id, type: o.type }))));
         bytes = (typeof peClonePdfBytes === 'function')
           ? peClonePdfBytes(await work.save({ useObjectStreams: false }))
           : new Uint8Array(await work.save({ useObjectStreams: false }));
         pdfDoc = await PDFLib.PDFDocument.load(
           (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
         );
+        console.log('[peDebugRace] metadata after reload from post-raster bytes (pre fix-up write)', JSON.stringify((peReadAllEditorMetaFromDoc(pdfDoc).pages[String(idx)] || []).map(o => ({ id: o.id, type: o.type }))));
         peSavePageEditorObjects(idx, persistObjs);
         // The metadata write above only touched the in-memory pdfDoc - bytes
         // still holds the pre-write serialization from `work.save()` a few
@@ -54000,6 +54006,8 @@ async function pageEditSave(options) {
     // Update the thumbnail of the edited page (also patches the history tip
     // via patchHistoryPending — intermediate undo thumbs fill in background).
     const pj = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+    console.log('[peDebugRace] metadata at thumbnail render time', JSON.stringify((peReadAllEditorMetaFromDoc(pdfDoc).pages[String(idx)] || []).map(o => ({ id: o.id, type: o.type }))),
+      'pdfDocCriticalWriterActive=', pdfDocCriticalWriterActive);
     const div = pagesContainer.querySelector('.page[data-index="' + idx + '"]');
     const im = div ? div.querySelector('img') : null;
     if (div && im) {
