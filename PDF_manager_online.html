@@ -18118,7 +18118,10 @@
         peLoadPageEditorObjects(pdfPageIndex).some(o => o.type === 'image');
       const renderScale = hasImages ? Math.max(useScale, THUMBNAIL_SCALE * 2) : useScale;
       const page = await pdfjsDoc.getPage(pdfjsPageNum);
-      if (isLoadingCancelled || operationId !== activeOperationId) return false;
+      if (isLoadingCancelled || operationId !== activeOperationId) {
+        console.log('[peDebugRender] CANCELLED before render, pdfPageIndex=', pdfPageIndex, 'isLoadingCancelled=', isLoadingCancelled, 'operationId=', operationId, 'activeOperationId=', activeOperationId);
+        return false;
+      }
 
       // pdf.js's page.rotate handles /Rotate inheritance from parent page-tree nodes,
       // which pdf-lib's getRotation() silently misses (it only checks the page dict).
@@ -18157,8 +18160,12 @@
       canvas.width = viewport.width; canvas.height = viewport.height;
       const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: false });
       await page.render({ canvasContext: ctx, viewport, annotationMode: 0 }).promise;
-      if (isLoadingCancelled || operationId !== activeOperationId) return false;
+      if (isLoadingCancelled || operationId !== activeOperationId) {
+        console.log('[peDebugRender] CANCELLED after render, before composite, pdfPageIndex=', pdfPageIndex, 'isLoadingCancelled=', isLoadingCancelled, 'operationId=', operationId, 'activeOperationId=', activeOperationId);
+        return false;
+      }
       if (pdfPageIndex != null && typeof peCompositeEditorObjectsOnCanvas === 'function') {
+        console.log('[peDebugRender] compositing pdfPageIndex=', pdfPageIndex, 'canvas', viewport.width, viewport.height);
         await peCompositeEditorObjectsOnCanvas(ctx, pdfPageIndex, viewport.width, viewport.height);
       }
 
@@ -18167,6 +18174,7 @@
       img.src = hasEditorObjs
         ? canvas.toDataURL('image/png')
         : canvas.toDataURL('image/jpeg', THUMBNAIL_JPEG_QUALITY);
+      console.log('[peDebugRender] img.src SET, pdfPageIndex=', pdfPageIndex, 'hasEditorObjs=', hasEditorObjs);
       return true;
     }
 
@@ -49997,10 +50005,18 @@ function peEnsurePageNormSize(pageIdx) {
 async function peCompositeEditorObjectsOnCanvas(ctx, pageIdx, canvasW, canvasH) {
   if (!pdfDoc || pageIdx == null || pageIdx < 0) return;
   peEnsurePageNormSize(pageIdx);
-  const objects = peHydrateEditorObjects(peLoadPageEditorObjects(pageIdx), pageIdx)
+  const rawLoaded = peLoadPageEditorObjects(pageIdx);
+  const objects = peHydrateEditorObjects(rawLoaded, pageIdx)
     .filter(o => o && o.type !== 'redact');
+  console.log('[peDebugRender] peCompositeEditorObjectsOnCanvas pageIdx=', pageIdx, 'rawLoaded=', JSON.stringify((rawLoaded || []).map(o => ({ id: o.id, type: o.type }))),
+    'after hydrate+filter=', JSON.stringify(objects.map(o => ({ id: o.id, type: o.type, hasImgEl: o.type === 'image' ? !!o.imgEl : undefined }))));
   if (!objects.length) return;
   await pePreloadEditorImages(objects);
+  objects.forEach(o => {
+    if (o.type === 'image') {
+      console.log('[peDebugRender] image object', o.id, 'after preload: imgEl.complete=', o.imgEl && o.imgEl.complete, 'naturalWidth=', o.imgEl && o.imgEl.naturalWidth);
+    }
+  });
   // Stage size must be the page's PDF-point (scale=1) size, NOT the canvas
   // pixel size. peDrawEditorObjects uses S = canvasW/stageW to scale fonts
   // and strokes; passing canvasW as stage made S=1 at every render scale, so
@@ -50014,7 +50030,8 @@ async function peCompositeEditorObjectsOnCanvas(ctx, pageIdx, canvasW, canvasH) 
   ctx.beginPath();
   ctx.rect(0, 0, canvasW, canvasH);
   ctx.clip();
-  peDrawEditorObjects(ctx, canvasW, canvasH, objects, stageW, stageH);
+  const drewResult = peDrawEditorObjects(ctx, canvasW, canvasH, objects, stageW, stageH);
+  console.log('[peDebugRender] peDrawEditorObjects returned drew=', drewResult, 'stageW/H=', stageW, stageH, 'canvasW/H=', canvasW, canvasH);
   ctx.restore();
 }
 
