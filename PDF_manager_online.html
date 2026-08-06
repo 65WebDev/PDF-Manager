@@ -7487,6 +7487,15 @@
     const HQ_RENDER_SCALE = 2.0;      //minimum high quality render scale
     let hqPdfjsDoc = null;            //pdf.js document cache for single-page rendering
     let hqPdfjsToken = 0;             //cache validity token (increases as the document changes)
+    // getHQPdfjsDoc() normally rebuilds its pdf.js doc via pdfDoc.save() (a
+    // full re-serialize) whenever invalidateHQ() fired since the last pass -
+    // including right after a tab switch, where pdfDoc was JUST loaded from
+    // known bytes (restoreDocSnapshot). In that one spot we already have the
+    // exact bytes on hand, so stash them here and skip the redundant
+    // save()+reparse. Cleared by invalidateHQ() like the rest of the HQ
+    // cache, so any actual mutation falls back to the always-correct save().
+    let pdfDocKnownBytes = null;
+    let pdfDocKnownBytesDoc = null;
     let hqUpgraded = new Set();       //data-index of pages already improved in the current mode
     // idx -> the raster scale runHQUpgrade() actually rendered that page at
     // last time. HQ upgrading now runs at every zoom level and the scale it
@@ -10604,6 +10613,11 @@
         pdfDoc = await PDFLib.PDFDocument.load(snap.pdfBytes.slice());
         originalFileBytes = snap.pdfBytes.slice();
         invalidateHQ();
+        // pdfDoc above was just loaded from these exact bytes - hand them to
+        // getHQPdfjsDoc() so it can skip its own pdfDoc.save() re-serialize
+        // (invalidateHQ() already cleared this, so set it after, not before).
+        pdfDocKnownBytesDoc = pdfDoc;
+        pdfDocKnownBytes = snap.pdfBytes.slice();
         thumbFlushQueue.clear();
         clearTimeout(thumbFlushTimer);
         rotateThumbPrefetch.clear();
@@ -12224,6 +12238,7 @@
     function invalidateHQ() {
       hqPdfjsToken++;
       hqPdfjsDoc = null;
+      pdfDocKnownBytesDoc = null;
       hqUpgraded.clear();
       hqRenderedScale.clear();
       gridClearPdfPageImagesCache();
@@ -12237,6 +12252,7 @@
     function invalidateHQCache() {
       hqPdfjsToken++;
       hqPdfjsDoc = null;
+      pdfDocKnownBytesDoc = null;
       hqUpgraded.clear();
       hqRenderedScale.clear();
       gridClearPdfPageImagesCache();
@@ -12252,9 +12268,15 @@
       // live preview a moment after Save.
       if (typeof whenPdfDocIdle === 'function') await whenPdfDocIdle();
       if (token !== hqPdfjsToken) return null;
-      const bytes = (typeof saveLivePdfBytes === 'function')
-        ? await saveLivePdfBytes()
-        : new Uint8Array(await pdfDoc.save());
+      // Skip the save() round-trip when pdfDoc was just loaded from bytes we
+      // already have (e.g. right after a tab switch) - invalidateHQ() clears
+      // this the moment pdfDoc is touched again, so a stale match here is
+      // impossible without also being a stale hqPdfjsToken match above.
+      const bytes = (pdfDocKnownBytesDoc === pdfDoc && pdfDocKnownBytes)
+        ? pdfDocKnownBytes
+        : (typeof saveLivePdfBytes === 'function')
+          ? await saveLivePdfBytes()
+          : new Uint8Array(await pdfDoc.save());
       if (!bytes || token !== hqPdfjsToken) return null;          //the document has changed - cancel
       const doc = await pdfjsLib.getDocument({ data: bytes }).promise;
       if (token !== hqPdfjsToken) return null;
