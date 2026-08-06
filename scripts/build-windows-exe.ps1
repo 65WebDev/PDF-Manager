@@ -2,7 +2,7 @@
 <#
 .SYNOPSIS
   Build Windows .exe (Tauri) for PDF Manager — optionally also a Linux
-  .deb/.AppImage via WSL2 — and upload the Windows installer to GitHub Releases.
+  .deb/.AppImage via WSL2 — and upload both to GitHub Releases.
 
 .DESCRIPTION
   Checks Node / Rust / MSVC link.exe, runs npm ci if needed, then release build.
@@ -16,18 +16,24 @@
   The first run installs apt build dependencies (webkit2gtk, gtk3, ...) inside
   WSL2 and may ask for your WSL sudo password. Requires WSL2 with a distro
   installed (wsl --install -d Ubuntu) and Rust + Node set up inside it (same
-  prerequisites as Windows, just the Linux equivalents).
+  prerequisites as Windows, just the Linux equivalents). By default the
+  resulting .deb/.AppImage are ALSO uploaded to GitHub Release
+  linux-v{version} (scripts\upload-linux-installer.mjs, from the Windows side
+  — dist-linux\ is visible there and gh is already authenticated); pass
+  -Local to keep it a local-only build for either platform.
 
   Output:
-    - portable:       src-tauri\target\release\PDF Manager.exe
-    - installer:       src-tauri\target\release\bundle\nsis\*.exe
-    - GitHub:          release tag windows-v{version}
-    - Linux (-Linux):  dist-linux\*.deb, dist-linux\*.AppImage
+    - portable:        src-tauri\target\release\PDF Manager.exe
+    - installer:        src-tauri\target\release\bundle\nsis\*.exe
+    - GitHub (Windows):  release tag windows-v{version}
+    - Linux (-Linux):    dist-linux\*.deb, dist-linux\*.AppImage
+    - GitHub (Linux):    release tag linux-v{version}
 
   Docs: docs\windows-tauri-build.md
 
 .PARAMETER Local
-  Build only — do NOT upload to GitHub (npm run tauri:build:local).
+  Build only — do NOT upload to GitHub. Applies to both platforms: skips
+  npm run tauri:build:local's upload AND scripts\upload-linux-installer.mjs.
 
 .PARAMETER SkipNpmCi
   Skip npm ci (use when node_modules already exists).
@@ -45,13 +51,13 @@
   Do not auto-bump Windows semver when main has commits since the last windows-v* release.
 
 .PARAMETER Linux
-  Also build the Linux .deb/.AppImage via WSL2, after the Windows build.
-  Local only — never auto-uploaded anywhere.
+  Also build the Linux .deb/.AppImage via WSL2, after the Windows build, and
+  (unless -Local) upload them to GitHub Release linux-v{version}.
 
 .PARAMETER LinuxOnly
   Build ONLY the Linux .deb/.AppImage via WSL2 — skips the Windows build
   entirely. Useful for iterating on the Linux side without waiting on a full
-  Windows rebuild each time.
+  Windows rebuild each time. Still uploads to linux-v{version} unless -Local.
 
 .PARAMETER WslDistro
   WSL distro name to build in (see `wsl -l`). Default: your WSL default distro.
@@ -384,6 +390,18 @@ if (-not $SkipGitSync) {
   }
 }
 
+if ($LinuxOnly -and $doUpload) {
+  # The Windows-build block below (which normally checks node/gh) is skipped
+  # entirely under -LinuxOnly, but the Linux release upload still runs from
+  # here (PowerShell/Windows side, via node) after the WSL2 build finishes.
+  Write-Step "GitHub auth check (Linux upload)"
+  Assert-Cmd 'node' @"
+Install Node.js 20+ LTS: https://nodejs.org/
+Then open a NEW PowerShell window.
+"@
+  Ensure-GhAuth
+}
+
 if ($LinuxOnly) {
   Write-Step "Windows build skipped (-LinuxOnly)"
 } else {
@@ -625,6 +643,17 @@ Install one (Ubuntu recommended), then re-open PowerShell and rerun this script:
   } else {
     Write-Fail "dist-linux folder not found after build."
     exit 1
+  }
+
+  if ($doUpload) {
+    Write-Step "Linux release upload (GitHub Release linux-v{version})"
+    node (Join-Path $RepoRoot 'scripts\upload-linux-installer.mjs')
+    if ($LASTEXITCODE -ne 0) {
+      Write-Fail "Linux release upload failed."
+      exit $LASTEXITCODE
+    }
+  } else {
+    Write-Host "Local build only (-Local): Linux GitHub upload skipped." -ForegroundColor DarkGray
   }
 
   } finally {
