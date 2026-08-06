@@ -2852,7 +2852,7 @@
     .pe-callout-rim.l { left: calc(-1 * var(--pe-callout-rim-half, 6px)); }
     .pe-callout-rim.r { right: calc(-1 * var(--pe-callout-rim-half, 6px)); }
     .pe-obj-callout-box .pe-callout-text:empty::before {
-      content: 'Комментарий…'; color: rgba(0,0,0,.35); pointer-events: none;
+      content: attr(data-empty-hint); color: rgba(0,0,0,.35); pointer-events: none;
     }
     /* Round corner dots — make anchors obvious when the comment box is selected. */
     .pe-text-corner-handle.pe-callout-corner-handle {
@@ -7797,6 +7797,11 @@
         underlineText: 'Подчеркнуть текст',
         redactText: 'Затереть текст',
         comment: 'Комментарий',
+        peCommentPlaceholder: 'Комментарий…',
+        peHlCommentMove: 'Переместить',
+        peHlCommentDelete: 'Удалить комментарий',
+        peHlCommentAuthorPlaceholder: 'Автор',
+        peHlCommentTextPlaceholder: 'Комментарий',
         clearMarkup: 'Снять форматирование',
         pePage: 'Страница',
         pePagePrev: 'Перейти к предыдущей странице',
@@ -7814,6 +7819,8 @@
         peCropCancel: 'Отменить кадрирование',
         peCropConfirm: 'Подтвердить кадрирование',
         loadingCroppingPage: 'Кадрирование страницы...',
+        loadingSavingAndNavigating: 'Сохранение и переход...',
+        loadingApplyingEdits: 'Применение правок...',
         peCropCtxConfirm: 'Кадрировать',
         peRedactColor: 'Выбрать цвет',
         peRedactConfirm: 'Подтвердить затирание',
@@ -8082,6 +8089,11 @@
         underlineText: 'Underline text',
         redactText: 'Redact text',
         comment: 'Comment',
+        peCommentPlaceholder: 'Comment…',
+        peHlCommentMove: 'Move',
+        peHlCommentDelete: 'Delete comment',
+        peHlCommentAuthorPlaceholder: 'Author',
+        peHlCommentTextPlaceholder: 'Comment',
         clearMarkup: 'Clear formatting',
         pePage: 'Page',
         pePagePrev: 'Go to previous page',
@@ -8099,6 +8111,8 @@
         peCropCancel: 'Cancel crop',
         peCropConfirm: 'Confirm crop',
         loadingCroppingPage: 'Cropping page...',
+        loadingSavingAndNavigating: 'Saving and navigating...',
+        loadingApplyingEdits: 'Applying edits...',
         peCropCtxConfirm: 'Crop',
         peRedactColor: 'Choose color',
         peRedactConfirm: 'Confirm redaction',
@@ -9328,6 +9342,9 @@
       document.querySelectorAll('[data-i18n-aria]').forEach((el) => {
         const key = el.getAttribute('data-i18n-aria');
         if (key) el.setAttribute('aria-label', t(key));
+      });
+      document.querySelectorAll('.pe-callout-text').forEach((el) => {
+        el.setAttribute('data-empty-hint', t('peCommentPlaceholder'));
       });
       document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
         const key = el.getAttribute('data-i18n-placeholder');
@@ -37149,6 +37166,7 @@ function peAppendCalloutBox(layer, o, W, H) {
   const textEl = document.createElement('div');
   textEl.className = 'pe-callout-text';
   textEl.dataset.peId = String(o.id);
+  textEl.setAttribute('data-empty-hint', t('peCommentPlaceholder'));
   const fontPx = (o.fontPt || 12) * (peState.scale || 1);
   textEl.style.fontSize = fontPx + 'px';
   textEl.innerHTML = o.html != null ? o.html : peEscapeHtml(o.text || '').replace(/\n/g, '<br>');
@@ -37316,6 +37334,7 @@ function peAppendShapeCommentBox(layer, o, W, H) {
   const textEl = document.createElement('div');
   textEl.className = 'pe-callout-text';
   textEl.dataset.peId = String(o.id);
+  textEl.setAttribute('data-empty-hint', t('peCommentPlaceholder'));
   const fontPx = (c.fontPt || 12) * (peState.scale || 1);
   textEl.style.fontSize = fontPx + 'px';
   textEl.innerHTML = c.html != null ? c.html : peEscapeHtml(c.text || '').replace(/\n/g, '<br>');
@@ -37938,11 +37957,11 @@ function peRenderHlCommentPanel() {
   const dragHandle = document.createElement('span');
   dragHandle.className = 'pe-hl-comment-drag-handle';
   dragHandle.textContent = '⠿';
-  dragHandle.title = 'Переместить';
+  dragHandle.title = t('peHlCommentMove');
   const closeBtn = document.createElement('button');
   closeBtn.type = 'button';
   closeBtn.className = 'pe-hl-comment-close';
-  closeBtn.title = 'Удалить комментарий';
+  closeBtn.title = t('peHlCommentDelete');
   closeBtn.textContent = '✕';
   closeBtn.addEventListener('mousedown', (e) => e.stopPropagation());
   closeBtn.addEventListener('click', (e) => {
@@ -37972,13 +37991,13 @@ function peRenderHlCommentPanel() {
   const author = document.createElement('input');
   author.type = 'text';
   author.className = 'pe-hl-comment-author';
-  author.placeholder = 'Автор';
+  author.placeholder = t('peHlCommentAuthorPlaceholder');
   author.value = o.hlComment.author || '';
   author.spellcheck = false;
 
   const text = document.createElement('textarea');
   text.className = 'pe-hl-comment-text';
-  text.placeholder = 'Комментарий';
+  text.placeholder = t('peHlCommentTextPlaceholder');
   text.value = o.hlComment.text || '';
   text.spellcheck = false;
 
@@ -53883,7 +53902,7 @@ async function pageEditSave(options) {
   if (typeof whenPdfDocIdle === 'function') await whenPdfDocIdle();
   pdfDocCriticalWriterActive = true;
   try {
-    showLoading(openIdx != null ? 'Сохранение и переход...' : 'Применение правок...');
+    showLoading(openIdx != null ? t('loadingSavingAndNavigating') : t('loadingApplyingEdits'));
     // Pending redact frames (drawn but not ✓) used to be dropped on Save, so
     // the black cover vanished from preview and on reopen. Confirm them first.
     if (typeof peConfirmAllPendingRedacts === 'function') {
