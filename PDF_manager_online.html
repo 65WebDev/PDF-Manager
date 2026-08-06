@@ -53925,19 +53925,24 @@ async function pageEditSave(options) {
         (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
       );
       peSavePageEditorObjects(idx, persistObjs);
+      console.log('[peDebugSave] pdfDoc cropBox before raster-check', JSON.stringify(pdfDoc.getPage(idx).getCropBox()),
+        'needsFullRaster', typeof pePageShouldFullRasterForRedact === 'function' && pePageShouldFullRasterForRedact(pdfDoc.getPage(idx), idx));
       if (typeof peApplyPendingRedactRasterization === 'function'
           && typeof pePageShouldFullRasterForRedact === 'function'
           && pePageShouldFullRasterForRedact(pdfDoc.getPage(idx), idx)) {
         let work = await PDFLib.PDFDocument.load(
           (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
         );
+        console.log('[peDebugSave] work cropBox BEFORE peApplyPendingRedactRasterization', JSON.stringify(work.getPage(idx).getCropBox()));
         work = await peApplyPendingRedactRasterization(work) || work;
+        console.log('[peDebugSave] work cropBox AFTER peApplyPendingRedactRasterization', JSON.stringify(work.getPage(idx).getCropBox()));
         bytes = (typeof peClonePdfBytes === 'function')
           ? peClonePdfBytes(await work.save({ useObjectStreams: false }))
           : new Uint8Array(await work.save({ useObjectStreams: false }));
         pdfDoc = await PDFLib.PDFDocument.load(
           (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
         );
+        console.log('[peDebugSave] pdfDoc cropBox after reload from post-raster bytes', JSON.stringify(pdfDoc.getPage(idx).getCropBox()));
         peSavePageEditorObjects(idx, persistObjs);
       } else {
         bytes = (typeof peClonePdfBytes === 'function')
@@ -53965,6 +53970,12 @@ async function pageEditSave(options) {
     // Update the thumbnail of the edited page (also patches the history tip
     // via patchHistoryPending — intermediate undo thumbs fill in background).
     const pj = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+    try {
+      const dbgPage = await pj.getPage(idx + 1);
+      const dbgVp = dbgPage.getViewport({ scale: 1 });
+      console.log('[peDebugSave] pj page viewport used for thumbnail', JSON.stringify({ width: dbgVp.width, height: dbgVp.height }),
+        'pdfDoc cropBox at thumbnail time', JSON.stringify(pdfDoc.getPage(idx).getCropBox()));
+    } catch (dbgErr) { console.log('[peDebugSave] thumbnail viewport check failed', dbgErr); }
     const div = pagesContainer.querySelector('.page[data-index="' + idx + '"]');
     const im = div ? div.querySelector('img') : null;
     if (div && im) {
