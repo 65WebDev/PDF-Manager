@@ -9,7 +9,7 @@ window.__PDF_MANAGER_VERSION_FEED__ = {
   "offlineDownloadUrl": "https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_offline.html",
   "windowsVersion": "0.1.19",
   "windowsDownloadUrl": "https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.19",
-  "linuxVersion": "",
-  "linuxDownloadUrl": "",
-  "updatedAt": "2026-08-06T10:06:26.545Z"
+  "linuxVersion": "0.1.19",
+  "linuxDownloadUrl": "https://github.com/65WebDev/PDF-Manager/releases/tag/linux-v0.1.19",
+  "updatedAt": "2026-08-06T10:10:07.393Z"
 };
