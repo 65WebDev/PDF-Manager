@@ -1,8 +1,7 @@
-# Сборка Windows‑приложения (Tauri) — инструкция для обсуждения
+# Сборка Windows‑ и Linux‑приложения (Tauri)
 
-> Ветка `cursor/tauri-windows-shell-1aac` — **только** про десктопную оболочку и эту инструкцию.  
-> Доработки самого редактора (HTML) ведутся отдельно, в других ветках / в `main`.  
-> В автоматический release‑pipeline эта сборка **пока не включена**.
+> Десктопная оболочка (Tauri, `src-tauri/`) живёт прямо в `main`.  
+> В автоматический release‑pipeline (`build-N`, HTML‑релизы) эта сборка **не включена** — только ручной запуск.
 
 ## Что получится
 
@@ -10,10 +9,12 @@
 
 | Файл | Путь |
 |------|------|
-| Запуск без установки | `src-tauri\target\release\PDF Manager.exe` |
-| Установщик (NSIS) | `src-tauri\target\release\bundle\nsis\` (например `PDF Manager_0.1.0_x64-setup.exe`) |
+| Windows: запуск без установки | `src-tauri\target\release\PDF Manager.exe` |
+| Windows: установщик (NSIS) | `src-tauri\target\release\bundle\nsis\` (например `PDF Manager_0.1.15_x64-setup.exe`) |
+| Linux: пакет `.deb` | `dist-linux\*.deb` |
+| Linux: `.AppImage` | `dist-linux\*.AppImage` |
 
-Сборка упаковывает **офлайн‑HTML** (`PDF_manager_offline.html`) в окно Tauri + WebView2.
+Сборка упаковывает **офлайн‑HTML** (`PDF_manager_offline.html`) в окно Tauri + WebView2 (Windows) / WebKitGTK (Linux).
 
 ---
 
@@ -112,14 +113,14 @@ https://developer.microsoft.com/microsoft-edge/webview2/
 
 ---
 
-## 2. Скачать код этой ветки
+## 2. Скачать код
 
 ```powershell
 git clone https://github.com/65WebDev/PDF-Manager.git
 cd PDF-Manager
-git fetch origin
-git checkout cursor/tauri-windows-shell-1aac
 ```
+
+(`src-tauri/` уже в `main` — отдельную ветку переключать не нужно.)
 
 ---
 
@@ -168,6 +169,12 @@ npm run tauri -- info
 
 # Режим разработки:
 .\scripts\build-windows-exe.ps1 -Dev
+
+# Windows-установщик И Linux .deb/.AppImage за один запуск (через WSL2):
+.\scripts\build-windows-exe.ps1 -Linux
+
+# Только Linux-сборка, без пересборки Windows (см. раздел 4a):
+.\scripts\build-windows-exe.ps1 -LinuxOnly -Local
 ```
 
 Перед upload-сборкой (без `-Local` / `-NoBump`) скрипт проверяет GitHub:
@@ -248,6 +255,66 @@ npm run tauri:dev
 
 ---
 
+## 4a. Linux (`.deb` / `.AppImage`) через WSL2 — с той же Windows-машины
+
+`build-windows-exe.ps1 -Linux` собирает Linux-пакеты **в дополнение** к Windows,
+одним запуском, без отдельной Linux-машины: Windows не умеет кросс-компилировать
+Tauri под Linux напрямую (нужен настоящий Linux с webkit2gtk), поэтому скрипт
+прогоняет `scripts/build-linux.sh` внутри WSL2 — с тем же коммитом, что и Windows-сборка.
+
+### Once: установить WSL2 + окружение внутри него
+
+```powershell
+# В обычном PowerShell (не WSL), один раз:
+wsl --install -d Ubuntu
+# Перезагрузка, затем открыть Ubuntu из меню Пуск один раз (создать пользователя).
+```
+
+Внутри WSL2 (Ubuntu) один раз поставить Node и Rust — так же, как на обычном Linux:
+
+```bash
+curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+sudo apt-get install -y nodejs
+curl https://sh.rustup.rs -sSf | sh -s -- -y
+source "$HOME/.cargo/env"
+```
+
+Системные библиотеки (`libwebkit2gtk-4.1-dev`, `libgtk-3-dev` и т.д.) ставить
+отдельно **не нужно** — `build-linux.sh` сам проверяет и ставит недостающие
+через `apt-get` (спросит sudo-пароль при первом запуске).
+
+### Сборка
+
+```powershell
+# Windows-установщик + Linux .deb/.AppImage за один запуск:
+.\scripts\build-windows-exe.ps1 -Linux
+
+# Только Linux, без пересборки Windows (быстрее при итерациях):
+.\scripts\build-windows-exe.ps1 -LinuxOnly -Local
+
+# Явно указать дистрибутив WSL, если их несколько:
+.\scripts\build-windows-exe.ps1 -Linux -WslDistro Ubuntu
+```
+
+Готовые файлы: `dist-linux\*.deb` и `dist-linux\*.AppImage` (в корне репозитория,
+видны прямо из Windows — папка не коммитится, есть в `.gitignore`).
+
+Первая Linux-сборка (crates.io + AppImage-тулинг) занимает **10–20+ минут**,
+как и первая Windows-сборка. Внутри WSL2 сборка идёт в отдельном клоне
+(`~/pdf-manager-linux-build` в файловой системе WSL, не на `/mnt/c`) — так
+заметно быстрее и без проблем с блокировкой файлов Cargo через 9p-мост.
+
+Загрузки в GitHub Releases для Linux **пока нет** — только локальная сборка.
+`.deb` ставится через `sudo apt install ./dist-linux/*.deb` (или двойным
+кликом в файловом менеджере), `.AppImage` — `chmod +x` и запуск напрямую.
+
+Bundle-таргеты Linux заданы отдельно от Windows, в `src-tauri/tauri.linux.conf.json`
+(Tauri сам подмешивает `tauri.<platform>.conf.json` поверх `tauri.conf.json`
+по целевой платформе) — правки NSIS/Windows в основном `tauri.conf.json` этот
+файл не затрагивает.
+
+---
+
 ## 5. Ассоциация с PDF (установщик)
 
 NSIS‑установщик регистрирует приложение как обработчик **`.pdf`** (`bundle.fileAssociations`).
@@ -295,17 +362,23 @@ NSIS‑установщик регистрирует приложение как
 | Индикатор вставки / курсор DnD «уезжает» вправо-вниз | Нужна сборка **≥ 0.1.4** — координаты drop переводятся из physical pixels в CSS через `scaleFactor` (масштаб Windows 125%/150%). |
 | Нет «призраков» вкладок / разделителя / подсветки «Объединить» при DnD | Нужна сборка **≥ 0.1.5** — мост Tauri сам hit-test’ит панель вкладок и кнопку «Объединить» (HTML5 `dragover`/`drop` при native DnD не приходят). |
 | В окне «Порядок объединения» нельзя переставить строки | Нужна сборка **≥ 0.1.6** — при Tauri native DnD HTML5 `draggable` в WebView2 не работает; сортировка переведена на pointer-события. |
+| `wsl.exe not found` при `-Linux` | Установить WSL2: `wsl --install -d Ubuntu`, перезагрузка, открыть Ubuntu один раз из Пуск. |
+| `No WSL2 distro installed` | Тот же `wsl --install -d Ubuntu`; список установленных — `wsl -l -v`. |
+| Внутри WSL: `rustc`/`node` не найдены | Поставить их **внутри WSL** (не путать с Windows-версиями) — см. раздел 4a «Once». |
+| Linux-сборка просит sudo-пароль на каждый запуск | Нормально при первом запуске (доустановка apt-пакетов). Если пакеты уже стоят, `build-linux.sh` больше `apt-get` не вызывает. |
+| `.AppImage` не запускается («permission denied») | `chmod +x dist-linux/*.AppImage` перед запуском — GitHub/Windows не сохраняют исполняемый бит. |
 
 ---
 
 ## 7. Краткий чеклист
 
 1. Node 20+, Git, Rust 1.85+, Build Tools (**C++**)  
-2. `git checkout` нужной ветки / `main`  
+2. `git clone` / `git pull` — код уже в `main`  
 3. `.\scripts\build-windows-exe.ps1` (или `npm ci` + `npm run tauri:build:local`)  
 4. `where.exe link` — команда что‑то находит (скрипт проверяет сам)  
 5. Запустить `src-tauri\target\release\PDF Manager.exe`  
 6. Установить NSIS‑сборку и проверить «Открыть с помощью» для PDF  
+7. Заодно и Linux (`.deb`/`.AppImage`)? `.\scripts\build-windows-exe.ps1 -Linux` (нужен WSL2, см. раздел 4a)  
 
 ---
 

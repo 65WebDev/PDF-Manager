@@ -44,9 +44,9 @@ npm run build:offline
 # Результат: PDF_manager_offline.html
 ```
 
-## Windows-приложение (Tauri, экспериментально)
+## Десктопное приложение (Tauri, экспериментально): Windows + Linux
 
-Оболочка **не** входит в автоматический release-pipeline. Обсуждение и ручная сборка — в ветке `cursor/tauri-windows-shell-1aac` (доработки редактора туда не смешиваем).
+Оболочка (`src-tauri/`) живёт в `main`, но **не** входит в автоматический release-pipeline — только ручная сборка.
 
 **Подробная инструкция (RU):** [docs/windows-tauri-build.md](docs/windows-tauri-build.md)
 
@@ -76,6 +76,7 @@ npm ci
 #   .\scripts\build-windows-exe.ps1
 #   .\scripts\build-windows-exe.ps1 -Local   # без загрузки
 #   .\scripts\build-windows-exe.ps1 -Dev
+#   .\scripts\build-windows-exe.ps1 -Linux   # + Linux .deb/.AppImage через WSL2, см. docs/windows-tauri-build.md#4a
 
 # Режим разработки (окно + UI из офлайн-HTML):
 npm run tauri:dev

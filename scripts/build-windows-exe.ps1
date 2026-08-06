@@ -1,7 +1,8 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-  Build Windows .exe (Tauri) for PDF Manager and upload to GitHub Releases.
+  Build Windows .exe (Tauri) for PDF Manager — optionally also a Linux
+  .deb/.AppImage via WSL2 — and upload the Windows installer to GitHub Releases.
 
 .DESCRIPTION
   Checks Node / Rust / MSVC link.exe, runs npm ci if needed, then release build.
@@ -10,10 +11,18 @@
 
   If link.exe is not in PATH, loads VS / Build Tools via vswhere + VsDevCmd.bat.
 
+  With -Linux (or -LinuxOnly), the same commit is also built for Linux inside
+  WSL2 by calling scripts\build-linux.sh — no separate Linux machine needed.
+  The first run installs apt build dependencies (webkit2gtk, gtk3, ...) inside
+  WSL2 and may ask for your WSL sudo password. Requires WSL2 with a distro
+  installed (wsl --install -d Ubuntu) and Rust + Node set up inside it (same
+  prerequisites as Windows, just the Linux equivalents).
+
   Output:
-    - portable:  src-tauri\target\release\PDF Manager.exe
-    - installer: src-tauri\target\release\bundle\nsis\*.exe
-    - GitHub:    release tag windows-v{version}
+    - portable:       src-tauri\target\release\PDF Manager.exe
+    - installer:       src-tauri\target\release\bundle\nsis\*.exe
+    - GitHub:          release tag windows-v{version}
+    - Linux (-Linux):  dist-linux\*.deb, dist-linux\*.AppImage
 
   Docs: docs\windows-tauri-build.md
 
@@ -35,6 +44,18 @@
 .PARAMETER NoBump
   Do not auto-bump Windows semver when main has commits since the last windows-v* release.
 
+.PARAMETER Linux
+  Also build the Linux .deb/.AppImage via WSL2, after the Windows build.
+  Local only — never auto-uploaded anywhere.
+
+.PARAMETER LinuxOnly
+  Build ONLY the Linux .deb/.AppImage via WSL2 — skips the Windows build
+  entirely. Useful for iterating on the Linux side without waiting on a full
+  Windows rebuild each time.
+
+.PARAMETER WslDistro
+  WSL distro name to build in (see `wsl -l`). Default: your WSL default distro.
+
 .EXAMPLE
   .\scripts\build-windows-exe.ps1
 
@@ -49,6 +70,14 @@
 
 .EXAMPLE
   .\scripts\build-windows-exe.ps1 -Force -Local
+
+.EXAMPLE
+  # Build Windows installer AND Linux .deb/.AppImage in one go:
+  .\scripts\build-windows-exe.ps1 -Linux
+
+.EXAMPLE
+  # Only rebuild the Linux side (e.g. iterating without a Windows rebuild):
+  .\scripts\build-windows-exe.ps1 -LinuxOnly -Local
 #>
 
 [CmdletBinding()]
@@ -58,7 +87,10 @@ param(
   [switch] $Dev,
   [switch] $SkipGitSync,
   [switch] $Force,
-  [switch] $NoBump
+  [switch] $NoBump,
+  [switch] $Linux,
+  [switch] $LinuxOnly,
+  [string] $WslDistro
 )
 
 $ErrorActionPreference = 'Stop'
@@ -352,6 +384,10 @@ if (-not $SkipGitSync) {
   }
 }
 
+if ($LinuxOnly) {
+  Write-Step "Windows build skipped (-LinuxOnly)"
+} else {
+
 Write-Step "Environment check"
 
 Assert-Cmd 'node' @"
@@ -519,5 +555,67 @@ if ($doUpload) {
 Write-Host ""
 Write-Host "Run portable:" -ForegroundColor DarkGray
 Write-Host ('  & "{0}"' -f $portable) -ForegroundColor DarkGray
+
+} # end Windows build ($LinuxOnly)
+
+if ($Linux -or $LinuxOnly) {
+  Write-Step "Linux build via WSL2"
+
+  if (-not (Test-Cmd 'wsl')) {
+    Write-Fail "wsl.exe not found."
+    Write-Host @"
+WSL2 is required for -Linux/-LinuxOnly. Install it (Windows 10 2004+):
+  wsl --install -d Ubuntu
+Then reboot, open the new Ubuntu shell once to finish setup, and rerun this script.
+"@ -ForegroundColor Yellow
+    exit 1
+  }
+
+  $distroArg = @()
+  if ($WslDistro) { $distroArg = @('-d', $WslDistro) }
+
+  $distros = @(& wsl -l -q 2>$null) | ForEach-Object { ($_ -replace "`0", '').Trim() } | Where-Object { $_ }
+  if (-not $distros) {
+    Write-Fail "No WSL2 distro installed."
+    Write-Host @"
+Install one (Ubuntu recommended), then re-open PowerShell and rerun this script:
+  wsl --install -d Ubuntu
+"@ -ForegroundColor Yellow
+    exit 1
+  }
+
+  $wslRepoPath = (& wsl @distroArg -- wslpath -a $RepoRoot.Path.Replace('\', '/') 2>$null)
+  if (-not $wslRepoPath) { $wslRepoPath = (& wsl @distroArg -- wslpath -a $RepoRoot.Path 2>$null) }
+  if (-not $wslRepoPath) {
+    Write-Fail "Could not translate the repo path into WSL (wslpath failed)."
+    exit 1
+  }
+  $wslRepoPath = $wslRepoPath.Trim()
+
+  $commit = (& git -C $RepoRoot rev-parse HEAD 2>$null)
+  if (-not $commit) {
+    Write-Fail "Could not resolve current commit (git rev-parse HEAD)."
+    exit 1
+  }
+  Write-Host ("Building Linux packages for commit {0}" -f $commit.Substring(0, 7)) -ForegroundColor DarkGray
+  Write-Host "First run installs apt build deps inside WSL2 (webkit2gtk, gtk3, ...) — may ask for your WSL sudo password." -ForegroundColor DarkGray
+  Write-Host "First build may take 10-20+ minutes." -ForegroundColor DarkGray
+
+  & wsl @distroArg -- bash -lc "'$wslRepoPath/scripts/build-linux.sh' '$commit'"
+  if ($LASTEXITCODE -ne 0) {
+    Write-Fail "Linux build failed (see WSL output above)."
+    exit $LASTEXITCODE
+  }
+
+  $linuxOutDir = Join-Path $RepoRoot 'dist-linux'
+  if (Test-Path -LiteralPath $linuxOutDir) {
+    Write-Ok "Linux artifacts:"
+    Get-ChildItem -Path $linuxOutDir -File | ForEach-Object { Write-Ok ("  {0}" -f $_.FullName) }
+  } else {
+    Write-Fail "dist-linux folder not found after build."
+    exit 1
+  }
+}
+
 Write-Host ""
 Write-Host "Docs: docs\windows-tauri-build.md" -ForegroundColor DarkGray
