@@ -10046,6 +10046,14 @@
       if (!pdfDoc || docHistoryIndex < 0 || !docHistory[docHistoryIndex]) return;
       if (!pagesContainer || !pagesContainer.querySelectorAll('.page').length) return;
       docHistory[docHistoryIndex].pages = capturePagesVisual();
+      // Bundle which pages are already HQ-rendered (and at what scale)
+      // alongside the image cache above - called right before a tab switch
+      // (pmCaptureActive), so returning to this tab can skip re-rendering
+      // pages that are already sharp instead of redoing every visible
+      // page's raster+encode from scratch. Restored in restoreDocSnapshot()
+      // next to reconcilePagesFromVisual().
+      docHistory[docHistoryIndex].hqRenderedScale = new Map(hqRenderedScale);
+      docHistory[docHistoryIndex].hqUpgraded = new Set(hqUpgraded);
     }
 
     async function captureDocSnapshot(pdfBytesOverride) {
@@ -10622,6 +10630,15 @@
         clearTimeout(thumbFlushTimer);
         rotateThumbPrefetch.clear();
         if (snap.pages && snap.pages.length && snapshotHasUsableVisualCache(snap)) {
+          // Restore which pages were already HQ-rendered when this snapshot
+          // was captured (see pmRefreshCurrentSnapshotPages) - invalidateHQ()
+          // above just cleared this, so this must run after that call.
+          if (snap.hqRenderedScale && snap.hqRenderedScale.size) {
+            for (const [i, s] of snap.hqRenderedScale) hqRenderedScale.set(i, s);
+          }
+          if (snap.hqUpgraded && snap.hqUpgraded.size) {
+            for (const i of snap.hqUpgraded) hqUpgraded.add(i);
+          }
           //If a step has any pending pages left, we’ll finish drawing them
           //on demand from snapshot bytes (fast, usually 1 page).
           if (snap.pendingIdx && snap.pendingIdx.length) {
@@ -10631,6 +10648,11 @@
               ids.forEach(i => {
                 const t = rendered.get(i);
                 if (t && snap.pages[i]) snap.pages[i] = { src: t.dataUrl, rotated: t.isSideways };
+                // Freshly rebuilt at base thumbnail quality just now - drop
+                // any restored HQ entry for it so runHQUpgrade treats it as
+                // needing a fresh pass instead of trusting a stale scale.
+                hqRenderedScale.delete(i);
+                hqUpgraded.delete(i);
               });
               snap.pendingIdx = [];
             } catch (e) { /*show the placeholder from the previous step*/ }
