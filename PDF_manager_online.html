@@ -10119,30 +10119,38 @@
     // the 2nd+ preview text-markup appeared to "do nothing".
     let pdfDocBorrowDepth = 0;
 
+    // pageEditSave rebuilds/reloads the live pdfDoc across many awaited steps
+    // (redact/shape rasterization, thumbnail render) and needs it to keep
+    // pointing at ITS OWN in-progress document the whole time. Two unrelated
+    // background mechanisms read/reassign that SAME global pdfDoc on their
+    // own timers and are not otherwise aware pageEditSave is mid-flight:
+    //  - renderThumbsFromBytes (via fillPendingSnapshots/scheduleSnapshotFill,
+    //    140ms timer) borrows pdfDoc unconditionally and restores it after -
+    //    safe against other short borrows, but if it fires WHILE pageEditSave
+    //    is still running it swaps pdfDoc out to a different, possibly older/
+    //    uncropped snapshot for the duration of its own render.
+    //  - runHQUpgrade (via scheduleHQUpgrade, ~180ms timer, including one
+    //    pageEditSave itself schedules on completion) reads pdfDoc directly
+    //    (no borrow/restore) and writes straight into the same visible <img>,
+    //    so if it fires mid-save it can composite from a stale/mid-mutation
+    //    document and then silently overwrite pageEditSave's own correct
+    //    thumbnail write moments later.
+    // Either way, the crop box (and any other mid-session edit) reads as
+    // reverted purely by timing, though only in-memory: the file pageEditSave
+    // already serialized to `bytes` is unaffected. Sections that must not
+    // have pdfDoc reassigned - or read - out from under them should bracket
+    // themselves with this flag; whenPdfDocIdle callers (which both
+    // fillPendingSnapshots and runHQUpgrade already are) wait it out
+    // automatically, same as an active borrow.
+    let pdfDocCriticalWriterActive = false;
+
     async function whenPdfDocIdle() {
       let spins = 0;
-      while (pdfDocBorrowDepth > 0 && spins < 200) {
+      while ((pdfDocBorrowDepth > 0 || pdfDocCriticalWriterActive) && spins < 200) {
         await new Promise(r => setTimeout(r, 20));
         spins++;
       }
     }
-
-    // pageEditSave rebuilds/reloads the live pdfDoc across many awaited steps
-    // (redact/shape rasterization, thumbnail render) and needs it to keep
-    // pointing at ITS OWN in-progress document the whole time. renderThumbsFromBytes
-    // (background pending-thumbnail fill, via fillPendingSnapshots/scheduleSnapshotFill)
-    // borrows the SAME global pdfDoc unconditionally and restores it afterward -
-    // safe against other short borrows, but if its 140ms timer fires WHILE
-    // pageEditSave is still mid-flight (very plausible: full-page rasterization
-    // takes real time), it swaps pdfDoc out to a DIFFERENT, possibly older/
-    // uncropped history snapshot for the duration of its own render, and
-    // pageEditSave's next pdfDoc read (e.g. building the grid thumbnail) picks
-    // up that wrong document - the crop box (and any other mid-session edit)
-    // reads as reverted purely by timing, though only in-memory: the file
-    // pageEditSave already serialized to `bytes` is unaffected. Sections that
-    // must not have pdfDoc reassigned out from under them should bracket
-    // themselves with this flag; fillPendingSnapshots defers itself while set.
-    let pdfDocCriticalWriterActive = false;
 
     // Serialize live pdfDoc.save() calls. Concurrent save()+mutate (history /
     // rotate flush / HQ) used to capture intermediate /Rotate and later paint
@@ -12852,6 +12860,11 @@
           if (typeof peCompositeEditorObjectsOnCanvas === 'function') {
             await peCompositeEditorObjectsOnCanvas(canvas.getContext('2d'), idx, viewport.width, viewport.height);
           }
+          // pageEditSave (or another critical writer) may have started AFTER
+          // this loop's own whenPdfDocIdle wait passed - bail without writing
+          // (and without marking hqUpgraded/hqRenderedScale) so a later pass
+          // retries against the settled document instead of racing this one.
+          if (token !== hqPdfjsToken || pdfDocCriticalWriterActive) return;
           img.src = canvas.toDataURL('image/jpeg', 0.92);
           hqUpgraded.add(idx);
           hqRenderedScale.set(idx, neededScale);
