@@ -48897,16 +48897,32 @@ function peMetaDecode(str) {
   return JSON.parse(decodeURIComponent(escape(atob(str))));
 }
 
+// peReadAllEditorMetaFromDoc decodes the whole document's editor-metadata
+// blob (catalog lookup + base64 + JSON.parse). It's called per-page during
+// thumbnail rendering, so cache the decoded result per doc instance -
+// peWriteAllEditorMetaToDoc busts the entry for that doc on every write.
+let peEditorMetaCacheDoc = null;
+let peEditorMetaCache = null;
+
 function peReadAllEditorMetaFromDoc(doc) {
   if (!doc) return { v: 1, pages: {}, pageNorm: {} };
+  if (doc === peEditorMetaCacheDoc && peEditorMetaCache) return peEditorMetaCache;
   try {
     const val = doc.catalog.get(PDFLib.PDFName.of(PE_EDITOR_META_KEY));
-    if (!val) return { v: 1, pages: {}, pageNorm: {} };
+    if (!val) {
+      const empty = { v: 1, pages: {}, pageNorm: {} };
+      peEditorMetaCacheDoc = doc;
+      peEditorMetaCache = empty;
+      return empty;
+    }
     let str = '';
     if (typeof val.decodeText === 'function') str = val.decodeText();
     else if (typeof val.asString === 'function') str = val.asString();
     else str = String(val);
-    return peMetaDecode(str);
+    const decoded = peMetaDecode(str);
+    peEditorMetaCacheDoc = doc;
+    peEditorMetaCache = decoded;
+    return decoded;
   } catch (_) {
     return { v: 1, pages: {}, pageNorm: {} };
   }
@@ -48918,6 +48934,7 @@ function peReadAllEditorMeta() {
 
 function peWriteAllEditorMetaToDoc(doc, data) {
   if (!doc) return;
+  if (doc === peEditorMetaCacheDoc) peEditorMetaCacheDoc = null;
   const pages = data && data.pages ? data.pages : {};
   if (!Object.keys(pages).length) {
     try { doc.catalog.delete(PDFLib.PDFName.of(PE_EDITOR_META_KEY)); } catch (_) {}
