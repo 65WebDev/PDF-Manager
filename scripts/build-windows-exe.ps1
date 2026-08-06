@@ -571,6 +571,17 @@ Then reboot, open the new Ubuntu shell once to finish setup, and rerun this scri
     exit 1
   }
 
+  # wsl.exe talks to the console using the active codepage by default, which
+  # mangles non-ASCII repo paths (Cyrillic, etc.) both when we capture its
+  # output (wslpath) and when we pass a path back in as an argument. WSL_UTF8
+  # plus a UTF-8 console output encoding for the duration of this block fixes
+  # both directions. https://github.com/microsoft/WSL/issues/4607
+  $prevWslUtf8 = $env:WSL_UTF8
+  $prevOutputEncoding = [Console]::OutputEncoding
+  $env:WSL_UTF8 = '1'
+  [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+  try {
+
   $distroArg = @()
   if ($WslDistro) { $distroArg = @('-d', $WslDistro) }
 
@@ -614,6 +625,11 @@ Install one (Ubuntu recommended), then re-open PowerShell and rerun this script:
   } else {
     Write-Fail "dist-linux folder not found after build."
     exit 1
+  }
+
+  } finally {
+    [Console]::OutputEncoding = $prevOutputEncoding
+    if ($null -eq $prevWslUtf8) { Remove-Item Env:WSL_UTF8 -ErrorAction SilentlyContinue } else { $env:WSL_UTF8 = $prevWslUtf8 }
   }
 }
 
