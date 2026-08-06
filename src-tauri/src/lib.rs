@@ -119,6 +119,25 @@ fn read_local_file(path: String) -> Result<Vec<u8>, String> {
   std::fs::read(&path).map_err(|e| format!("Не удалось прочитать файл: {e}"))
 }
 
+/// Write bytes straight to a local path — used for regular Save on a
+/// document opened from a known native path (file association / Explorer
+/// drag-drop / second instance), so the UI can skip the save-location
+/// dialog. Restricted to .pdf like read_local_file, and requires the parent
+/// directory to already exist (this is meant to overwrite a file the user
+/// already opened, not create arbitrary new paths/directories).
+#[tauri::command]
+fn write_local_file(path: String, data: Vec<u8>) -> Result<(), String> {
+  let path = PathBuf::from(normalize_arg(&path));
+  if !is_pdf_path(&path) {
+    return Err("Разрешено сохранять только файлы .pdf".into());
+  }
+  match path.parent() {
+    Some(dir) if dir.as_os_str().is_empty() || dir.is_dir() => {}
+    _ => return Err(format!("Папка не найдена: {}", path.display())),
+  }
+  std::fs::write(&path, &data).map_err(|e| format!("Не удалось сохранить файл: {e}"))
+}
+
 /// Fetch a small text URL for the About update check (bypasses WebView CORS).
 #[tauri::command]
 async fn fetch_url_text(url: String) -> Result<String, String> {
@@ -162,6 +181,7 @@ pub fn run() {
     .invoke_handler(tauri::generate_handler![
       take_pending_open_files,
       read_local_file,
+      write_local_file,
       fetch_url_text,
       maximize_main_window_cmd
     ])

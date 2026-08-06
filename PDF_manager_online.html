@@ -8445,12 +8445,34 @@
     let fileInput = null;
     let sourceFileHandle = null; //handle of the source file (File System Access API) for saving nearby
     let lastDirHandle = null;    //last opening catalog - to offer it again
+    // Desktop (Tauri) equivalent of sourceFileHandle: the real disk path a
+    // document was opened from via file association / Explorer drag-drop /
+    // second instance (never the in-app Open picker - browsers don't expose
+    // a path for that, by design). Set in loadPDF() from a File tagged with
+    // __pmNativePath by the Tauri bridge; null on any other open. Lets a
+    // regular Save write straight back to that path without a picker, since
+    // WebKitGTK (Linux) has no File System Access API at all and WebView2
+    // (Windows) only has a real sourceHandle when opened via showOpenFilePicker.
+    let sourceNativePath = null;
     const PICKER_ID_OPEN = 'pdf-manager-open';
     const PICKER_ID_SAVE = 'pdf-manager-save';
     const PICKER_ID_SAVE_DIR = 'pdf-manager-save-dir';
 
     function rememberFileHandleLocation(handle) {
       if (handle) lastDirHandle = handle;
+    }
+
+    function isTauriDesktopApp() {
+      return !!(window.__TAURI__ && window.__TAURI__.core && typeof window.__TAURI__.core.invoke === 'function');
+    }
+
+    function getActiveTabNativePath() {
+      if (typeof pmTabsEnabled === 'function' && pmTabsEnabled() &&
+          typeof pmActiveId !== 'undefined' && pmActiveId != null && pmTabs.length) {
+        const t = pmTabs.find(x => x.id === pmActiveId);
+        return (t && t.sourceNativePath) ? t.sourceNativePath : null;
+      }
+      return sourceNativePath || null;
     }
 
     function applyOpenPickerStartIn(opts) {
@@ -16819,6 +16841,9 @@
         currentFileName = (isOffice || isImage || isEmail)
           ? file.name.replace(/\.(docx?|xlsx?|eml|msg|png|jpe?g|bmp|gif|webp|tiff?)$/i, '.pdf')
           : file.name;
+        // Office/image/email conversions produce a NEW pdf - never write
+        // that back over the original source file.
+        sourceNativePath = (isOffice || isImage || isEmail) ? null : (file.__pmNativePath || null);
 
         dropZone.style.display = 'none';
 
@@ -24500,13 +24525,26 @@
 
       if (pmTabsEnabled() && pmActiveId != null) pmCaptureActive();
 
+      // Desktop (Tauri) direct-to-file save: a regular Save (not Save As
+      // image / Encrypt / Compress - those produce a different file and
+      // should still ask where to put it) on a document opened from a known
+      // native path writes straight back to it, skipping the save-location
+      // dialog entirely. This is the Windows+Linux equivalent of the
+      // preferSourceFile File System Access API path below - WebKitGTK
+      // (Linux) has no such API at all, and WebView2 (Windows) only has a
+      // real sourceHandle when the file was opened via showOpenFilePicker.
+      const isRegularSave = !asImage && !encryptOnly && !compressOnly;
+      const nativeSavePath = (isRegularSave && isTauriDesktopApp()) ? getActiveTabNativePath() : null;
+
       // First, select the file and open the recording stream (while the user gesture is active),
       // then we collect the PDF - otherwise createWritable is blocked after a long preparation.
       let saveTarget = null;
-      try {
-        saveTarget = await acquireSaveTarget(suggestedName, { preferSourceFile: true });
-      } catch (e) {
-        if (e && e.name === 'AbortError') return; // the user closed the window - we do nothing
+      if (!nativeSavePath) {
+        try {
+          saveTarget = await acquireSaveTarget(suggestedName, { preferSourceFile: true });
+        } catch (e) {
+          if (e && e.name === 'AbortError') return; // the user closed the window - we do nothing
+        }
       }
 
       showLoading("Сохранение файла...");
@@ -24561,7 +24599,11 @@
           }
         }
 
-        if (saveTarget) {
+        if (nativeSavePath) {
+          await window.__TAURI__.core.invoke('write_local_file', {
+            path: nativeSavePath, data: Array.from(bytes)
+          });
+        } else if (saveTarget) {
           await saveTarget.writable.write(bytes);
           await saveTarget.writable.close();
           rememberFileHandleLocation(saveTarget.handle);
@@ -27928,7 +27970,7 @@
 function pmNewSession() {
   return {
     id: ++pmSeq,
-    fileName: 'документ.pdf', sourceHandle: null,
+    fileName: 'документ.pdf', sourceHandle: null, sourceNativePath: null,
     dirty: false, docHistory: [], docHistoryIndex: -1,
     scale: 100, autoScale: true, scaleLocked: false, mobileMin: 70,
     mode: 'select', multiSel: false, deletedHidden: true, scrollTop: 0,
@@ -27949,6 +27991,7 @@ function pmCaptureActive() {
   } else if (sourceFileHandle && !pmTabsEnabled()) {
     t.sourceHandle = sourceFileHandle;
   }
+  t.sourceNativePath = sourceNativePath;
   t.dirty = documentDirty; t.docHistory = docHistory; t.docHistoryIndex = docHistoryIndex;
   t.scale = currentScale; t.autoScale = autoScaleEnabled; t.scaleLocked = scaleUserLocked;
   t.mobileMin = mobileMinScale; t.multiSel = multiSelectMode;
@@ -27972,6 +28015,7 @@ async function pmActivate(id, skipCapture, keepSelection) {
   }
 
   currentFileName = t.fileName; sourceFileHandle = t.sourceHandle;
+  sourceNativePath = t.sourceNativePath || null;
   documentDirty = t.dirty; docHistory = t.docHistory; docHistoryIndex = t.docHistoryIndex;
   currentScale = t.scale; autoScaleEnabled = t.autoScale; scaleUserLocked = t.scaleLocked;
   mobileMinScale = t.mobileMin; deletedPagesHidden = t.deletedHidden;
@@ -28051,6 +28095,8 @@ async function pmOpenOneFileAsTab(file, handle, insertAt) {
   pmResetGlobalsEmpty();
   sourceFileHandle = handle || null;
   session.sourceHandle = handle || null;
+  sourceNativePath = null;
+  session.sourceNativePath = null;
   pmRenderBar(); pmSyncLayout();
 
   await loadPDF(file);
@@ -28065,6 +28111,7 @@ async function pmOpenOneFileAsTab(file, handle, insertAt) {
   session.fileName = currentFileName;
   if (handle) session.sourceHandle = handle;
   sourceFileHandle = session.sourceHandle;
+  session.sourceNativePath = sourceNativePath; // set by loadPDF() from file.__pmNativePath
   pmCaptureActive();
   pmRenderBar(); pmSyncLayout();
 }

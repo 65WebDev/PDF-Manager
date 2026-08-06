@@ -340,7 +340,12 @@ const TAURI_OPEN_BRIDGE = `
         var raw = await invoke('read_local_file', { path: path });
         var bytes = toUint8(raw);
         if (!bytes.length) throw new Error('пустой файл');
-        files.push(new File([bytes], basename(path), { type: 'application/pdf' }));
+        var file = new File([bytes], basename(path), { type: 'application/pdf' });
+        // Tag with the real disk path (association / Explorer drag-drop /
+        // second instance - never the in-app Open picker) so the main app
+        // can write Save straight back to it without a save-location dialog.
+        file.__pmNativePath = path;
+        files.push(file);
       } catch (err) {
         console.error('[Tauri] failed to read', path, err);
         alert('Не удалось открыть файл:\\n' + path + '\\n\\n' + (err && err.message ? err.message : err));
