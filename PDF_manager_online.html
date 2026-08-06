@@ -10159,8 +10159,6 @@
     }
 
     async function renderThumbsFromBytes(pdfBytes, indices) {
-      console.log('[peDebugRace] renderThumbsFromBytes ENTER, pdfDocCriticalWriterActive=', pdfDocCriticalWriterActive, 'indices=', JSON.stringify(indices));
-      console.trace('[peDebugRace] renderThumbsFromBytes call stack');
       const result = new Map();
       const pdfjsDoc = await pdfjsLib.getDocument({ data: pdfBytes.slice() }).promise;
       const prevDoc = pdfDoc;
@@ -18118,10 +18116,7 @@
         peLoadPageEditorObjects(pdfPageIndex).some(o => o.type === 'image');
       const renderScale = hasImages ? Math.max(useScale, THUMBNAIL_SCALE * 2) : useScale;
       const page = await pdfjsDoc.getPage(pdfjsPageNum);
-      if (isLoadingCancelled || operationId !== activeOperationId) {
-        console.log('[peDebugRender] CANCELLED before render, pdfPageIndex=', pdfPageIndex, 'isLoadingCancelled=', isLoadingCancelled, 'operationId=', operationId, 'activeOperationId=', activeOperationId);
-        return false;
-      }
+      if (isLoadingCancelled || operationId !== activeOperationId) return false;
 
       // pdf.js's page.rotate handles /Rotate inheritance from parent page-tree nodes,
       // which pdf-lib's getRotation() silently misses (it only checks the page dict).
@@ -18160,12 +18155,8 @@
       canvas.width = viewport.width; canvas.height = viewport.height;
       const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: false });
       await page.render({ canvasContext: ctx, viewport, annotationMode: 0 }).promise;
-      if (isLoadingCancelled || operationId !== activeOperationId) {
-        console.log('[peDebugRender] CANCELLED after render, before composite, pdfPageIndex=', pdfPageIndex, 'isLoadingCancelled=', isLoadingCancelled, 'operationId=', operationId, 'activeOperationId=', activeOperationId);
-        return false;
-      }
+      if (isLoadingCancelled || operationId !== activeOperationId) return false;
       if (pdfPageIndex != null && typeof peCompositeEditorObjectsOnCanvas === 'function') {
-        console.log('[peDebugRender] compositing pdfPageIndex=', pdfPageIndex, 'canvas', viewport.width, viewport.height);
         await peCompositeEditorObjectsOnCanvas(ctx, pdfPageIndex, viewport.width, viewport.height);
       }
 
@@ -18174,7 +18165,6 @@
       img.src = hasEditorObjs
         ? canvas.toDataURL('image/png')
         : canvas.toDataURL('image/jpeg', THUMBNAIL_JPEG_QUALITY);
-      console.log('[peDebugRender] img.src SET, pdfPageIndex=', pdfPageIndex, 'hasEditorObjs=', hasEditorObjs);
       return true;
     }
 
@@ -50005,18 +49995,10 @@ function peEnsurePageNormSize(pageIdx) {
 async function peCompositeEditorObjectsOnCanvas(ctx, pageIdx, canvasW, canvasH) {
   if (!pdfDoc || pageIdx == null || pageIdx < 0) return;
   peEnsurePageNormSize(pageIdx);
-  const rawLoaded = peLoadPageEditorObjects(pageIdx);
-  const objects = peHydrateEditorObjects(rawLoaded, pageIdx)
+  const objects = peHydrateEditorObjects(peLoadPageEditorObjects(pageIdx), pageIdx)
     .filter(o => o && o.type !== 'redact');
-  console.log('[peDebugRender] peCompositeEditorObjectsOnCanvas pageIdx=', pageIdx, 'rawLoaded=', JSON.stringify((rawLoaded || []).map(o => ({ id: o.id, type: o.type }))),
-    'after hydrate+filter=', JSON.stringify(objects.map(o => ({ id: o.id, type: o.type, hasImgEl: o.type === 'image' ? !!o.imgEl : undefined }))));
   if (!objects.length) return;
   await pePreloadEditorImages(objects);
-  objects.forEach(o => {
-    if (o.type === 'image') {
-      console.log('[peDebugRender] image object', o.id, 'after preload: imgEl.complete=', o.imgEl && o.imgEl.complete, 'naturalWidth=', o.imgEl && o.imgEl.naturalWidth);
-    }
-  });
   // Stage size must be the page's PDF-point (scale=1) size, NOT the canvas
   // pixel size. peDrawEditorObjects uses S = canvasW/stageW to scale fonts
   // and strokes; passing canvasW as stage made S=1 at every render scale, so
@@ -50030,8 +50012,7 @@ async function peCompositeEditorObjectsOnCanvas(ctx, pageIdx, canvasW, canvasH) 
   ctx.beginPath();
   ctx.rect(0, 0, canvasW, canvasH);
   ctx.clip();
-  const drewResult = peDrawEditorObjects(ctx, canvasW, canvasH, objects, stageW, stageH);
-  console.log('[peDebugRender] peDrawEditorObjects returned drew=', drewResult, 'stageW/H=', stageW, stageH, 'canvasW/H=', canvasW, canvasH);
+  peDrawEditorObjects(ctx, canvasW, canvasH, objects, stageW, stageH);
   ctx.restore();
 }
 
@@ -53965,13 +53946,11 @@ async function pageEditSave(options) {
     // Bake pending redact markers into the live page now (same path as
     // export/print). Keeps the cover in the page stream so HQ / history-thumb
     // fills cannot resurrect a pre-redact raster.
-    console.log('[peDebugRace] persistObjs at pageEditSave start', JSON.stringify((persistObjs || []).map(o => ({ id: o.id, type: o.type }))));
     try {
       pdfDoc = await PDFLib.PDFDocument.load(
         (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
       );
       peSavePageEditorObjects(idx, persistObjs);
-      console.log('[peDebugRace] metadata after first peSavePageEditorObjects', JSON.stringify((peReadAllEditorMetaFromDoc(pdfDoc).pages[String(idx)] || []).map(o => ({ id: o.id, type: o.type }))));
       if (typeof peApplyPendingRedactRasterization === 'function'
           && typeof pePageShouldFullRasterForRedact === 'function'
           && pePageShouldFullRasterForRedact(pdfDoc.getPage(idx), idx)) {
@@ -53979,14 +53958,12 @@ async function pageEditSave(options) {
           (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
         );
         work = await peApplyPendingRedactRasterization(work) || work;
-        console.log('[peDebugRace] metadata in work AFTER peApplyPendingRedactRasterization', JSON.stringify((peReadAllEditorMetaFromDoc(work).pages[String(idx)] || []).map(o => ({ id: o.id, type: o.type }))));
         bytes = (typeof peClonePdfBytes === 'function')
           ? peClonePdfBytes(await work.save({ useObjectStreams: false }))
           : new Uint8Array(await work.save({ useObjectStreams: false }));
         pdfDoc = await PDFLib.PDFDocument.load(
           (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
         );
-        console.log('[peDebugRace] metadata after reload from post-raster bytes (pre fix-up write)', JSON.stringify((peReadAllEditorMetaFromDoc(pdfDoc).pages[String(idx)] || []).map(o => ({ id: o.id, type: o.type }))));
         peSavePageEditorObjects(idx, persistObjs);
         // The metadata write above only touched the in-memory pdfDoc - bytes
         // still holds the pre-write serialization from `work.save()` a few
@@ -54023,8 +54000,6 @@ async function pageEditSave(options) {
     // Update the thumbnail of the edited page (also patches the history tip
     // via patchHistoryPending — intermediate undo thumbs fill in background).
     const pj = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
-    console.log('[peDebugRace] metadata at thumbnail render time', JSON.stringify((peReadAllEditorMetaFromDoc(pdfDoc).pages[String(idx)] || []).map(o => ({ id: o.id, type: o.type }))),
-      'pdfDocCriticalWriterActive=', pdfDocCriticalWriterActive);
     const div = pagesContainer.querySelector('.page[data-index="' + idx + '"]');
     const im = div ? div.querySelector('img') : null;
     if (div && im) {
