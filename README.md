@@ -10,13 +10,16 @@
 | **Скачать офлайн-версию** | https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_offline.html |
 | **Windows: установщик** | https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.18/PDF.Manager_0.1.18_x64-setup.exe |
 | **Windows: portable `.exe`** | https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.18/pdf-manager.exe |
+| **Linux: `.deb`** | https://github.com/65WebDev/PDF-Manager/releases |
+| **Linux: `.AppImage`** | https://github.com/65WebDev/PDF-Manager/releases |
 | **Страница релизов (HTML)** | https://github.com/65WebDev/PDF-Manager/releases/latest |
 | **Релиз Windows** | https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.18 |
+| **Релиз Linux** | https://github.com/65WebDev/PDF-Manager/releases |
 | **Открыть онлайн (GitHub Pages)** | https://65WebDev.github.io/PDF-Manager/ |
 
 После скачивания HTML откройте файл в браузере. Онлайн-версия подгружает библиотеки из CDN; офлайн-версия содержит все зависимости внутри файла.
 
-Десктопная сборка для Windows — **отдельный** релиз (`windows-v…`), не смешивается с автоматическими `build-N`. Актуальная версия сейчас: [windows-v0.1.18](https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.18).
+Десктопная сборка — **отдельные** релизы (`windows-v…`, `linux-v…`), не смешиваются с автоматическими `build-N`. Актуальная версия Windows сейчас: [windows-v0.1.18](https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.18).
 
 ## Как это работает
 

@@ -229,6 +229,14 @@
         <span lang-ru>Windows: portable .exe</span>
         <span lang-en>Windows: portable .exe</span>
       </a>
+      <a class="btn btn-secondary" id="downloadLinuxDebBtn" href="https://github.com/65WebDev/PDF-Manager/releases">
+        <span lang-ru>Linux: .deb</span>
+        <span lang-en>Linux: .deb</span>
+      </a>
+      <a class="btn btn-secondary" id="downloadLinuxAppImageBtn" href="https://github.com/65WebDev/PDF-Manager/releases">
+        <span lang-ru>Linux: .AppImage</span>
+        <span lang-en>Linux: .AppImage</span>
+      </a>
     </div>
     <p class="privacy-note">
       <span lang-ru>Файлы не покидают ваш компьютер — вся обработка PDF происходит локально в браузере, без загрузки на сервер.</span>
@@ -411,8 +419,8 @@
   <section class="wrap">
     <h2><span lang-ru>Как получить</span><span lang-en>How to get it</span></h2>
     <p class="section-sub">
-      <span lang-ru>Три способа — выберите подходящий.</span>
-      <span lang-en>Three ways to run it — pick whichever suits you.</span>
+      <span lang-ru>Несколько способов — выберите подходящий.</span>
+      <span lang-en>Several ways to run it — pick whichever suits you.</span>
     </p>
     <div class="dist-grid">
       <div class="dist-card">
@@ -445,6 +453,17 @@
           <span lang-en>A native desktop build: installer or portable .exe, with .pdf file association.</span>
         </p>
         <a class="btn btn-secondary" id="distWindowsBtn" href="#" style="width:100%; justify-content:center;">
+          <span lang-ru>Скачать</span><span lang-en>Download</span>
+        </a>
+      </div>
+      <div class="dist-card">
+        <span class="d-badge">Linux</span>
+        <h3><span lang-ru>Приложение для Linux</span><span lang-en>Linux app</span></h3>
+        <p>
+          <span lang-ru>Нативная десктопная сборка: пакет .deb или переносимый .AppImage.</span>
+          <span lang-en>A native desktop build: .deb package or a portable .AppImage.</span>
+        </p>
+        <a class="btn btn-secondary" id="distLinuxBtn" href="https://github.com/65WebDev/PDF-Manager/releases" style="width:100%; justify-content:center;">
           <span lang-ru>Скачать</span><span lang-en>Download</span>
         </a>
       </div>
@@ -505,6 +524,9 @@
       var winSetupBtn = document.getElementById('downloadWindowsSetupBtn');
       var winPortableBtn = document.getElementById('downloadWindowsPortableBtn');
       var distWindowsBtn = document.getElementById('distWindowsBtn');
+      var linuxDebBtn = document.getElementById('downloadLinuxDebBtn');
+      var linuxAppImageBtn = document.getElementById('downloadLinuxAppImageBtn');
+      var distLinuxBtn = document.getElementById('distLinuxBtn');
       try {
         var res = await fetch('version.json', { cache: 'no-store' });
         if (!res.ok) throw new Error('no version');
@@ -524,6 +546,17 @@
           winPortableBtn.href = portableUrl;
           distWindowsBtn.href = setupUrl;
         }
+        var linuxVer = String(v.linuxVersion || '').trim();
+        if (linuxVer) {
+          var linuxTag = 'linux-v' + linuxVer;
+          var debName = 'pdf-manager_' + linuxVer + '_amd64.deb';
+          var appImageName = 'pdf-manager_' + linuxVer + '_amd64.AppImage';
+          var debUrl = 'https://github.com/65WebDev/PDF-Manager/releases/download/' + linuxTag + '/' + debName;
+          var appImageUrl = 'https://github.com/65WebDev/PDF-Manager/releases/download/' + linuxTag + '/' + appImageName;
+          if (linuxDebBtn) linuxDebBtn.href = debUrl;
+          if (linuxAppImageBtn) linuxAppImageBtn.href = appImageUrl;
+          if (distLinuxBtn) distLinuxBtn.href = debUrl;
+        }
         var date = v.date ? new Date(v.date).toLocaleString(document.documentElement.lang === 'en' ? 'en-US' : 'ru-RU') : '—';
         var repoBase = 'https://github.com/65WebDev/PDF-Manager';
         el.innerHTML =
@@ -532,6 +565,10 @@
           (winVer ? (
             '<br><span lang-ru><strong>Windows:</strong> <a href="' + repoBase + '/releases/tag/windows-v' + winVer + '">v' + winVer + '</a></span>' +
             '<span lang-en><strong>Windows:</strong> <a href="' + repoBase + '/releases/tag/windows-v' + winVer + '">v' + winVer + '</a></span>'
+          ) : '') +
+          (linuxVer ? (
+            '<br><span lang-ru><strong>Linux:</strong> <a href="' + repoBase + '/releases/tag/linux-v' + linuxVer + '">v' + linuxVer + '</a></span>' +
+            '<span lang-en><strong>Linux:</strong> <a href="' + repoBase + '/releases/tag/linux-v' + linuxVer + '">v' + linuxVer + '</a></span>'
           ) : '') +
           '<br><span lang-ru><strong>Коммит:</strong> <a href="' + repoBase + '/commit/' + (v.commit || '') + '">' + (v.shortCommit || '—') + '</a></span>' +
           '<span lang-en><strong>Commit:</strong> <a href="' + repoBase + '/commit/' + (v.commit || '') + '">' + (v.shortCommit || '—') + '</a></span>' +

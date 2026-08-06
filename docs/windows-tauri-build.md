@@ -304,7 +304,16 @@ source "$HOME/.cargo/env"
 (`~/pdf-manager-linux-build` в файловой системе WSL, не на `/mnt/c`) — так
 заметно быстрее и без проблем с блокировкой файлов Cargo через 9p-мост.
 
-Загрузки в GitHub Releases для Linux **пока нет** — только локальная сборка.
+По умолчанию (без `-Local`) сборка **также заливается** в GitHub Release
+`linux-v{version}` — аналогично Windows, но своим тегом (нужен тот же
+`gh auth login`, что и для Windows-загрузки; выполняется из PowerShell,
+`dist-linux/` видна оттуда). Только локально, без загрузки:
+
+```powershell
+.\scripts\build-windows-exe.ps1 -Linux -Local
+.\scripts\build-windows-exe.ps1 -LinuxOnly -Local
+```
+
 `.deb` ставится через `sudo apt install ./dist-linux/*.deb` (или двойным
 кликом в файловом менеджере), `.AppImage` — `chmod +x` и запуск напрямую.
 
