@@ -10129,7 +10129,12 @@
       const canvas = document.createElement('canvas');
       canvas.width = viewport.width;
       canvas.height = viewport.height;
-      const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: false });
+      // toDataURL() below reads every pixel back off this canvas - without
+      // willReadFrequently, browsers back it with a GPU surface tuned for
+      // drawing, and that readback becomes a slow GPU->CPU transfer on
+      // weak/integrated GPUs (independent of CPU speed). true forces a
+      // CPU-backed buffer, trading GPU compositing for consistent readback.
+      const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: true });
       await page.render({ canvasContext: ctx, viewport, annotationMode: 0 }).promise;
       if (typeof peCompositeEditorObjectsOnCanvas === 'function') {
         await peCompositeEditorObjectsOnCanvas(ctx, idx, viewport.width, viewport.height);
@@ -12916,10 +12921,14 @@
           const viewport = page.getViewport({ scale: neededScale, rotation: effectiveRotation });
           const canvas = document.createElement('canvas');
           canvas.width = viewport.width; canvas.height = viewport.height;
-          await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+          // willReadFrequently: the toDataURL() below reads this canvas back -
+          // without it, weak/integrated GPUs pay a slow GPU->CPU transfer
+          // here regardless of CPU speed (see renderPageImageInto).
+          const hqCtx = canvas.getContext('2d', { willReadFrequently: true });
+          await page.render({ canvasContext: hqCtx, viewport }).promise;
           if (token !== hqPdfjsToken) return;
           if (typeof peCompositeEditorObjectsOnCanvas === 'function') {
-            await peCompositeEditorObjectsOnCanvas(canvas.getContext('2d'), idx, viewport.width, viewport.height);
+            await peCompositeEditorObjectsOnCanvas(hqCtx, idx, viewport.width, viewport.height);
           }
           // pageEditSave (or another critical writer) may have started AFTER
           // this loop's own whenPdfDocIdle wait passed - bail without writing
@@ -18227,7 +18236,12 @@
 
       const canvas = document.createElement('canvas');
       canvas.width = viewport.width; canvas.height = viewport.height;
-      const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: false });
+      // toDataURL() below reads every pixel back off this canvas - without
+      // willReadFrequently, browsers back it with a GPU surface tuned for
+      // drawing, and that readback becomes a slow GPU->CPU transfer on
+      // weak/integrated GPUs (independent of CPU speed). true forces a
+      // CPU-backed buffer, trading GPU compositing for consistent readback.
+      const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: true });
       await page.render({ canvasContext: ctx, viewport, annotationMode: 0 }).promise;
       if (isLoadingCancelled || operationId !== activeOperationId) return false;
       if (pdfPageIndex != null && typeof peCompositeEditorObjectsOnCanvas === 'function') {
@@ -22834,7 +22848,8 @@
       const canvas = document.createElement('canvas');
       canvas.width = viewport.width;
       canvas.height = viewport.height;
-      const ctx = canvas.getContext('2d');
+      // See renderPageImageInto - this canvas gets toDataURL()'d below.
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
       await page.render({ canvasContext: ctx, viewport, annotationMode: 0 }).promise;
       // After rotation, the thumbnails are updated via this path (refreshThumbnails),
       // Therefore, here too you need to add editor objects from the metadata.
@@ -34937,10 +34952,12 @@ function editSelectedPage() {
       const canvas = document.createElement('canvas');
       canvas.width = viewport.width;
       canvas.height = viewport.height;
-      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+      // See renderPageImageInto - this canvas gets toDataURL()'d below.
+      const previewCtx = canvas.getContext('2d', { willReadFrequently: true });
+      await page.render({ canvasContext: previewCtx, viewport }).promise;
       if (typeof peCompositeEditorObjectsOnCanvas === 'function') {
         await peCompositeEditorObjectsOnCanvas(
-          canvas.getContext('2d'), pageIdx, viewport.width, viewport.height);
+          previewCtx, pageIdx, viewport.width, viewport.height);
       }
       img.src = canvas.toDataURL('image/jpeg', useHq ? 0.92 : THUMBNAIL_JPEG_QUALITY);
       if (useHq && typeof hqUpgraded !== 'undefined' && hqUpgraded) hqUpgraded.add(pageIdx);
@@ -54109,10 +54126,12 @@ async function pageEditSave(options) {
           const canvas = document.createElement('canvas');
           canvas.width = viewport.width;
           canvas.height = viewport.height;
-          await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+          // See renderPageImageInto - this canvas gets toDataURL()'d below.
+          const seedCtx = canvas.getContext('2d', { willReadFrequently: true });
+          await page.render({ canvasContext: seedCtx, viewport }).promise;
           if (typeof peCompositeEditorObjectsOnCanvas === 'function') {
             await peCompositeEditorObjectsOnCanvas(
-              canvas.getContext('2d'), idx, viewport.width, viewport.height);
+              seedCtx, idx, viewport.width, viewport.height);
           }
           im.src = canvas.toDataURL('image/jpeg', 0.92);
           if (typeof hqPdfjsDoc !== 'undefined') hqPdfjsDoc = pj;
