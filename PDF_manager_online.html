@@ -10119,9 +10119,34 @@
     // the 2nd+ preview text-markup appeared to "do nothing".
     let pdfDocBorrowDepth = 0;
 
+    // pageEditSave rebuilds/reloads the live pdfDoc across many awaited steps
+    // (redact/shape rasterization, thumbnail render) and needs it to keep
+    // pointing at ITS OWN in-progress document the whole time. Two unrelated
+    // background mechanisms read/reassign that SAME global pdfDoc on their
+    // own timers and are not otherwise aware pageEditSave is mid-flight:
+    //  - renderThumbsFromBytes (via fillPendingSnapshots/scheduleSnapshotFill,
+    //    140ms timer) borrows pdfDoc unconditionally and restores it after -
+    //    safe against other short borrows, but if it fires WHILE pageEditSave
+    //    is still running it swaps pdfDoc out to a different, possibly older/
+    //    uncropped snapshot for the duration of its own render.
+    //  - runHQUpgrade (via scheduleHQUpgrade, ~180ms timer, including one
+    //    pageEditSave itself schedules on completion) reads pdfDoc directly
+    //    (no borrow/restore) and writes straight into the same visible <img>,
+    //    so if it fires mid-save it can composite from a stale/mid-mutation
+    //    document and then silently overwrite pageEditSave's own correct
+    //    thumbnail write moments later.
+    // Either way, the crop box (and any other mid-session edit) reads as
+    // reverted purely by timing, though only in-memory: the file pageEditSave
+    // already serialized to `bytes` is unaffected. Sections that must not
+    // have pdfDoc reassigned - or read - out from under them should bracket
+    // themselves with this flag; whenPdfDocIdle callers (which both
+    // fillPendingSnapshots and runHQUpgrade already are) wait it out
+    // automatically, same as an active borrow.
+    let pdfDocCriticalWriterActive = false;
+
     async function whenPdfDocIdle() {
       let spins = 0;
-      while (pdfDocBorrowDepth > 0 && spins < 200) {
+      while ((pdfDocBorrowDepth > 0 || pdfDocCriticalWriterActive) && spins < 200) {
         await new Promise(r => setTimeout(r, 20));
         spins++;
       }
@@ -10237,7 +10262,8 @@
       //the final step is through patchHistoryPending - without a separate render).
       if (document.querySelector('.page.rotate-anim-active') ||
           (thumbFlushQueue && thumbFlushQueue.size) || thumbFlushBusy ||
-          (typeof anyPageHasPendingRotateRaster === 'function' && anyPageHasPendingRotateRaster())) {
+          (typeof anyPageHasPendingRotateRaster === 'function' && anyPageHasPendingRotateRaster()) ||
+          pdfDocCriticalWriterActive) {
         scheduleSnapshotFill();
         return;
       }
@@ -12834,6 +12860,11 @@
           if (typeof peCompositeEditorObjectsOnCanvas === 'function') {
             await peCompositeEditorObjectsOnCanvas(canvas.getContext('2d'), idx, viewport.width, viewport.height);
           }
+          // pageEditSave (or another critical writer) may have started AFTER
+          // this loop's own whenPdfDocIdle wait passed - bail without writing
+          // (and without marking hqUpgraded/hqRenderedScale) so a later pass
+          // retries against the settled document instead of racing this one.
+          if (token !== hqPdfjsToken || pdfDocCriticalWriterActive) return;
           img.src = canvas.toDataURL('image/jpeg', 0.92);
           hqUpgraded.add(idx);
           hqRenderedScale.set(idx, neededScale);
@@ -33044,6 +33075,55 @@ function peRemapObjectForCrop(o, crop) {
   }
 }
 
+function peRemapRedactedRegionForCrop(region, cropFrac) {
+  const rx = (v) => (v - cropFrac.x) / cropFrac.w;
+  const ry = (v) => (v - cropFrac.y) / cropFrac.h;
+  const out = region.slice();
+  const x0 = rx(region[0]), x1 = rx(region[2]);
+  const y0 = ry(region[1]), y1 = ry(region[3]);
+  out[0] = Math.min(x0, x1); out[2] = Math.max(x0, x1);
+  out[1] = Math.min(y0, y1); out[3] = Math.max(y0, y1);
+  return out;
+}
+
+// Already-confirmed redactions bake a black plate into the page content AND
+// remember its box as a visual-norm fraction of the page's crop box at
+// PE_REDACTED_REGIONS_KEY / PE_FLATTENED_COVERS_KEY / peSessionRedactedRegions
+// (peScrubEngineParse reads these back at save/export time to locate the
+// plate and verify no text survives under it). Cropping the page changes
+// what "current crop box" means without touching that bookkeeping, so every
+// stored fraction silently starts pointing at the wrong spot: the regional
+// redaction pass compares the (correctly positioned, unmoved) black plate
+// against the now-mislocated remembered box, treats the mismatch as foreign
+// ink under a phantom box, aborts the safe regional path, and the page can
+// fall back to full rasterization - or worse, "verify" against the wrong
+// region entirely. Rebase every stored region into the new crop box's
+// fraction space, the same way peRemapObjectForCrop rebases editor objects.
+function peRemapPageRedactBookkeepingForCrop(page, oldCb, newCropPdf, pageIdx) {
+  if (!page || !oldCb || !newCropPdf) return;
+  try {
+    const rot = page.getRotation().angle || 0;
+    const c1 = pePdfUserToVisualNorm(newCropPdf.x, newCropPdf.y, rot, oldCb);
+    const c2 = pePdfUserToVisualNorm(newCropPdf.x + newCropPdf.w, newCropPdf.y + newCropPdf.h, rot, oldCb);
+    const cropFrac = {
+      x: Math.min(c1.nx, c2.nx), y: Math.min(c1.ny, c2.ny),
+      w: Math.max(1e-6, Math.abs(c2.nx - c1.nx)), h: Math.max(1e-6, Math.abs(c2.ny - c1.ny))
+    };
+    const regions = pePageRedactedRegions(page).map(r => peRemapRedactedRegionForCrop(r, cropFrac));
+    if (regions.length) {
+      page.node.set(PDFLib.PDFName.of(PE_REDACTED_REGIONS_KEY), PDFLib.PDFString.of(JSON.stringify(regions)));
+    }
+    const covers = peGetFlattenedCovers(page).map(cov =>
+      peRemapRedactedRegionForCrop([cov.minX, cov.minY, cov.maxX, cov.maxY], cropFrac));
+    if (covers.length) {
+      peSetFlattenedCovers(page, covers.map(r => ({ minX: r[0], minY: r[1], maxX: r[2], maxY: r[3] })));
+    }
+    if (pageIdx != null && peSessionRedactedRegions[pageIdx] && peSessionRedactedRegions[pageIdx].length) {
+      peSessionRedactedRegions[pageIdx] = peSessionRedactedRegions[pageIdx].map(r => peRemapRedactedRegionForCrop(r, cropFrac));
+    }
+  } catch (_) {}
+}
+
 /**
  * Drop objects fully outside the crop rect and rebase survivors into the
  * new visible-page coordinate system (fractions of the cropped page).
@@ -33097,9 +33177,11 @@ async function peCropConfirm() {
     const idx = peState.idx;
     const page = pdfDoc.getPage(idx);
     const c = peState.cropPdf;
+    const oldCb = page.getCropBox();
     // Cull / rebase objects against the current viewport, then apply crop.
     peApplyCropToEditorObjects(c);
     page.setCropBox(c.x, c.y, c.w, c.h);
+    peRemapPageRedactBookkeepingForCrop(page, oldCb, c, idx);
     setDocumentDirty(true);
 
     const bytes = new Uint8Array(await pdfDoc.save());
@@ -50972,6 +51054,33 @@ function peFilterRedactedTextItems(textContent, pageIdx, vp) {
   return Object.assign({}, textContent, { items: items });
 }
 
+// PEI<pageIdx>I<objId>N / PEI<pageIdx>I<objId>C<n> hold each inserted image's
+// actual pixel data (peSaveEditorImageData / peCatalogGetChunked) as chunked
+// catalog string entries, kept separate from the PE_EDITOR_META_KEY JSON
+// (which only carries position/size, not the bytes). Both are plain literal
+// catalog values (PDFString/PDFNumber, not indirect refs), so they can be
+// copied onto another document's catalog directly. Any path that rebuilds a
+// fresh PDFDocument.create() and only restamps PE_EDITOR_META_KEY (full-page
+// redact/shape rasterization) must also carry these over, or every inserted
+// image's pixel data is silently and permanently dropped from the live
+// document while its x/y/w/h metadata survives - the object then renders as
+// nothing everywhere it gets re-hydrated (grid thumbnails, HQ previews,
+// reopening the page editor), even though export/print already baked it into
+// real pixels earlier in the same pipeline and looks fine.
+function peCopyImageCatalogEntries(srcDoc, destDoc) {
+  if (!srcDoc || !destDoc) return;
+  try {
+    for (const key of srcDoc.catalog.keys()) {
+      const name = key.asString ? key.asString() : String(key);
+      const k = name.charAt(0) === '/' ? name.slice(1) : name;
+      if (k.indexOf('PEI') !== 0) continue;
+      const val = srcDoc.catalog.lookup(key);
+      if (!val) continue;
+      destDoc.catalog.set(PDFLib.PDFName.of(k), val);
+    }
+  } catch (_) {}
+}
+
 // Renders a page exactly as it currently exists (which may already have
 // shapes baked onto it as a vector/image overlay via peBakeShapesOntoPdfPage)
 // to a raster image and replaces the page with it, discarding the
@@ -51012,6 +51121,7 @@ async function peRasterizePageInDoc(srcDoc, pageIdx) {
       }
     }
     peWriteAllEditorMetaToDoc(newDoc, editorMeta);
+    peCopyImageCatalogEntries(srcDoc, newDoc);
     return newDoc;
   } finally {
     try { pj.destroy(); } catch (_) {}
@@ -51180,6 +51290,7 @@ async function peBuildDocWithRasterizedShapesPage(srcDoc, pageIdx, shapes) {
       }
     }
     peWriteAllEditorMetaToDoc(newDoc, editorMeta);
+    peCopyImageCatalogEntries(srcDoc, newDoc);
     return newDoc;
   } finally {
     try { pj.destroy(); } catch (_) {}
@@ -53763,6 +53874,14 @@ async function pageEditSave(options) {
   const baselineBytes = peState.baselinePdfBytes
     ? peState.baselinePdfBytes.slice()
     : new Uint8Array(await pdfDoc.save());
+  // Guards pdfDoc against a concurrent background thumbnail fill
+  // (fillPendingSnapshots) reassigning it mid-flight - see the comment on
+  // pdfDocCriticalWriterActive's declaration. Wait out any ALREADY in-flight
+  // borrow first: it restores pdfDoc to whatever it captured as "previous"
+  // when IT started, so one finishing after we've made our own changes here
+  // would silently revert them.
+  if (typeof whenPdfDocIdle === 'function') await whenPdfDocIdle();
+  pdfDocCriticalWriterActive = true;
   try {
     showLoading(openIdx != null ? 'Сохранение и переход...' : 'Применение правок...');
     // Pending redact frames (drawn but not ✓) used to be dropped on Save, so
@@ -53859,6 +53978,15 @@ async function pageEditSave(options) {
           (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
         );
         peSavePageEditorObjects(idx, persistObjs);
+        // The metadata write above only touched the in-memory pdfDoc - bytes
+        // still holds the pre-write serialization from `work.save()` a few
+        // lines up. Every downstream consumer (originalFileBytes, the
+        // doc-history tip, and the pdf.js doc used for the grid thumbnail
+        // below) reads `bytes`, not pdfDoc, so without this the last fix-up
+        // write would silently never reach any of them.
+        bytes = (typeof peClonePdfBytes === 'function')
+          ? peClonePdfBytes(await pdfDoc.save({ useObjectStreams: false }))
+          : new Uint8Array(await pdfDoc.save({ useObjectStreams: false }));
       } else {
         bytes = (typeof peClonePdfBytes === 'function')
           ? peClonePdfBytes(await pdfDoc.save({ useObjectStreams: false }))
@@ -53948,6 +54076,7 @@ async function pageEditSave(options) {
     historyPushSuspended = false;
     alert('Ошибка применения правок: ' + (err.message || err));
   } finally {
+    pdfDocCriticalWriterActive = false;
     hideLoading();
   }
 }
