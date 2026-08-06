@@ -154,6 +154,15 @@ function replacePdfJsWorker(html, workerCode) {
 
 function replaceCantooImport(html, bundledEsm) {
   const moduleB64 = toBase64(bundledEsm);
+  // The matched text is only the "pdfPasswordLibPromise = import(...)" call -
+  // the source's own trailing ".catch((err) => {...})" (which resets the
+  // cached promise to null and rethrows) stays untouched right after this
+  // replacement and ends up chained onto the IIFE's call expression. So the
+  // IIFE must `return` the promise it assigns, or that trailing .catch runs
+  // against the IIFE's (undefined) return value instead of the real promise -
+  // "Cannot read properties of undefined (reading 'catch')" on every first
+  // call in a session (pdfPasswordLibPromise still ends up set correctly
+  // beforehand, which is why every call after the first one works fine).
   const replacement = [
     '(function () {',
     `  var moduleB64 = '${moduleB64}';`,
@@ -162,7 +171,7 @@ function replaceCantooImport(html, bundledEsm) {
     '  for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);',
     "  var blob = new Blob([bytes], { type: 'text/javascript' });",
     '  var moduleUrl = URL.createObjectURL(blob);',
-    '  pdfPasswordLibPromise = import(moduleUrl).catch(function (err) {',
+    '  return pdfPasswordLibPromise = import(moduleUrl).catch(function (err) {',
     '    pdfPasswordLibPromise = null;',
     '    throw err;',
     '  });',
