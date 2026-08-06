@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Builds the Linux Tauri bundle (.deb + .AppImage) for PDF Manager.
 #
+# Must keep LF line endings (enforced via .gitattributes: *.sh text eol=lf) —
+# a CRLF-mangled shebang here fails as "/usr/bin/env: 'bash\r': No such file
+# or directory" when Git for Windows checks it out with core.autocrlf=true.
+#
 # Meant to run inside WSL2 (invoked automatically by
 # scripts\build-windows-exe.ps1 -Linux), but works in any Debian/Ubuntu-based
 # Linux the same way if run directly.
