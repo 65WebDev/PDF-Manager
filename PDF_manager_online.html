@@ -10127,6 +10127,23 @@
       }
     }
 
+    // pageEditSave rebuilds/reloads the live pdfDoc across many awaited steps
+    // (redact/shape rasterization, thumbnail render) and needs it to keep
+    // pointing at ITS OWN in-progress document the whole time. renderThumbsFromBytes
+    // (background pending-thumbnail fill, via fillPendingSnapshots/scheduleSnapshotFill)
+    // borrows the SAME global pdfDoc unconditionally and restores it afterward -
+    // safe against other short borrows, but if its 140ms timer fires WHILE
+    // pageEditSave is still mid-flight (very plausible: full-page rasterization
+    // takes real time), it swaps pdfDoc out to a DIFFERENT, possibly older/
+    // uncropped history snapshot for the duration of its own render, and
+    // pageEditSave's next pdfDoc read (e.g. building the grid thumbnail) picks
+    // up that wrong document - the crop box (and any other mid-session edit)
+    // reads as reverted purely by timing, though only in-memory: the file
+    // pageEditSave already serialized to `bytes` is unaffected. Sections that
+    // must not have pdfDoc reassigned out from under them should bracket
+    // themselves with this flag; fillPendingSnapshots defers itself while set.
+    let pdfDocCriticalWriterActive = false;
+
     // Serialize live pdfDoc.save() calls. Concurrent save()+mutate (history /
     // rotate flush / HQ) used to capture intermediate /Rotate and later paint
     // that stale raster over the final CSS spin (~1s snap-back).
@@ -10237,7 +10254,8 @@
       //the final step is through patchHistoryPending - without a separate render).
       if (document.querySelector('.page.rotate-anim-active') ||
           (thumbFlushQueue && thumbFlushQueue.size) || thumbFlushBusy ||
-          (typeof anyPageHasPendingRotateRaster === 'function' && anyPageHasPendingRotateRaster())) {
+          (typeof anyPageHasPendingRotateRaster === 'function' && anyPageHasPendingRotateRaster()) ||
+          pdfDocCriticalWriterActive) {
         scheduleSnapshotFill();
         return;
       }
@@ -53843,6 +53861,14 @@ async function pageEditSave(options) {
   const baselineBytes = peState.baselinePdfBytes
     ? peState.baselinePdfBytes.slice()
     : new Uint8Array(await pdfDoc.save());
+  // Guards pdfDoc against a concurrent background thumbnail fill
+  // (fillPendingSnapshots) reassigning it mid-flight - see the comment on
+  // pdfDocCriticalWriterActive's declaration. Wait out any ALREADY in-flight
+  // borrow first: it restores pdfDoc to whatever it captured as "previous"
+  // when IT started, so one finishing after we've made our own changes here
+  // would silently revert them.
+  if (typeof whenPdfDocIdle === 'function') await whenPdfDocIdle();
+  pdfDocCriticalWriterActive = true;
   try {
     showLoading(openIdx != null ? 'Сохранение и переход...' : 'Применение правок...');
     // Pending redact frames (drawn but not ✓) used to be dropped on Save, so
@@ -53925,25 +53951,29 @@ async function pageEditSave(options) {
         (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
       );
       peSavePageEditorObjects(idx, persistObjs);
-      console.log('[peDebugSave] pdfDoc cropBox before raster-check', JSON.stringify(pdfDoc.getPage(idx).getCropBox()),
-        'needsFullRaster', typeof pePageShouldFullRasterForRedact === 'function' && pePageShouldFullRasterForRedact(pdfDoc.getPage(idx), idx));
       if (typeof peApplyPendingRedactRasterization === 'function'
           && typeof pePageShouldFullRasterForRedact === 'function'
           && pePageShouldFullRasterForRedact(pdfDoc.getPage(idx), idx)) {
         let work = await PDFLib.PDFDocument.load(
           (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
         );
-        console.log('[peDebugSave] work cropBox BEFORE peApplyPendingRedactRasterization', JSON.stringify(work.getPage(idx).getCropBox()));
         work = await peApplyPendingRedactRasterization(work) || work;
-        console.log('[peDebugSave] work cropBox AFTER peApplyPendingRedactRasterization', JSON.stringify(work.getPage(idx).getCropBox()));
         bytes = (typeof peClonePdfBytes === 'function')
           ? peClonePdfBytes(await work.save({ useObjectStreams: false }))
           : new Uint8Array(await work.save({ useObjectStreams: false }));
         pdfDoc = await PDFLib.PDFDocument.load(
           (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
         );
-        console.log('[peDebugSave] pdfDoc cropBox after reload from post-raster bytes', JSON.stringify(pdfDoc.getPage(idx).getCropBox()));
         peSavePageEditorObjects(idx, persistObjs);
+        // The metadata write above only touched the in-memory pdfDoc - bytes
+        // still holds the pre-write serialization from `work.save()` a few
+        // lines up. Every downstream consumer (originalFileBytes, the
+        // doc-history tip, and the pdf.js doc used for the grid thumbnail
+        // below) reads `bytes`, not pdfDoc, so without this the last fix-up
+        // write would silently never reach any of them.
+        bytes = (typeof peClonePdfBytes === 'function')
+          ? peClonePdfBytes(await pdfDoc.save({ useObjectStreams: false }))
+          : new Uint8Array(await pdfDoc.save({ useObjectStreams: false }));
       } else {
         bytes = (typeof peClonePdfBytes === 'function')
           ? peClonePdfBytes(await pdfDoc.save({ useObjectStreams: false }))
@@ -53970,12 +54000,6 @@ async function pageEditSave(options) {
     // Update the thumbnail of the edited page (also patches the history tip
     // via patchHistoryPending — intermediate undo thumbs fill in background).
     const pj = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
-    try {
-      const dbgPage = await pj.getPage(idx + 1);
-      const dbgVp = dbgPage.getViewport({ scale: 1 });
-      console.log('[peDebugSave] pj page viewport used for thumbnail', JSON.stringify({ width: dbgVp.width, height: dbgVp.height }),
-        'pdfDoc cropBox at thumbnail time', JSON.stringify(pdfDoc.getPage(idx).getCropBox()));
-    } catch (dbgErr) { console.log('[peDebugSave] thumbnail viewport check failed', dbgErr); }
     const div = pagesContainer.querySelector('.page[data-index="' + idx + '"]');
     const im = div ? div.querySelector('img') : null;
     if (div && im) {
@@ -54039,6 +54063,7 @@ async function pageEditSave(options) {
     historyPushSuspended = false;
     alert('Ошибка применения правок: ' + (err.message || err));
   } finally {
+    pdfDocCriticalWriterActive = false;
     hideLoading();
   }
 }
