@@ -103,14 +103,26 @@ function findArtifacts() {
   return files;
 }
 
-function pickDebArtifact(artifacts) {
-  const names = artifacts.map((f) => basename(f));
-  return names.find((n) => /\.deb$/i.test(n)) || null;
+/**
+ * dist-linux/ isn't cleaned between builds, so it can hold artifacts from an
+ * older version alongside the current one. Prefer whichever filename embeds
+ * the current app version; fall back to the first match if none does.
+ */
+function pickArtifact(artifacts, ext, version) {
+  const names = artifacts.map((f) => basename(f)).filter((n) => new RegExp(`\\.${ext}$`, 'i').test(n));
+  if (version) {
+    const match = names.find((n) => n.includes(version));
+    if (match) return match;
+  }
+  return names[0] || null;
 }
 
-function pickAppImageArtifact(artifacts) {
-  const names = artifacts.map((f) => basename(f));
-  return names.find((n) => /\.appimage$/i.test(n)) || null;
+function pickDebArtifact(artifacts, version) {
+  return pickArtifact(artifacts, 'deb', version);
+}
+
+function pickAppImageArtifact(artifacts, version) {
+  return pickArtifact(artifacts, 'appimage', version);
 }
 
 /** GitHub Release asset names cannot contain spaces — uploads rewrite " " → ".". */
@@ -490,8 +502,8 @@ function main() {
   }
   artifacts = normalizeArtifactsForGithub(artifacts);
 
-  const debName = pickDebArtifact(artifacts);
-  const appImageName = pickAppImageArtifact(artifacts);
+  const debName = pickDebArtifact(artifacts, version);
+  const appImageName = pickAppImageArtifact(artifacts, version);
   const releaseUrl = `https://github.com/${REPO_SLUG}/releases/tag/${tag}`;
   const notes = buildReleaseNotes({ version, tag, debName, appImageName, releaseUrl });
 

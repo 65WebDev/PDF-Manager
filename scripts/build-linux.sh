@@ -78,6 +78,7 @@ echo "First build can take 10-20+ minutes (crates.io + AppImage tooling download
 npx tauri build
 
 step "Collect artifacts"
+rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 DEB_DIR="$BUILD_DIR/src-tauri/target/release/bundle/deb"
 APPIMAGE_DIR="$BUILD_DIR/src-tauri/target/release/bundle/appimage"

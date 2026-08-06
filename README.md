@@ -10,8 +10,8 @@
 | **Скачать офлайн-версию** | https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_offline.html |
 | **Windows: установщик** | https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.19/PDF.Manager_0.1.19_x64-setup.exe |
 | **Windows: portable `.exe`** | https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.19/pdf-manager.exe |
-| **Linux: `.deb`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.19/PDF.Manager_0.1.18_amd64.deb|
-| **Linux: `.AppImage`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.19/PDF.Manager_0.1.18_amd64.AppImage|
+| **Linux: `.deb`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.19/PDF.Manager_0.1.19_amd64.deb|
+| **Linux: `.AppImage`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.19/PDF.Manager_0.1.19_amd64.AppImage|
 | **Страница релизов (HTML)** | https://github.com/65WebDev/PDF-Manager/releases/latest |
 | **Релиз Windows** | https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.19 |
 | **Релиз Linux** | https://github.com/65WebDev/PDF-Manager/releases/tag/linux-v0.1.19|
