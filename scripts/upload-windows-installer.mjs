@@ -110,20 +110,28 @@ function ensureGhAuth(ghBin) {
   process.exit(1);
 }
 
-function findArtifacts() {
+function findArtifacts(version) {
   const nsisDir = join(root, 'src-tauri', 'target', 'release', 'bundle', 'nsis');
   const releaseDir = join(root, 'src-tauri', 'target', 'release');
   const files = [];
 
   if (existsSync(nsisDir)) {
     for (const name of readdirSync(nsisDir)) {
-      if (name.toLowerCase().endsWith('.exe')) {
-        files.push(join(nsisDir, name));
+      const lower = name.toLowerCase();
+      if (!lower.endsWith('.exe')) continue;
+      // bundle/nsis/ is never cleaned between builds, so installers from
+      // older versions pile up there - only the current version's setup
+      // exe belongs in this release's upload.
+      if (lower.endsWith('setup.exe') && !name.includes(version)) {
+        console.log(`Пропускаю установщик старой версии: ${name}`);
+        continue;
       }
+      files.push(join(nsisDir, name));
     }
   }
 
-  // Portable binary next to the installer (optional).
+  // Portable binary next to the installer (optional). Unversioned filename,
+  // cargo overwrites it in place each build - no stale-version filtering needed.
   if (existsSync(releaseDir)) {
     for (const name of readdirSync(releaseDir)) {
       if (!name.toLowerCase().endsWith('.exe')) continue;
@@ -176,30 +184,38 @@ function githubDownloadUrl(tag, assetName) {
   );
 }
 
-/** Rename local artifacts so uploaded names match GitHub download URLs. */
+/**
+ * Rename local artifacts so uploaded names match GitHub download URLs.
+ * bundle/nsis/ is never cleaned between builds, and Tauri always writes the
+ * installer as "PDF Manager_X_x64-setup.exe" (space) fresh - if a PREVIOUS
+ * run already renamed that same filename to the dot form and left it
+ * sitting there, findArtifacts() picks up both as separate entries. The
+ * freshly-built file is always the one that just came out of `tauri build`
+ * (the `p` argument here) - overwrite any stale dot-named leftover with it
+ * rather than keeping the old one, otherwise today's build silently never
+ * gets uploaded, and passing the same resulting path twice to
+ * `gh release upload` is what 404s the --clobber flow.
+ */
 function normalizeArtifactsForGithub(paths) {
   const out = [];
+  const seenDest = new Set();
   for (const p of paths) {
     const base = basename(p);
     const ghName = toGithubAssetName(base);
-    if (ghName === base) {
-      out.push(p);
-      continue;
-    }
-    const dest = join(dirname(p), ghName);
-    if (existsSync(dest)) {
-      if (dest !== p && existsSync(p)) {
+    const dest = ghName === base ? p : join(dirname(p), ghName);
+    if (seenDest.has(dest)) continue; // already normalized to this path this run
+    if (ghName !== base) {
+      if (existsSync(dest)) {
         try {
-          unlinkSync(p);
+          unlinkSync(dest);
         } catch {
           /* ignore */
         }
       }
-      out.push(dest);
-      continue;
+      renameSync(p, dest);
+      console.log(`Asset rename for GitHub: "${base}" → "${ghName}"`);
     }
-    renameSync(p, dest);
-    console.log(`Asset rename for GitHub: "${base}" → "${ghName}"`);
+    seenDest.add(dest);
     out.push(dest);
   }
   return out;
@@ -542,7 +558,7 @@ function main() {
   const tag = `windows-v${version}`;
   const title = `Windows installer v${version}`;
 
-  let artifacts = findArtifacts();
+  let artifacts = findArtifacts(version);
   if (!artifacts.length) {
     console.error('Не найдены .exe после сборки.');
     console.error('Ожидалось в: src-tauri/target/release/bundle/nsis/');
