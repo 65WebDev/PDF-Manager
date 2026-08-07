@@ -7379,8 +7379,38 @@
     //deletion) after the last save. Resets to false when saving.
     let documentDirty = false;
     const DOC_HISTORY_MAX = 40;
+    // Every undo step holds a full copy of the document's bytes, so the step
+    // count alone is not a memory limit: 40 steps of a 10 MB file is ~400 MB,
+    // and a 50 MB file would blow past what a tab can hold. Cap the total and
+    // drop the oldest steps once it is exceeded - small documents still get
+    // the full 40 steps, large ones get however many actually fit.
+    const DOC_HISTORY_MAX_BYTES = 500 * 1024 * 1024;
     let docHistory = [];
     let docHistoryIndex = -1;
+
+    function docHistoryEntryBytes(snap) {
+      const b = snap && snap.pdfBytes;
+      return (b && typeof b.byteLength === 'number') ? b.byteLength : 0;
+    }
+
+    /**
+     * Enforce both history limits by dropping the oldest steps.
+     *
+     * Call right after pushing a new step and before reassigning
+     * docHistoryIndex - every call site sets it to docHistory.length - 1
+     * immediately afterwards, which stays correct however many entries go.
+     * The newest step is never dropped, so a document larger than the whole
+     * budget simply ends up with no undo depth rather than a broken history.
+     */
+    function trimDocHistory() {
+      while (docHistory.length > DOC_HISTORY_MAX) docHistory.shift();
+      let total = 0;
+      for (const snap of docHistory) total += docHistoryEntryBytes(snap);
+      while (docHistory.length > 1 && total > DOC_HISTORY_MAX_BYTES) {
+        total -= docHistoryEntryBytes(docHistory[0]);
+        docHistory.shift();
+      }
+    }
     let historyPushTimer = null;
     let selectionHistoryTimer = null;
     let historyPushSuspended = false;
@@ -7490,7 +7520,19 @@
     function isMobileZoomPan() {
       return false;
     }
-    const HQ_RENDER_SCALE = 2.0;      //minimum high quality render scale
+    const HQ_RENDER_SCALE = 2.0;      //fixed HQ scale for the >400%-zoom paths
+    // runHQUpgrade sizes its raster from what is actually on screen instead of
+    // a fixed scale. HQ_RENDER_SCALE used to be a hard floor there, which at
+    // ordinary zoom rasterised an A4 page ~1190px wide to show it at ~117px -
+    // 10x per side, ~100x the pixels, and ~8 MB of decoded bitmap per visible
+    // page held by the browser. That is what made weak GPUs struggle while the
+    // CPU coped. The floor is now relative: render HQ_RENDER_HEADROOM times
+    // the displayed size, so a page stays sharp through a 2x zoom step before
+    // the next pass re-renders it (hqRenderedScale drives that), clamped at
+    // both ends so neither a minimum-zoom page nor a 1300%-zoom page produces
+    // an absurd canvas.
+    const HQ_RENDER_HEADROOM = 2.0;
+    const HQ_RENDER_SCALE_MAX = 3.0;
     let hqPdfjsDoc = null;            //pdf.js document cache for single-page rendering
     let hqPdfjsToken = 0;             //cache validity token (increases as the document changes)
     // getHQPdfjsDoc() normally rebuilds its pdf.js doc via pdfDoc.save() (a
@@ -10292,7 +10334,7 @@
       docHistory = docHistory.slice(0, docHistoryIndex + 1);
       const sel = captureSelectionState();
       docHistory.push({ pdfBytes, marked, pages, pendingIdx, selected: sel.selected, lastSel: sel.lastSel });
-      if (docHistory.length > DOC_HISTORY_MAX) docHistory.shift();
+      trimDocHistory();
       docHistoryIndex = docHistory.length - 1;
       syncDirtyFromHistory();
       updateUndoRedoUI();
@@ -10380,7 +10422,7 @@
 
       docHistory = docHistory.slice(0, docHistoryIndex + 1);
       docHistory.push(snap);
-      if (docHistory.length > DOC_HISTORY_MAX) docHistory.shift();
+      trimDocHistory();
       docHistoryIndex = docHistory.length - 1;
       syncDirtyFromHistory();
       updateUndoRedoUI();
@@ -10409,7 +10451,7 @@
       }
       docHistory = docHistory.slice(0, docHistoryIndex + 1);
       docHistory.push(snap);
-      if (docHistory.length > DOC_HISTORY_MAX) docHistory.shift();
+      trimDocHistory();
       docHistoryIndex = docHistory.length - 1;
       syncDirtyFromHistory();
       updateUndoRedoUI();
@@ -10430,7 +10472,7 @@
       }
       docHistory = docHistory.slice(0, docHistoryIndex + 1);
       docHistory.push(snap);
-      if (docHistory.length > DOC_HISTORY_MAX) docHistory.shift();
+      trimDocHistory();
       docHistoryIndex = docHistory.length - 1;
       syncDirtyFromHistory();
       updateUndoRedoUI();
@@ -12944,11 +12986,23 @@
           // page would stay pinned at whatever resolution it first got
           // upgraded to no matter how far past that the user zooms.
           const vp1 = page.getViewport({ scale: 1, rotation: effectiveRotation });
-          const neededScale = Math.max(HQ_RENDER_SCALE, (displayWidth * PM_THUMBNAIL_DPR) / vp1.width);
+          const displayMatched = (displayWidth * PM_THUMBNAIL_DPR) / vp1.width;
+          // Never below the base thumbnail: the card already shows a raster at
+          // THUMBNAIL_SCALE, so a smaller "upgrade" would swap a sharp image
+          // for a blurrier one.
+          const neededScale = Math.min(
+            HQ_RENDER_SCALE_MAX,
+            Math.max(THUMBNAIL_SCALE, displayMatched * HQ_RENDER_HEADROOM)
+          );
           const cachedScale = hqRenderedScale.get(idx);
           // Small tolerance so a fractional zoom tick during a smooth drag
           // doesn't re-render every already-good-enough page on screen.
           if (cachedScale != null && cachedScale >= neededScale * 0.97) continue;
+          // Page still showing its base thumbnail and the display does not
+          // out-resolve it: skip the HQ pass entirely rather than re-rendering
+          // the same resolution. At ordinary zoom this is every visible page,
+          // so no HQ render/encode happens at all until the user zooms in.
+          if (cachedScale == null && neededScale <= THUMBNAIL_SCALE * 1.03) continue;
           const viewport = page.getViewport({ scale: neededScale, rotation: effectiveRotation });
           const canvas = document.createElement('canvas');
           canvas.width = viewport.width; canvas.height = viewport.height;
@@ -36069,7 +36123,7 @@ function pePushPageEditHistoryBytes(pdfBytes, pageIdx, opts) {
     selected: sel.selected,
     lastSel: sel.lastSel
   });
-  if (docHistory.length > DOC_HISTORY_MAX) docHistory.shift();
+  trimDocHistory();
   docHistoryIndex = docHistory.length - 1;
   // During editor-history expand we defer fills — awaiting a full pdf.js thumb
   // per undo step is what made Save take minutes with images/shapes.
