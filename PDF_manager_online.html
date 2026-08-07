@@ -14731,8 +14731,7 @@
       } else {
         dragSourceDiv.classList.add('drag-source');
       }
-      dragGhostEl.style.left = (touchLastX - dragGhostEl._ox) + 'px';
-      dragGhostEl.style.top  = (touchLastY - dragGhostEl._oy) + 'px';
+      moveDragGhostTo(touchLastX, touchLastY);
       updateInsertIndicatorsAt(touchLastX, touchLastY);
     }
 
@@ -14805,10 +14804,7 @@
       if (longPressActive || isDragActive) {
         e.preventDefault();
         enforceScrollLock();
-        if (dragGhostEl) {
-          dragGhostEl.style.left = (e.clientX - dragGhostEl._ox) + 'px';
-          dragGhostEl.style.top  = (e.clientY - dragGhostEl._oy) + 'px';
-        }
+        moveDragGhostTo(e.clientX, e.clientY);
         updateInsertIndicatorsAt(e.clientX, e.clientY);
         checkAndStartAutoScroll(e.clientY);
         return;
@@ -17831,7 +17827,8 @@
     // 'mine' — crossfade preview (ghost + fade)
     const PAGE_MOVE_ANIM_VARIANT = 'combined';
     const PAGE_MOVE_ANIM_MS = 340;
-    const PAGE_MOVE_SHADOW_LIFT_MS = 180;
+    // Tail after the slide finishes, before the flip classes/styles come off.
+    // (The shadow itself is no longer transitioned - see playPageMoveFlipAnimation.)
     const PAGE_MOVE_SHADOW_LAND_MS = 55;
     const PAGE_MOVE_TRAVEL = 0.42;
     const PAGE_MOVE_IN_OFFSET = 0.65;
@@ -17909,9 +17906,16 @@
         requestAnimationFrame(() => {
           moved.forEach(({ div }) => {
             div.classList.add('page-move-flip-active');
+            // transform only. box-shadow is a paint-only property - it cannot
+            // be composited, so transitioning it forced a full repaint of every
+            // moving card (thumbnail included) on every frame of the animation.
+            // Moving one page across a long document animates every card in
+            // between, which is exactly the case that stuttered on weak GPUs.
+            // The shadow now snaps between its two states instead; the values
+            // are close enough that the step is not noticeable.
             div.style.setProperty(
               'transition',
-              `transform ${PAGE_MOVE_ANIM_MS}ms ${PAGE_MOVE_EASING}, box-shadow ${PAGE_MOVE_SHADOW_LIFT_MS}ms ease-out`,
+              `transform ${PAGE_MOVE_ANIM_MS}ms ${PAGE_MOVE_EASING}`,
               'important'
             );
             div.style.transform = 'translate3d(0, 0, 0)';
@@ -17921,11 +17925,7 @@
         setTimeout(() => {
           moved.forEach(({ div }) => {
             div.classList.remove('page-move-flip-active');
-            div.style.setProperty(
-              'transition',
-              `box-shadow ${PAGE_MOVE_SHADOW_LAND_MS}ms ease-out`,
-              'important'
-            );
+            div.style.setProperty('transition', 'none', 'important');
           });
 
           setTimeout(() => {
@@ -18326,6 +18326,71 @@
       cancelDesktopPageDrag();
     }
 
+    // ── Drag move: one pass per animation frame ─────────────────────────
+    // Pointing devices deliver mousemove at their polling rate (125 Hz stock,
+    // 500-1000 Hz on gaming mice) while the screen only repaints ~60 times a
+    // second. Running the hit-test/indicator pass straight from the event
+    // handler therefore did the whole job 2-16x per painted frame and threw
+    // away every result but the last. Coalescing into a single rAF keeps the
+    // newest coordinates (lastPageDragX/Y are refreshed by every event) and
+    // does the work exactly once per frame.
+    let dragMoveRafId = null;
+
+    function scheduleDragMoveFrame() {
+      if (dragMoveRafId != null) return;
+      dragMoveRafId = requestAnimationFrame(() => {
+        dragMoveRafId = null;
+        runDragMoveFrame(lastPageDragX, lastPageDragY);
+      });
+    }
+
+    function cancelDragMoveFrame() {
+      if (dragMoveRafId == null) return;
+      cancelAnimationFrame(dragMoveRafId);
+      dragMoveRafId = null;
+    }
+
+    /** Run the pending pass right now, at the given point (used on release). */
+    function flushDragMoveFrame(clientX, clientY) {
+      cancelDragMoveFrame();
+      if (isDragActive) runDragMoveFrame(clientX, clientY);
+    }
+
+    function runDragMoveFrame(clientX, clientY) {
+      if (!isDragActive || !dragGhostEl) return;
+
+      moveDragGhostTo(clientX, clientY);
+
+      if (pmTabsEnabled()) updatePageDragTabTarget(clientX, clientY);
+      else clearPageDragTabVisuals();
+      if (pageDragOverTabId) {
+        clearInsertIndicators();
+        pmDragDebugReport(() => {
+          const hr = scrollContainer.getBoundingClientRect();
+          return {
+            reason: 'tab-hover',
+            shown: false,
+            x: Math.round(clientX),
+            y: Math.round(clientY),
+            isDragActive,
+            draggedIndex,
+            selected: [...selectedPages].sort((a, b) => a - b),
+            pageDragOverTabId,
+            autoScrollOn: !!autoScrollInterval,
+            autoScrollDir,
+            autoScrollSpeed,
+            scrollTop: Math.round(scrollContainer.scrollTop),
+            scrollMax: Math.max(0, scrollContainer.scrollHeight - scrollContainer.clientHeight),
+            distBottom: Math.round(hr.bottom - clientY),
+            distTop: Math.round(clientY - hr.top),
+            atBottom: scrollContainer.scrollTop + scrollContainer.clientHeight >= scrollContainer.scrollHeight - 2,
+            note: 'индикатор скрыт: курсор над вкладкой'
+          };
+        });
+      } else updateInsertIndicatorsAt(clientX, clientY);
+      checkAndStartAutoScroll(clientY);
+    }
+
     function onDragMouseMove(e) {
       if (!dragSourceDiv) return;
       lastPageDragX = e.clientX;
@@ -18352,45 +18417,21 @@
         }
       }
 
-      // Moving the ghost
-      dragGhostEl.style.left = (e.clientX - dragGhostEl._ox) + 'px';
-      dragGhostEl.style.top  = (e.clientY - dragGhostEl._oy) + 'px';
-
-      if (pmTabsEnabled()) updatePageDragTabTarget(e.clientX, e.clientY);
-      else clearPageDragTabVisuals();
-      if (pageDragOverTabId) {
-        clearInsertIndicators();
-        if (typeof pmDragDebugReport === 'function') {
-          const hr = scrollContainer.getBoundingClientRect();
-          pmDragDebugReport({
-            reason: 'tab-hover',
-            shown: false,
-            x: Math.round(e.clientX),
-            y: Math.round(e.clientY),
-            isDragActive,
-            draggedIndex,
-            selected: [...selectedPages].sort((a, b) => a - b),
-            pageDragOverTabId,
-            autoScrollOn: !!autoScrollInterval,
-            autoScrollDir,
-            autoScrollSpeed,
-            scrollTop: Math.round(scrollContainer.scrollTop),
-            scrollMax: Math.max(0, scrollContainer.scrollHeight - scrollContainer.clientHeight),
-            distBottom: Math.round(hr.bottom - e.clientY),
-            distTop: Math.round(e.clientY - hr.top),
-            atBottom: scrollContainer.scrollTop + scrollContainer.clientHeight >= scrollContainer.scrollHeight - 2,
-            note: 'индикатор скрыт: курсор над вкладкой'
-          });
-        }
-      } else updateInsertIndicatorsAt(e.clientX, e.clientY);
-      checkAndStartAutoScroll(e.clientY);
       e.preventDefault();
+      // The rAF callback still runs before the next paint, so the ghost is
+      // never painted at its creation spot - no visible jump on drag start.
+      scheduleDragMoveFrame();
     }
 
     function onDragMouseUp(e) {
       document.removeEventListener('mousemove', onDragMouseMove);
       document.removeEventListener('mouseup',   onDragMouseUp);
       document.removeEventListener('keydown',   onDragKeyDown, true);
+
+      // Apply the coalesced pass at the release point before reading the drop
+      // marker off the DOM, so the insert position matches where the button
+      // actually came up rather than the last frame that happened to paint.
+      flushDragMoveFrame(e.clientX, e.clientY);
 
       const finishDrag = async () => {
         if (isDragActive) {
@@ -18463,6 +18504,7 @@
     }
 
     function cancelDesktopPageDrag() {
+      cancelDragMoveFrame();
       document.removeEventListener('mousemove', onDragMouseMove);
       document.removeEventListener('mouseup', onDragMouseUp);
       document.removeEventListener('keydown', onDragKeyDown, true);
@@ -19717,6 +19759,7 @@
         `position:fixed;left:${minX}px;top:${minY}px;` +
         `width:${maxX - minX}px;height:${maxY - minY}px;` +
         `pointer-events:none;z-index:9999;opacity:${touchGhost ? '1' : '0.70'};transition:none;` +
+        `will-change:transform;` +
         `--thumb-width:${tw};--scale-factor:${sf};--page-gap:${pg};--preview-inset:${pi};`;
 
       // We clone the pages, add a vignette through the opacity of each clone.
@@ -19762,8 +19805,29 @@
 
       ghost._ox = mouseX - minX;
       ghost._oy = mouseY - minY;
+      // Anchor for moveDragGhostTo(): the ghost keeps the left/top it was born
+      // with and is moved with a compositor transform from there.
+      ghost._baseX = minX;
+      ghost._baseY = minY;
       document.body.appendChild(ghost);
       return ghost;
+    }
+
+    /**
+     * Move the drag ghost so the cursor keeps its grab offset.
+     *
+     * Uses translate3d rather than left/top: the ghost holds clones of the
+     * dragged page cards (thumbnail images + shadows), and left/top relaid out
+     * and repainted that whole subtree on every pointer move. A transform is
+     * handled by the compositor, which is what weak GPUs need - measured ~13x
+     * cheaper per move on a plain desktop profile, and the gap widens as the
+     * ghost grows (multi-page selection).
+     */
+    function moveDragGhostTo(clientX, clientY) {
+      if (!dragGhostEl) return;
+      const tx = (clientX - dragGhostEl._ox) - dragGhostEl._baseX;
+      const ty = (clientY - dragGhostEl._oy) - dragGhostEl._baseY;
+      dragGhostEl.style.transform = 'translate3d(' + tx + 'px,' + ty + 'px,0)';
     }
 
     // ── Page-drag diagnostics (toggle: Ctrl+Alt+Shift+D) ───────────────
@@ -19902,8 +19966,15 @@
       log.scrollTop = log.scrollHeight;
     }
 
+    // `sample` may be a thunk. Callers on the drag hot path pass one so the
+    // payload - which forces a synchronous layout (getBoundingClientRect +
+    // scrollTop/scrollHeight/clientHeight) and allocates/sorts an array of the
+    // selection - is only built when the diagnostics overlay is actually on.
+    // Passing a plain object still works for cold call sites.
     function pmDragDebugReport(sample) {
       if (!pmDragDebugIsEnabled()) return;
+      if (typeof sample === 'function') sample = sample();
+      if (!sample) return;
       sample.t = Date.now();
       pmDragDebug.last = sample;
       pmDragDebugPaintLive(sample);
@@ -19998,29 +20069,29 @@
 
       if (isZoomPanMode() || pageMoveAnimActive || pagesContainer.classList.contains('page-reordering')) {
         hideInsertIndicator();
-        pmDragDebugReport(Object.assign(base(), {
+        pmDragDebugReport(() => Object.assign(base(), {
           reason: isZoomPanMode() ? 'zoom-pan' : (pageMoveAnimActive ? 'page-move-anim' : 'page-reordering')
         }));
         return;
       }
       if ((typeof readModeActive !== 'undefined' && readModeActive) || interactionMode === 'nav') {
         hideInsertIndicator();
-        pmDragDebugReport(Object.assign(base(), { reason: 'nav-or-read' }));
+        pmDragDebugReport(() => Object.assign(base(), { reason: 'nav-or-read' }));
         return;
       }
       if (loupeModeOn || loupeState) {
         hideInsertIndicator();
-        pmDragDebugReport(Object.assign(base(), { reason: 'loupe' }));
+        pmDragDebugReport(() => Object.assign(base(), { reason: 'loupe' }));
         return;
       }
       if (isPointOverAppChrome(clientX, clientY)) {
         hideInsertIndicator();
-        pmDragDebugReport(Object.assign(base(), { reason: 'app-chrome' }));
+        pmDragDebugReport(() => Object.assign(base(), { reason: 'app-chrome' }));
         return;
       }
       const pages = getVisiblePages();
       if (!pages.length) {
-        pmDragDebugReport(Object.assign(base(), { reason: 'no-visible-pages' }));
+        pmDragDebugReport(() => Object.assign(base(), { reason: 'no-visible-pages' }));
         return;
       }
 
@@ -20160,7 +20231,7 @@
       if (targetPage && !redundant) {
         targetPage.classList.add(insertBefore ? 'insert-before' : 'insert-after');
         positionInsertIndicator(targetPage, insertBefore, pages, indicatorOpacity);
-        pmDragDebugReport(Object.assign(base(), {
+        pmDragDebugReport(() => Object.assign(base(), {
           reason: indicatorOpacity < 0.05 ? 'shown-but-opacity~0' : 'shown',
           shown: indicatorOpacity >= 0.05,
           targetIndex: parseInt(targetPage.dataset.index, 10),
@@ -20172,7 +20243,7 @@
         }));
       } else {
         hideInsertIndicator();
-        pmDragDebugReport(Object.assign(base(), {
+        pmDragDebugReport(() => Object.assign(base(), {
           reason: !targetPage
             ? (hitPath === 'fallback-too-far' ? 'no-target-fallback-far' : 'no-target')
             : 'redundant',
