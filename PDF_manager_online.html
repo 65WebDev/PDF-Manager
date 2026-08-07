@@ -7410,6 +7410,12 @@
     let dragGhostEl = null;
     let dragSourceDiv = null;
     let dragWasActive = false;
+    // Page geometry snapshot used by the drag hit-test, and the one card
+    // currently marked as the drop target. Declared here rather than next to
+    // their helpers further down because applyScale() invalidates the snapshot
+    // and already runs during page init, long before that point.
+    let dragGeom = null;
+    let insertMarkedEl = null;
     let pageMoveAnimActive = false;
     // A page-reorder's own showLoading() call would otherwise trip the same
     // "no document / loading" auto-close updateUIState() applies to the
@@ -12005,6 +12011,9 @@
 
     function applyScale(opts) {
       opts = opts || {};
+      // Card size / gap are about to change, so any drag geometry snapshot
+      // taken against the old layout is stale.
+      if (typeof invalidateDragGeometry === 'function') invalidateDragGeometry();
       // Re-checked on every scale change regardless of which branch below
       // actually handles the rest of the work (the wheel/slider zoom path
       // returns early via the opts.zoomAnchor branch further down) - a
@@ -14396,6 +14405,10 @@
     });
 
     window.addEventListener('resize', relayoutTopUI);
+    // A resize reflows the page grid; drop any snapshot taken before it.
+    window.addEventListener('resize', () => {
+      if (typeof invalidateDragGeometry === 'function') invalidateDragGeometry();
+    });
     window.addEventListener('orientationchange', relayoutTopUI);
     window.addEventListener('load', relayoutTopUI);
     // Safety net on top of window 'resize': on some builds/window managers
@@ -14699,6 +14712,7 @@
       pagesContainer.querySelectorAll('.page.drag-source, .page.page-press-pending').forEach(p => {
         p.classList.remove('drag-source', 'page-press-pending');
       });
+      invalidateDragGeometry();
       dragSourceDiv = null;
       isDragActive = false;
       longPressActive = false;
@@ -14732,6 +14746,7 @@
         dragSourceDiv.classList.add('drag-source');
       }
       moveDragGhostTo(touchLastX, touchLastY);
+      captureDragGeometry();
       updateInsertIndicatorsAt(touchLastX, touchLastY);
     }
 
@@ -17850,8 +17865,24 @@
       return { before, hasBefore };
     }
 
+    // Margin (px) beyond the viewport still counted as "the user could see
+    // this move" - covers a card sliding in from just off-screen.
+    const PAGE_MOVE_VIEWPORT_MARGIN = 240;
+
     function collectMovedPages(before) {
       const moved = [];
+      // Moving a page across a long document shifts every card in between, and
+      // each animated card costs a compositor layer plus per-frame work for the
+      // whole 340ms. Cards that are off-screen both before and after the move
+      // cannot be watched travelling, so animating them is pure cost - they
+      // just take their final position immediately.
+      const view = scrollContainer ? scrollContainer.getBoundingClientRect() : null;
+      const seen = (r) => !view || (
+        r.bottom > view.top - PAGE_MOVE_VIEWPORT_MARGIN &&
+        r.top < view.bottom + PAGE_MOVE_VIEWPORT_MARGIN &&
+        r.right > view.left - PAGE_MOVE_VIEWPORT_MARGIN &&
+        r.left < view.right + PAGE_MOVE_VIEWPORT_MARGIN);
+
       pagesContainer.querySelectorAll('.page').forEach(div => {
         if (div.style.display === 'none') return;
         const oldR = before.get(div);
@@ -17860,6 +17891,7 @@
         const dx = newR.left - oldR.left;
         const dy = newR.top - oldR.top;
         if (Math.hypot(dx, dy) < 3) return;
+        if (!seen(oldR) && !seen(newR)) return;
         moved.push({ div, oldR, newR, dx, dy });
       });
       return moved;
@@ -18415,6 +18447,7 @@
         } else {
           dragSourceDiv.classList.add('drag-source');
         }
+        captureDragGeometry();
       }
 
       e.preventDefault();
@@ -18496,6 +18529,7 @@
         isDragActive  = false;
         draggedIndex  = null;
         pageTabSwitchPendingId = null;
+        invalidateDragGeometry();
         endScrollLock();
         unlockScrollForDrag();
       };
@@ -18505,6 +18539,7 @@
 
     function cancelDesktopPageDrag() {
       cancelDragMoveFrame();
+      invalidateDragGeometry();
       document.removeEventListener('mousemove', onDragMouseMove);
       document.removeEventListener('mouseup', onDragMouseUp);
       document.removeEventListener('keydown', onDragKeyDown, true);
@@ -20042,6 +20077,69 @@
       };
     })();
 
+    // ── Page geometry snapshot for the drag hot path ────────────────────
+    // Reading getBoundingClientRect() for every card on every pointer move -
+    // interleaved with the class/style writes the same pass performs - forced
+    // a synchronous relayout per read, which dominated the cost of dragging.
+    // The grid does not reflow while a drag is in flight, so snapshot it once
+    // at drag start and reuse it. Scrolling only translates the grid, and that
+    // is corrected by shifting the query point rather than rebuilding rects.
+    //
+    // Only populated during a page drag: hover, touch and external callers
+    // keep the original read-every-time behaviour.
+    // (dragGeom itself is declared with the other drag state near the top:
+    // applyScale() invalidates it and runs during init, before this point.)
+
+    function captureDragGeometry() {
+      if (typeof scrollContainer === 'undefined' || !scrollContainer) return null;
+      const pages = getVisiblePages();
+      dragGeom = {
+        pages,
+        rects: pages.map(p => p.getBoundingClientRect()),
+        hostRect: scrollContainer.getBoundingClientRect(),
+        scrollLeft: scrollContainer.scrollLeft,
+        scrollTop: scrollContainer.scrollTop,
+        vertical: useVerticalInsertIndicator(),
+        cardCount: pagesContainer.childElementCount
+      };
+      return dragGeom;
+    }
+
+    function invalidateDragGeometry() {
+      dragGeom = null;
+    }
+
+    /**
+     * Snapshot for this pass, or null when none is active.
+     *
+     * `dx`/`dy` map a point in current viewport coordinates into the
+     * snapshot's space. Positions written back out (the indicator) are
+     * computed from the snapshot's own scroll offsets, which makes them
+     * scroll-invariant: rect.left + scrollLeft is the same content coordinate
+     * before and after scrolling, so no correction is needed there.
+     */
+    function dragGeometryForPass() {
+      if (!dragGeom) return null;
+      // Grid swapped under us (cross-tab drag, insert) - resnapshot. Reading
+      // childElementCount does not force layout.
+      if (pagesContainer.childElementCount !== dragGeom.cardCount) captureDragGeometry();
+      if (!dragGeom) return null;
+      dragGeom.dx = scrollContainer.scrollLeft - dragGeom.scrollLeft;
+      dragGeom.dy = scrollContainer.scrollTop - dragGeom.scrollTop;
+      return dragGeom;
+    }
+
+    // insertMarkedEl - the single card currently carrying an
+    // insert-before/insert-after marker - is declared with the other drag
+    // state near the top for the same reason as dragGeom. Clearing just that
+    // one card beats sweeping every card each pass, which invalidated layout
+    // for the whole grid on every pointer move.
+    function clearInsertMarkerClass() {
+      if (!insertMarkedEl) return;
+      insertMarkedEl.classList.remove('insert-before', 'insert-after');
+      insertMarkedEl = null;
+    }
+
     function updateInsertIndicatorsAt(clientX, clientY) {
       const hostSnap = () => {
         const host = scrollContainer;
@@ -20089,13 +20187,23 @@
         pmDragDebugReport(() => Object.assign(base(), { reason: 'app-chrome' }));
         return;
       }
-      const pages = getVisiblePages();
+      // Read phase. With a drag snapshot every rect below is a plain object
+      // lookup; without one (hover / touch / external callers) rectOf falls
+      // back to a live measurement exactly as before.
+      const geom = dragGeometryForPass();
+      const pages = geom ? geom.pages : getVisiblePages();
       if (!pages.length) {
         pmDragDebugReport(() => Object.assign(base(), { reason: 'no-visible-pages' }));
         return;
       }
+      const rectOf = geom
+        ? (page, i) => geom.rects[i]
+        : (page) => page.getBoundingClientRect();
+      // Query point moved into the snapshot's coordinate space.
+      const px = geom ? clientX + geom.dx : clientX;
+      const py = geom ? clientY + geom.dy : clientY;
 
-      const vertical = useVerticalInsertIndicator();
+      const vertical = geom ? geom.vertical : useVerticalInsertIndicator();
       let targetPage = null;
       let insertBefore = true;
       let targetRect = null;
@@ -20110,12 +20218,12 @@
         const hitX = isTouchDevice ? INSERT_IND_TOUCH_HIT_X : 0;
         const hitY = (isTouchDevice ? INSERT_IND_TOUCH_HIT_Y : 0) + (isDragActive ? ySlop : 0);
 
-        for (const page of pages) {
-          const r = page.getBoundingClientRect();
-          if (clientX < r.left - hitX || clientX > r.right + hitX) continue;
-          if (clientY >= r.top - hitY && clientY <= r.bottom + hitY) {
-            targetPage = page;
-            insertBefore = clientY < r.top + r.height * 0.5;
+        for (let i = 0; i < pages.length; i++) {
+          const r = rectOf(pages[i], i);
+          if (px < r.left - hitX || px > r.right + hitX) continue;
+          if (py >= r.top - hitY && py <= r.bottom + hitY) {
+            targetPage = pages[i];
+            insertBefore = py < r.top + r.height * 0.5;
             targetRect = r;
             hitPath = 'vert-direct';
             break;
@@ -20124,13 +20232,13 @@
 
         if (!targetPage) {
           for (let i = 0; i < pages.length; i++) {
-            const r = pages[i].getBoundingClientRect();
-            if (clientX < r.left - hitX || clientX > r.right + hitX) continue;
+            const r = rectOf(pages[i], i);
+            if (px < r.left - hitX || px > r.right + hitX) continue;
 
             if (i > 0) {
-              const rPrev = pages[i - 1].getBoundingClientRect();
+              const rPrev = rectOf(pages[i - 1], i - 1);
               if (pagesShareColumn(rPrev, r) &&
-                  clientY >= rPrev.bottom - hitY && clientY <= r.top + hitY) {
+                  py >= rPrev.bottom - hitY && py <= r.top + hitY) {
                 targetPage = pages[i];
                 insertBefore = true;
                 targetRect = r;
@@ -20139,9 +20247,9 @@
               }
             }
             if (i < pages.length - 1) {
-              const rNext = pages[i + 1].getBoundingClientRect();
+              const rNext = rectOf(pages[i + 1], i + 1);
               if (pagesShareColumn(r, rNext) &&
-                  clientY >= r.bottom - hitY && clientY <= rNext.top + hitY) {
+                  py >= r.bottom - hitY && py <= rNext.top + hitY) {
                 targetPage = pages[i];
                 insertBefore = false;
                 targetRect = r;
@@ -20153,11 +20261,11 @@
         }
       } else {
         // Direct hit on the card
-        for (const page of pages) {
-          const r = page.getBoundingClientRect();
-          if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) {
-            targetPage   = page;
-            insertBefore = clientX < r.left + r.width * 0.5;
+        for (let i = 0; i < pages.length; i++) {
+          const r = rectOf(pages[i], i);
+          if (px >= r.left && px <= r.right && py >= r.top && py <= r.bottom) {
+            targetPage   = pages[i];
+            insertBefore = px < r.left + r.width * 0.5;
             targetRect   = r;
             hitPath = 'horiz-direct';
             break;
@@ -20167,14 +20275,14 @@
         // Nearest card in the same row (gaps)
         if (!targetPage) {
           let minDist = Infinity;
-          for (const page of pages) {
-            const r = page.getBoundingClientRect();
-            if (clientY < r.top - ySlop || clientY > r.bottom + ySlop) continue;
-            const dist = Math.abs((r.left + r.right) / 2 - clientX);
+          for (let i = 0; i < pages.length; i++) {
+            const r = rectOf(pages[i], i);
+            if (py < r.top - ySlop || py > r.bottom + ySlop) continue;
+            const dist = Math.abs((r.left + r.right) / 2 - px);
             if (dist < minDist) {
               minDist      = dist;
-              targetPage   = page;
-              insertBefore = clientX < r.left + r.width * 0.5;
+              targetPage   = pages[i];
+              insertBefore = px < r.left + r.width * 0.5;
               targetRect   = r;
               hitPath = 'horiz-row-gap';
             }
@@ -20187,17 +20295,17 @@
       let fallbackDist = null;
       if (!targetPage && isDragActive) {
         let bestDist = Infinity;
-        for (const page of pages) {
-          const r = page.getBoundingClientRect();
-          const cx = Math.max(r.left, Math.min(clientX, r.right));
-          const cy = Math.max(r.top, Math.min(clientY, r.bottom));
-          const dist = Math.hypot(clientX - cx, clientY - cy);
+        for (let i = 0; i < pages.length; i++) {
+          const r = rectOf(pages[i], i);
+          const cx = Math.max(r.left, Math.min(px, r.right));
+          const cy = Math.max(r.top, Math.min(py, r.bottom));
+          const dist = Math.hypot(px - cx, py - cy);
           if (dist < bestDist) {
             bestDist = dist;
-            targetPage = page;
+            targetPage = pages[i];
             targetRect = r;
-            if (vertical) insertBefore = clientY < (r.top + r.bottom) / 2;
-            else insertBefore = clientX < (r.left + r.right) / 2;
+            if (vertical) insertBefore = py < (r.top + r.bottom) / 2;
+            else insertBefore = px < (r.left + r.right) / 2;
             hitPath = 'fallback-nearest';
           }
         }
@@ -20215,22 +20323,26 @@
         if (vertical && targetRect.height > 0) {
           const cy = (targetRect.top + targetRect.bottom) / 2;
           const halfH = targetRect.height / 2;
-          const t = Math.min(1, Math.abs(clientY - cy) / halfH);
+          const t = Math.min(1, Math.abs(py - cy) / halfH);
           indicatorOpacity = Math.max(0, Math.min(1, t / 0.5));
         } else if (targetRect.width > 0) {
           const cx = (targetRect.left + targetRect.right) / 2;
           const halfW = targetRect.width / 2;
-          const t = Math.min(1, Math.abs(clientX - cx) / halfW);
+          const t = Math.min(1, Math.abs(px - cx) / halfW);
           indicatorOpacity = Math.max(0, Math.min(1, t / 0.5));
         }
       }
 
+      // Write phase - every read above is done, so nothing here can force a
+      // relayout that a later read would have to pay for.
       // The marker class on the landing page is needed for insert-on-release logic
-      pages.forEach(p => p.classList.remove('insert-before', 'insert-after'));
       const redundant = !!(targetPage && isRedundantInsertPosition(targetPage, insertBefore, pages));
       if (targetPage && !redundant) {
+        if (insertMarkedEl !== targetPage) clearInsertMarkerClass();
+        targetPage.classList.remove('insert-before', 'insert-after');
         targetPage.classList.add(insertBefore ? 'insert-before' : 'insert-after');
-        positionInsertIndicator(targetPage, insertBefore, pages, indicatorOpacity);
+        insertMarkedEl = targetPage;
+        positionInsertIndicator(targetPage, insertBefore, pages, indicatorOpacity, geom);
         pmDragDebugReport(() => Object.assign(base(), {
           reason: indicatorOpacity < 0.05 ? 'shown-but-opacity~0' : 'shown',
           shown: indicatorOpacity >= 0.05,
@@ -20242,6 +20354,7 @@
           fallbackDist: fallbackDist == null ? null : Math.round(fallbackDist)
         }));
       } else {
+        clearInsertMarkerClass();
         hideInsertIndicator();
         pmDragDebugReport(() => Object.assign(base(), {
           reason: !targetPage
@@ -20360,13 +20473,30 @@
       pagePushApartEls = [];
     }
 
-    function positionInsertIndicatorEl(ind, targetPage, insertBefore, pages, opacity) {
+    /**
+     * `geom` is the drag snapshot (see dragGeometryForPass). When present all
+     * geometry comes from it - including the host rect and the scroll offsets
+     * used to convert into content coordinates. That conversion is
+     * scroll-invariant (rect.left + scrollLeft names the same content point
+     * before and after scrolling), so the snapshot stays correct while the
+     * grid auto-scrolls under the pointer. Without a snapshot this measures
+     * live, exactly as it always did.
+     */
+    function positionInsertIndicatorEl(ind, targetPage, insertBefore, pages, opacity, geom) {
       if (!ind) return;
 
-      const vertical = useVerticalInsertIndicator();
       const host = scrollContainer;
-      const hostRect = host.getBoundingClientRect();
-      const tRect = targetPage.getBoundingClientRect();
+      const idxOf = geom ? geom.pages.indexOf(targetPage) : -1;
+      const useSnap = !!geom && idxOf >= 0;
+      const rectOf = useSnap
+        ? (p, i) => geom.rects[i]
+        : (p) => p.getBoundingClientRect();
+
+      const vertical = useSnap ? geom.vertical : useVerticalInsertIndicator();
+      const hostRect = useSnap ? geom.hostRect : host.getBoundingClientRect();
+      const hostScrollLeft = useSnap ? geom.scrollLeft : host.scrollLeft;
+      const hostScrollTop = useSnap ? geom.scrollTop : host.scrollTop;
+      const tRect = useSnap ? geom.rects[idxOf] : targetPage.getBoundingClientRect();
 
       if (vertical) {
         resetInsertIndicatorLayout(ind);
@@ -20376,9 +20506,10 @@
         let neighbor = null;
         let neighborEl = null;
         let neighborGap = Infinity;
-        for (const p of pages) {
+        for (let i = 0; i < pages.length; i++) {
+          const p = pages[i];
           if (p === targetPage) continue;
-          const r = p.getBoundingClientRect();
+          const r = rectOf(p, i);
           if (!pagesShareColumn(tRect, r)) continue;
           if (insertBefore && r.bottom <= tRect.top + 1) {
             const gap = tRect.top - r.bottom;
@@ -20400,23 +20531,24 @@
         }
 
         let refWidth = tRect.width;
-        const portrait = pages.find(p => !p.classList.contains('page-rotated'));
-        if (portrait) refWidth = portrait.getBoundingClientRect().width;
+        const portraitIdx = pages.findIndex(p => !p.classList.contains('page-rotated'));
+        if (portraitIdx >= 0) refWidth = rectOf(pages[portraitIdx], portraitIdx).width;
         const indWidth = refWidth * INSERT_IND_VERT_FRAC;
         const indHeight = INSERT_IND_WIDTH;
 
         ind.style.width = indWidth + 'px';
         ind.style.height = indHeight + 'px';
-        ind.style.left = (tCenterX - hostRect.left + host.scrollLeft - indWidth / 2) + 'px';
-        ind.style.top = (centerY - hostRect.top + host.scrollTop - indHeight / 2) + 'px';
+        ind.style.left = (tCenterX - hostRect.left + hostScrollLeft - indWidth / 2) + 'px';
+        ind.style.top = (centerY - hostRect.top + hostScrollTop - indHeight / 2) + 'px';
       } else {
         resetInsertIndicatorLayout(ind);
 
         const tCenterY = (tRect.top + tRect.bottom) / 2;
         let neighbor = null, neighborEl = null, neighborGap = Infinity;
-        for (const p of pages) {
+        for (let i = 0; i < pages.length; i++) {
+          const p = pages[i];
           if (p === targetPage) continue;
-          const r = p.getBoundingClientRect();
+          const r = rectOf(p, i);
           if (Math.abs((r.top + r.bottom) / 2 - tCenterY) > tRect.height * 0.5) continue;
           if (insertBefore && r.right <= tRect.left + 1) {
             const gap = tRect.left - r.right;
@@ -20438,22 +20570,25 @@
         }
 
         let refHeight = tRect.height;
-        const portrait = pages.find(p => !p.classList.contains('page-rotated'));
-        if (portrait) refHeight = portrait.getBoundingClientRect().height;
+        const portraitIdx = pages.findIndex(p => !p.classList.contains('page-rotated'));
+        if (portraitIdx >= 0) refHeight = rectOf(pages[portraitIdx], portraitIdx).height;
         const indHeight = refHeight * INSERT_IND_VERT_FRAC;
 
-        const indHalfW = (ind.offsetWidth || INSERT_IND_WIDTH) / 2;
+        // offsetWidth is a layout read; the bar has a fixed width, so during a
+        // drag take the constant instead of measuring it every frame.
+        const indHalfW = (useSnap ? INSERT_IND_WIDTH : (ind.offsetWidth || INSERT_IND_WIDTH)) / 2;
         ind.style.height = indHeight + 'px';
-        ind.style.left = (centerX - hostRect.left + host.scrollLeft - indHalfW) + 'px';
-        ind.style.top = (tCenterY - hostRect.top + host.scrollTop - indHeight / 2) + 'px';
+        ind.style.left = (centerX - hostRect.left + hostScrollLeft - indHalfW) + 'px';
+        ind.style.top = (tCenterY - hostRect.top + hostScrollTop - indHeight / 2) + 'px';
       }
 
       ind.style.opacity = (opacity == null) ? '1' : String(opacity);
       ind.style.display = 'block';
     }
 
-    function positionInsertIndicator(targetPage, insertBefore, pages, opacity) {
-      positionInsertIndicatorEl(document.getElementById('insertIndicator'), targetPage, insertBefore, pages, opacity);
+    function positionInsertIndicator(targetPage, insertBefore, pages, opacity, geom) {
+      positionInsertIndicatorEl(
+        document.getElementById('insertIndicator'), targetPage, insertBefore, pages, opacity, geom);
     }
 
     function hideInsertIndicator() {
@@ -21662,6 +21797,7 @@
 
     function clearInsertIndicators() {
       document.querySelectorAll('.page').forEach(p => p.classList.remove('insert-before', 'insert-after'));
+      insertMarkedEl = null;   // superset of clearInsertMarkerClass(); keep them in step
       hideInsertIndicator();
     }
 
