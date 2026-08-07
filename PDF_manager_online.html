@@ -496,8 +496,15 @@
     .pm-tab:hover { background: #46596c; color: #eaf0f5; }
     .pm-tab.active {
       background: #f4f4f4; color: #1f2d3a; font-weight: 600; box-shadow: none;
-      /*overlap the separator line so that the active tab merges with the work area*/
-      margin-bottom: -1px; position: relative; z-index: 2;
+      /* No negative bottom margin: the tab used to hang 1px past the tab bar
+         to cover a separator line that no longer exists, and that overhang is
+         painted OVER the scroll area - against a white page scrolled up to the
+         bar it showed as a dark step under the active tab in dark mode.
+         Nothing can seam through in its place: the tab's background is exactly
+         the body background in both themes (#f4f4f4 / #14171c) and the scroll
+         and pages containers are transparent, so even a sub-pixel gap between
+         the menu and the work area reveals that same colour. */
+      margin-bottom: 0; position: relative; z-index: 2;
     }
     /*With multiple selection, the active but not selected tab is like a regular one (not “white”)*/
     .tab-bar:has(.pm-tab-selected) .pm-tab.active:not(.pm-tab-selected) {
