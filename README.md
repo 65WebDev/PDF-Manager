@@ -1,4 +1,4 @@
-# PDF Manager
+# PDF Document Manager
 
 <p align="right">
   <a href="#english">🇬🇧 English</a> · <a href="#русский">🇷🇺 Русский</a>
@@ -6,7 +6,32 @@
 
 <a id="english"></a>**A PDF editor that runs entirely in your browser.** Merge and split PDFs, edit pages, manage bookmarks, convert Word/Excel/email files — all in a single HTML file, nothing to install. Your files never leave your computer: everything happens locally, nothing is uploaded to a server.
 
-<!-- SCREENSHOTS-EN -->
+<table>
+<tr>
+<td align="center" width="20%">
+<a href="docs/screenshots/01-thumbnails.jpg"><img src="docs/screenshots/01-thumbnails.jpg" width="150" alt="Page thumbnail view"></a><br>
+<sub>Page thumbnails</sub>
+</td>
+<td align="center" width="20%">
+<a href="docs/screenshots/02-tabs-split.jpg"><img src="docs/screenshots/02-tabs-split.jpg" width="150" alt="Tabs and splitting pages into a new document"></a><br>
+<sub>Tabs & splitting pages</sub>
+</td>
+<td align="center" width="20%">
+<a href="docs/screenshots/03-page-editor.jpg"><img src="docs/screenshots/03-page-editor.jpg" width="150" alt="Page editor with shape, arrow and text annotations"></a><br>
+<sub>Page editor — shapes, arrows & text</sub>
+</td>
+<td align="center" width="20%">
+<a href="docs/screenshots/04-scroll-navigator.jpg"><img src="docs/screenshots/04-scroll-navigator.jpg" width="150" alt="Floating scroll navigator"></a><br>
+<sub>Floating scroll navigator</sub>
+</td>
+<td align="center" width="20%">
+<a href="docs/screenshots/05-merge-order.jpg"><img src="docs/screenshots/05-merge-order.jpg" width="150" alt="Merge dialog with a custom file order"></a><br>
+<sub>Merge with custom order</sub>
+</td>
+</tr>
+</table>
+
+*(click a thumbnail to open it full-size)*
 
 **[Open online →](https://65WebDev.github.io/PDF-Manager/PDF_manager_online.html)**
 
@@ -41,7 +66,32 @@ After downloading, open the HTML file in your browser. The online version loads 
 
 <a id="русский"></a>**Редактор PDF, который работает прямо в браузере.** Слияние и разбиение PDF, редактирование страниц, закладки, конвертация Word/Excel/почты — всё в одном HTML-файле, ничего устанавливать не нужно. Файлы не покидают ваш компьютер: вся обработка происходит локально, без загрузки на сервер.
 
-<!-- SCREENSHOTS-RU -->
+<table>
+<tr>
+<td align="center" width="20%">
+<a href="docs/screenshots/01-thumbnails.jpg"><img src="docs/screenshots/01-thumbnails.jpg" width="150" alt="Просмотр миниатюр страниц"></a><br>
+<sub>Миниатюры страниц</sub>
+</td>
+<td align="center" width="20%">
+<a href="docs/screenshots/02-tabs-split.jpg"><img src="docs/screenshots/02-tabs-split.jpg" width="150" alt="Вкладки и перенос страниц в новый документ"></a><br>
+<sub>Вкладки и перенос страниц</sub>
+</td>
+<td align="center" width="20%">
+<a href="docs/screenshots/03-page-editor.jpg"><img src="docs/screenshots/03-page-editor.jpg" width="150" alt="Редактор страниц с фигурами, стрелками и текстом"></a><br>
+<sub>Редактор страниц — фигуры, стрелки, текст</sub>
+</td>
+<td align="center" width="20%">
+<a href="docs/screenshots/04-scroll-navigator.jpg"><img src="docs/screenshots/04-scroll-navigator.jpg" width="150" alt="Плавающий навигатор прокрутки"></a><br>
+<sub>Навигатор прокрутки</sub>
+</td>
+<td align="center" width="20%">
+<a href="docs/screenshots/05-merge-order.jpg"><img src="docs/screenshots/05-merge-order.jpg" width="150" alt="Слияние файлов с настройкой порядка"></a><br>
+<sub>Слияние с настройкой порядка</sub>
+</td>
+</tr>
+</table>
+
+*(нажмите на миниатюру, чтобы открыть в полном размере)*
 
 **[Открыть онлайн →](https://65WebDev.github.io/PDF-Manager/PDF_manager_online.html)**
 
