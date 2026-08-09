@@ -219,17 +219,25 @@ function updateReadmeLinuxLinks({ version, tag, debName, appImageName }) {
     // Match the row by its label, replacing whatever URL currently sits in the
     // cell — covers both the initial generic /releases placeholder and any
     // previously-published linux-v* URL.
+    //
+    // Global (/g): README.md carries a bilingual RU/EN copy of this table.
+    // "Linux: `.deb`" / "Linux: `.AppImage`" are identical in both languages
+    // (technical terms, not translated), so both rows match here and both get
+    // updated. The release-tag row's label does differ by language (Релиз
+    // Linux / Linux release), so that one alternates and preserves whichever
+    // label matched - a non-global replace here would silently leave the
+    // second-language row on the previous release's (soon 404) URL.
     text = text.replace(
-      /(\|\s*\*\*Linux: `\.deb`\*\*\s*\|\s*)[^\n|]+(\s*\|)/,
+      /(\|\s*\*\*Linux: `\.deb`\*\*\s*\|\s*)[^\n|]+(\s*\|)/g,
       `$1${debUrl}$2`,
     );
     text = text.replace(
-      /(\|\s*\*\*Linux: `\.AppImage`\*\*\s*\|\s*)[^\n|]+(\s*\|)/,
+      /(\|\s*\*\*Linux: `\.AppImage`\*\*\s*\|\s*)[^\n|]+(\s*\|)/g,
       `$1${appImageUrl}$2`,
     );
     text = text.replace(
-      /(\|\s*\*\*Релиз Linux\*\*\s*\|\s*)[^\n|]+(\s*\|)/,
-      `$1${tagUrl}$2`,
+      /\|\s*\*\*(Релиз Linux|Linux release)\*\*\s*\|\s*[^\n|]+\s*\|/g,
+      (_m, label) => `| **${label}** | ${tagUrl} |`,
     );
   } else {
     // First-ever Linux release: insert rows right after the Windows portable row.

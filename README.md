@@ -1,8 +1,17 @@
-# PDF-Manager
+# PDF Manager
 
-Веб-приложение для работы с PDF-документами в браузере (один HTML-файл, без установки).
+<p align="right">
+  <a href="#русский">🇷🇺 Русский</a> · <a href="#english">🇬🇧 English</a>
+</p>
 
-## Быстрое скачивание
+<a id="русский"></a>
+## Русский
+
+**Редактор PDF, который работает прямо в браузере.** Слияние и разбиение PDF, редактирование страниц, закладки, конвертация Word/Excel/почты — всё в одном HTML-файле, ничего устанавливать не нужно. Файлы не покидают ваш компьютер: вся обработка происходит локально, без загрузки на сервер.
+
+**[Открыть онлайн →](https://65WebDev.github.io/PDF-Manager/)**
+
+### Скачать
 
 | Способ | Ссылка |
 |--------|--------|
@@ -10,92 +19,57 @@
 | **Скачать офлайн-версию** | https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_offline.html |
 | **Windows: установщик** | https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.21/PDF.Manager_0.1.21_x64-setup.exe |
 | **Windows: portable `.exe`** | https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.21/pdf-manager.exe |
-| **Linux: `.deb`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.21/PDF.Manager_0.1.21_amd64.deb|
-| **Linux: `.AppImage`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.21/PDF.Manager_0.1.21_amd64.AppImage|
-| **Страница релизов (HTML)** | https://github.com/65WebDev/PDF-Manager/releases/latest |
+| **Linux: `.deb`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.21/PDF.Manager_0.1.21_amd64.deb |
+| **Linux: `.AppImage`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.21/PDF.Manager_0.1.21_amd64.AppImage |
 | **Релиз Windows** | https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.21 |
-| **Релиз Linux** | https://github.com/65WebDev/PDF-Manager/releases/tag/linux-v0.1.21|
-| **Открыть онлайн (GitHub Pages)** | https://65WebDev.github.io/PDF-Manager/ |
+| **Релиз Linux** | https://github.com/65WebDev/PDF-Manager/releases/tag/linux-v0.1.21 |
 
-После скачивания HTML откройте файл в браузере. Онлайн-версия подгружает библиотеки из CDN; офлайн-версия содержит все зависимости внутри файла.
+После скачивания откройте HTML-файл в браузере. Онлайн-версия подгружает библиотеки из CDN; офлайн-версия содержит все зависимости внутри файла и работает без интернета.
 
-Десктопная сборка — **отдельные** релизы (`windows-v…`, `linux-v…`), не смешиваются с автоматическими `build-N`. Актуальная версия Windows сейчас: [windows-v0.1.21](https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.21).
+### Возможности
 
-## Как это работает
+- **Управление страницами** — слияние, разбиение, перетаскивание, удаление и поворот страниц.
+- **Встроенный редактор страниц** — добавление и редактирование текста и изображений прямо на странице PDF.
+- **Закладки и оглавление** — иерархические закладки с множественным выделением, перетаскиванием и групповым удалением.
+- **Внутренние ссылки** — переходы по ссылкам и оглавлению прямо в просмотре.
+- **Умный зум** — чёткий рендер на любом приближении, магнит к ширине страницы (колесо/ползунок на десктопе, pinch-to-zoom на мобильном).
+- **Несколько документов сразу** *(только десктоп)* — несколько PDF во вкладках одного окна.
+- **Импорт из Word, Excel и почты** — `.docx`, `.xlsx`, `.eml` и `.msg` конвертируются в PDF автоматически.
+- **Сжатие изображений** — уменьшение размера файла без потери читаемости.
+- **Пароль и шифрование** — установка пароля на PDF прямо в браузере, без сторонних сервисов.
 
-При каждом обновлении `PDF_manager_online.html` в ветке `main` автоматически:
+---
 
-1. **Создаётся релиз** с пронумерованной сборкой (`build-1`, `build-2`, …) и двумя файлами: онлайн и офлайн.
-2. **Собирается офлайн-версия** (`npm run build:offline`) — все CDN-библиотеки и `@cantoo/pdf-lib` встраиваются в `PDF_manager_offline.html`.
-3. **Обновляется GitHub Pages** — можно открыть менеджер в браузере или скачать с лендинга.
+<a id="english"></a>
+## English
 
-Прямая ссылка `/releases/latest/download/...` всегда ведёт на **самую свежую HTML-сборку** (`build-N`). Релизы Windows (`windows-v…`) специально **не** помечаются как Latest, чтобы не ломать эти ссылки.
+**A PDF editor that runs entirely in your browser.** Merge and split PDFs, edit pages, manage bookmarks, convert Word/Excel/email files — all in a single HTML file, nothing to install. Your files never leave your computer: everything happens locally, nothing is uploaded to a server.
 
-## Ручной запуск
+**[Open online →](https://65WebDev.github.io/PDF-Manager/)**
 
-В разделе **Actions** репозитория можно вручную запустить workflow **Release** или **Deploy Pages** (кнопка *Run workflow*).
+### Download
 
-## Локальная разработка
+| Method | Link |
+|--------|------|
+| **Download online version** | https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_online.html |
+| **Download offline version** | https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_offline.html |
+| **Windows: installer** | https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.21/PDF.Manager_0.1.21_x64-setup.exe |
+| **Windows: portable `.exe`** | https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.21/pdf-manager.exe |
+| **Linux: `.deb`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.21/PDF.Manager_0.1.21_amd64.deb |
+| **Linux: `.AppImage`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.21/PDF.Manager_0.1.21_amd64.AppImage |
+| **Windows release** | https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.21 |
+| **Linux release** | https://github.com/65WebDev/PDF-Manager/releases/tag/linux-v0.1.21 |
 
-```bash
-git clone https://github.com/65WebDev/PDF-Manager.git
-# Откройте PDF_manager_online.html в браузере
+After downloading, open the HTML file in your browser. The online version loads its libraries from a CDN; the offline version bundles everything inside the file and works without internet access.
 
-# Собрать офлайн-версию локально:
-npm ci
-npm run build:offline
-# Результат: PDF_manager_offline.html
-```
+### Features
 
-## Десктопное приложение (Tauri, экспериментально): Windows + Linux
-
-Оболочка (`src-tauri/`) живёт в `main`, но **не** входит в автоматический release-pipeline — только ручная сборка.
-
-**Подробная инструкция (RU):** [docs/windows-tauri-build.md](docs/windows-tauri-build.md)
-
-### Требования (Windows)
-
-- [Node.js](https://nodejs.org/) 20+
-- [Rust](https://rustup.rs/) (stable, **1.85+**)
-- [Microsoft C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) — workload **«Разработка классических приложений на C++»**
-- WebView2 обычно уже есть на Windows 10/11; если нет — установщик подтянет bootstrapper
-
-Проверка окружения после установки:
-
-```bash
-rustc --version   # >= 1.85
-where link        # должен найти link.exe (Windows)
-npm run tauri -- info
-```
-
-### Сборка
-
-```bash
-git clone https://github.com/65WebDev/PDF-Manager.git
-cd PDF-Manager
-npm ci
-
-# PowerShell (Windows) — проверка окружения + сборка + upload на GitHub:
-#   .\scripts\build-windows-exe.ps1
-#   .\scripts\build-windows-exe.ps1 -Local   # без загрузки
-#   .\scripts\build-windows-exe.ps1 -Dev
-#   .\scripts\build-windows-exe.ps1 -Linux   # + Linux .deb/.AppImage через WSL2, см. docs/windows-tauri-build.md#4a
-
-# Режим разработки (окно + UI из офлайн-HTML):
-npm run tauri:dev
-
-# Релизная сборка (.exe + NSIS) и загрузка на GitHub Releases:
-npm run tauri:build
-# Нужны: GitHub CLI (gh) и `gh auth login`
-# Release tag: windows-v{version} из src-tauri/tauri.conf.json
-# Без загрузки: npm run tauri:build:local
-# или: TAURI_SKIP_UPLOAD=1 npm run tauri:build
-# Повторно залить уже собранный exe: npm run tauri:upload
-```
-
-Готовые файлы появятся в:
-
-- `src-tauri/target/release/PDF Manager.exe` — запуск без установщика
-- `src-tauri/target/release/bundle/nsis/` — установщик `.exe`
-
-`npm run tauri:build` сначала собирает офлайн-HTML (нужен интернет на этом шаге), копирует его в `tauri-ui/index.html` (с мостом открытия PDF), упаковывает в Tauri, затем через `gh` заливает установщик в GitHub Release `windows-v*`. NSIS регистрирует ассоциацию с файлами **`.pdf`**.
+- **Page management** — merge, split, drag to reorder, delete and rotate pages.
+- **Built-in page editor** — add and edit text and images directly on a PDF page.
+- **Bookmarks & table of contents** — hierarchical bookmarks with multi-select, drag reordering, and bulk delete.
+- **Clickable internal links** — follow links and table-of-contents entries in the viewer.
+- **Smart zoom** — crisp rendering at any zoom level, snaps to page width (wheel/slider on desktop, pinch-to-zoom on mobile).
+- **Multiple documents at once** *(desktop only)* — several PDFs in tabs, one window.
+- **Import from Word, Excel & email** — `.docx`, `.xlsx`, `.eml` and `.msg` converted to PDF automatically.
+- **Image compression** — reduce the PDF file size without losing readability.
+- **Password & encryption** — set a password on a PDF right in the browser, no third-party service involved.

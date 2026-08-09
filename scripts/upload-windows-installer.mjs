@@ -271,20 +271,26 @@ function updateReadmeWindowsLinks({ version, tag, setupName, portableName }) {
   let text = readFileSync(README_PATH, 'utf8');
   const before = text;
 
+  // Global (/g): README.md carries a bilingual RU/EN copy of this table, so
+  // every one of these patterns can legitimately appear twice. A non-global
+  // replace only touches the first (RU) row and leaves the EN copy with a
+  // stale, eventually-404 URL after the next release. The setup/tag rows use
+  // an RU|EN alternation and pick the matching label back out so each row
+  // keeps its own language.
   text = text.replace(
-    /\|\s*\*\*Windows: установщик\*\*\s*\|\s*https:\/\/github\.com\/[^|\s]+\/releases\/download\/windows-v[^|\s]+\/[^\s|]+\s*\|/,
-    `| **Windows: установщик** | ${setupUrl} |`,
+    /\|\s*\*\*Windows: (установщик|installer)\*\*\s*\|\s*https:\/\/github\.com\/[^|\s]+\/releases\/download\/windows-v[^|\s]+\/[^\s|]+\s*\|/g,
+    (_m, label) => `| **Windows: ${label}** | ${setupUrl} |`,
   );
   text = text.replace(
-    /\|\s*\*\*Windows: portable `\.exe`\*\*\s*\|\s*https:\/\/github\.com\/[^|\s]+\/releases\/download\/windows-v[^|\s]+\/[^\s|]+\s*\|/,
+    /\|\s*\*\*Windows: portable `\.exe`\*\*\s*\|\s*https:\/\/github\.com\/[^|\s]+\/releases\/download\/windows-v[^|\s]+\/[^\s|]+\s*\|/g,
     `| **Windows: portable \`.exe\`** | ${portableUrl} |`,
   );
   text = text.replace(
-    /\|\s*\*\*Релиз Windows\*\*\s*\|\s*https:\/\/github\.com\/[^|\s]+\/releases\/tag\/windows-v[^|\s]+\s*\|/,
-    `| **Релиз Windows** | ${tagUrl} |`,
+    /\|\s*\*\*(Релиз Windows|Windows release)\*\*\s*\|\s*https:\/\/github\.com\/[^|\s]+\/releases\/tag\/windows-v[^|\s]+\s*\|/g,
+    (_m, label) => `| **${label}** | ${tagUrl} |`,
   );
   text = text.replace(
-    /Актуальная версия сейчас:\s*\[[^\]]*\]\([^)]+\)/,
+    /Актуальная версия сейчас:\s*\[[^\]]*\]\([^)]+\)/g,
     `Актуальная версия сейчас: [${tag}](${tagUrl})`,
   );
   // Broader fallback for any leftover version pins in the quick-download block.
