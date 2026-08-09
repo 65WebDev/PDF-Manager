@@ -226,14 +226,36 @@ function releaseExists(ghBin, tag) {
   return r.status === 0;
 }
 
+// Bilingual (English first, Russian second) to match README.md's language
+// order. A single release-notes page is short enough to just stack both
+// full blocks behind a divider - no same-page nav needed the way the much
+// longer README benefits from one.
 function buildReleaseNotes({ version, tag, setupName, portableName, releaseUrl }) {
   const setupAsset = setupName ? toGithubAssetName(setupName) : null;
   const portableAsset = portableName ? toGithubAssetName(portableName) : null;
   const setupUrl = setupAsset ? githubDownloadUrl(tag, setupAsset) : releaseUrl;
   const portableUrl = portableAsset ? githubDownloadUrl(tag, portableAsset) : releaseUrl;
 
-  return [
-    `Windows-приложение PDF Manager **v${version}** (Tauri).`,
+  const en = [
+    `Windows app **PDF Document Manager v${version}** (Tauri).`,
+    '',
+    '### Download',
+    setupAsset ? `- **Installer (NSIS):** [${setupAsset}](${setupUrl})` : null,
+    portableAsset ? `- **Portable .exe:** [${portableAsset}](${portableUrl})` : null,
+    `- Release page: ${releaseUrl}`,
+    '',
+    "### What's inside",
+    '- The NSIS installer registers the `.pdf` file association',
+    '- After installing: right-click a PDF → "Open with" → PDF Document Manager',
+    '- Offline editor (all libraries bundled into the UI)',
+    '',
+    'Not part of the automatic HTML release pipeline (`build-N`).',
+  ]
+    .filter((line) => line != null)
+    .join('\n');
+
+  const ru = [
+    `Windows-приложение **PDF Document Manager v${version}** (Tauri).`,
     '',
     '### Скачать',
     setupAsset ? `- **Установщик (NSIS):** [${setupAsset}](${setupUrl})` : null,
@@ -242,13 +264,15 @@ function buildReleaseNotes({ version, tag, setupName, portableName, releaseUrl }
     '',
     '### Что внутри',
     '- Установщик NSIS регистрирует ассоциацию с `.pdf`',
-    '- После установки: ПКМ по PDF → «Открыть с помощью» → PDF Manager',
+    '- После установки: ПКМ по PDF → «Открыть с помощью» → PDF Document Manager',
     '- Офлайн-редактор (библиотеки встроены в UI)',
     '',
     'Не является частью автоматического HTML release pipeline (`build-N`).',
   ]
     .filter((line) => line != null)
     .join('\n');
+
+  return `${en}\n\n---\n\n${ru}`;
 }
 
 /**

@@ -172,14 +172,38 @@ function releaseExists(ghBin, tag) {
   return r.status === 0;
 }
 
+// Bilingual (English first, Russian second) to match README.md's language
+// order. A single release-notes page is short enough to just stack both
+// full blocks behind a divider - no same-page nav needed the way the much
+// longer README benefits from one.
 function buildReleaseNotes({ version, tag, debName, appImageName, releaseUrl }) {
   const debAsset = debName ? toGithubAssetName(debName) : null;
   const appImageAsset = appImageName ? toGithubAssetName(appImageName) : null;
   const debUrl = debAsset ? githubDownloadUrl(tag, debAsset) : releaseUrl;
   const appImageUrl = appImageAsset ? githubDownloadUrl(tag, appImageAsset) : releaseUrl;
 
-  return [
-    `Linux-приложение PDF Manager **v${version}** (Tauri).`,
+  const en = [
+    `Linux app **PDF Document Manager v${version}** (Tauri).`,
+    '',
+    '### Download',
+    debAsset ? `- **.deb package (Debian/Ubuntu):** [${debAsset}](${debUrl})` : null,
+    appImageAsset ? `- **.AppImage (any distro):** [${appImageAsset}](${appImageUrl})` : null,
+    `- Release page: ${releaseUrl}`,
+    '',
+    '### Install',
+    debAsset ? `- \`.deb\`: \`sudo apt install ./${debAsset}\` (or double-click it in your file manager)` : null,
+    appImageAsset ? `- \`.AppImage\`: \`chmod +x ${appImageAsset} && ./${appImageAsset}\`` : null,
+    '',
+    "### What's inside",
+    '- Offline editor (all libraries bundled into the UI)',
+    '',
+    'Not part of the automatic HTML release pipeline (`build-N`).',
+  ]
+    .filter((line) => line != null)
+    .join('\n');
+
+  const ru = [
+    `Linux-приложение **PDF Document Manager v${version}** (Tauri).`,
     '',
     '### Скачать',
     debAsset ? `- **Пакет .deb (Debian/Ubuntu):** [${debAsset}](${debUrl})` : null,
@@ -197,6 +221,8 @@ function buildReleaseNotes({ version, tag, debName, appImageName, releaseUrl }) 
   ]
     .filter((line) => line != null)
     .join('\n');
+
+  return `${en}\n\n---\n\n${ru}`;
 }
 
 function updateReadmeLinuxLinks({ version, tag, debName, appImageName }) {
