@@ -1,4 +1,4 @@
-# PDF Document Manager
+# PDF Document Manager in a <b>single HTML-file</b>
 
 <p align="right">
   <a href="#english">🇬🇧 English</a> · <a href="#русский">🇷🇺 Русский</a>
