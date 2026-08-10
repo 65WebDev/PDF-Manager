@@ -20,12 +20,13 @@
       } catch (e) { /* localStorage/matchMedia unavailable - default (light) stays */ }
       try {
         var loc = localStorage.getItem('pmLocale');
-        if (loc !== 'en' && loc !== 'ru') {
-          var nav = (navigator.languages && navigator.languages[0]) || navigator.language || '';
-          loc = String(nav).toLowerCase().indexOf('en') === 0 ? 'en' : 'ru';
+        if (loc !== 'en' && loc !== 'ru' && loc !== 'es') {
+          var nav = String((navigator.languages && navigator.languages[0]) || navigator.language || '').toLowerCase();
+          loc = nav.indexOf('en') === 0 ? 'en' : (nav.indexOf('es') === 0 ? 'es' : 'ru');
         }
-        document.documentElement.setAttribute('lang', loc === 'en' ? 'en' : 'ru');
+        document.documentElement.setAttribute('lang', loc === 'en' ? 'en' : (loc === 'es' ? 'es' : 'ru'));
         if (loc === 'en') document.title = 'PDF Document Manager';
+        else if (loc === 'es') document.title = 'Gestor de Documentos PDF';
       } catch (e2) { /* ignore */ }
     })();
   </script>
@@ -7714,7 +7715,7 @@
         menuToggle: 'Скрыть/показать меню', menuToggleHide: 'Скрыть меню', menuToggleShow: 'Показать меню',
         themeDark: 'Тёмный режим', themeLight: 'Светлый режим',
         about: 'О программе', restoreHelp: 'Вернуть подсказку по горячим клавишам',
-        langSwitchToEn: 'English', langSwitchToRu: 'Русский',
+        langSwitchToEn: 'English', langSwitchToRu: 'Русский', langSwitchToEs: 'Español',
         selectFile: 'Выбрать файл', selectFiles: 'Выбрать файлы',
         selectFilesTitle: 'Выбрать один или несколько файлов (F)',
         merge: 'Объединить',
@@ -8006,7 +8007,7 @@
         menuToggle: 'Hide/show menu', menuToggleHide: 'Hide menu', menuToggleShow: 'Show menu',
         themeDark: 'Dark mode', themeLight: 'Light mode',
         about: 'About', restoreHelp: 'Restore keyboard shortcuts hint',
-        langSwitchToEn: 'English', langSwitchToRu: 'Русский',
+        langSwitchToEn: 'English', langSwitchToRu: 'Русский', langSwitchToEs: 'Español',
         selectFile: 'Select file', selectFiles: 'Select files',
         selectFilesTitle: 'Open files (F)',
         merge: 'Merge',
@@ -8292,6 +8293,298 @@
         searchNotFound: 'Not found',
         searchNoMatches: 'No matches found',
         undoMobile: 'Undo', redoMobile: 'Redo'
+      },
+      es: {
+        appTitle: 'Gestor de Documentos PDF',
+        menuToggle: 'Mostrar/ocultar menú', menuToggleHide: 'Ocultar menú', menuToggleShow: 'Mostrar menú',
+        themeDark: 'Modo oscuro', themeLight: 'Modo claro',
+        about: 'Acerca de', restoreHelp: 'Restablecer ayuda de atajos de teclado',
+        langSwitchToEn: 'English', langSwitchToRu: 'Русский', langSwitchToEs: 'Español',
+        selectFile: 'Seleccionar archivo', selectFiles: 'Seleccionar archivos',
+        selectFilesTitle: 'Abrir archivos (F)',
+        merge: 'Combinar',
+        readMode: 'Modo lectura', readModeKey: 'Modo lectura (R)', loupeMode: 'Modo lupa (Z)',
+        selectMode: 'Modo selección (C)', navMode: 'Modo navegación (H)',
+        rotateLeftSelected: 'Girar páginas seleccionadas en sentido antihorario (Q)',
+        rotateRightSelected: 'Girar páginas seleccionadas en sentido horario (W)',
+        editPage: 'Editar página',
+        deleteSelectedPages: 'Eliminar páginas seleccionadas (Supr)',
+        deletedPagesHidden: 'Las páginas marcadas para eliminar están ocultas (Shift+H)',
+        deletedPagesShown: 'Las páginas marcadas para eliminar están visibles (Shift+H)',
+        multiSelectMode: 'Modo de selección múltiple de páginas',
+        printDocument: 'Imprimir documento (P)', printSelectedPages: 'Imprimir páginas seleccionadas',
+        replace: 'Reemplazar', replaceSelectedPages: 'Reemplazar páginas seleccionadas (Shift+C)',
+        export: 'Exportar', exportSelectedPages: 'Exportar páginas seleccionadas a un solo PDF (Shift+E)',
+        exportAsImages: 'Exportar como imágenes',
+        exportAsImagesHint: 'Exportar como imágenes\n(exportar páginas seleccionadas a PDF, guardando las páginas como imágenes)',
+        compressPdf: 'Comprimir PDF',
+        compressPdfHint: 'Comprimir PDF\n(reducir el tamaño del archivo sin perder calidad)',
+        compressPdfHintEstimate: 'Comprimir PDF\n(reducción de tamaño estimada: {before} → {after})',
+        compressPdfEstimating: 'Comprimir PDF\n(calculando la reducción de tamaño estimada…)',
+        compressPdfProgress: 'Comprimiendo imágenes...',
+        compressPdfResult: 'Tamaño del archivo reducido: {before} → {after}',
+        compressPdfNoBenefit: 'No se espera una reducción significativa del tamaño del archivo',
+        save: 'Guardar', saveFinalFile: 'Guardar archivo final (S)',
+        saveAsImages: 'Guardar como imágenes',
+        saveAsImagesHint: 'Guardar como imágenes\n(guardar el archivo como PDF con las páginas guardadas como imágenes)',
+        scale: 'Escala:', pin: 'Fijar', unpin: 'Desfijar', pages: 'Páginas:',
+        dropZoneDesktop: 'Haga clic aquí o arrastre uno o más archivos a esta área para abrirlos',
+        dropZoneMobile: 'Toque aquí para seleccionar uno o más archivos',
+        dropZoneFormats: 'Compatible con: PDF, Word (.docx), Excel (.xls, .xlsx), correo (.eml, .msg), imágenes (PNG, JPEG, BMP, GIF, WEBP, TIFF)',
+        confirmEmailAttachments: 'Este correo tiene archivos adjuntos que se pueden añadir como páginas independientes ({n}):<br><br>{list}<br><br>¿Añadir los adjuntos como páginas siguientes?',
+        emailImportLoading: 'Importando correo...',
+        emailAttachmentsYes: 'Añadir adjuntos',
+        emailAttachmentsNo: 'Solo el correo',
+        emailHdrFrom: 'De:', emailHdrTo: 'Para:', emailHdrCc: 'CC:', emailHdrDate: 'Fecha:',
+        emailNoSubject: '(sin asunto)',
+        helpHotkeys: 'Atajos de teclado', helpHideToggle: 'Ocultar ayuda', helpClickToHide: 'Haga clic para ocultar',
+        helpTitle: 'Atajos de teclado principales',
+        helpSubtitlePages: 'Páginas:', helpSubtitleGeneral: 'General:',
+        helpSubtitleNav: 'Navegación:', helpSubtitleTabs: 'Pestañas:',
+        helpQ: '<span class="hk">Q</span> — girar páginas seleccionadas en sentido antihorario',
+        helpW: '<span class="hk">W</span> — girar páginas seleccionadas en sentido horario',
+        helpDel: '<span class="hk">Supr</span> — eliminar páginas seleccionadas',
+        helpCtrlC: '<span class="hk">Ctrl + C</span> — copiar páginas seleccionadas',
+        helpCtrlX: '<span class="hk">Ctrl + X</span> — cortar páginas seleccionadas',
+        helpCtrlV: '<span class="hk">Ctrl + V</span> — pegar páginas o una imagen desde el portapapeles',
+        helpShiftSelect: 'Mantenga pulsado <span class="hk">Shift</span> — seleccionar un rango de páginas',
+        helpCtrlSelect: 'Mantenga pulsado <span class="hk">Ctrl</span> — seleccionar páginas individuales',
+        helpP: '<span class="hk">P</span> — imprimir', helpS: '<span class="hk">S</span> — guardar',
+        helpB: '<span class="hk">B</span> — marcadores',
+        helpCtrlF: '<span class="hk">Ctrl + F</span> — buscar',
+        helpCtrlZ: '<span class="hk">Ctrl + Z</span> — deshacer',
+        helpCtrlY: '<span class="hk">Ctrl + Y</span> — rehacer',
+        helpC: '<span class="hk">C</span> — modo selección', helpH: '<span class="hk">H</span> — modo navegación',
+        helpR: '<span class="hk">R</span> — modo lectura', helpZ: '<span class="hk">Z</span> — modo lupa',
+        helpAltWheel: '<span class="hk">Alt + rueda del ratón</span> — cambiar escala',
+        helpDblClickFit: '<span class="hk">Doble clic en la página</span> — ajustar al ancho',
+        helpTabLeft: '<span class="hk">Ctrl + flecha izquierda</span> — seleccionar pestaña de la izquierda',
+        helpTabRight: '<span class="hk">Ctrl + flecha derecha</span> — seleccionar pestaña de la derecha',
+        helpTabClose: '<span class="hk">Ctrl + Supr</span> — cerrar pestaña',
+        aboutDesktop: 'Aplicación de escritorio para trabajar con documentos PDF.',
+        aboutWeb: 'Aplicación web para trabajar con documentos PDF. Todo el procesamiento se realiza en el navegador.',
+        aboutVersion: 'Versión {ver}', aboutEditor: 'Editor: {build}', aboutEditorFrom: ' del {date}',
+        aboutVersionUnknownApp: 'Versión de la aplicación desconocida',
+        aboutVersionUnknown: 'Versión desconocida (no compilada mediante el pipeline de versiones)',
+        aboutLibraries: 'Bibliotecas:',
+        aboutNetworkOffline: 'Todas las bibliotecas están incluidas en la aplicación web. Sin acceso a la red.',
+        aboutNetworkCdn: 'Las bibliotecas se cargan desde CDN en el primer inicio. La versión sin conexión las incluye en el archivo, sin acceso a la red.',
+        aboutAiAuthorship: 'Una parte significativa del código fue escrita con inteligencia artificial siguiendo una especificación técnica y bajo la supervisión del desarrollador.',
+        aboutDeveloper: 'Desarrollador: <b>Evgeniy Kutin</b>.',
+        aboutClose: 'Cerrar', aboutShaComputing: 'SHA-256: calculando…',
+        aboutShaUnavailable: 'SHA-256: no disponible en este contexto',
+        aboutUpdateFail: 'No se pudo comprobar si hay actualizaciones (sin acceso a la lista de versiones).',
+        aboutUpdateApp: 'Hay una nueva versión de la aplicación disponible: {ver}',
+        aboutUpdateEditor: 'Hay un editor actualizado disponible: {build}',
+        aboutUpdateWeb: 'Hay una nueva versión disponible: {build}',
+        pagePrevDesktop: 'Página anterior (clic derecho - desplazamiento automático)',
+        pagePrevTouch: 'Página anterior. Mantener pulsado - desplazamiento automático',
+        pageNextDesktop: 'Página siguiente (clic derecho - desplazamiento automático)',
+        pageNextTouch: 'Página siguiente. Mantener pulsado - desplazamiento automático',
+        scrollSpeedDesktop: 'Velocidad de desplazamiento (rueda del ratón)', scrollSpeedTouch: 'Velocidad de desplazamiento',
+        scrollPauseDesktop: 'Detener desplazamiento (clic derecho / Esc)', scrollPauseTouch: 'Detener desplazamiento',
+        scrollResumeDesktop: 'Reanudar desplazamiento (clic derecho); Esc — salir', scrollResumeTouch: 'Reanudar desplazamiento',
+        loadingPages: 'Cargando páginas...', cancelLoading: 'Cancelar carga',
+        loadingMovingPage: 'Moviendo página...',
+        readModeEsc: 'ESC para salir del modo lectura', loupeWheelHint: 'Cambiar la escala con la rueda del ratón',
+        searchPlaceholder: 'Buscar en el documento', searchFind: 'Buscar (Enter)',
+        searchPrev: 'Coincidencia anterior (Shift+Enter)', searchNext: 'Siguiente coincidencia (Enter)',
+        searchClose: 'Cerrar (Esc)', searchAllTabs: 'Buscar en todas las pestañas',
+        bookmarksPanel: 'Marcadores', bookmarksPanelKey: 'Marcadores (B)', bookmarksClose: 'Cerrar marcadores',
+        bookmarksEmpty: 'Este documento no tiene marcadores', bookmarksLoading: 'Cargando…',
+        bookmarksExpandGroup: 'Expandir grupo', bookmarksCollapseGroup: 'Contraer grupo',
+        bookmarksAdd: 'Añadir marcador', bookmarksDeleteBtn: 'Eliminar marcador',
+        bookmarksExpandAll: 'Expandir marcadores', bookmarksCollapseAll: 'Contraer marcadores',
+        bookmarksWrapNames: 'Ajustar nombres largos de marcadores a la siguiente línea',
+        bookmarksGoTo: 'Ir al marcador', bookmarksRename: 'Renombrar', bookmarksDelete: 'Eliminar',
+        bookmarksLinkCurrent: 'Vincular a la posición actual',
+        bookmarksConfirmLink: '¿Vincular este marcador a la posición actual del documento?',
+        newDocumentHint: 'Se creará un nuevo documento', openInNewTabs: 'Se abrirá en nuevas pestañas',
+        tabClose: 'Cerrar pestaña', tabCloseOthers: 'Cerrar otras pestañas', tabCloseRight: 'Cerrar pestañas a la derecha',
+        peInsertText: 'Insertar texto', peInsertImage: 'Insertar imagen', peAddShapes: 'Añadir formas',
+        peShapeRect: 'Rectángulo', peShapeEllipse: 'Círculo / óvalo', peShapeArrow: 'Flecha',
+        peShapeLine: 'Línea', peShapePlus: 'Cruz', peShapeFreehand: 'Forma libre', peShapeStar: 'Estrella',
+        peObjLabelText: 'Texto', peObjLabelImage: 'Imagen',
+        peObjLabelRedact: 'Área de tachado', peObjLabelShapeGeneric: 'Forma',
+        peCancel: 'Cancelar', peSave: 'Guardar', peCropHint: 'Seleccione el área de recorte',
+        mergeTitleWithDoc: 'Combinar varios archivos en uno y añadirlo al actual (M)',
+        mergeTitleNoDoc: 'Combinar varios archivos en uno (M)',
+        mergeDropHint: 'Combinar los archivos seleccionados en uno',
+        mergingFilesProgress: 'Combinando {count} archivo(s)...',
+        mergeOrderDropHint: 'Añadir archivo para combinar',
+        openInNewTab: 'Se abrirá en una nueva pestaña',
+        quickRotateLeft: 'Girar en sentido antihorario',
+        quickRotateRight: 'Girar en sentido horario',
+        quickDeletePage: 'Eliminar página',
+        fitWidthTitle: 'Ajustar al ancho de página (doble clic en la página)\nClic derecho para establecer como modo de apertura predeterminado',
+        fitWidthAria: 'Ajustar al ancho de página',
+        fitWidthAriaDefaultOn: 'Ajustar al ancho de página (apertura predeterminada activada)',
+        fitWidthDefaultTitle: 'Todos los documentos se abrirán ajustados al ancho de página de forma predeterminada',
+        fitWidthDefaultLabel: 'Abrir de forma predeterminada',
+        scaleWheelHint: 'Alt + rueda del ratón — cambiar escala',
+        ctxNavMode: 'Modo navegación',
+        ctxReadMode: 'Modo lectura',
+        ctxLoupeMode: 'Modo lupa',
+        ctxSelectMode: 'Modo selección',
+        ctxFitWidth: 'Ajustar al ancho de página',
+        ctxRotLeft: 'Girar en sentido antihorario',
+        ctxRotRight: 'Girar en sentido horario',
+        ctxEdit: 'Editar',
+        ctxCut: 'Cortar (Ctrl+X)',
+        ctxCopy: 'Copiar (Ctrl+C)',
+        ctxDelete: 'Eliminar (Supr)',
+        ctxPrintPages: 'Imprimir páginas',
+        ctxPrintPage: 'Imprimir página',
+        ctxUndo: 'Deshacer (CTRL+Z)',
+        ctxRedo: 'Rehacer (CTRL+Y)',
+        ctxExitRead: 'Salir del modo lectura',
+        copy: 'Copiar',
+        copyImage: 'Copiar imagen',
+        saveAs: 'Guardar como',
+        highlightText: 'Resaltar texto',
+        strikeoutText: 'Tachar texto',
+        underlineText: 'Subrayar texto',
+        redactText: 'Tachar/censurar texto',
+        comment: 'Comentario',
+        peCommentPlaceholder: 'Comentario…',
+        peHlCommentMove: 'Mover',
+        peHlCommentDelete: 'Eliminar comentario',
+        peHlCommentAuthorPlaceholder: 'Autor',
+        peHlCommentTextPlaceholder: 'Comentario',
+        clearMarkup: 'Quitar formato',
+        pePage: 'Página',
+        pePagePrev: 'Ir a la página anterior',
+        pePageNext: 'Ir a la página siguiente',
+        peObjSelect: 'Seleccionar objetos',
+        peHand: 'Mano (desplazar la página)',
+        peCrop: 'Recortar',
+        peRedact: 'Borrador',
+        peMarker: 'Marcador',
+        peRotPageLeft: 'Girar página en sentido antihorario',
+        peRotPageRight: 'Girar página en sentido horario',
+        peRotPageLeftShort: 'Girar página a la izq.',
+        peRotPageRightShort: 'Girar página a la der.',
+        peDeleteObj: 'Eliminar objeto',
+        peCropCancel: 'Cancelar recorte',
+        peCropConfirm: 'Confirmar recorte',
+        loadingCroppingPage: 'Recortando página...',
+        loadingSavingAndNavigating: 'Guardando y navegando...',
+        loadingApplyingEdits: 'Aplicando cambios...',
+        peCropCtxConfirm: 'Recortar',
+        peRedactColor: 'Elegir color',
+        peRedactConfirm: 'Confirmar tachado',
+        pePropsDrag: 'Mover el panel. Un toque — contraer. Doble clic — restablecer posición predeterminada',
+        pePropsDragAria: 'Mover o contraer el panel de herramientas',
+        peTextSize: 'Tamaño del texto',
+        peTextColor: 'Color del texto',
+        peTextBg: 'Color de fondo del texto',
+        peFillColor: 'Color de relleno',
+        peNoBg: 'Sin fondo',
+        peMarkerColor: 'Color del marcador:',
+        peShapeColor: 'Color de la forma',
+        peFill: 'Relleno',
+        peFillShape: 'Rellenar forma',
+        peClearFill: 'Quitar relleno',
+        peStrokeDisabled: 'No se puede cambiar el grosor de línea mientras el relleno está activado',
+        pePropsShow: 'Mostrar panel',
+        pePropsShowAria: 'Mostrar el panel de herramientas',
+        pePropsDragAriaCollapsed: 'Mover o contraer el panel',
+        peStrokeWidth: 'Grosor de línea',
+        peStrokeWidthPx: 'Grosor de línea (px)',
+        peStrokeThicker: 'Aumentar 1 px',
+        peStrokeThinner: 'Reducir 1 px',
+        peOpacity: 'Opacidad',
+        peBold: 'Negrita',
+        peItalic: 'Cursiva',
+        peUnderline: 'Subrayado',
+        peAlignLeft: 'Alinear a la izquierda',
+        peAlignCenter: 'Centrar',
+        peAlignRight: 'Alinear a la derecha',
+        peCopy: 'Copiar',
+        peCut: 'Cortar',
+        pePaste: 'Pegar',
+        peEditText: 'Editar',
+        peDelete: 'Eliminar',
+        peAddShape: 'Añadir forma',
+        peAspectSnap: 'Proporción original',
+        peMobileKbTitle: 'Entrada de texto',
+        peMobileKbDone: 'Listo',
+        peSwipePrev: 'Página anterior',
+        peSwipeNext: 'Página siguiente',
+        tabClosePlural: 'Cerrar pestañas',
+        loadingOpeningFiles: 'Abriendo archivos...',
+        loadingOpenEditor: 'Abriendo editor de página...',
+        loadingPagesProgress: 'Cargando páginas... {cur} de {total}',
+        loadingPreparingDoc: 'Preparando documento...',
+        insertFromFile: 'Insertar desde archivo',
+        insertBlankPage: 'Insertar página en blanco',
+        insertFromClipboard: 'Pegar desde el portapapeles',
+        pwdTitle: 'El archivo está protegido con contraseña',
+        pwdBody: '{file}: introduzca la contraseña para abrir el documento.',
+        pwdBodyFile: 'Archivo',
+        pwdWrong: 'Contraseña incorrecta. Inténtelo de nuevo.',
+        pwdPlaceholder: 'Contraseña',
+        pwdOpen: 'Abrir',
+        pwdCancel: 'Cancelar',
+        encryptFileTooltip: 'Cifrar archivo con contraseña',
+        encryptPwdTitle: 'Cifrar archivo con contraseña',
+        encryptPwdBody: 'Esta contraseña será necesaria para abrir el PDF guardado.',
+        encryptPwdPlaceholder: 'Contraseña',
+        encryptPwdConfirmPlaceholder: 'Repita la contraseña',
+        encryptPwdOk: 'Cifrar',
+        encryptPwdEmpty: 'Introduzca una contraseña',
+        encryptPwdMismatch: 'Las contraseñas no coinciden',
+        encryptError: 'Error al cifrar el archivo',
+        imgSaveEncrypt: 'Cifrar archivo',
+        imgSaveExportTitle: 'Exportar como imagen',
+        imgSaveSaveTitle: 'Guardar como imagen',
+        imgSaveJpegTitle: 'Calidad JPEG',
+        imgSavePages: 'Páginas: {n}',
+        imgSaveDocsPages: 'Documentos: {docs}, páginas: {pages}',
+        imgSaveAllDocs: 'Guardar todos los documentos abiertos ({n})',
+        imgSaveDpi: 'Resolución (DPI):',
+        imgSaveDpiHint: 'Menos DPI — archivo más pequeño, menos detalle',
+        imgSaveQuality: 'Calidad JPEG:',
+        imgSaveFileSize: 'Tamaño del archivo:',
+        imgSaveTotalSize: 'Tamaño total de los archivos:',
+        imgSaveEstimating: 'calculando…',
+        imgSaveContinue: 'Continuar',
+        imgSaveCancel: 'Cancelar',
+        mergeOrderTitle: 'Orden de combinación de archivos',
+        mergeOrderHelp: 'Arrastre las filas para cambiar el orden, o suelte archivos del explorador en la lista — la posición de inserción se resalta con una línea azul. El botón «×» excluye un archivo de la lista.',
+        mergeOrderCancel: 'Cancelar',
+        mergeOrderConfirm: 'Confirmar combinación',
+        mergeOrderEmpty: 'No hay archivos en la lista',
+        mergeOrderPages: '{n} pág.',
+        mergeOrderUnavailable: 'No se puede abrir el archivo',
+        mergeOrderPassword: 'contraseña',
+        mergeOrderRemove: 'Quitar de la lista',
+        recoveryFound: 'Se encontró trabajo sin guardar: <b>{name}</b>',
+        recoveryPages: ' ({n} pág.)',
+        recoveryFrom: 'del {dt}',
+        recoveryExtraOne: 'y {n} sesión sin guardar más',
+        recoveryExtraMany: 'y {n} sesiones sin guardar más',
+        recoveryAsk: '¿Restaurar este documento?',
+        recoveryRestore: 'Restaurar',
+        recoveryDelete: 'Eliminar',
+        recoveryDefaultName: 'documento.pdf',
+        mergedFileNameDefault: 'combinado.pdf',
+        recoveryFail: 'No se pudo restaurar el documento: ',
+        peAspectSnapSquare: 'Proporción 1:1',
+        confirmYes: 'Sí',
+        confirmNo: 'No',
+        confirmDeletePage: '¿Eliminar la página seleccionada?',
+        confirmDeletePages: '¿Eliminar las páginas seleccionadas?',
+        confirmOpenReplace: 'El documento no está guardado.<br>Al abrir uno nuevo, se reemplazará el documento actual.',
+        confirmOpenReplaceYes: 'Confirmar',
+        confirmOpenReplaceNo: 'Cancelar',
+        confirmCloseTab: 'El documento «{name}» no está guardado.<br>¿Cerrar la pestaña?',
+        confirmCloseTabYes: 'Cerrar',
+        confirmCloseTabNo: 'Cancelar',
+        docUnsaved: 'Documento sin guardar',
+        searchNotFound: 'No encontrado',
+        searchNoMatches: 'No se encontraron coincidencias',
+        undoMobile: 'Deshacer', redoMobile: 'Rehacer'
       }
     };
 
@@ -8299,7 +8592,7 @@
     function pmDetectLocale() {
       try {
         const saved = localStorage.getItem(PM_LOCALE_KEY);
-        if (saved === 'en' || saved === 'ru') return saved;
+        if (saved === 'en' || saved === 'ru' || saved === 'es') return saved;
       } catch (_) {}
       try {
         const langs = (navigator.languages && navigator.languages.length)
@@ -8307,6 +8600,7 @@
         for (let i = 0; i < langs.length; i++) {
           const l = String(langs[i] || '').toLowerCase();
           if (l.startsWith('en')) return 'en';
+          if (l.startsWith('es')) return 'es';
           if (l.startsWith('ru')) return 'ru';
         }
       } catch (_) {}
@@ -9391,19 +9685,24 @@
     }
 
 
+    const PM_LOCALE_ORDER = ['ru', 'en', 'es'];
+    function pmNextLocale() {
+      return PM_LOCALE_ORDER[(PM_LOCALE_ORDER.indexOf(pmLocale) + 1) % PM_LOCALE_ORDER.length];
+    }
     function pmUpdateLangToggleUI() {
       const btn = document.getElementById('langToggleBtn');
       const flag = document.getElementById('langToggleFlag');
       if (!btn) return;
-      // Show the code of the language you switch TO.
-      const toEn = pmLocale !== 'en';
-      if (flag) flag.textContent = toEn ? 'EN' : 'RU';
-      const label = toEn ? t('langSwitchToEn') : t('langSwitchToRu');
+      // Show the code of the language you switch TO (cycles ru → en → es → ru).
+      const next = pmNextLocale();
+      if (flag) flag.textContent = next.toUpperCase();
+      const key = next === 'en' ? 'langSwitchToEn' : (next === 'es' ? 'langSwitchToEs' : 'langSwitchToRu');
+      const label = t(key);
       btn.title = label;
       btn.setAttribute('aria-label', label);
     }
     function pmApplyI18n() {
-      document.documentElement.setAttribute('lang', pmLocale === 'en' ? 'en' : 'ru');
+      document.documentElement.setAttribute('lang', pmLocale === 'en' ? 'en' : (pmLocale === 'es' ? 'es' : 'ru'));
       try { document.title = t('appTitle'); } catch (_) {}
       document.querySelectorAll('[data-i18n]').forEach((el) => {
         const key = el.getAttribute('data-i18n');
@@ -9468,14 +9767,14 @@
       }
     }
     function pmSetLocale(locale, persist) {
-      pmLocale = (locale === 'en') ? 'en' : 'ru';
+      pmLocale = (locale === 'en' || locale === 'es') ? locale : 'ru';
       if (persist !== false) {
         try { localStorage.setItem(PM_LOCALE_KEY, pmLocale); } catch (_) {}
       }
       pmApplyI18n();
     }
     function pmToggleLocale() {
-      pmSetLocale(pmLocale === 'en' ? 'ru' : 'en', true);
+      pmSetLocale(pmNextLocale(), true);
     }
     // Sync the toggle button's icon/title with whatever <head> already applied.
     pmUpdateThemeToggleUI(pmCurrentTheme());
@@ -9668,7 +9967,7 @@
       const extra = rows.length - 1;
       let dtStr = '';
       try {
-        dtStr = new Date(top.savedAt || Date.now()).toLocaleString(pmLocale === 'en' ? 'en-GB' : 'ru-RU');
+        dtStr = new Date(top.savedAt || Date.now()).toLocaleString(pmLocale === 'en' ? 'en-GB' : (pmLocale === 'es' ? 'es-ES' : 'ru-RU'));
       } catch (e) {}
       const recName = escapeHtml(top.fileName || t('recoveryDefaultName'));
       const msg = t('recoveryFound', { name: recName }) +

@@ -62,6 +62,8 @@ After downloading, open the HTML file in your browser. The online version loads 
 - **Image compression** — reduce the PDF file size without losing readability.
 - **Password & encryption** — set a password on a PDF right in the browser, no third-party service involved.
 
+**Supported interface languages:** English, Russian, Spanish.
+
 ---
 
 <a id="русский"></a>**Редактор PDF, который работает прямо в браузере.** Слияние и разбиение PDF, редактирование страниц, закладки, конвертация Word/Excel/почты — всё в одном HTML-файле, ничего устанавливать не нужно. Файлы не покидают ваш компьютер: вся обработка происходит локально, без загрузки на сервер.
@@ -121,3 +123,5 @@ After downloading, open the HTML file in your browser. The online version loads 
 - **Импорт из Word, Excel и почты** — `.docx`, `.xlsx`, `.eml` и `.msg` конвертируются в PDF автоматически.
 - **Сжатие изображений** — уменьшение размера файла без потери читаемости.
 - **Пароль и шифрование** — установка пароля на PDF прямо в браузере, без сторонних сервисов.
+
+**Поддерживаемые языки интерфейса:** русский, английский, испанский.
