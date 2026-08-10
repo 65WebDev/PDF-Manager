@@ -4480,16 +4480,13 @@
       background: #c3daf9;
       box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
     }
-    /* appearance:none alone isn't reliably enough to fully suppress native
-       checkbox/radio rendering across every browser/OS/theme combination -
-       some still paint a faint native shadow/second shape underneath,
-       looking like two overlapping controls. Instead the real <input> is
-       made fully invisible (still handles click/keyboard/focus/state - nothing
-       native is ever painted) and every pixel of the visible circle/box is a
-       separate sibling div driven purely by the :checked adjacent-sibling
-       selector, so there is nothing left for a browser/theme to render
-       inconsistently. position:absolute + inset:0 for the same inline-flow-
-       baseline reason as the text/select controls above. */
+    /* The real <input> is made fully invisible (it still handles
+       click/keyboard/focus/state) and every pixel of the visible circle/box
+       is drawn by a separate sibling div, driven purely by the :checked
+       adjacent-sibling selector - styling a native checkbox/radio directly
+       is not reliable across browser/OS/theme combinations, and this way the
+       control's whole appearance is ours. position:absolute + inset:0 for the
+       same inline-flow-baseline reason as the text/select controls above. */
     .pm-form-checkbox,
     .pm-form-radio {
       position: absolute;
@@ -4499,15 +4496,18 @@
       opacity: 0;
       cursor: pointer;
     }
-    /* No z-index on the invisible input above: it must stay BELOW the visual
-       div in stacking order (default: later DOM sibling wins) so that any
-       native rendering leakage the browser still paints for the input
-       (observed even at opacity:0 in some engines/themes) is fully covered
-       by the opaque visual on top, instead of showing through as a shadow. */
+    /* The input above carries no z-index, so this visual - a later DOM
+       sibling - paints over it by default stacking order. (The input is
+       opacity:0 anyway; this just keeps the paint order obvious.) */
     .pm-form-checkbox-visual,
     .pm-form-radio-visual {
       position: absolute;
-      inset: 0;
+      /* Deliberately bled OUTSIDE the widget box - see pmFormRasterBleedPx().
+         The PDF's own control graphic sits at exactly this rect and its
+         antialiased stroke spills a fraction of a raster pixel past it, which
+         the display upscale magnifies into a dark arc peeking out from behind
+         this one (reads as a "second circle" on radio buttons). */
+      inset: calc(-1 * var(--pm-form-bleed, 1px));
       box-sizing: border-box;
       pointer-events: none;
       background: #d9e8fb;
@@ -13195,6 +13195,33 @@
       setDocumentDirty(true);
     }
 
+    // How far the overlay's own control graphic has to bleed outside the
+    // widget box to fully hide the PDF's own drawn control underneath it.
+    //
+    // Writers commonly bake a field's border/background straight into the
+    // PAGE CONTENT STREAM rather than (only) the widget's appearance stream -
+    // reportlab's forceBorder does exactly that - so annotationMode:0, which
+    // suppresses annotations everywhere in this app, does NOT hide them: a
+    // real circle/box is painted in the page raster at exactly the same rect
+    // this overlay covers. Its stroke is antialiased, and half the stroke
+    // width sits outside the rect to begin with, so it spills up to about one
+    // raster pixel past the box. The raster is usually shown upscaled, which
+    // magnifies that sub-pixel spill into a several-px dark arc peeking out
+    // from behind the overlay - on a radio button that reads as a "second
+    // circle" behind the real one, strongest on whichever side the rect's
+    // fractional pixel position rounds toward.
+    //
+    // Covering it takes one source pixel, expressed in display px. Clamped so
+    // a heavily upscaled (blurry) raster can't inflate the control absurdly.
+    function pmFormRasterBleedPx(img, metrics) {
+      if (!img || !img.naturalWidth || !metrics || !(metrics.width > 0)) return 1;
+      return Math.min(3, Math.max(1, metrics.width / img.naturalWidth));
+    }
+
+    function pmFormApplyRasterBleed(layer, img, metrics) {
+      layer.style.setProperty('--pm-form-bleed', pmFormRasterBleedPx(img, metrics) + 'px');
+    }
+
     // Field text was a fixed 13px regardless of zoom - overflowed/garbled at
     // small page scale, looked disproportionately tiny at high zoom. Size it
     // off the field's own actual rendered pixel height instead, so it tracks
@@ -13342,6 +13369,7 @@
         layer.style.top = metrics.top + 'px';
         layer.style.width = metrics.width + 'px';
         layer.style.height = metrics.height + 'px';
+        pmFormApplyRasterBleed(layer, img, metrics);
         layer.innerHTML = '';
         const form = pdfDoc.getForm();
         fields.forEach((f) => {
@@ -13401,6 +13429,7 @@
         layer.style.top = metrics.top + 'px';
         layer.style.width = metrics.width + 'px';
         layer.style.height = metrics.height + 'px';
+        pmFormApplyRasterBleed(layer, img, metrics);
         // The fields inside are percentage-positioned so their pixel box
         // tracks the layer resize on its own, but font-size doesn't scale
         // with a percentage box - recompute it here too, or text stays
