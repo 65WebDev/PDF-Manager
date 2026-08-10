@@ -55,6 +55,9 @@ const PDFJS_WORKER_URL =
 const CANTOO_IMPORT =
   "import('https://esm.sh/@cantoo/pdf-lib@2.7.4')";
 
+const FONTKIT_IMPORT =
+  "import('https://esm.sh/@pdf-lib/fontkit@1.1.1')";
+
 const POSTAL_MIME_IMPORT =
   "import('https://cdn.jsdelivr.net/npm/postal-mime@2.7.5/+esm')";
 
@@ -89,6 +92,20 @@ function toBase64(text) {
 async function bundleCantooPdfLib() {
   const result = await esbuild.build({
     entryPoints: [join(root, 'node_modules/@cantoo/pdf-lib/es/index.js')],
+    bundle: true,
+    format: 'esm',
+    platform: 'browser',
+    write: false,
+    minify: true,
+    target: ['es2020'],
+    logLevel: 'silent',
+  });
+  return result.outputFiles[0].text;
+}
+
+async function bundleFontkit() {
+  const result = await esbuild.build({
+    entryPoints: [join(root, 'node_modules/@pdf-lib/fontkit/dist/fontkit.es.js')],
     bundle: true,
     format: 'esm',
     platform: 'browser',
@@ -184,6 +201,36 @@ function replaceCantooImport(html, bundledEsm) {
 
   return html.replace(
     `pdfPasswordLibPromise = ${CANTOO_IMPORT}`,
+    replacement,
+  );
+}
+
+function replaceFontkitImport(html, bundledEsm) {
+  const moduleB64 = toBase64(bundledEsm);
+  // Same reasoning as replaceCantooImport above: the source's own trailing
+  // ".then((mod) => mod.default || mod).catch(...)" stays untouched right
+  // after this replacement, so the IIFE must itself `return` an already-
+  // unwrapped-or-not promise for that trailing .then to safely re-apply to
+  // (mod.default || mod) is a no-op the second time since a plain fontkit
+  // object has no .default property.
+  const replacement = [
+    '(function () {',
+    `  var moduleB64 = '${moduleB64}';`,
+    "  var binary = atob(moduleB64);",
+    '  var bytes = new Uint8Array(binary.length);',
+    '  for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);',
+    "  var blob = new Blob([bytes], { type: 'text/javascript' });",
+    '  var moduleUrl = URL.createObjectURL(blob);',
+    '  return pmFormFallbackFontkitPromise = import(moduleUrl).then(function (mod) { return mod.default || mod; });',
+    '})()',
+  ].join('\n        ');
+
+  if (!html.includes(FONTKIT_IMPORT)) {
+    throw new Error('Could not find @pdf-lib/fontkit dynamic import');
+  }
+
+  return html.replace(
+    `pmFormFallbackFontkitPromise = ${FONTKIT_IMPORT}`,
     replacement,
   );
 }
@@ -294,6 +341,9 @@ async function main() {
   console.log('Bundling @cantoo/pdf-lib...');
   const cantooBundle = await bundleCantooPdfLib();
 
+  console.log('Bundling @pdf-lib/fontkit...');
+  const fontkitBundle = await bundleFontkit();
+
   console.log('Bundling postal-mime...');
   const postalMimeBundle = await bundlePostalMime();
 
@@ -305,6 +355,7 @@ async function main() {
   html = replaceHeadScripts(html, inlinedBlocks);
   html = replacePdfJsWorker(html, workerCode);
   html = replaceCantooImport(html, cantooBundle);
+  html = replaceFontkitImport(html, fontkitBundle);
   html = replacePostalMimeImport(html, postalMimeBundle);
   html = replaceMsgLibsImports(html, msgLibsBundle);
 

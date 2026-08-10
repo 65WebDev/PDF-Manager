@@ -78,6 +78,7 @@ After downloading, open the HTML file in your browser. The online version loads 
 - **@kenjiuno/msgreader-web-ng** — parsing Outlook messages (`.msg`)
 - **@kenjiuno/decompressrtf** — decompressing RTF bodies inside `.msg` files
 - **@cantoo/pdf-lib** — opening password-protected PDFs
+- **@pdf-lib/fontkit** — embedding a Unicode font for non-Latin text in filled-in form fields
 
 ---
 
@@ -155,3 +156,4 @@ After downloading, open the HTML file in your browser. The online version loads 
 - **@kenjiuno/msgreader-web-ng** — разбор писем Outlook (`.msg`)
 - **@kenjiuno/decompressrtf** — распаковка RTF-тела в файлах `.msg`
 - **@cantoo/pdf-lib** — открытие PDF-файлов, защищённых паролем
+- **@pdf-lib/fontkit** — встраивание Unicode-шрифта для нелатинского текста в заполняемых полях форм
