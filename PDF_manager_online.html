@@ -13211,11 +13211,14 @@
     // circle" behind the real one, strongest on whichever side the rect's
     // fractional pixel position rounds toward.
     //
-    // Covering it takes one source pixel, expressed in display px. Clamped so
-    // a heavily upscaled (blurry) raster can't inflate the control absurdly.
+    // Covering it takes one source pixel (the antialiasing spread) plus a
+    // display pixel of slack for the subpixel misregistration between the
+    // overlay's box and the raster's pixel grid. Clamped so a heavily
+    // upscaled (blurry) raster can't inflate the control absurdly.
     function pmFormRasterBleedPx(img, metrics) {
       if (!img || !img.naturalWidth || !metrics || !(metrics.width > 0)) return 1;
-      return Math.min(3, Math.max(1, metrics.width / img.naturalWidth));
+      const sourcePx = metrics.width / img.naturalWidth;
+      return Math.min(6, Math.max(1, sourcePx + 1));
     }
 
     function pmFormApplyRasterBleed(layer, img, metrics) {
