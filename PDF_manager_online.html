@@ -4432,6 +4432,9 @@
       position: absolute;
       box-sizing: border-box;
     }
+    /* Solid (not translucent) fill - a partial-alpha background let anything
+       drawn underneath show through at the edges/through antialiasing, which
+       read as ghosted double text next to the field's real value. */
     .pm-form-input,
     .pm-form-select {
       box-sizing: border-box;
@@ -4441,29 +4444,84 @@
       padding: 1px 3px;
       border: 1px solid rgba(37, 99, 235, 0.55);
       border-radius: 2px;
-      background: rgba(173, 216, 230, 0.35);
+      background: #d9e8fb;
       color: #1a1a1a;
-      font: 13px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      line-height: 1.2;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+      /* font-size is set per-instance in JS (pmFormApplyFontSize), scaled to
+         the field's actual rendered pixel height so it tracks zoom. */
     }
     textarea.pm-form-input {
       resize: none;
       overflow: auto;
+      white-space: pre-wrap;
+    }
+    input.pm-form-input,
+    .pm-form-select {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .pm-form-select {
+      padding-right: 14px; /* room for the native dropdown arrow */
     }
     .pm-form-input:focus,
     .pm-form-select:focus {
       outline: none;
       border-color: #2563eb;
-      background: rgba(173, 216, 230, 0.55);
+      background: #c3daf9;
       box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
     }
+    /* Native checkbox/radio rendering doesn't scale or center predictably
+       when stretched to arbitrary CSS box sizes across browsers - appearance:
+       none hands the whole visual over to CSS below so it always exactly
+       fills and centers within the field's own box, whatever size that is. */
     .pm-form-checkbox,
     .pm-form-radio {
+      -webkit-appearance: none;
+      appearance: none;
+      position: relative;
       box-sizing: border-box;
       width: 100%;
       height: 100%;
       margin: 0;
+      padding: 0;
       cursor: pointer;
-      accent-color: #2563eb;
+      background: #d9e8fb;
+      border: 1.5px solid rgba(37, 99, 235, 0.7);
+    }
+    .pm-form-checkbox { border-radius: 2px; }
+    .pm-form-radio { border-radius: 50%; }
+    .pm-form-checkbox:checked,
+    .pm-form-radio:checked {
+      background: #2563eb;
+      border-color: #2563eb;
+    }
+    .pm-form-checkbox:checked::after {
+      content: '';
+      position: absolute;
+      left: 27%;
+      top: 6%;
+      width: 32%;
+      height: 58%;
+      border: solid #fff;
+      border-width: 0 2px 2px 0;
+      transform: rotate(40deg);
+    }
+    .pm-form-radio:checked::after {
+      content: '';
+      position: absolute;
+      left: 30%;
+      top: 30%;
+      width: 40%;
+      height: 40%;
+      border-radius: 50%;
+      background: #fff;
+    }
+    .pm-form-checkbox:focus,
+    .pm-form-radio:focus {
+      outline: none;
+      box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.35);
     }
 
     /*Preview sheet: keep the page's true aspect ratio (CropBox may not be A4
@@ -13115,6 +13173,21 @@
       setDocumentDirty(true);
     }
 
+    // Field text was a fixed 13px regardless of zoom - overflowed/garbled at
+    // small page scale, looked disproportionately tiny at high zoom. Size it
+    // off the field's own actual rendered pixel height instead, so it tracks
+    // the scale slider/fit-width the same way the underlying page bitmap does.
+    // Multiline fields use a smaller ratio of their (usually much taller) box
+    // so a several-line-tall comment field doesn't get comically large text.
+    function pmFormApplyFontSize(el, heightPx) {
+      const control = el.querySelector('input, textarea, select');
+      if (!control) return;
+      const multiline = control.tagName === 'TEXTAREA';
+      const ratio = multiline ? 0.28 : 0.55;
+      const px = Math.max(6, Math.min(28, heightPx * ratio));
+      control.style.fontSize = px + 'px';
+    }
+
     // Builds one field's overlay control, wiring it straight to the live
     // pdf-lib field object. 'input' mutates the field on every keystroke (so
     // Save always sees the latest text, since it serializes the live pdfDoc
@@ -13202,46 +13275,62 @@
       return wrap;
     }
 
+    let pmFormBuildingPages = new Set();
+
     async function pmFormBuildLayerForPage(pageDiv) {
       const idx = parseInt(pageDiv.dataset.index, 10);
       if (Number.isNaN(idx)) return;
-      const wrapper = pageDiv.querySelector('.img-wrapper');
-      const img = wrapper ? wrapper.querySelector('img') : null;
-      if (!wrapper || !img || !img.naturalWidth || !img.naturalHeight) return;
-      let layer = wrapper.querySelector('.pm-form-layer');
-      // Don't rebuild out from under a field the user is actively editing.
-      if (layer && document.activeElement && layer.contains(document.activeElement)) return;
-      const token = hqPdfjsToken;
-      const { aspectRatio, fields } = await pmFormLoadPage(idx);
-      if (token !== hqPdfjsToken) return;
-      if (!fields.length) {
-        if (layer) layer.remove();
-        return;
+      // pmFormLoadPage()'s own await gap means two overlapping calls for the
+      // SAME page can otherwise interleave (a debounced rebuild firing again
+      // while a previous run is still mid-flight through runPageFormLayerBuild's
+      // page loop, e.g. while many pages lazy-load in quick succession) - each
+      // one clearing/re-appending the layer's children independently, which
+      // read as doubled/offset controls for a frame. One build per page at a time.
+      if (pmFormBuildingPages.has(idx)) return;
+      pmFormBuildingPages.add(idx);
+      try {
+        const wrapper = pageDiv.querySelector('.img-wrapper');
+        const img = wrapper ? wrapper.querySelector('img') : null;
+        if (!wrapper || !img || !img.naturalWidth || !img.naturalHeight) return;
+        let layer = wrapper.querySelector('.pm-form-layer');
+        // Don't rebuild out from under a field the user is actively editing.
+        if (layer && document.activeElement && layer.contains(document.activeElement)) return;
+        const token = hqPdfjsToken;
+        const { aspectRatio, fields } = await pmFormLoadPage(idx);
+        if (token !== hqPdfjsToken) return;
+        if (!fields.length) {
+          if (layer) layer.remove();
+          return;
+        }
+        const metrics = getPageImgDisplayMetrics(img, wrapper, aspectRatio);
+        if (!metrics || !metrics.width || !metrics.height) return;
+        if (!layer) {
+          layer = document.createElement('div');
+          layer.className = 'pm-form-layer';
+          wrapper.appendChild(layer);
+        }
+        layer.dataset.trueAspectRatio = String(aspectRatio);
+        layer.style.left = metrics.left + 'px';
+        layer.style.top = metrics.top + 'px';
+        layer.style.width = metrics.width + 'px';
+        layer.style.height = metrics.height + 'px';
+        layer.innerHTML = '';
+        const form = pdfDoc.getForm();
+        fields.forEach((f) => {
+          const field = form.getField(f.name);
+          const el = pmFormCreateControl(field, f);
+          if (!el) return;
+          el.style.left = (f.left * 100) + '%';
+          el.style.top = (f.top * 100) + '%';
+          el.style.width = (f.width * 100) + '%';
+          el.style.height = (f.height * 100) + '%';
+          el.dataset.hFrac = String(f.height);
+          pmFormApplyFontSize(el, f.height * metrics.height);
+          layer.appendChild(el);
+        });
+      } finally {
+        pmFormBuildingPages.delete(idx);
       }
-      const metrics = getPageImgDisplayMetrics(img, wrapper, aspectRatio);
-      if (!metrics || !metrics.width || !metrics.height) return;
-      if (!layer) {
-        layer = document.createElement('div');
-        layer.className = 'pm-form-layer';
-        wrapper.appendChild(layer);
-      }
-      layer.dataset.trueAspectRatio = String(aspectRatio);
-      layer.style.left = metrics.left + 'px';
-      layer.style.top = metrics.top + 'px';
-      layer.style.width = metrics.width + 'px';
-      layer.style.height = metrics.height + 'px';
-      layer.innerHTML = '';
-      const form = pdfDoc.getForm();
-      fields.forEach((f) => {
-        const field = form.getField(f.name);
-        const el = pmFormCreateControl(field, f);
-        if (!el) return;
-        el.style.left = (f.left * 100) + '%';
-        el.style.top = (f.top * 100) + '%';
-        el.style.width = (f.width * 100) + '%';
-        el.style.height = (f.height * 100) + '%';
-        layer.appendChild(el);
-      });
     }
 
     let pmFormBuildTimer = null;
@@ -13284,6 +13373,15 @@
         layer.style.top = metrics.top + 'px';
         layer.style.width = metrics.width + 'px';
         layer.style.height = metrics.height + 'px';
+        // The fields inside are percentage-positioned so their pixel box
+        // tracks the layer resize on its own, but font-size doesn't scale
+        // with a percentage box - recompute it here too, or text stays
+        // whatever size it was at the last full rebuild through every zoom
+        // change in between (scale-slider drag, fit-width, window resize).
+        layer.querySelectorAll('.pm-form-field').forEach((el) => {
+          const hFrac = parseFloat(el.dataset.hFrac);
+          if (hFrac > 0) pmFormApplyFontSize(el, hFrac * metrics.height);
+        });
       });
     }
 
