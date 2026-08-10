@@ -4480,34 +4480,43 @@
       background: #c3daf9;
       box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
     }
-    /* Native checkbox/radio rendering doesn't scale or center predictably
-       when stretched to arbitrary CSS box sizes across browsers - appearance:
-       none hands the whole visual over to CSS below so it always exactly
-       fills and centers within the field's own box, whatever size that is.
-       position:absolute + inset:0 for the same reason as the text/select
-       controls above - keeps it out of inline-flow baseline alignment
-       entirely, still a valid containing block for the ::after dot below. */
+    /* appearance:none alone isn't reliably enough to fully suppress native
+       checkbox/radio rendering across every browser/OS/theme combination -
+       some still paint a faint native shadow/second shape underneath,
+       looking like two overlapping controls. Instead the real <input> is
+       made fully invisible (still handles click/keyboard/focus/state - nothing
+       native is ever painted) and every pixel of the visible circle/box is a
+       separate sibling div driven purely by the :checked adjacent-sibling
+       selector, so there is nothing left for a browser/theme to render
+       inconsistently. position:absolute + inset:0 for the same inline-flow-
+       baseline reason as the text/select controls above. */
     .pm-form-checkbox,
     .pm-form-radio {
-      -webkit-appearance: none;
-      appearance: none;
+      position: absolute;
+      inset: 0;
+      margin: 0;
+      padding: 0;
+      opacity: 0;
+      cursor: pointer;
+      z-index: 1;
+    }
+    .pm-form-checkbox-visual,
+    .pm-form-radio-visual {
       position: absolute;
       inset: 0;
       box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-      cursor: pointer;
+      pointer-events: none;
       background: #d9e8fb;
       border: 1.5px solid rgba(37, 99, 235, 0.7);
     }
-    .pm-form-checkbox { border-radius: 2px; }
-    .pm-form-radio { border-radius: 50%; }
-    .pm-form-checkbox:checked,
-    .pm-form-radio:checked {
+    .pm-form-checkbox-visual { border-radius: 2px; }
+    .pm-form-radio-visual { border-radius: 50%; }
+    .pm-form-checkbox:checked + .pm-form-checkbox-visual,
+    .pm-form-radio:checked + .pm-form-radio-visual {
       background: #2563eb;
       border-color: #2563eb;
     }
-    .pm-form-checkbox:checked::after {
+    .pm-form-checkbox:checked + .pm-form-checkbox-visual::after {
       content: '';
       position: absolute;
       left: 27%;
@@ -4518,7 +4527,7 @@
       border-width: 0 2px 2px 0;
       transform: rotate(40deg);
     }
-    .pm-form-radio:checked::after {
+    .pm-form-radio:checked + .pm-form-radio-visual::after {
       content: '';
       position: absolute;
       left: 30%;
@@ -4528,9 +4537,8 @@
       border-radius: 50%;
       background: #fff;
     }
-    .pm-form-checkbox:focus,
-    .pm-form-radio:focus {
-      outline: none;
+    .pm-form-checkbox:focus + .pm-form-checkbox-visual,
+    .pm-form-radio:focus + .pm-form-radio-visual {
       box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.35);
     }
 
@@ -13237,7 +13245,10 @@
           try { if (input.checked) field.check(); else field.uncheck(); } catch (_) {}
           commit();
         });
+        const visual = document.createElement('div');
+        visual.className = 'pm-form-checkbox-visual';
         wrap.appendChild(input);
+        wrap.appendChild(visual);
       } else if (f.kind === 'radio') {
         const options = field.getOptions();
         const value = options[f.widgetIdx];
@@ -13253,7 +13264,10 @@
           try { field.select(value); } catch (_) {}
           commit();
         });
+        const visual = document.createElement('div');
+        visual.className = 'pm-form-radio-visual';
         wrap.appendChild(input);
+        wrap.appendChild(visual);
       } else if (f.kind === 'dropdown' || f.kind === 'optionlist') {
         const select = document.createElement('select');
         select.className = 'pm-form-select';
