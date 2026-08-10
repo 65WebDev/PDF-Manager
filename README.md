@@ -64,6 +64,21 @@ After downloading, open the HTML file in your browser. The online version loads 
 
 **Supported interface languages:** English, Russian, Spanish.
 
+**Embedded libraries:**
+
+- **pdf-lib** — PDF assembly and editing (pages, rotation, merging, saving)
+- **pdf.js** — rendering PDF pages (thumbnails, preview)
+- **mammoth** — converting Word (`.docx`) files to HTML on import
+- **SheetJS (xlsx)** — reading Excel (`.xls`/`.xlsx`) tables on import
+- **html2canvas** — rasterizing HTML markup into an image for PDF assembly
+- **JSZip** — unpacking `.docx` archives for docx-preview
+- **docx-preview** — page-accurate rendering of Word documents
+- **ExcelJS** — reading styled Excel tables with print/pagination settings
+- **postal-mime** — parsing email messages (`.eml`)
+- **@kenjiuno/msgreader-web-ng** — parsing Outlook messages (`.msg`)
+- **@kenjiuno/decompressrtf** — decompressing RTF bodies inside `.msg` files
+- **@cantoo/pdf-lib** — opening password-protected PDFs
+
 ---
 
 <a id="русский"></a>**Редактор PDF, который работает прямо в браузере.** Слияние и разбиение PDF, редактирование страниц, закладки, конвертация Word/Excel/почты — всё в одном HTML-файле, ничего устанавливать не нужно. Файлы не покидают ваш компьютер: вся обработка происходит локально, без загрузки на сервер.
@@ -125,3 +140,18 @@ After downloading, open the HTML file in your browser. The online version loads 
 - **Пароль и шифрование** — установка пароля на PDF прямо в браузере, без сторонних сервисов.
 
 **Поддерживаемые языки интерфейса:** русский, английский, испанский.
+
+**Используемые библиотеки:**
+
+- **pdf-lib** — сборка и редактирование PDF (страницы, поворот, слияние, сохранение)
+- **pdf.js** — рендер страниц PDF (миниатюры, предпросмотр)
+- **mammoth** — конвертация файлов Word (`.docx`) в HTML при импорте
+- **SheetJS (xlsx)** — чтение таблиц Excel (`.xls`/`.xlsx`) при импорте
+- **html2canvas** — растеризация HTML-разметки в изображение для сборки PDF
+- **JSZip** — распаковка `.docx`-архивов для docx-preview
+- **docx-preview** — постраничный рендер документов Word
+- **ExcelJS** — чтение таблиц Excel со стилями и настройками печати
+- **postal-mime** — разбор писем (`.eml`)
+- **@kenjiuno/msgreader-web-ng** — разбор писем Outlook (`.msg`)
+- **@kenjiuno/decompressrtf** — распаковка RTF-тела в файлах `.msg`
+- **@cantoo/pdf-lib** — открытие PDF-файлов, защищённых паролем
