@@ -4405,20 +4405,28 @@
     }
 
     /* Fill-form overlay - real HTML controls over a page's AcroForm widgets.
-       Only shown in fill-form mode (body.pm-form-mode-active); the controls
-       are styled to read as "fillable fields on paper" (pale blue, on top of
-       the always-white page bitmap) rather than following the app's own
+       Available directly in select mode, no dedicated mode. The controls are
+       styled to read as "fillable fields on paper" (pale blue, on top of the
+       always-white page bitmap) rather than following the app's own
        light/dark theme, the same way .pm-link-hotzone doesn't either. */
     .pm-form-layer {
       position: absolute;
       overflow: hidden;
-      pointer-events: none;
-      display: none;
+      pointer-events: auto;
       z-index: 4;
     }
-    body.pm-form-mode-active .pm-form-layer {
-      display: block;
-      pointer-events: auto;
+    body.pm-links-multi-column .pm-form-layer,
+    body.pm-links-multi-column .pm-form-field {
+      pointer-events: none !important;
+    }
+    /* Unlike .pm-link-layer, this must stay VISIBLE (not display:none) in
+       nav/read mode: page thumbnails render with annotationMode: 0 (pdf.js's
+       AnnotationMode.DISABLE) everywhere in this app, so a typed value can
+       never be baked into the raster - this overlay is the only place it's
+       ever shown. Only interactivity is disabled here, so a click falls
+       through to nav mode's pan/drag instead of focusing a field. */
+    body.nav-mode-active .pm-form-layer {
+      pointer-events: none !important;
     }
     .pm-form-field {
       position: absolute;
@@ -6554,7 +6562,6 @@
           <button id="navModeBtn" class="icon-btn mode-btn rl-slot-popup" onclick="setMode('nav')" disabled title="Режим навигации (H)" data-i18n-title="navMode"><svg viewBox="0 0 69.0645142 89.838707" width="22" height="22" fill="#ffffff" stroke="#000000" stroke-width="0.8" stroke-linejoin="round" aria-hidden="true"><path d="M40.4849663,82.8033905  c-9.1123066,0-16.3754902-5.1455078-19.4277363-13.7636719c-0.1801758-0.5087891-0.3701172-1.015625-0.5893555-1.5087891  c-0.6171875-1.3886719-0.6171875-1.3886719-0.7412109-1.5224609l-0.015625,0.0146484  c-0.7080078-1.3291016-3.1923828-5.6308632-11.9047842-20.7168007c-0.909668-1.5717773-0.3686523-3.5917969,1.2021484-4.5014648  c0.7021484-0.4023438,1.5004883-0.6147461,2.3085938-0.6147461c1.6572266,0,3.1967773,0.8867188,4.0185547,2.315918  l6.8134756,11.7963867c0.2260742,0.3916016,0.6865234,0.5839844,1.125,0.4648438  c0.4370117-0.1171875,0.7407227-0.5136719,0.7407227-0.9658203V16.7179394c0-2.1977549,1.6191406-4.0249033,3.6865234-4.1601572  c1.1650391-0.0810547,2.2583008,0.3310547,3.0761719,1.1494141c0.7470703,0.7475586,1.1586914,1.7426758,1.1586914,2.802247  v24.2529278c0,0.5522461,0.4477558,1,1.0000019,1s1-0.4477539,1-1V10.9962587c0-2.184082,1.7768555-3.960937,3.9604492-3.960937  c1.0600586,0,2.0551758,0.4116211,2.8022461,1.1591792c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v5.5131845  v0.277832v23.9750957c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1V16.7872753v-0.277832  c0-2.184083,1.7773438-3.9609385,3.9609375-3.9609385c1.0595703,0,2.0546875,0.4116211,2.8027344,1.1586914  c0.7470703,0.7475586,1.1582031,1.7426758,1.1582031,2.802247v5.9462891v18.3066387c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1  V22.4557323c0-2.184082,1.7773438-3.9609375,3.9609375-3.9609375c1.0595703,0,2.0546875,0.4116211,2.8017578,1.1591797  c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v37.1074219  C61.69981,72.3776093,52.1832085,82.8033905,40.4849663,82.8033905z"/></svg></button>
           <button id="readModeBtn" class="icon-btn mode-btn rl-slot-popup" onclick="onReadModeBtnClick()" disabled title="Режим чтения (R)" data-i18n-title="readModeKey"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></button>
           <button id="loupeModeBtn" class="icon-btn mode-btn rl-slot-popup" onclick="toggleLoupeMode()" disabled title="Режим увеличения (Z)" data-i18n-title="loupeMode"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20.5 20.5l-4.8-4.8"/></svg></button>
-          <button id="fillFormModeBtn" class="icon-btn mode-btn rl-slot-popup" onclick="toggleFormFillMode()" disabled style="display:none;" title="Заполнение формы" data-i18n-title="fillFormMode"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="7" y1="9" x2="17" y2="9"/><line x1="7" y1="13" x2="13" y2="13"/><path d="M7 17h3"/></svg></button>
         </div>
         <button id="rotateLeftBtn" class="icon-btn" onclick="rotateSelected(-90)" disabled title="Повернуть выбранные страницы против часовой стрелки (Q)" data-i18n-title="rotateLeftSelected"><span class="rotate-glyph" aria-hidden="true">↺</span></button>
         <button id="rotateRightBtn" class="icon-btn" onclick="rotateSelected(90)" disabled title="Повернуть выбранные страницы по часовой стрелке (W)" data-i18n-title="rotateRightSelected"><span class="rotate-glyph" aria-hidden="true">↻</span></button>
@@ -7693,14 +7700,6 @@
       if (typeof setMode === 'function') setMode(m === 'nav' ? 'nav' : 'select');
     }
 
-    // "Fill form" overlay mode toggle switch (button only, no hotkey). Declared
-    // here (not next to its enterFormFillMode()/exitFormFillMode() functions
-    // further down) because updateUIState() reads it on every bootstrap call,
-    // long before script execution would otherwise reach a `let` this far down
-    // in the same script block (TDZ ReferenceError - `let` is hoisted but stays
-    // in the temporal dead zone until its own line actually runs).
-    let formFillModeOn = false;
-
     //=== READING MODE ===
     let readModeActive = false;
     let readModeRestoreState = null;     // { scale, scaleUserLocked, autoScaleEnabled, mode, menuCollapsed }
@@ -7784,9 +7783,6 @@
         merge: 'Объединить',
         readMode: 'Режим чтения', readModeKey: 'Режим чтения (R)', loupeMode: 'Режим увеличения (Z)',
         selectMode: 'Режим выбора (C)', navMode: 'Режим навигации (H)',
-        fillFormMode: 'Заполнение формы',
-        formFieldPrev: 'Предыдущее поле', formFieldNext: 'Следующее поле',
-        formFieldIndicator: 'Поле {cur} из {total}',
         rotateLeftSelected: 'Повернуть выбранные страницы против часовой стрелки (Q)',
         rotateRightSelected: 'Повернуть выбранные страницы по часовой стрелке (W)',
         editPage: 'Редактировать страницу',
@@ -8079,9 +8075,6 @@
         merge: 'Merge',
         readMode: 'Reading mode', readModeKey: 'Reading mode (R)', loupeMode: 'Magnifier mode (Z)',
         selectMode: 'Selection mode (C)', navMode: 'Navigation mode (H)',
-        fillFormMode: 'Fill form',
-        formFieldPrev: 'Previous field', formFieldNext: 'Next field',
-        formFieldIndicator: 'Field {cur} of {total}',
         rotateLeftSelected: 'Rotate selected pages counter-clockwise (Q)',
         rotateRightSelected: 'Rotate selected pages clockwise (W)',
         editPage: 'Edit page',
@@ -8374,9 +8367,6 @@
         merge: 'Combinar',
         readMode: 'Modo lectura', readModeKey: 'Modo lectura (R)', loupeMode: 'Modo lupa (Z)',
         selectMode: 'Modo selección (C)', navMode: 'Modo navegación (H)',
-        fillFormMode: 'Rellenar formulario',
-        formFieldPrev: 'Campo anterior', formFieldNext: 'Campo siguiente',
-        formFieldIndicator: 'Campo {cur} de {total}',
         rotateLeftSelected: 'Girar páginas seleccionadas en sentido antihorario (Q)',
         rotateRightSelected: 'Girar páginas seleccionadas en sentido horario (W)',
         editPage: 'Editar página',
@@ -9428,16 +9418,6 @@
       if (readModeBtnEl) readModeBtnEl.disabled = readModeDisabled;
       const loupeModeBtnEl = document.getElementById('loupeModeBtn');
       if (loupeModeBtnEl) loupeModeBtnEl.disabled = readModeDisabled;
-      const fillFormModeBtnEl = document.getElementById('fillFormModeBtn');
-      if (fillFormModeBtnEl) {
-        const hasForm = typeof pmDocHasFormFields === 'function' && pmDocHasFormFields();
-        fillFormModeBtnEl.style.display = hasForm ? '' : 'none';
-        fillFormModeBtnEl.disabled = readModeDisabled || !hasForm;
-        if (fillFormModeBtnEl.disabled && typeof formFillModeOn !== 'undefined' && formFillModeOn &&
-            typeof exitFormFillMode === 'function') {
-          exitFormFillMode();
-        }
-      }
       if (mobileReadModeBtnEl) mobileReadModeBtnEl.disabled = readModeDisabled;
       const bookmarksBtnEl = document.getElementById('bookmarksBtn');
       if (bookmarksBtnEl) {
@@ -13048,7 +13028,9 @@
     // AcroForm widgets, same box-metrics technique as the pm-link-layer
     // above but sourcing rects from the live pdf-lib document (not pdf.js
     // annotations) so writes go straight into the objects savePDF() already
-    // serializes. Only built while formFillModeOn (see enterFormFillMode).
+    // serializes. Built unconditionally whenever the document has fields
+    // (like the link layer), available directly in select mode - CSS hides
+    // it during nav/read mode the same way .pm-link-layer is hidden then.
     // ─────────────────────────────────────────────────────────────────────
     let pmFormPageCache = new Map();
 
@@ -13122,6 +13104,12 @@
     // Records the affected page as changed and folds it into undo history -
     // same commit pattern rotatePagesSelected()/rotateSinglePage() use, so a
     // filled-in field survives tab-switch/undo the same way any other edit does.
+    // NOTE: page thumbnails render with annotationMode: 0 (pdf.js's
+    // AnnotationMode.DISABLE) everywhere in this app, same as links/highlights -
+    // a typed value can never be baked into the raster by re-rendering, no
+    // matter how often. The overlay control is the ONLY thing that ever shows
+    // it, which is why it must stay visible (not display:none) across mode
+    // switches - see the .pm-form-layer CSS rule.
     function pmFormCommitField(pageIndex) {
       historyChangeHint = [pageIndex];
       setDocumentDirty(true);
@@ -13137,6 +13125,11 @@
     function pmFormCreateControl(field, f) {
       const wrap = document.createElement('div');
       wrap.className = 'pm-form-field pm-form-field--' + f.kind;
+      // Interacting with a field must not also toggle page selection (select
+      // mode) or start a rubber-band drag - same reason .pm-link-hotzone's
+      // own click handler stops propagation.
+      wrap.addEventListener('mousedown', (e) => e.stopPropagation());
+      wrap.addEventListener('click', (e) => e.stopPropagation());
       const commit = () => pmFormCommitField(f.pageIndex);
 
       if (f.kind === 'text') {
@@ -13255,16 +13248,15 @@
 
     // Debounced rebuild of every currently-loaded page's form layer - hooked
     // into the same content-changed signals schedulePageLinkLayerBuild() reacts
-    // to. No-op unless fill-form mode is actually active (building real input
-    // elements for every field is heavier than the link layer's plain hotzones,
-    // not worth doing for documents where the user never opens the mode).
+    // to. pmFormBuildLayerForPage() itself is the one that no-ops per-page when
+    // the document has no fields, so this stays cheap for the common case.
     function schedulePageFormLayerBuild() {
       clearTimeout(pmFormBuildTimer);
       pmFormBuildTimer = setTimeout(runPageFormLayerBuild, 140);
     }
 
     async function runPageFormLayerBuild() {
-      if (!pdfDoc || !formFillModeOn) return;
+      if (!pdfDoc) return;
       const token = hqPdfjsToken;
       const pages = Array.from(pagesContainer.querySelectorAll('.page'));
       for (const pageDiv of pages) {
@@ -16701,16 +16693,15 @@
       }
     });
 
-    // Which of the 5 merged mode buttons (select/nav/read/loupe/fillForm) represents
-    // the currently active mode - becomes the visible "main" slot in .readmode-wrapper.
+    // Which of the 4 merged mode buttons (select/nav/read/loupe) represents the
+    // currently active mode - becomes the visible "main" slot in .readmode-wrapper.
     function pmActiveModeBtnId() {
       if (typeof readModeActive !== 'undefined' && readModeActive) return 'readModeBtn';
       if (typeof loupeModeOn !== 'undefined' && loupeModeOn) return 'loupeModeBtn';
-      if (typeof formFillModeOn !== 'undefined' && formFillModeOn) return 'fillFormModeBtn';
       if (typeof interactionMode !== 'undefined' && interactionMode === 'nav') return 'navModeBtn';
       return 'selectModeBtn';
     }
-    const PM_MODE_BTN_ORDER = ['selectModeBtn', 'navModeBtn', 'readModeBtn', 'loupeModeBtn', 'fillFormModeBtn'];
+    const PM_MODE_BTN_ORDER = ['selectModeBtn', 'navModeBtn', 'readModeBtn', 'loupeModeBtn'];
     // Syncs .rl-slot-main/.rl-slot-popup/.active-mode classes and popup stacking
     // order across all 4 merged mode buttons to match the currently active mode.
     function syncModeButtonSlots() {
@@ -16742,7 +16733,6 @@
       if (!isTouchDevice && selectModeBtn && selectModeBtn.disabled) return;
       interactionMode = mode;
       if (typeof turnOffLoupeMode === 'function') turnOffLoupeMode();
-      if (typeof formFillModeOn !== 'undefined' && formFillModeOn) exitFormFillMode();
 
       const navBtn    = document.getElementById('navModeBtn');
 
@@ -16912,7 +16902,6 @@
       if (selectModeBtn) selectModeBtn.classList.remove('active-mode');
       if (navModeBtn) navModeBtn.classList.remove('active-mode');
       if (typeof readModeActive !== 'undefined' && readModeActive) exitReadMode(false);
-      if (typeof formFillModeOn !== 'undefined' && formFillModeOn) exitFormFillMode();
       if (typeof multiSelectCheckbox !== 'undefined' && multiSelectCheckbox && multiSelectCheckbox.checked) {
         multiSelectCheckbox.checked = false;
         updateMultiSelectMode();
@@ -16923,78 +16912,25 @@
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // FILL FORM MODE - overlays real HTML controls (text/checkbox/radio/
-    // select) on top of the rendered page bitmap for every AcroForm field,
-    // positioned the same way pmLinks* places clickable link hotzones.
-    // Mutually exclusive with select/nav/read/loupe (see their toggle
-    // functions above/below, each calls exitFormFillMode() on entry).
-    // State var declared up near interactionMode/readModeActive (not here) -
-    // updateUIState() reads it on every bootstrap call, long before script
-    // execution would otherwise reach a `let` this far down (TDZ ReferenceError).
+    // FILL FORM - real HTML controls overlay every AcroForm field's widget
+    // rect on top of the rendered page bitmap, positioned the same way
+    // pmLinks* places clickable link hotzones. No dedicated mode: it's just
+    // always on (like the link layer) whenever the document has fields,
+    // available directly in select mode; body.nav-mode-active hides it the
+    // same way it already hides the link layer during nav/read mode.
     // ─────────────────────────────────────────────────────────────────────
 
     // True only if the document already has an /AcroForm dict with >=1 field -
     // checked via the catalog directly (not pdfDoc.getForm()) because getForm()
     // lazily CREATES an empty AcroForm on documents that never had one, which
     // would silently add a stray empty AcroForm to every opened PDF just from
-    // probing for this button's visibility.
+    // probing for this.
     function pmDocHasFormFields() {
       if (!pdfDoc) return false;
       try {
         if (!pdfDoc.catalog.has(PDFLib.PDFName.of('AcroForm'))) return false;
         return pdfDoc.getForm().getFields().length > 0;
       } catch (_) { return false; }
-    }
-
-    function enterFormFillMode() {
-      const btn = document.getElementById('fillFormModeBtn');
-      if (!btn || btn.disabled || formFillModeOn) return;
-      if (typeof turnOffLoupeMode === 'function') turnOffLoupeMode();
-      if (typeof readModeActive !== 'undefined' && readModeActive) exitReadMode(false);
-      formFillModeOn = true;
-      const selectModeBtn = document.getElementById('selectModeBtn');
-      const navModeBtn = document.getElementById('navModeBtn');
-      if (selectModeBtn) selectModeBtn.classList.remove('active-mode');
-      if (navModeBtn) navModeBtn.classList.remove('active-mode');
-      btn.classList.add('active-mode');
-      // Filling a form field and page-selection actions (rotate/delete/reorder)
-      // don't combine meaningfully - clear selection the same way setMode('nav') does.
-      const hadSelection = selectedPages.size > 0;
-      selectedPages.clear();
-      lastSelectedIndex = null;
-      document.querySelectorAll('.page').forEach(p => p.classList.remove('selected'));
-      if (multiSelectCheckbox && multiSelectCheckbox.checked) {
-        multiSelectCheckbox.checked = false;
-        updateMultiSelectMode();
-      } else if (hadSelection) {
-        notifySelectionChanged();
-      }
-      document.body.classList.add('pm-form-mode-active');
-      if (typeof runPageFormLayerBuild === 'function') runPageFormLayerBuild();
-      updateUIState();
-      syncModeButtonSlots();
-    }
-
-    function exitFormFillMode() {
-      if (!formFillModeOn) return;
-      formFillModeOn = false;
-      const btn = document.getElementById('fillFormModeBtn');
-      if (btn) btn.classList.remove('active-mode');
-      const selectModeBtn = document.getElementById('selectModeBtn');
-      const navModeBtn = document.getElementById('navModeBtn');
-      if (interactionMode === 'nav') {
-        if (navModeBtn) navModeBtn.classList.add('active-mode');
-      } else {
-        if (selectModeBtn) selectModeBtn.classList.add('active-mode');
-      }
-      document.body.classList.remove('pm-form-mode-active');
-      updateUIState();
-      syncModeButtonSlots();
-    }
-
-    function toggleFormFillMode() {
-      if (formFillModeOn) exitFormFillMode();
-      else enterFormFillMode();
     }
 
     // Persist cursor tool on tab/window close. Reading mode → select next time.
@@ -18023,7 +17959,6 @@
 
       if (readModeActive) return;
       if (typeof turnOffLoupeMode === 'function') turnOffLoupeMode();
-      if (typeof formFillModeOn !== 'undefined' && formFillModeOn) exitFormFillMode();
 
       const menu = document.getElementById('topMenu');
       const menuCollapsed = menu ? menu.classList.contains('collapsed') : false;
