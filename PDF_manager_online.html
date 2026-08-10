@@ -4408,11 +4408,16 @@
        Available directly in select mode, no dedicated mode. The controls are
        styled to read as "fillable fields on paper" (pale blue, on top of the
        always-white page bitmap) rather than following the app's own
-       light/dark theme, the same way .pm-link-hotzone doesn't either. */
+       light/dark theme, the same way .pm-link-hotzone doesn't either.
+       pointer-events:none on the LAYER itself, auto on each .pm-form-field -
+       same split as .pm-link-layer/.pm-link-hotzone below. The layer spans
+       the full page (so its fields can be positioned inside it), and an
+       auto layer would swallow every click/drag over the page - including
+       empty space with no field - blocking ordinary text selection there. */
     .pm-form-layer {
       position: absolute;
       overflow: hidden;
-      pointer-events: auto;
+      pointer-events: none;
       z-index: 4;
     }
     body.pm-links-multi-column .pm-form-layer,
@@ -4425,12 +4430,14 @@
        never be baked into the raster - this overlay is the only place it's
        ever shown. Only interactivity is disabled here, so a click falls
        through to nav mode's pan/drag instead of focusing a field. */
-    body.nav-mode-active .pm-form-layer {
+    body.nav-mode-active .pm-form-layer,
+    body.nav-mode-active .pm-form-field {
       pointer-events: none !important;
     }
     .pm-form-field {
       position: absolute;
       box-sizing: border-box;
+      pointer-events: auto;
     }
     /* Solid (not translucent) fill - a partial-alpha background let anything
        drawn underneath show through at the edges/through antialiasing, which
@@ -7685,6 +7692,11 @@
     const HQ_RENDER_SCALE_MAX = 3.0;
     let hqPdfjsDoc = null;            //pdf.js document cache for single-page rendering
     let hqPdfjsToken = 0;             //cache validity token (increases as the document changes)
+    // In-flight getHQPdfjsDoc() build for the current token, so concurrent
+    // callers (links/form/text layers all build off a freshly-shown page at
+    // once) share ONE pdfjsLib.getDocument() call instead of racing to start
+    // their own - see getHQPdfjsDoc() for why a second one always loses.
+    let hqPdfjsDocInFlight = null;    // { token, promise } | null
     // getHQPdfjsDoc() normally rebuilds its pdf.js doc via pdfDoc.save() (a
     // full re-serialize) whenever invalidateHQ() fired since the last pass -
     // including right after a tab switch, where pdfDoc was JUST loaded from
@@ -12809,28 +12821,53 @@
     }
 
     //Lazy loading of cached pdf.js document from current pdfDoc.
+    //
+    // Wrapped as a single promise cached in hqPdfjsDocInFlight BEFORE any
+    // await runs, so concurrent callers with the same token (links/form/text
+    // layers all building off the same freshly-shown page at once - routine
+    // right after opening a document or switching tabs) return the SAME
+    // promise instead of each starting their own pdfjsLib.getDocument() call.
+    // That used to race: pdf.js transfers (detaches) the bytes ArrayBuffer to
+    // its worker as an optimization, so a second concurrent call reusing the
+    // same pdfDocKnownBytes reference hit "DataCloneError: ArrayBuffer ...
+    // already detached" - caught by callers like pmFormLoadPage/
+    // pmLinksLoadPage, which cached the resulting empty (no fields/links)
+    // fallback under that token FOREVER (their own cache key is pageIdx+token,
+    // and the token doesn't change again until a real edit), silently and
+    // permanently breaking form-filling and links on that page.
     async function getHQPdfjsDoc(token) {
       if (hqPdfjsDoc && token === hqPdfjsToken) return hqPdfjsDoc;
-      // renderThumbsFromBytes temporarily swaps global pdfDoc to a history
-      // snapshot (often an intermediate page-edit step WITHOUT a just-confirmed
-      // redact). Saving that stand-in would paint the wrong raster onto the
-      // live preview a moment after Save.
-      if (typeof whenPdfDocIdle === 'function') await whenPdfDocIdle();
-      if (token !== hqPdfjsToken) return null;
-      // Skip the save() round-trip when pdfDoc was just loaded from bytes we
-      // already have (e.g. right after a tab switch) - invalidateHQ() clears
-      // this the moment pdfDoc is touched again, so a stale match here is
-      // impossible without also being a stale hqPdfjsToken match above.
-      const bytes = (pdfDocKnownBytesDoc === pdfDoc && pdfDocKnownBytes)
-        ? pdfDocKnownBytes
-        : (typeof saveLivePdfBytes === 'function')
-          ? await saveLivePdfBytes()
-          : new Uint8Array(await pdfDoc.save());
-      if (!bytes || token !== hqPdfjsToken) return null;          //the document has changed - cancel
-      const doc = await pdfjsLib.getDocument({ data: bytes }).promise;
-      if (token !== hqPdfjsToken) return null;
-      hqPdfjsDoc = doc;
-      return doc;
+      if (hqPdfjsDocInFlight && hqPdfjsDocInFlight.token === token) return hqPdfjsDocInFlight.promise;
+      const promise = (async () => {
+        // renderThumbsFromBytes temporarily swaps global pdfDoc to a history
+        // snapshot (often an intermediate page-edit step WITHOUT a just-confirmed
+        // redact). Saving that stand-in would paint the wrong raster onto the
+        // live preview a moment after Save.
+        if (typeof whenPdfDocIdle === 'function') await whenPdfDocIdle();
+        if (token !== hqPdfjsToken) return null;
+        // Skip the save() round-trip when pdfDoc was just loaded from bytes we
+        // already have (e.g. right after a tab switch) - invalidateHQ() clears
+        // this the moment pdfDoc is touched again, so a stale match here is
+        // impossible without also being a stale hqPdfjsToken match above.
+        const bytes = (pdfDocKnownBytesDoc === pdfDoc && pdfDocKnownBytes)
+          ? pdfDocKnownBytes
+          : (typeof saveLivePdfBytes === 'function')
+            ? await saveLivePdfBytes()
+            : new Uint8Array(await pdfDoc.save());
+        if (!bytes || token !== hqPdfjsToken) return null;          //the document has changed - cancel
+        const doc = await pdfjsLib.getDocument({ data: bytes }).promise;
+        if (token !== hqPdfjsToken) return null;
+        hqPdfjsDoc = doc;
+        return doc;
+      })();
+      hqPdfjsDocInFlight = { token, promise };
+      try {
+        return await promise;
+      } finally {
+        if (hqPdfjsDocInFlight && hqPdfjsDocInFlight.token === token && hqPdfjsDocInFlight.promise === promise) {
+          hqPdfjsDocInFlight = null;
+        }
+      }
     }
 
     /** Normalized (0..1, top-left) bounds of a PDF image drawn in the unit square. */
@@ -12994,6 +13031,13 @@
           return { aspectRatio, links };
         } catch (err) {
           console.warn('pmLinksLoadPage', pageIdx, err);
+          // An unexpected exception (was: a getHQPdfjsDoc() race - now fixed,
+          // but worth staying defensive here) must NOT be cached under this
+          // token: the cache key is pageIdx+token, and the token doesn't
+          // change again until a real edit, so a cached failure would leave
+          // this page's links silently, permanently broken. Let the next
+          // rebuild trigger (scroll, resize, ...) retry from scratch.
+          pmLinksPageCache.delete(cacheKey);
           return empty;
         }
       })();
@@ -13174,6 +13218,10 @@
           return { aspectRatio, fields };
         } catch (err) {
           console.warn('pmFormLoadPage', pageIdx, err);
+          // See the matching comment in pmLinksLoadPage: caching a genuine
+          // failure under this token would permanently break form-filling
+          // for this page until the next real edit. Let it retry instead.
+          pmFormPageCache.delete(cacheKey);
           return empty;
         }
       })();
