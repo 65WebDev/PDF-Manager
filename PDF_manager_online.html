@@ -4434,12 +4434,20 @@
     }
     /* Solid (not translucent) fill - a partial-alpha background let anything
        drawn underneath show through at the edges/through antialiasing, which
-       read as ghosted double text next to the field's real value. */
+       read as ghosted double text next to the field's real value.
+       position:absolute + inset:0 (not width/height:100%) is deliberate:
+       <input>/<select> are inline-block by default, so sizing them with
+       width/height:100% while leaving them in normal flow still subjects
+       them to their line box's baseline/vertical-align rules - invisible at
+       a normal field size, but at a widget only 1-2px tall (small page
+       scale) that line-box padding was pushing the control ten-plus pixels
+       below the wrapper it's meant to exactly fill. Taking it out of flow
+       entirely with absolute positioning removes that dependency outright. */
     .pm-form-input,
     .pm-form-select {
+      position: absolute;
+      inset: 0;
       box-sizing: border-box;
-      width: 100%;
-      height: 100%;
       margin: 0;
       padding: 1px 3px;
       border: 1px solid rgba(37, 99, 235, 0.55);
@@ -4475,15 +4483,17 @@
     /* Native checkbox/radio rendering doesn't scale or center predictably
        when stretched to arbitrary CSS box sizes across browsers - appearance:
        none hands the whole visual over to CSS below so it always exactly
-       fills and centers within the field's own box, whatever size that is. */
+       fills and centers within the field's own box, whatever size that is.
+       position:absolute + inset:0 for the same reason as the text/select
+       controls above - keeps it out of inline-flow baseline alignment
+       entirely, still a valid containing block for the ::after dot below. */
     .pm-form-checkbox,
     .pm-form-radio {
       -webkit-appearance: none;
       appearance: none;
-      position: relative;
+      position: absolute;
+      inset: 0;
       box-sizing: border-box;
-      width: 100%;
-      height: 100%;
       margin: 0;
       padding: 0;
       cursor: pointer;
