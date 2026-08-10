@@ -4404,6 +4404,60 @@
       pointer-events: none !important;
     }
 
+    /* Fill-form overlay - real HTML controls over a page's AcroForm widgets.
+       Only shown in fill-form mode (body.pm-form-mode-active); the controls
+       are styled to read as "fillable fields on paper" (pale blue, on top of
+       the always-white page bitmap) rather than following the app's own
+       light/dark theme, the same way .pm-link-hotzone doesn't either. */
+    .pm-form-layer {
+      position: absolute;
+      overflow: hidden;
+      pointer-events: none;
+      display: none;
+      z-index: 4;
+    }
+    body.pm-form-mode-active .pm-form-layer {
+      display: block;
+      pointer-events: auto;
+    }
+    .pm-form-field {
+      position: absolute;
+      box-sizing: border-box;
+    }
+    .pm-form-input,
+    .pm-form-select {
+      box-sizing: border-box;
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 1px 3px;
+      border: 1px solid rgba(37, 99, 235, 0.55);
+      border-radius: 2px;
+      background: rgba(173, 216, 230, 0.35);
+      color: #1a1a1a;
+      font: 13px/1.2 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    }
+    textarea.pm-form-input {
+      resize: none;
+      overflow: auto;
+    }
+    .pm-form-input:focus,
+    .pm-form-select:focus {
+      outline: none;
+      border-color: #2563eb;
+      background: rgba(173, 216, 230, 0.55);
+      box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
+    }
+    .pm-form-checkbox,
+    .pm-form-radio {
+      box-sizing: border-box;
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      cursor: pointer;
+      accent-color: #2563eb;
+    }
+
     /*Preview sheet: keep the page's true aspect ratio (CropBox may not be A4
        after кадрирование). Fit inside the card slot; do not force √2 letterboxing
        — that showed false white bars top/bottom on tight crops.
@@ -6500,6 +6554,7 @@
           <button id="navModeBtn" class="icon-btn mode-btn rl-slot-popup" onclick="setMode('nav')" disabled title="Режим навигации (H)" data-i18n-title="navMode"><svg viewBox="0 0 69.0645142 89.838707" width="22" height="22" fill="#ffffff" stroke="#000000" stroke-width="0.8" stroke-linejoin="round" aria-hidden="true"><path d="M40.4849663,82.8033905  c-9.1123066,0-16.3754902-5.1455078-19.4277363-13.7636719c-0.1801758-0.5087891-0.3701172-1.015625-0.5893555-1.5087891  c-0.6171875-1.3886719-0.6171875-1.3886719-0.7412109-1.5224609l-0.015625,0.0146484  c-0.7080078-1.3291016-3.1923828-5.6308632-11.9047842-20.7168007c-0.909668-1.5717773-0.3686523-3.5917969,1.2021484-4.5014648  c0.7021484-0.4023438,1.5004883-0.6147461,2.3085938-0.6147461c1.6572266,0,3.1967773,0.8867188,4.0185547,2.315918  l6.8134756,11.7963867c0.2260742,0.3916016,0.6865234,0.5839844,1.125,0.4648438  c0.4370117-0.1171875,0.7407227-0.5136719,0.7407227-0.9658203V16.7179394c0-2.1977549,1.6191406-4.0249033,3.6865234-4.1601572  c1.1650391-0.0810547,2.2583008,0.3310547,3.0761719,1.1494141c0.7470703,0.7475586,1.1586914,1.7426758,1.1586914,2.802247  v24.2529278c0,0.5522461,0.4477558,1,1.0000019,1s1-0.4477539,1-1V10.9962587c0-2.184082,1.7768555-3.960937,3.9604492-3.960937  c1.0600586,0,2.0551758,0.4116211,2.8022461,1.1591792c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v5.5131845  v0.277832v23.9750957c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1V16.7872753v-0.277832  c0-2.184083,1.7773438-3.9609385,3.9609375-3.9609385c1.0595703,0,2.0546875,0.4116211,2.8027344,1.1586914  c0.7470703,0.7475586,1.1582031,1.7426758,1.1582031,2.802247v5.9462891v18.3066387c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1  V22.4557323c0-2.184082,1.7773438-3.9609375,3.9609375-3.9609375c1.0595703,0,2.0546875,0.4116211,2.8017578,1.1591797  c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v37.1074219  C61.69981,72.3776093,52.1832085,82.8033905,40.4849663,82.8033905z"/></svg></button>
           <button id="readModeBtn" class="icon-btn mode-btn rl-slot-popup" onclick="onReadModeBtnClick()" disabled title="Режим чтения (R)" data-i18n-title="readModeKey"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></button>
           <button id="loupeModeBtn" class="icon-btn mode-btn rl-slot-popup" onclick="toggleLoupeMode()" disabled title="Режим увеличения (Z)" data-i18n-title="loupeMode"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20.5 20.5l-4.8-4.8"/></svg></button>
+          <button id="fillFormModeBtn" class="icon-btn mode-btn rl-slot-popup" onclick="toggleFormFillMode()" disabled style="display:none;" title="Заполнение формы" data-i18n-title="fillFormMode"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="7" y1="9" x2="17" y2="9"/><line x1="7" y1="13" x2="13" y2="13"/><path d="M7 17h3"/></svg></button>
         </div>
         <button id="rotateLeftBtn" class="icon-btn" onclick="rotateSelected(-90)" disabled title="Повернуть выбранные страницы против часовой стрелки (Q)" data-i18n-title="rotateLeftSelected"><span class="rotate-glyph" aria-hidden="true">↺</span></button>
         <button id="rotateRightBtn" class="icon-btn" onclick="rotateSelected(90)" disabled title="Повернуть выбранные страницы по часовой стрелке (W)" data-i18n-title="rotateRightSelected"><span class="rotate-glyph" aria-hidden="true">↻</span></button>
@@ -7638,6 +7693,14 @@
       if (typeof setMode === 'function') setMode(m === 'nav' ? 'nav' : 'select');
     }
 
+    // "Fill form" overlay mode toggle switch (button only, no hotkey). Declared
+    // here (not next to its enterFormFillMode()/exitFormFillMode() functions
+    // further down) because updateUIState() reads it on every bootstrap call,
+    // long before script execution would otherwise reach a `let` this far down
+    // in the same script block (TDZ ReferenceError - `let` is hoisted but stays
+    // in the temporal dead zone until its own line actually runs).
+    let formFillModeOn = false;
+
     //=== READING MODE ===
     let readModeActive = false;
     let readModeRestoreState = null;     // { scale, scaleUserLocked, autoScaleEnabled, mode, menuCollapsed }
@@ -7721,6 +7784,9 @@
         merge: 'Объединить',
         readMode: 'Режим чтения', readModeKey: 'Режим чтения (R)', loupeMode: 'Режим увеличения (Z)',
         selectMode: 'Режим выбора (C)', navMode: 'Режим навигации (H)',
+        fillFormMode: 'Заполнение формы',
+        formFieldPrev: 'Предыдущее поле', formFieldNext: 'Следующее поле',
+        formFieldIndicator: 'Поле {cur} из {total}',
         rotateLeftSelected: 'Повернуть выбранные страницы против часовой стрелки (Q)',
         rotateRightSelected: 'Повернуть выбранные страницы по часовой стрелке (W)',
         editPage: 'Редактировать страницу',
@@ -8013,6 +8079,9 @@
         merge: 'Merge',
         readMode: 'Reading mode', readModeKey: 'Reading mode (R)', loupeMode: 'Magnifier mode (Z)',
         selectMode: 'Selection mode (C)', navMode: 'Navigation mode (H)',
+        fillFormMode: 'Fill form',
+        formFieldPrev: 'Previous field', formFieldNext: 'Next field',
+        formFieldIndicator: 'Field {cur} of {total}',
         rotateLeftSelected: 'Rotate selected pages counter-clockwise (Q)',
         rotateRightSelected: 'Rotate selected pages clockwise (W)',
         editPage: 'Edit page',
@@ -8305,6 +8374,9 @@
         merge: 'Combinar',
         readMode: 'Modo lectura', readModeKey: 'Modo lectura (R)', loupeMode: 'Modo lupa (Z)',
         selectMode: 'Modo selección (C)', navMode: 'Modo navegación (H)',
+        fillFormMode: 'Rellenar formulario',
+        formFieldPrev: 'Campo anterior', formFieldNext: 'Campo siguiente',
+        formFieldIndicator: 'Campo {cur} de {total}',
         rotateLeftSelected: 'Girar páginas seleccionadas en sentido antihorario (Q)',
         rotateRightSelected: 'Girar páginas seleccionadas en sentido horario (W)',
         editPage: 'Editar página',
@@ -9356,6 +9428,16 @@
       if (readModeBtnEl) readModeBtnEl.disabled = readModeDisabled;
       const loupeModeBtnEl = document.getElementById('loupeModeBtn');
       if (loupeModeBtnEl) loupeModeBtnEl.disabled = readModeDisabled;
+      const fillFormModeBtnEl = document.getElementById('fillFormModeBtn');
+      if (fillFormModeBtnEl) {
+        const hasForm = typeof pmDocHasFormFields === 'function' && pmDocHasFormFields();
+        fillFormModeBtnEl.style.display = hasForm ? '' : 'none';
+        fillFormModeBtnEl.disabled = readModeDisabled || !hasForm;
+        if (fillFormModeBtnEl.disabled && typeof formFillModeOn !== 'undefined' && formFillModeOn &&
+            typeof exitFormFillMode === 'function') {
+          exitFormFillMode();
+        }
+      }
       if (mobileReadModeBtnEl) mobileReadModeBtnEl.disabled = readModeDisabled;
       const bookmarksBtnEl = document.getElementById('bookmarksBtn');
       if (bookmarksBtnEl) {
@@ -12393,6 +12475,7 @@
       // them lag until the debounced rebuild lands.
       if (typeof syncPreviewTextLayersLiveScale === 'function') syncPreviewTextLayersLiveScale();
       if (typeof pmLinksSyncLayerPositions === 'function') pmLinksSyncLayerPositions();
+      if (typeof pmFormSyncLayerPositions === 'function') pmFormSyncLayerPositions();
 
       if (pinchActive) {
         return;
@@ -12960,6 +13043,258 @@
       });
     }
 
+    // ─────────────────────────────────────────────────────────────────────
+    // FILL FORM overlay - real HTML controls positioned over each page's
+    // AcroForm widgets, same box-metrics technique as the pm-link-layer
+    // above but sourcing rects from the live pdf-lib document (not pdf.js
+    // annotations) so writes go straight into the objects savePDF() already
+    // serializes. Only built while formFillModeOn (see enterFormFillMode).
+    // ─────────────────────────────────────────────────────────────────────
+    let pmFormPageCache = new Map();
+
+    function pmFormFieldKind(field) {
+      if (field instanceof PDFLib.PDFTextField) return 'text';
+      if (field instanceof PDFLib.PDFCheckBox) return 'checkbox';
+      if (field instanceof PDFLib.PDFRadioGroup) return 'radio';
+      if (field instanceof PDFLib.PDFDropdown) return 'dropdown';
+      if (field instanceof PDFLib.PDFOptionList) return 'optionlist';
+      return null; // signature or other unsupported field types - not shown
+    }
+
+    // Returns { aspectRatio, fields: [{ pageIndex, left, top, width, height,
+    // kind, name, widgetIdx }] } with left/top/width/height as 0..1 fractions
+    // of the page's own (rotation-applied) box - same convention pmLinksLoadPage
+    // uses, ready to place as percentage-positioned controls inside the box
+    // getPageImgDisplayMetrics computes for it.
+    async function pmFormLoadPage(pageIdx) {
+      const token = hqPdfjsToken;
+      const cacheKey = pageIdx + ':' + token;
+      if (pmFormPageCache.has(cacheKey)) return pmFormPageCache.get(cacheKey);
+      const promise = (async () => {
+        const empty = { aspectRatio: 0, fields: [] };
+        try {
+          if (!pdfDoc || !pdfjsLib || typeof getHQPdfjsDoc !== 'function') return empty;
+          if (!pmDocHasFormFields()) return empty;
+          const doc = await getHQPdfjsDoc(token);
+          if (!doc || token !== hqPdfjsToken) return empty;
+          const page = await doc.getPage(pageIdx + 1);
+          if (token !== hqPdfjsToken) return empty;
+          const rot = typeof page.rotate === 'number' ? page.rotate : 0;
+          const viewport = page.getViewport({ scale: 1, rotation: rot });
+          const aspectRatio = viewport.height > 0 ? viewport.width / viewport.height : 0;
+
+          const pageRefs = pdfDoc.getPages().map(p => p.ref);
+          const form = pdfDoc.getForm();
+          const fields = [];
+          for (const field of form.getFields()) {
+            const kind = pmFormFieldKind(field);
+            if (!kind) continue;
+            const widgets = field.acroField.getWidgets();
+            widgets.forEach((w, widgetIdx) => {
+              let pRef = null;
+              try { pRef = w.P ? w.P() : null; } catch (_) { pRef = null; }
+              const pageIndex = pRef ? pageRefs.indexOf(pRef) : -1;
+              // Widgets without a resolvable /P (rare - most writers set it,
+              // reportlab/Acrobat included) are skipped rather than guessed at.
+              if (pageIndex !== pageIdx) return;
+              const r = w.getRectangle();
+              const rect = viewport.convertToViewportRectangle(
+                [r.x, r.y, r.x + r.width, r.y + r.height]
+              );
+              const left = Math.min(rect[0], rect[2]) / viewport.width;
+              const top = Math.min(rect[1], rect[3]) / viewport.height;
+              const width = Math.abs(rect[2] - rect[0]) / viewport.width;
+              const height = Math.abs(rect[3] - rect[1]) / viewport.height;
+              if (!(width > 0) || !(height > 0)) return;
+              fields.push({ pageIndex, left, top, width, height, kind, name: field.getName(), widgetIdx });
+            });
+          }
+          return { aspectRatio, fields };
+        } catch (err) {
+          console.warn('pmFormLoadPage', pageIdx, err);
+          return empty;
+        }
+      })();
+      pmFormPageCache.set(cacheKey, promise);
+      return promise;
+    }
+
+    // Records the affected page as changed and folds it into undo history -
+    // same commit pattern rotatePagesSelected()/rotateSinglePage() use, so a
+    // filled-in field survives tab-switch/undo the same way any other edit does.
+    function pmFormCommitField(pageIndex) {
+      historyChangeHint = [pageIndex];
+      setDocumentDirty(true);
+    }
+
+    // Builds one field's overlay control, wiring it straight to the live
+    // pdf-lib field object. 'input' mutates the field on every keystroke (so
+    // Save always sees the latest text, since it serializes the live pdfDoc
+    // directly) while 'change' - which only fires after a real edit, on blur
+    // for text fields and immediately for checkbox/radio/select - is what
+    // commits the edit into undo history, so typing doesn't flood it with a
+    // snapshot per keystroke.
+    function pmFormCreateControl(field, f) {
+      const wrap = document.createElement('div');
+      wrap.className = 'pm-form-field pm-form-field--' + f.kind;
+      const commit = () => pmFormCommitField(f.pageIndex);
+
+      if (f.kind === 'text') {
+        const multiline = field.isMultiline();
+        const input = document.createElement(multiline ? 'textarea' : 'input');
+        if (!multiline) input.type = 'text';
+        input.className = 'pm-form-input';
+        input.value = field.getText() || '';
+        const maxLen = field.getMaxLength();
+        if (maxLen) input.maxLength = maxLen;
+        input.addEventListener('input', () => {
+          try { field.setText(input.value); } catch (_) {}
+        });
+        input.addEventListener('change', commit);
+        wrap.appendChild(input);
+      } else if (f.kind === 'checkbox') {
+        const input = document.createElement('input');
+        input.type = 'checkbox';
+        input.className = 'pm-form-checkbox';
+        input.checked = field.isChecked();
+        input.addEventListener('change', () => {
+          try { if (input.checked) field.check(); else field.uncheck(); } catch (_) {}
+          commit();
+        });
+        wrap.appendChild(input);
+      } else if (f.kind === 'radio') {
+        const options = field.getOptions();
+        const value = options[f.widgetIdx];
+        if (value == null) return null;
+        const input = document.createElement('input');
+        input.type = 'radio';
+        input.className = 'pm-form-radio';
+        input.name = 'pm-form-radio-' + f.name;
+        input.value = value;
+        input.checked = field.getSelected() === value;
+        input.addEventListener('change', () => {
+          if (!input.checked) return;
+          try { field.select(value); } catch (_) {}
+          commit();
+        });
+        wrap.appendChild(input);
+      } else if (f.kind === 'dropdown' || f.kind === 'optionlist') {
+        const select = document.createElement('select');
+        select.className = 'pm-form-select';
+        if (f.kind === 'optionlist') select.multiple = true;
+        field.getOptions().forEach((opt) => {
+          const o = document.createElement('option');
+          o.value = opt;
+          o.textContent = opt;
+          select.appendChild(o);
+        });
+        const selected = field.getSelected();
+        if (f.kind === 'optionlist') {
+          const sel = selected || [];
+          Array.from(select.options).forEach((o) => { o.selected = sel.includes(o.value); });
+        } else if (selected && selected.length) {
+          select.value = selected[0];
+        }
+        select.addEventListener('change', () => {
+          const value = f.kind === 'optionlist'
+            ? Array.from(select.selectedOptions).map(o => o.value)
+            : select.value;
+          try { field.select(value); } catch (_) {}
+          commit();
+        });
+        wrap.appendChild(select);
+      } else {
+        return null;
+      }
+      return wrap;
+    }
+
+    async function pmFormBuildLayerForPage(pageDiv) {
+      const idx = parseInt(pageDiv.dataset.index, 10);
+      if (Number.isNaN(idx)) return;
+      const wrapper = pageDiv.querySelector('.img-wrapper');
+      const img = wrapper ? wrapper.querySelector('img') : null;
+      if (!wrapper || !img || !img.naturalWidth || !img.naturalHeight) return;
+      let layer = wrapper.querySelector('.pm-form-layer');
+      // Don't rebuild out from under a field the user is actively editing.
+      if (layer && document.activeElement && layer.contains(document.activeElement)) return;
+      const token = hqPdfjsToken;
+      const { aspectRatio, fields } = await pmFormLoadPage(idx);
+      if (token !== hqPdfjsToken) return;
+      if (!fields.length) {
+        if (layer) layer.remove();
+        return;
+      }
+      const metrics = getPageImgDisplayMetrics(img, wrapper, aspectRatio);
+      if (!metrics || !metrics.width || !metrics.height) return;
+      if (!layer) {
+        layer = document.createElement('div');
+        layer.className = 'pm-form-layer';
+        wrapper.appendChild(layer);
+      }
+      layer.dataset.trueAspectRatio = String(aspectRatio);
+      layer.style.left = metrics.left + 'px';
+      layer.style.top = metrics.top + 'px';
+      layer.style.width = metrics.width + 'px';
+      layer.style.height = metrics.height + 'px';
+      layer.innerHTML = '';
+      const form = pdfDoc.getForm();
+      fields.forEach((f) => {
+        const field = form.getField(f.name);
+        const el = pmFormCreateControl(field, f);
+        if (!el) return;
+        el.style.left = (f.left * 100) + '%';
+        el.style.top = (f.top * 100) + '%';
+        el.style.width = (f.width * 100) + '%';
+        el.style.height = (f.height * 100) + '%';
+        layer.appendChild(el);
+      });
+    }
+
+    let pmFormBuildTimer = null;
+
+    // Debounced rebuild of every currently-loaded page's form layer - hooked
+    // into the same content-changed signals schedulePageLinkLayerBuild() reacts
+    // to. No-op unless fill-form mode is actually active (building real input
+    // elements for every field is heavier than the link layer's plain hotzones,
+    // not worth doing for documents where the user never opens the mode).
+    function schedulePageFormLayerBuild() {
+      clearTimeout(pmFormBuildTimer);
+      pmFormBuildTimer = setTimeout(runPageFormLayerBuild, 140);
+    }
+
+    async function runPageFormLayerBuild() {
+      if (!pdfDoc || !formFillModeOn) return;
+      const token = hqPdfjsToken;
+      const pages = Array.from(pagesContainer.querySelectorAll('.page'));
+      for (const pageDiv of pages) {
+        if (token !== hqPdfjsToken) return;
+        if (pageDiv.classList.contains('page-lazy-pending')) continue;
+        await pmFormBuildLayerForPage(pageDiv);
+      }
+    }
+
+    // Keeps each already-built form layer's pixel box glued to its page
+    // card's live size (scale-slider drag, fit-width, window resize) - the
+    // controls inside are percentage-positioned, so only the outer box needs
+    // updating here.
+    function pmFormSyncLayerPositions() {
+      const layers = pagesContainer.querySelectorAll('.page .pm-form-layer');
+      if (!layers.length) return;
+      layers.forEach((layer) => {
+        const wrapper = layer.parentElement;
+        const img = wrapper ? wrapper.querySelector('img') : null;
+        if (!img || !img.naturalWidth || !img.naturalHeight) return;
+        const aspectRatio = parseFloat(layer.dataset.trueAspectRatio) || 0;
+        const metrics = getPageImgDisplayMetrics(img, wrapper, aspectRatio);
+        if (!metrics || !metrics.width || !metrics.height) return;
+        layer.style.left = metrics.left + 'px';
+        layer.style.top = metrics.top + 'px';
+        layer.style.width = metrics.width + 'px';
+        layer.style.height = metrics.height + 'px';
+      });
+    }
+
     /** Client rect of the visible page bitmap in preview (object-fit: contain letterboxing). */
     function gridGetPreviewPageContentClientRect(pageIdx) {
       const pageDiv = document.querySelector('.page[data-index="' + pageIdx + '"]');
@@ -13331,6 +13666,7 @@
           hqRenderedScale.set(idx, neededScale);
           if (typeof schedulePageTextLayerBuild === 'function') schedulePageTextLayerBuild();
           if (typeof schedulePageLinkLayerBuild === 'function') schedulePageLinkLayerBuild();
+          if (typeof schedulePageFormLayerBuild === 'function') schedulePageFormLayerBuild();
         } catch (e) {
           console.error('HQ render error for page', idx, e);
         }
@@ -13961,6 +14297,7 @@
         // own live-sync call - keep any built link hotzones glued to their
         // page card the same way.
         if (typeof pmLinksSyncLayerPositions === 'function') pmLinksSyncLayerPositions();
+        if (typeof pmFormSyncLayerPositions === 'function') pmFormSyncLayerPositions();
       });
     }
 
@@ -14206,6 +14543,7 @@
           }
           if (typeof schedulePageLinkLayerBuild === 'function') {
             try { schedulePageLinkLayerBuild(); } catch (_) {}
+            try { schedulePageFormLayerBuild(); } catch (_) {}
           }
         }
       } else {
@@ -16363,15 +16701,16 @@
       }
     });
 
-    // Which of the 4 merged mode buttons (select/nav/read/loupe) represents the
-    // currently active mode - becomes the visible "main" slot in .readmode-wrapper.
+    // Which of the 5 merged mode buttons (select/nav/read/loupe/fillForm) represents
+    // the currently active mode - becomes the visible "main" slot in .readmode-wrapper.
     function pmActiveModeBtnId() {
       if (typeof readModeActive !== 'undefined' && readModeActive) return 'readModeBtn';
       if (typeof loupeModeOn !== 'undefined' && loupeModeOn) return 'loupeModeBtn';
+      if (typeof formFillModeOn !== 'undefined' && formFillModeOn) return 'fillFormModeBtn';
       if (typeof interactionMode !== 'undefined' && interactionMode === 'nav') return 'navModeBtn';
       return 'selectModeBtn';
     }
-    const PM_MODE_BTN_ORDER = ['selectModeBtn', 'navModeBtn', 'readModeBtn', 'loupeModeBtn'];
+    const PM_MODE_BTN_ORDER = ['selectModeBtn', 'navModeBtn', 'readModeBtn', 'loupeModeBtn', 'fillFormModeBtn'];
     // Syncs .rl-slot-main/.rl-slot-popup/.active-mode classes and popup stacking
     // order across all 4 merged mode buttons to match the currently active mode.
     function syncModeButtonSlots() {
@@ -16403,6 +16742,7 @@
       if (!isTouchDevice && selectModeBtn && selectModeBtn.disabled) return;
       interactionMode = mode;
       if (typeof turnOffLoupeMode === 'function') turnOffLoupeMode();
+      if (typeof formFillModeOn !== 'undefined' && formFillModeOn) exitFormFillMode();
 
       const navBtn    = document.getElementById('navModeBtn');
 
@@ -16572,6 +16912,7 @@
       if (selectModeBtn) selectModeBtn.classList.remove('active-mode');
       if (navModeBtn) navModeBtn.classList.remove('active-mode');
       if (typeof readModeActive !== 'undefined' && readModeActive) exitReadMode(false);
+      if (typeof formFillModeOn !== 'undefined' && formFillModeOn) exitFormFillMode();
       if (typeof multiSelectCheckbox !== 'undefined' && multiSelectCheckbox && multiSelectCheckbox.checked) {
         multiSelectCheckbox.checked = false;
         updateMultiSelectMode();
@@ -16579,6 +16920,81 @@
       updateNavShiftCursorState();
       pmPersistCursorMode('loupe');
       syncModeButtonSlots();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // FILL FORM MODE - overlays real HTML controls (text/checkbox/radio/
+    // select) on top of the rendered page bitmap for every AcroForm field,
+    // positioned the same way pmLinks* places clickable link hotzones.
+    // Mutually exclusive with select/nav/read/loupe (see their toggle
+    // functions above/below, each calls exitFormFillMode() on entry).
+    // State var declared up near interactionMode/readModeActive (not here) -
+    // updateUIState() reads it on every bootstrap call, long before script
+    // execution would otherwise reach a `let` this far down (TDZ ReferenceError).
+    // ─────────────────────────────────────────────────────────────────────
+
+    // True only if the document already has an /AcroForm dict with >=1 field -
+    // checked via the catalog directly (not pdfDoc.getForm()) because getForm()
+    // lazily CREATES an empty AcroForm on documents that never had one, which
+    // would silently add a stray empty AcroForm to every opened PDF just from
+    // probing for this button's visibility.
+    function pmDocHasFormFields() {
+      if (!pdfDoc) return false;
+      try {
+        if (!pdfDoc.catalog.has(PDFLib.PDFName.of('AcroForm'))) return false;
+        return pdfDoc.getForm().getFields().length > 0;
+      } catch (_) { return false; }
+    }
+
+    function enterFormFillMode() {
+      const btn = document.getElementById('fillFormModeBtn');
+      if (!btn || btn.disabled || formFillModeOn) return;
+      if (typeof turnOffLoupeMode === 'function') turnOffLoupeMode();
+      if (typeof readModeActive !== 'undefined' && readModeActive) exitReadMode(false);
+      formFillModeOn = true;
+      const selectModeBtn = document.getElementById('selectModeBtn');
+      const navModeBtn = document.getElementById('navModeBtn');
+      if (selectModeBtn) selectModeBtn.classList.remove('active-mode');
+      if (navModeBtn) navModeBtn.classList.remove('active-mode');
+      btn.classList.add('active-mode');
+      // Filling a form field and page-selection actions (rotate/delete/reorder)
+      // don't combine meaningfully - clear selection the same way setMode('nav') does.
+      const hadSelection = selectedPages.size > 0;
+      selectedPages.clear();
+      lastSelectedIndex = null;
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('selected'));
+      if (multiSelectCheckbox && multiSelectCheckbox.checked) {
+        multiSelectCheckbox.checked = false;
+        updateMultiSelectMode();
+      } else if (hadSelection) {
+        notifySelectionChanged();
+      }
+      document.body.classList.add('pm-form-mode-active');
+      if (typeof runPageFormLayerBuild === 'function') runPageFormLayerBuild();
+      updateUIState();
+      syncModeButtonSlots();
+    }
+
+    function exitFormFillMode() {
+      if (!formFillModeOn) return;
+      formFillModeOn = false;
+      const btn = document.getElementById('fillFormModeBtn');
+      if (btn) btn.classList.remove('active-mode');
+      const selectModeBtn = document.getElementById('selectModeBtn');
+      const navModeBtn = document.getElementById('navModeBtn');
+      if (interactionMode === 'nav') {
+        if (navModeBtn) navModeBtn.classList.add('active-mode');
+      } else {
+        if (selectModeBtn) selectModeBtn.classList.add('active-mode');
+      }
+      document.body.classList.remove('pm-form-mode-active');
+      updateUIState();
+      syncModeButtonSlots();
+    }
+
+    function toggleFormFillMode() {
+      if (formFillModeOn) exitFormFillMode();
+      else enterFormFillMode();
     }
 
     // Persist cursor tool on tab/window close. Reading mode → select next time.
@@ -17607,6 +18023,7 @@
 
       if (readModeActive) return;
       if (typeof turnOffLoupeMode === 'function') turnOffLoupeMode();
+      if (typeof formFillModeOn !== 'undefined' && formFillModeOn) exitFormFillMode();
 
       const menu = document.getElementById('topMenu');
       const menuCollapsed = menu ? menu.classList.contains('collapsed') : false;
@@ -18080,6 +18497,7 @@
 
       if (typeof schedulePageTextLayerBuild === 'function') schedulePageTextLayerBuild();
       if (typeof schedulePageLinkLayerBuild === 'function') schedulePageLinkLayerBuild();
+      if (typeof schedulePageFormLayerBuild === 'function') schedulePageFormLayerBuild();
 
       if (isLoading && !isLoadingCancelled && lazyThumbNumPages) {
         showLoading(t('loadingPagesProgress', { cur: lazyThumbLoaded.size, total: lazyThumbNumPages }));
@@ -20089,6 +20507,7 @@
     scrollContainer.addEventListener('scroll', () => {
       if (typeof schedulePageTextLayerBuild === 'function') schedulePageTextLayerBuild();
       if (typeof schedulePageLinkLayerBuild === 'function') schedulePageLinkLayerBuild();
+      if (typeof schedulePageFormLayerBuild === 'function') schedulePageFormLayerBuild();
       if (typeof pmPosHistoryScheduleSave === 'function') pmPosHistoryScheduleSave();
     }, { passive: true });
 
@@ -35585,6 +36004,7 @@ function editSelectedPage() {
       }
       if (typeof schedulePageTextLayerBuild === 'function') schedulePageTextLayerBuild();
       if (typeof schedulePageLinkLayerBuild === 'function') schedulePageLinkLayerBuild();
+      if (typeof schedulePageFormLayerBuild === 'function') schedulePageFormLayerBuild();
     } catch (e) {
       console.error('preview markup refresh failed', e);
     } finally {
