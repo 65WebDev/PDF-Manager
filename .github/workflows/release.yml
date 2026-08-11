@@ -51,6 +51,12 @@ jobs:
           - **Офлайн-версия** (\`PDF_manager_offline.html\`) — все библиотеки встроены в файл, интернет не нужен. [Прямая ссылка](https://github.com/${{ github.repository }}/releases/latest/download/PDF_manager_offline.html)
           EOF
 
+      - name: Sync embedded library versions into README
+        # Keeps README's library list in sync with PDF_MANAGER_LIBRARIES in
+        # PDF_manager_online.html - README.md isn't in this workflow's
+        # trigger paths above, so committing it here can't loop.
+        run: node scripts/sync-readme-libraries.mjs
+
       - name: Write version feed files
         env:
           GH_TOKEN: ${{ github.token }}
