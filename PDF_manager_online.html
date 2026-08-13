@@ -16517,6 +16517,61 @@
       }
     }, { passive: false });
 
+    // ── Double tap on a page (nav/pan mode) → Reading mode ──
+    // Mirrors the "Режим чтения" button/context-menu action, anchored to
+    // whichever page was tapped. Kept out of 'select' mode, where a double
+    // tap already arms the rubber-band selection frame above.
+    let lastReadTapTime = 0, lastReadTapX = 0, lastReadTapY = 0;
+    function canStartReadModeDoubleTap(target) {
+      if (interactionMode !== 'nav') return false;
+      if (isZoomPanMode() || loupeModeOn) return false;
+      if (isLoading || !pdfDoc || readModeActive) return false;
+      if (document.querySelector('.modal-overlay-active')) return false;
+      if (insertMenuOpen) return false;
+      const el = target && target.closest ? target : null;
+      if (!el) return false;
+      return !el.closest('.top-menu, #pageCountBox, #insertMenu, #insertIndicator, ' +
+                          '#menuToggleBtn, #desktopMenuToggleBtn, #helpToggle, #helpPanel, ' +
+                          '.quick-actions, .selection-checkbox, .pm-page-nav-btn, #pmAutoScrollSpeed, #pmAutoScrollPauseBtn');
+    }
+
+    // .page has pointer-events:none while in nav mode (so drag-to-pan isn't
+    // blocked by the page cards), so the touch target here is always the
+    // .pages/scrollContainer wrapper, never the page itself - find which
+    // card the point actually falls over by geometry instead of ancestry.
+    function findPageAtClientPoint(clientX, clientY) {
+      for (const p of pagesContainer.querySelectorAll('.page')) {
+        if (p.style.display === 'none') continue;
+        const r = p.getBoundingClientRect();
+        if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) return p;
+      }
+      return null;
+    }
+
+    scrollContainer.addEventListener('touchstart', (e) => {
+      if (!isTouchDevice) return;
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0];
+      const target = t.target || e.target;
+      if (!canStartReadModeDoubleTap(target)) { lastReadTapTime = 0; return; }
+
+      const now = Date.now();
+      const dt = now - lastReadTapTime;
+      const dist = Math.hypot(t.clientX - lastReadTapX, t.clientY - lastReadTapY);
+
+      if (dt < DOUBLE_TAP_MS && dist < DOUBLE_TAP_DIST) {
+        lastReadTapTime = 0;
+        const pageEl = findPageAtClientPoint(t.clientX, t.clientY);
+        if (!pageEl) return; // tapped empty space around/below the pages, not a page
+        const idx = parseInt(pageEl.dataset.index, 10);
+        enterReadMode(Number.isNaN(idx) ? undefined : idx);
+      } else {
+        lastReadTapTime = now;
+        lastReadTapX = t.clientX;
+        lastReadTapY = t.clientY;
+      }
+    }, { passive: true });
+
     function rubberTouchMove(e) {
       if (e.touches.length !== 1) return;
       const t = e.touches[0];
@@ -18546,15 +18601,19 @@
 
     // Full screen for reading mode (mobile): hides the address bar
     // browser, and on Android - system buttons (back/home/menu).
+    // Returns the (settled, never-rejecting) fullscreen promise when the
+    // browser gives us one, so the caller can wait for the OS transition
+    // instead of racing it - see the comment in enterReadMode().
     function requestReadModeFullscreen() {
-      if (!isTouchDevice) return;
+      if (!isTouchDevice) return null;
       const el = document.documentElement;
       const req = el.requestFullscreen || el.webkitRequestFullscreen || el.webkitRequestFullScreen;
-      if (!req) return;
+      if (!req) return null;
       try {
         const p = req.call(el, { navigationUI: 'hide' });
-        if (p && typeof p.catch === 'function') p.catch(function () {});
+        if (p && typeof p.then === 'function') return p.catch(function () {});
       } catch (_) {}
+      return null;
     }
     function exitReadModeFullscreen() {
       const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
@@ -18567,7 +18626,7 @@
       } catch (_) {}
     }
 
-    function enterReadMode(anchorPageIdx) {
+    async function enterReadMode(anchorPageIdx) {
       if (!pdfDoc) return;
 
       if (readModeActive) return;
@@ -18608,7 +18667,17 @@
 
       readModeActive = true;
       document.body.classList.add('read-mode-active');
-      requestReadModeFullscreen();
+      const fsPromise = requestReadModeFullscreen();
+      if (fsPromise) {
+        // Let the OS/browser fullscreen transition (address bar + Android
+        // system UI hide, the animation behind the "black screen" during
+        // entry) run on an otherwise-idle main thread instead of racing it
+        // against the scale/relayout work below - the two competing for the
+        // same thread is what stretches out the visible black frame. Capped
+        // so a browser that resolves late (or silently never settles) can't
+        // stall entering reading mode.
+        await Promise.race([fsPromise, new Promise((r) => setTimeout(r, 350))]);
+      }
       if (typeof pmSyncLayout === 'function') pmSyncLayout();
 
       // 1. Calculate and set the target scale
