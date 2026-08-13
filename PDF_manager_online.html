@@ -15010,9 +15010,23 @@
       prevBtn.classList.add('visible');
       nextBtn.classList.add('visible');
       const idx = pmBestVisiblePageIndex(pages);
+      // A button must only disable once there is truly nowhere further to
+      // scroll in that direction - not merely once the first/last PAGE
+      // becomes "current". pmBestVisiblePageIndex picks whichever page shows
+      // the largest fraction of ITS OWN height, so for a page taller than
+      // the viewport (any real zoom level) the last page can become
+      // "current" the moment it edges out the previous page, while most of
+      // it still sits unscrolled below the fold. Disabling on idx alone
+      // made the button - and the hold/right-click gesture that starts
+      // continuous autoscroll, which a disabled button can't receive at
+      // all - go dead right as the last/first page came into view, long
+      // before its actual bottom/top was reached.
+      const atTop = scrollContainer.scrollTop <= 0.5;
+      const atBottom = scrollContainer.scrollTop
+        >= scrollContainer.scrollHeight - scrollContainer.clientHeight - 0.5;
       // Keep the active auto-scroll button clickable so the user can turn it off.
-      prevBtn.disabled = (pmNavAutoDir === -1) ? false : (idx <= 0);
-      nextBtn.disabled = (pmNavAutoDir === 1) ? false : (idx < 0 || idx >= pages.length - 1);
+      prevBtn.disabled = (pmNavAutoDir === -1) ? false : (idx < 0 || atTop);
+      nextBtn.disabled = (pmNavAutoDir === 1) ? false : (idx < 0 || atBottom);
       pmPositionPageNavButtons();
     }
 
