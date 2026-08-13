@@ -25136,6 +25136,149 @@
       return pdfPasswordLibPromise;
     }
 
+    // @cantoo/pdf-lib's PDFString writer deliberately does not escape raw
+    // '(', ')' or '\' bytes when serializing a literal string - its own
+    // source comment says "for simplicity, we will not bother escaping
+    // them", reasoning that balanced parens are technically legal
+    // unescaped. That is only true for content that happens to already be
+    // balanced/escape-free, which ordinary short text usually is by luck.
+    // It is NOT true for arbitrary binary content: an AES-encrypted string
+    // is close to random bytes, so any string of meaningful length is all
+    // but certain to contain an unescaped '(', ')' or '\' - desyncing the
+    // parenthesis-nesting boundary every PDF parser (including this same
+    // library, on the very next load) uses to find where that literal
+    // string ends. Confirmed via a real user-reported file: this app's own
+    // page-editor/redaction feature stores a base64 PNG preview + JSON
+    // fallback info directly as string values on /Catalog; once password-
+    // protected, those strings become ~20-30KB of ciphertext, get written
+    // back unescaped, and the resulting garbled bytes desync the parser
+    // starting at the Catalog object - surfacing as
+    // "catalog.Pages is not a function" the next time the file is opened.
+    // PDFString.asBytes() (the read/unescape side) already understands
+    // these escapes correctly, so patching only the write side restores a
+    // valid round trip. Applied once per loaded module instance, right
+    // before it's used, since the same dynamically-imported module
+    // instance is reused for every subsequent call in the session.
+    function pmPatchPdfStringEscaping(mod) {
+      const PDFString = mod && mod.PDFString;
+      if (!PDFString || PDFString.prototype.__pmEscapesPatched) return mod;
+      const escapeValue = (value) => {
+        let out = '';
+        for (let i = 0; i < value.length; i++) {
+          const code = value.charCodeAt(i);
+          out += (code === 0x28 || code === 0x29 || code === 0x5c) ? '\\' + value[i] : value[i];
+        }
+        return out;
+      };
+      PDFString.prototype.toString = function () {
+        return '(' + escapeValue(this.value) + ')';
+      };
+      PDFString.prototype.sizeInBytes = function () {
+        return escapeValue(this.value).length + 2;
+      };
+      PDFString.prototype.copyBytesInto = function (buffer, offset) {
+        const escaped = escapeValue(this.value);
+        buffer[offset++] = 0x28;
+        for (let i = 0; i < escaped.length; i++) buffer[offset + i] = escaped.charCodeAt(i);
+        offset += escaped.length;
+        buffer[offset] = 0x29;
+        return escaped.length + 2;
+      };
+      PDFString.prototype.__pmEscapesPatched = true;
+      return mod;
+    }
+
+    // @cantoo/pdf-lib's writer (PDFWriter.prototype.encrypt) only encrypts
+    // objects that are themselves a PDFStream - it never encrypts PDFString/
+    // PDFHexString VALUES living directly in a plain (non-stream) object's
+    // own dict/array, such as this app's own page-editor/redaction feature
+    // storing preview data (a base64 PNG data URI, JSON fallback info)
+    // directly as custom string properties on /Catalog. Those strings are
+    // written out as PLAIN, UNENCRYPTED bytes even though the document is
+    // otherwise "encrypted" - but every reader (this library included, on
+    // the very next load) unconditionally tries to AES-DECRYPT every string
+    // it parses once a password is supplied. A plaintext string run through
+    // that spurious decrypt naturally comes out as garbage; once written
+    // back as a non-hex, parenthesis-delimited PDFString (see
+    // pmPatchPdfStringEscaping above), that garbage's raw bytes are all but
+    // certain to contain unescaped '(' / ')' / '\\', desyncing the parser's
+    // object boundaries starting at whichever object holds it. For a large
+    // custom string sitting directly on /Catalog, that surfaces as
+    // "catalog.Pages is not a function" the next time the file is opened.
+    // Strings living inside a compressed object stream (ObjStm) are
+    // unaffected by any of this: the ObjStm container itself is a
+    // PDFStream and already gets correctly encrypted as a whole by the
+    // library's existing code, and objects read back out of an
+    // already-decrypted ObjStm are correctly left alone by the parser - it
+    // is specifically top-level (non-ObjStm) dict/array objects with their
+    // own string values that the library's writer misses. This patches
+    // exactly that gap: every string found while walking a plain object's
+    // own dict/array (not following into referenced objects, which get
+    // their own separate encrypt() call; not descending into nested
+    // streams, whose CONTENT the existing code already encrypts) is
+    // AES-encrypted with a freshly-generated IV per string, matching what
+    // the parser's decrypt side expects, and re-written as a PDFHexString -
+    // sidestepping the parenthesis-escaping question entirely for these,
+    // since hex strings have no escaping ambiguity at all. The /Encrypt
+    // dictionary's own O/U/OE/UE/Perms values are explicitly left untouched
+    // (matched by comparing against the trailer's own Encrypt ref) since
+    // those are key material, never document content.
+    function pmPatchPdfWriterStringEncryption(mod) {
+      const PDFWriter = mod && mod.PDFWriter;
+      if (!PDFWriter || PDFWriter.prototype.__pmStringEncryptPatched) return mod;
+      const { PDFDict, PDFArray, PDFString, PDFHexString, PDFStream } = mod;
+      const bytesToHex = (bytes) => {
+        let s = '';
+        for (let i = 0; i < bytes.length; i++) s += bytes[i].toString(16).padStart(2, '0');
+        return s;
+      };
+      function encryptStringsIn(obj, ref, security, seen) {
+        if (!obj || seen.has(obj)) return;
+        if (obj instanceof PDFDict) {
+          if (obj.suppressEncryption) return;
+          seen.add(obj);
+          for (const [key, value] of obj.entries()) {
+            if (value instanceof PDFString || value instanceof PDFHexString) {
+              // A fresh IV per string (not one shared across a whole object) -
+              // reusing one would weaken the encryption, not break correctness.
+              const encryptFn = security.getEncryptFn(ref.objectNumber, ref.generationNumber);
+              obj.set(key, PDFHexString.of(bytesToHex(encryptFn(value.asBytes()))));
+            } else {
+              encryptStringsIn(value, ref, security, seen);
+            }
+          }
+        } else if (obj instanceof PDFArray) {
+          seen.add(obj);
+          for (let i = 0; i < obj.size(); i++) {
+            const value = obj.get(i);
+            if (value instanceof PDFString || value instanceof PDFHexString) {
+              const encryptFn = security.getEncryptFn(ref.objectNumber, ref.generationNumber);
+              obj.set(i, PDFHexString.of(bytesToHex(encryptFn(value.asBytes()))));
+            } else {
+              encryptStringsIn(value, ref, security, seen);
+            }
+          }
+        }
+        // PDFRef/PDFName/PDFNumber/etc: nothing to do - refs are handled by
+        // their own separate encrypt() call in the writer's main loop.
+      }
+      const origEncrypt = PDFWriter.prototype.encrypt;
+      PDFWriter.prototype.encrypt = function (ref, object, security) {
+        origEncrypt.call(this, ref, object, security);
+        if (object instanceof PDFStream) return; // stream content already handled above
+        const encryptRef = this.context.trailerInfo && this.context.trailerInfo.Encrypt;
+        if (encryptRef && encryptRef.objectNumber === ref.objectNumber
+          && encryptRef.generationNumber === ref.generationNumber) {
+          return; // never touch the /Encrypt dictionary's own values
+        }
+        if (object instanceof PDFDict || object instanceof PDFArray) {
+          encryptStringsIn(object, ref, security, new Set());
+        }
+      };
+      PDFWriter.prototype.__pmStringEncryptPatched = true;
+      return mod;
+    }
+
     // postal-mime (EML parser). Online: jsDelivr ESM. Offline build replaces the
     // import() call with a blob: URL (scripts/build-offline.mjs).
     let postalMimeLibPromise = null;
@@ -25192,6 +25335,8 @@
     /** Open with the password supplied by the user; return bytes without encryption. */
     async function decryptPdfBytesWithPassword(bytes, password) {
       const mod = await loadPdfPasswordLib();
+      pmPatchPdfStringEscaping(mod);
+      pmPatchPdfWriterStringEncryption(mod);
       const pwd = password == null ? '' : String(password);
       const doc = await mod.PDFDocument.load(bytes.slice(), { password: pwd });
       // Re-save so the main pdf-lib build can load the result normally.
@@ -25204,6 +25349,8 @@
      *  a two-tier permissions scheme). Returns new, encrypted bytes. */
     async function encryptPdfBytesWithPassword(bytes, password) {
       const mod = await loadPdfPasswordLib();
+      pmPatchPdfStringEscaping(mod);
+      pmPatchPdfWriterStringEncryption(mod);
       const doc = await mod.PDFDocument.load(bytes.slice());
       // The security handler revision is picked from the PDF's own header
       // version (see @cantoo/pdf-lib's PDFSecurity.initialize): a normal
