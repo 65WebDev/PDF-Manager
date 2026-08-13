@@ -8040,6 +8040,8 @@
         loadingCroppingPage: 'Кадрирование страницы...',
         loadingSavingAndNavigating: 'Сохранение и переход...',
         loadingApplyingEdits: 'Применение правок...',
+        loadingRedactingInfo: 'Затирание информации...',
+        loadingRedactingText: 'Затирание текста...',
         peCropCtxConfirm: 'Кадрировать',
         peRedactColor: 'Выбрать цвет',
         peRedactConfirm: 'Подтвердить затирание',
@@ -8151,6 +8153,7 @@
         confirmCloseTab: 'Документ «{name}» не сохранён.<br>Закрыть вкладку?',
         confirmCloseTabYes: 'Закрыть',
         confirmCloseTabNo: 'Отмена',
+        confirmCloseEditorUnsaved: 'Закрыть редактор без сохранения правок?',
         docUnsaved: 'Документ не сохранён',
         searchNotFound: 'Не найдено',
         searchNoMatches: 'Совпадений не найдено',
@@ -8331,7 +8334,9 @@
         peCropConfirm: 'Confirm crop',
         loadingCroppingPage: 'Cropping page...',
         loadingSavingAndNavigating: 'Saving and navigating...',
-        loadingApplyingEdits: 'Applying edits...',
+        loadingApplyingEdits: 'Applying changes...',
+        loadingRedactingInfo: 'Redacting information...',
+        loadingRedactingText: 'Redacting text...',
         peCropCtxConfirm: 'Crop',
         peRedactColor: 'Choose color',
         peRedactConfirm: 'Confirm redaction',
@@ -8443,6 +8448,7 @@
         confirmCloseTab: 'Document “{name}” is unsaved.<br>Close the tab?',
         confirmCloseTabYes: 'Close',
         confirmCloseTabNo: 'Cancel',
+        confirmCloseEditorUnsaved: 'Close the editor without saving changes?',
         docUnsaved: 'Document unsaved',
         searchNotFound: 'Not found',
         searchNoMatches: 'No matches found',
@@ -8624,6 +8630,8 @@
         loadingCroppingPage: 'Recortando página...',
         loadingSavingAndNavigating: 'Guardando y navegando...',
         loadingApplyingEdits: 'Aplicando cambios...',
+        loadingRedactingInfo: 'Tachando información...',
+        loadingRedactingText: 'Tachando texto...',
         peCropCtxConfirm: 'Recortar',
         peRedactColor: 'Elegir color',
         peRedactConfirm: 'Confirmar tachado',
@@ -8735,6 +8743,7 @@
         confirmCloseTab: 'El documento «{name}» no está guardado.<br>¿Cerrar la pestaña?',
         confirmCloseTabYes: 'Cerrar',
         confirmCloseTabNo: 'Cancelar',
+        confirmCloseEditorUnsaved: '¿Cerrar el editor sin guardar los cambios?',
         docUnsaved: 'Documento sin guardar',
         searchNotFound: 'No encontrado',
         searchNoMatches: 'No se encontraron coincidencias',
@@ -34750,7 +34759,7 @@ async function peRedactConfirm(o, opts) {
 
   peState.__redactConfirmBusy = true;
   try {
-    if (!skipLoading) showLoading('Затирание информации...');
+    if (!skipLoading) showLoading(t('loadingRedactingInfo'));
     document.getElementById('peRedactConfirmBtn')?.blur();
 
     // Snapshot for undo, then reload pdfDoc — save() leaves the in-memory
@@ -34831,7 +34840,7 @@ async function peRedactNormalizedRegionsImmediate(regions, opts) {
 
   peState.__redactConfirmBusy = true;
   try {
-    showLoading(opts.loadingMsg || 'Затирание текста...');
+    showLoading(opts.loadingMsg || t('loadingRedactingText'));
 
     const bytesBefore = peClonePdfBytes(await pdfDoc.save());
     pdfDoc = await PDFLib.PDFDocument.load(peClonePdfBytes(bytesBefore));
@@ -34895,7 +34904,7 @@ async function peApplyPageTextSelRedact() {
   }));
   await peRedactNormalizedRegionsImmediate(regions, {
     color: peLastRedactColor || '#000000',
-    loadingMsg: 'Затирание текста...'
+    loadingMsg: t('loadingRedactingText')
   });
 }
 
@@ -37487,7 +37496,7 @@ async function peRevertSessionPdfEdits() {
 
 async function pageEditClose(force) {
   if (!peState) return;
-  if (!force && peDirtyEdits() && !confirm('Закрыть редактор без сохранения правок?')) return;
+  if (!force && peDirtyEdits() && !confirm(t('confirmCloseEditorUnsaved'))) return;
   if (peColorPreview) peCloseColorPickerSession();
   // Never leave unconfirmed redact frames in page metadata/previews.
   if (peState.objects && peState.objects.some(o => o.type === 'redact')) {
