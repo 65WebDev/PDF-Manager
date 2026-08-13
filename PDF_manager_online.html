@@ -34705,6 +34705,16 @@ async function peCropConfirm() {
     peRestoreAfterCrop();
     await peRenderStage();
     peRedrawObjects();
+    // Drawing/moving/resizing the crop frame before confirming already
+    // pushed its own undo step(s) (tool 'crop', not yet applied). Drop them
+    // here so this single "applied" snapshot lands directly on top of the
+    // pre-crop state - one Ctrl+Z then fully reverts the crop (box gone,
+    // tool back to whatever was active before cropping) instead of first
+    // stopping at the frame-selection step.
+    const undo = peState.undoStack || [];
+    while (undo.length && undo[undo.length - 1].tool === 'crop' && !undo[undo.length - 1].cropApplied) {
+      undo.pop();
+    }
     peCommitEditorHistory();
   } catch (err) {
     console.error(err);
@@ -34761,7 +34771,7 @@ async function peRedactConfirm(o, opts) {
       minX: target.x, minY: target.y,
       maxX: target.x + target.w, maxY: target.y + target.h
     };
-    pePaintBlackRedactRect(pdfDoc, peState.idx, region, target.color || peLastRedactColor);
+    pePaintBlackRedactRect(pdfDoc, peState.idx, region, target.color || peLastRedactColor, peFinalRotation());
     peRememberSessionRedactedRegion(peState.idx, region.minX, region.minY, region.maxX, region.maxY);
 
     setDocumentDirty(true);
@@ -34832,8 +34842,9 @@ async function peRedactNormalizedRegionsImmediate(regions, opts) {
       undo[undo.length - 1].sessionRedacted = JSON.parse(JSON.stringify(peSessionRedactedRegions));
     }
 
+    const rotOverride = peFinalRotation();
     ready.forEach(region => {
-      pePaintBlackRedactRect(pdfDoc, peState.idx, region, color);
+      pePaintBlackRedactRect(pdfDoc, peState.idx, region, color, rotOverride);
       peRememberSessionRedactedRegion(
         peState.idx, region.minX, region.minY, region.maxX, region.maxY);
     });
@@ -52661,7 +52672,7 @@ async function peRasterizePageInDoc(srcDoc, pageIdx) {
 // Paint a solid redact rect in visual/normalized coords onto a page.
 // Does NOT scrub text here — export/save runs peApplyPendingRedactRasterization
 // (regional first, full-page JPEG only as fallback).
-function pePaintBlackRedactRect(doc, pageIdx, region, fillColor) {
+function pePaintBlackRedactRect(doc, pageIdx, region, fillColor, rotOverride) {
   if (!doc || pageIdx == null || pageIdx < 0 || !region) return;
   const minX = Math.max(0, region.minX != null ? region.minX : region[0]);
   const minY = Math.max(0, region.minY != null ? region.minY : region[1]);
@@ -52669,7 +52680,13 @@ function pePaintBlackRedactRect(doc, pageIdx, region, fillColor) {
   const maxY = Math.min(1, region.maxY != null ? region.maxY : region[3]);
   if (!(maxX > minX && maxY > minY)) return;
   const page = doc.getPage(pageIdx);
-  const rot = page.getRotation().angle || 0;
+  // In-editor callers pass rotOverride = peFinalRotation(): while the page
+  // editor is open, a rotation the user just applied (peState.delta) is only
+  // baked into the real PDFPage via page.setRotation() at Save time, but the
+  // region fractions here are already measured against the rotated on-screen
+  // view - using the page's still-stale persisted rotation would place the
+  // cover at the pre-rotation location/orientation.
+  const rot = (rotOverride != null) ? (((rotOverride % 360) + 360) % 360) : (page.getRotation().angle || 0);
   const cb = page.getCropBox();
   const full = peOverlayPlacement(rot, cb);
   const localX = full.x + minX * full.w;
