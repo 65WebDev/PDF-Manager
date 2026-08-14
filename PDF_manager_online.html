@@ -12522,14 +12522,39 @@
       return landscape ? 8 : 4;
     }
 
-    function computeMobileScaleForCols(cols) {
+    // Actual single-page preview width at `scale` for pageEl's own
+    // orientation - mirrors the desktop zoom-magnet / computeReadModeMobileScale
+    // logic (a portrait page's rendered width is narrower than its
+    // surrounding square card, see portraitPreviewWidth): used so the mobile
+    // pinch fill-snap can target the actual PAGE CONTENT reaching the
+    // available width in single-column view, not just the outer square card
+    // (cardRowWidth) - which left portrait pages letterboxed with unused
+    // side margins even once the card itself was reported as "filled".
+    function mobileSinglePageContentWidth(scale, pageEl) {
+      if (pageEl.classList.contains('page-rotated')) return pmPreviewLongPx(scale);
+      const img = pageEl.querySelector('.img-wrapper img') || pageEl.querySelector('img');
+      const aspect = (img && img.naturalWidth > 0 && img.naturalHeight > 0)
+        ? img.naturalWidth / img.naturalHeight
+        : pmMaxPortraitAspect();
+      if (!aspect) return cardOuterWidth(scale);
+      return portraitPreviewWidth(scale, aspect);
+    }
+
+    // pageEl (optional): when cols===1, snap to where THAT page's own actual
+    // content reaches avail (see mobileSinglePageContentWidth) instead of
+    // just the outer square card. Only meaningful at single-column - a
+    // multi-column grid intentionally uses uniform square-ish cards.
+    function computeMobileScaleForCols(cols, pageEl) {
       const avail = getScrollAvailWidth();
       if (avail <= 0) return MOBILE_SCALE_FLOOR;
       const n = pdfDoc ? pdfDoc.getPageCount() : 1;
       cols = Math.max(1, Math.min(n, cols));
+      const widthFn = (cols === 1 && pageEl)
+        ? (s) => mobileSinglePageContentWidth(s, pageEl)
+        : (s) => cardRowWidth(s, cols);
       let best = MOBILE_SCALE_FLOOR;
       for (let s = MOBILE_SCALE_FLOOR; s <= 700; s++) {
-        if (cardRowFits(s, cols, avail)) best = s;
+        if (widthFn(s) <= avail + 0.01) best = s;
         else break;
       }
       return best;
@@ -12705,12 +12730,12 @@
       else if (endCols > startCols) cols = startCols + 1;
       cols = Math.max(1, Math.min(nPages, cols));
 
-      const target = computeMobileScaleForCols(cols);
-      if (!(target > 0) || target === currentScale) return false;
-
       const pages = getVisiblePages();
       const page = (anchorEl && anchorEl.isConnected) ? anchorEl : pages[0];
       if (!page) return false;
+
+      const target = computeMobileScaleForCols(cols, page);
+      if (!(target > 0) || target === currentScale) return false;
 
       return applyMobilePinchScaleSnap(target, page, anchorFx, anchorFy, midX, midY);
     }
