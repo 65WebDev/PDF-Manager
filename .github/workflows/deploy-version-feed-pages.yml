@@ -17,7 +17,17 @@ on:
       - '.nojekyll'
       - '.github/workflows/deploy-version-feed-pages.yml'
   workflow_dispatch:
-  # Also after HTML releases finish writing the feed.
+  # The Release workflow commits version-feed.js with GITHUB_TOKEN. That
+  # commit does not trigger `push` workflows, and creating the GitHub
+  # Release with GITHUB_TOKEN does not trigger `release` workflows either —
+  # so without this, Pages stays one HTML build behind (About still shows
+  # the previous build-* as latest). workflow_run is the documented way to
+  # chain off a GITHUB_TOKEN job.
+  workflow_run:
+    workflows: ['Release']
+    types: [completed]
+  # Manual / PAT-published build-* releases. Windows/Linux tags are ignored
+  # below: the github-pages environment is main-only and those events fail.
   release:
     types: [published]
 
@@ -32,12 +42,20 @@ concurrency:
 
 jobs:
   deploy:
+    if: |
+      (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success')
+      && (github.event_name != 'release' || startsWith(github.event.release.tag_name, 'build-'))
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      # Always take the tip of main. `release` / `workflow_run` otherwise
+      # check out the triggering tag or the pre-feed HTML commit, which still
+      # has the previous build's version.json.
       - uses: actions/checkout@v4
+        with:
+          ref: main
 
       - name: Configure Pages
         uses: actions/configure-pages@v5
@@ -60,6 +78,8 @@ jobs:
           if [ -f version-feed.js ]; then
             cp version-feed.js _site/version-feed.mjs
           fi
+          echo '--- version.json to deploy ---'
+          cat version.json
           ls -la _site
 
       - uses: actions/upload-pages-artifact@v3
