@@ -11,5 +11,5 @@ window.__PDF_MANAGER_VERSION_FEED__ = {
   "windowsDownloadUrl": "https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.19",
   "linuxVersion": "0.1.19",
   "linuxDownloadUrl": "https://github.com/65WebDev/PDF-Manager/releases/tag/linux-v0.1.19",
-  "updatedAt": "2026-08-06T17:47:33.292Z"
+  "updatedAt": "2026-08-16T18:13:33.688Z"
 };
