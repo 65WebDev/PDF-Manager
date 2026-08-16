@@ -7615,8 +7615,20 @@
     let rubberActive = false;
     let rubberArmed = false;
     //Before pageCountPinned and the first updateUIState().
-    const isTouchDevice = ('ontouchstart' in window) || navigator.maxTouchPoints > 0 ||
-                          (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+    // Touch CAPABILITY alone isn't enough - a touchscreen laptop/2-in-1 used
+    // with a mouse/trackpad also reports 'ontouchstart'/maxTouchPoints/
+    // pointer:coarse, which used to force the whole app into mobile
+    // behavior (tabs, hover quick-actions, right-click menu, click-to-select
+    // all gated on !isTouchDevice; the pinch scale range/min-scale formula
+    // also kicked in, clamping desktop zoom to a phone-calibrated range) even
+    // though hover/right-click/click work fine there. any-pointer:fine is
+    // true whenever ANY attached pointing device (mouse, trackpad, pen) is
+    // fine-grained, regardless of whether a coarse touchscreen is ALSO
+    // present - so a hybrid device now reads as desktop, while phones/
+    // tablets (no fine pointer at all) are unaffected.
+    const isTouchDevice = (('ontouchstart' in window) || navigator.maxTouchPoints > 0 ||
+                          (window.matchMedia && window.matchMedia('(pointer: coarse)').matches)) &&
+                          !(window.matchMedia && window.matchMedia('(any-pointer: fine)').matches);
 
     //Tabs (desktop): state - up to the init code and drop/open handlers below.
     let pmTabs = [];
