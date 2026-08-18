@@ -165,7 +165,6 @@ async fn fetch_url_text(url: String) -> Result<String, String> {
 pub fn run() {
   // argv[0] is the executable; the rest may include PDF paths from the shell.
   let startup_files = collect_pdf_paths_from_args(std::env::args().skip(1));
-  let maximize_on_start = !startup_files.is_empty();
 
   tauri::Builder::default()
     .manage(PendingOpenFiles(Mutex::new(startup_files)))
@@ -186,9 +185,10 @@ pub fn run() {
       maximize_main_window_cmd
     ])
     .setup(move |app| {
-      if maximize_on_start {
-        maximize_main_window(app.handle());
-      }
+      // Always start maximized (Windows "развернуть"), not just when opened
+      // via a PDF file association — a plain launch from the shortcut/Start
+      // menu used to open windowed at the tauri.conf.json default size.
+      maximize_main_window(app.handle());
       if cfg!(debug_assertions) {
         app.handle().plugin(
           tauri_plugin_log::Builder::default()
