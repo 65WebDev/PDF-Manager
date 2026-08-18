@@ -33,6 +33,11 @@
 
 *(click a thumbnail to open it full-size)*
 
+<p align="center">
+  <video src="https://github.com/65WebDev/PDF-Manager/releases/download/demo-video/demo.mp4" controls preload="metadata" poster="docs/screenshots/03-page-editor.jpg" width="480"></video>
+  <br><sub>Video demo</sub>
+</p>
+
 ### Download
 
 | Method | Link |
@@ -109,6 +114,11 @@ After downloading, open the HTML file in your browser. The online version loads 
 </table>
 
 *(нажмите на миниатюру, чтобы открыть в полном размере)*
+
+<p align="center">
+  <video src="https://github.com/65WebDev/PDF-Manager/releases/download/demo-video/demo.mp4" controls preload="metadata" poster="docs/screenshots/03-page-editor.jpg" width="480"></video>
+  <br><sub>Видео-демо</sub>
+</p>
 
 ### Скачать
 
