@@ -40,11 +40,11 @@
 | **Open online** | https://65WebDev.github.io/PDF-Manager/PDF_manager_online.html |
 | **Download online version** | https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_online.html |
 | **Download offline version** | https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_offline.html |
-| **Windows: installer** | https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.25/PDF.Manager_0.1.25_x64-setup.exe |
-| **Windows: portable `.exe`** | https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.25/pdf-manager.exe |
+| **Windows: installer** | https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.26/PDF.Manager_0.1.26_x64-setup.exe |
+| **Windows: portable `.exe`** | https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.26/pdf-manager.exe |
 | **Linux: `.deb`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.25/PDF.Manager_0.1.25_amd64.deb|
 | **Linux: `.AppImage`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.25/PDF.Manager_0.1.25_amd64.AppImage|
-| **Windows release** | https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.25 |
+| **Windows release** | https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.26 |
 | **Linux release** | https://github.com/65WebDev/PDF-Manager/releases/tag/linux-v0.1.25 |
 
 After downloading, open the HTML file in your browser. The online version loads its libraries from a CDN; the offline version bundles everything inside the file and works without internet access.
@@ -117,11 +117,11 @@ After downloading, open the HTML file in your browser. The online version loads 
 | **Открыть онлайн** | https://65WebDev.github.io/PDF-Manager/PDF_manager_online.html |
 | **Скачать онлайн-версию** | https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_online.html |
 | **Скачать офлайн-версию** | https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_offline.html |
-| **Windows: установщик** | https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.25/PDF.Manager_0.1.25_x64-setup.exe |
-| **Windows: portable `.exe`** | https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.25/pdf-manager.exe |
+| **Windows: установщик** | https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.26/PDF.Manager_0.1.26_x64-setup.exe |
+| **Windows: portable `.exe`** | https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.26/pdf-manager.exe |
 | **Linux: `.deb`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.25/PDF.Manager_0.1.25_amd64.deb|
 | **Linux: `.AppImage`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.25/PDF.Manager_0.1.25_amd64.AppImage|
-| **Релиз Windows** | https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.25 |
+| **Релиз Windows** | https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.26 |
 | **Релиз Linux** | https://github.com/65WebDev/PDF-Manager/releases/tag/linux-v0.1.25 |
 
 После скачивания откройте HTML-файл в браузере. Онлайн-версия подгружает библиотеки из CDN; офлайн-версия содержит все зависимости внутри файла и работает без интернета.
