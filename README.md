@@ -33,13 +33,6 @@
 
 *(click a thumbnail to open it full-size)*
 
-<p align="center">
-  <a href="https://github.com/65WebDev/PDF-Manager/releases/download/demo-video/demo.mp4">
-    <img src="docs/screenshots/06-video-poster.jpg" width="480" alt="Video demo — click to play">
-  </a>
-  <br><sub>▶ <a href="https://github.com/65WebDev/PDF-Manager/releases/download/demo-video/demo.mp4">Video demo</a> (opens the .mp4 — GitHub's README renderer strips inline video players; see it embedded live on the <a href="https://65webdev.github.io/PDF-Manager/">landing page</a>)</sub>
-</p>
-
 ### Download
 
 | Method | Link |
@@ -116,13 +109,6 @@ After downloading, open the HTML file in your browser. The online version loads 
 </table>
 
 *(нажмите на миниатюру, чтобы открыть в полном размере)*
-
-<p align="center">
-  <a href="https://github.com/65WebDev/PDF-Manager/releases/download/demo-video/demo.mp4">
-    <img src="docs/screenshots/06-video-poster.jpg" width="480" alt="Видео-демо — нажмите, чтобы воспроизвести">
-  </a>
-  <br><sub>▶ <a href="https://github.com/65WebDev/PDF-Manager/releases/download/demo-video/demo.mp4">Видео-демо</a> (открывает .mp4 — GitHub вырезает встроенный видеоплеер из README; посмотреть можно на <a href="https://65webdev.github.io/PDF-Manager/">лендинге</a>)</sub>
-</p>
 
 ### Скачать
 
