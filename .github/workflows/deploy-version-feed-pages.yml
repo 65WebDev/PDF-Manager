@@ -71,6 +71,29 @@ jobs:
           # same-site relative path - without it, Pages 404s even though the
           # landing page itself deploys fine.
           if [ -f PDF_manager_online.html ]; then cp PDF_manager_online.html _site/; fi
+          # Pages serves a straight checkout of main, which never gets the
+          # runner-local sed stamp Release applies (see release.yml's "Stamp
+          # version" step) - so without this, the About panel here always
+          # read "Версия неизвестна", even though the served code itself is
+          # current. Stamp the _site copy only (never the tracked source),
+          # using the build/date already committed in version.json - that
+          # file reflects whichever release last touched
+          # PDF_manager_online.html, and this workflow redeploys again via
+          # workflow_run right after each Release finishes, so the two stay
+          # in sync the same way version.json itself does.
+          if [ -f _site/PDF_manager_online.html ] && [ -f version.json ]; then
+            BUILD=$(jq -r '.build // empty' version.json)
+            DATE_ONLY=$(jq -r '.date // empty' version.json | cut -dT -f1)
+            if [[ "$BUILD" =~ ^build-[0-9]+$ ]] && [ -n "$DATE_ONLY" ]; then
+              sed -i \
+                -e "s/__PDF_MANAGER_BUILD__/${BUILD}/g" \
+                -e "s/__PDF_MANAGER_DATE__/${DATE_ONLY}/g" \
+                _site/PDF_manager_online.html
+              echo "Stamped _site/PDF_manager_online.html with ${BUILD} (${DATE_ONLY})"
+            else
+              echo "::warning::version.json build/date not in expected format - leaving PDF_manager_online.html unstamped"
+            fi
+          fi
           if [ -f .nojekyll ]; then cp .nojekyll _site/; else touch _site/.nojekyll; fi
           if [ -f version-feed.js ]; then cp version-feed.js _site/; fi
           if [ -f version.json ]; then cp version.json _site/; fi
