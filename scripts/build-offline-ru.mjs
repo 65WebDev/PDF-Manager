@@ -263,13 +263,14 @@ function forcePreBootLocaleRu(html) {
   const search =
     "      try {\n" +
     "        var loc = localStorage.getItem('pmLocale');\n" +
-    "        if (loc !== 'en' && loc !== 'ru' && loc !== 'es') {\n" +
+    "        if (loc !== 'en' && loc !== 'ru' && loc !== 'es' && loc !== 'zh') {\n" +
     "          var nav = String((navigator.languages && navigator.languages[0]) || navigator.language || '').toLowerCase();\n" +
-    "          loc = nav.indexOf('en') === 0 ? 'en' : (nav.indexOf('es') === 0 ? 'es' : 'ru');\n" +
+    "          loc = nav.indexOf('en') === 0 ? 'en' : (nav.indexOf('es') === 0 ? 'es' : (nav.indexOf('zh') === 0 ? 'zh' : 'ru'));\n" +
     "        }\n" +
-    "        document.documentElement.setAttribute('lang', loc === 'en' ? 'en' : (loc === 'es' ? 'es' : 'ru'));\n" +
+    "        document.documentElement.setAttribute('lang', loc === 'en' ? 'en' : (loc === 'es' ? 'es' : (loc === 'zh' ? 'zh' : 'ru')));\n" +
     "        if (loc === 'en') document.title = 'PDF Document Manager';\n" +
     "        else if (loc === 'es') document.title = 'Gestor de Documentos PDF';\n" +
+    "        else if (loc === 'zh') document.title = 'PDF 文档管理器';\n" +
     "      } catch (e2) { /* ignore */ }\n";
   const replace =
     "      try {\n" +
@@ -283,7 +284,7 @@ function forceRuntimeLocaleRu(html) {
     "    function pmDetectLocale() {\n" +
     "      try {\n" +
     "        const saved = localStorage.getItem(PM_LOCALE_KEY);\n" +
-    "        if (saved === 'en' || saved === 'ru' || saved === 'es') return saved;\n" +
+    "        if (saved === 'en' || saved === 'ru' || saved === 'es' || saved === 'zh') return saved;\n" +
     "      } catch (_) {}\n" +
     "      try {\n" +
     "        const langs = (navigator.languages && navigator.languages.length)\n" +
@@ -293,6 +294,10 @@ function forceRuntimeLocaleRu(html) {
     "          if (l.startsWith('en')) return 'en';\n" +
     "          if (l.startsWith('es')) return 'es';\n" +
     "          if (l.startsWith('ru')) return 'ru';\n" +
+    "          // Covers zh-CN/zh-Hans/zh-SG (simplified) and zh-TW/zh-HK/zh-Hant\n" +
+    "          // (traditional) alike - only one Chinese translation (simplified)\n" +
+    "          // exists, same as how a generic 'es'/'en' covers all regional variants.\n" +
+    "          if (l.startsWith('zh')) return 'zh';\n" +
     "        }\n" +
     "      } catch (_) {}\n" +
     "      return 'ru';\n" +
