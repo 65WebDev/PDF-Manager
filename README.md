@@ -61,7 +61,7 @@ After downloading, open the HTML file in your browser. The online version loads 
 - **Image compression** — reduce the PDF file size without losing readability.
 - **Password & encryption** — set a password on a PDF right in the browser, no third-party service involved.
 
-**Supported interface languages:** English, Russian, Spanish.
+**Supported interface languages:** English, Russian, Spanish, Chinese.
 
 **Embedded libraries:**
 
@@ -138,7 +138,7 @@ After downloading, open the HTML file in your browser. The online version loads 
 - **Сжатие изображений** — уменьшение размера файла без потери читаемости.
 - **Пароль и шифрование** — установка пароля на PDF прямо в браузере, без сторонних сервисов.
 
-**Поддерживаемые языки интерфейса:** русский, английский, испанский.
+**Поддерживаемые языки интерфейса:** русский, английский, испанский, китайский.
 
 **Используемые библиотеки:**
 
