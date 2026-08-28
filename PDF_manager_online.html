@@ -12563,7 +12563,16 @@
           pagesContainer.classList.remove('pages-row-overflow');
           updatePagesRowOverflow();
         }
-        scrollContainer.scrollLeft = 0;
+        // Guarded (not an unconditional assignment): this runs on every
+        // scroll tick while locked, including every tick of an in-flight
+        // VERTICAL scrollTo({behavior:'smooth'}) (e.g. the page-nav
+        // buttons) - reassigning scrollLeft even to its own current value
+        // cancels that animation after a single frame (confirmed: it isn't
+        // just "redundant but harmless", a same-value scrollLeft write on
+        // Chromium aborts an in-progress smooth scroll on the OTHER axis
+        // too), which is why "next page" used to crawl a couple of pixels
+        // and stop instead of jumping a page whenever this lock was active.
+        if (scrollContainer.scrollLeft !== 0) scrollContainer.scrollLeft = 0;
       }
     }
 
@@ -12746,7 +12755,7 @@
             pagesContainer.classList.remove('pages-row-overflow');
             updatePagesRowOverflow();
           }
-          if (!pagesContainer.classList.contains('pages-row-overflow')) {
+          if (!pagesContainer.classList.contains('pages-row-overflow') && scrollContainer.scrollLeft !== 0) {
             scrollContainer.scrollLeft = 0;
           }
         });
