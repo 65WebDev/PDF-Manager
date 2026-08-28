@@ -42,10 +42,10 @@
 | **Download offline version** | https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_offline.html |
 | **Windows: installer** | https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.27/PDF.Manager_0.1.27_x64-setup.exe |
 | **Windows: portable `.exe`** | https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.27/pdf-manager.exe |
-| **Linux: `.deb`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.26/PDF.Manager_0.1.26_amd64.deb|
-| **Linux: `.AppImage`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.26/PDF.Manager_0.1.26_amd64.AppImage|
+| **Linux: `.deb`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.27/PDF.Manager_0.1.27_amd64.deb|
+| **Linux: `.AppImage`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.27/PDF.Manager_0.1.27_amd64.AppImage|
 | **Windows release** | https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.27 |
-| **Linux release** | https://github.com/65WebDev/PDF-Manager/releases/tag/linux-v0.1.26 |
+| **Linux release** | https://github.com/65WebDev/PDF-Manager/releases/tag/linux-v0.1.27 |
 
 After downloading, open the HTML file in your browser. The online version loads its libraries from a CDN; the offline version bundles everything inside the file and works without internet access.
 
@@ -119,10 +119,10 @@ After downloading, open the HTML file in your browser. The online version loads 
 | **Скачать офлайн-версию** | https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_offline.html |
 | **Windows: установщик** | https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.27/PDF.Manager_0.1.27_x64-setup.exe |
 | **Windows: portable `.exe`** | https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.27/pdf-manager.exe |
-| **Linux: `.deb`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.26/PDF.Manager_0.1.26_amd64.deb|
-| **Linux: `.AppImage`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.26/PDF.Manager_0.1.26_amd64.AppImage|
+| **Linux: `.deb`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.27/PDF.Manager_0.1.27_amd64.deb|
+| **Linux: `.AppImage`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.27/PDF.Manager_0.1.27_amd64.AppImage|
 | **Релиз Windows** | https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.27 |
-| **Релиз Linux** | https://github.com/65WebDev/PDF-Manager/releases/tag/linux-v0.1.26 |
+| **Релиз Linux** | https://github.com/65WebDev/PDF-Manager/releases/tag/linux-v0.1.27 |
 
 После скачивания откройте HTML-файл в браузере. Онлайн-версия подгружает библиотеки из CDN; офлайн-версия содержит все зависимости внутри файла и работает без интернета.
 
