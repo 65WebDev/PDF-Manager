@@ -32916,7 +32916,12 @@ function pmBookmarksRenderRenameInput(row, node) {
     e.stopPropagation();
   });
   input.addEventListener('click', (e) => e.stopPropagation());
-  requestAnimationFrame(() => { input.focus(); input.select(); });
+  // preventScroll: without it, focusing an input for a bookmark that's
+  // currently scrolled out of view makes the browser scroll-into-view the
+  // #pmBookmarksList container by its own default alignment - which for a
+  // row deep in a long list can land far from where it actually was,
+  // reading as the whole list "jumping" on rename.
+  requestAnimationFrame(() => { input.focus({ preventScroll: true }); input.select(); });
 }
 
 function pmBookmarksRenderList(flatItems) {
@@ -33534,8 +33539,18 @@ function pmBookmarksMarkDirty() {
   if (typeof setDocumentDirty === 'function') setDocumentDirty(true);
 }
 
+// pmBookmarksRenderList() rebuilds every row from scratch (old ones removed,
+// new ones appended) rather than patching in place, so the list's scrollTop
+// isn't guaranteed to survive a rerender the way it does in
+// pmBookmarksLoadAndRender() (which explicitly saves/restores it around its
+// own render call) - explicitly doing the same thing here covers every
+// pmBookmarksRerender() caller at once (format toggle, rename, delete, link
+// to current page, drag reorder, etc.).
 function pmBookmarksRerender() {
+  const list = document.getElementById('pmBookmarksList');
+  const scrollTop = list ? list.scrollTop : 0;
   pmBookmarksRenderList(pmBookmarksFlatten(pmBookmarksState.tree));
+  if (list) list.scrollTop = scrollTop;
 }
 
 function pmBookmarksExpandAll() {
