@@ -15891,10 +15891,32 @@
     // scrolling-ancestor chain itself and was observed to occasionally cut
     // its smooth-scroll animation short; computing the target offset off
     // the container we already scroll everywhere else is more predictable.
+    // Tracks the page a nav-button click already sent scrollContainer smoothly
+    // toward, so a second quick click can advance from THAT page instead of
+    // pmBestVisiblePageIndex()'s live reading - which, while the previous
+    // smooth-scroll animation is still in flight, still reports the OLD page
+    // as "current" (it's barely moved yet). Recomputing the target from that
+    // stale reading sends the next scrollTo() toward almost the same nearby
+    // point, so the visible page only crawls a few pixels per click instead
+    // of jumping a full page - at high zoom, where a single page spans many
+    // viewport-heights, that crawl needs many clicks to actually cross into
+    // the next page. Cleared once scrollContainer goes quiet for a bit (see
+    // the 'scroll' listener in pmInitPageNavAutoScroll below), so it can't
+    // outlive its own animation or leak into an unrelated manual scroll.
+    let pmNavPendingTargetIdx = null;
+    let pmNavPendingSettleTimer = null;
+
+    function pmNavScheduleSettle() {
+      clearTimeout(pmNavPendingSettleTimer);
+      pmNavPendingSettleTimer = setTimeout(() => { pmNavPendingTargetIdx = null; }, 150);
+    }
+
     function pmNavigateSingleColPage(dir) {
       const pages = pmVisiblePageEls();
       if (pages.length < 2) return;
-      const idx = pmBestVisiblePageIndex(pages);
+      const idx = (pmNavPendingTargetIdx != null && pages[pmNavPendingTargetIdx])
+        ? pmNavPendingTargetIdx
+        : pmBestVisiblePageIndex(pages);
       if (idx < 0) return;
       const targetIdx = idx + (dir < 0 ? -1 : 1);
       const target = pages[targetIdx];
@@ -15904,6 +15926,8 @@
       const targetTop = scrollContainer.scrollTop + (targetRect.top - containerRect.top);
       const maxTop = scrollContainer.scrollHeight - scrollContainer.clientHeight;
       scrollContainer.scrollTo({ top: Math.max(0, Math.min(targetTop, maxTop)), behavior: 'smooth' });
+      pmNavPendingTargetIdx = targetIdx;
+      pmNavScheduleSettle();
     }
 
     function pmNavOnPointerDown(e) {
@@ -16016,6 +16040,14 @@
 
     (function pmInitPageNavAutoScroll() {
       pmNavApplyStaticTooltips();
+      // Keeps pmNavPendingTargetIdx alive for as long as scrollContainer is
+      // actually still moving (nav-triggered or not), and lets it clear
+      // itself out once scrolling goes quiet - see pmNavigateSingleColPage.
+      if (scrollContainer) {
+        scrollContainer.addEventListener('scroll', () => {
+          if (pmNavPendingTargetIdx != null) pmNavScheduleSettle();
+        }, { passive: true });
+      }
       const prevBtn = document.getElementById('pmPagePrevBtn');
       const nextBtn = document.getElementById('pmPageNextBtn');
       [prevBtn, nextBtn].forEach((btn) => {
