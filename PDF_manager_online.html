@@ -39521,6 +39521,23 @@ function peNormalizeShapeComment(o) {
   peShapeCommentData(o);
 }
 
+// Keeps a callout's comment box on-page after its box position is shifted
+// programmatically (e.g. dragging the frame/highlight it's attached to,
+// which carries the box along by the same delta). Dragging the box directly
+// already clamps like this; moving the frame did not, so the box could end
+// up positioned past the page edge - still visible in the live DOM editor
+// (not strictly clipped there) but silently dropped when baked to the
+// print/export overlay PNG, which clips hard to the page's own bounds -
+// this is what made a comment's box vanish only in print/export, not in
+// the editor.
+function peClampCalloutBoxXY(o) {
+  if (!o || o.boxX == null || o.boxY == null) return;
+  const boxW = o.boxW || 0.1;
+  const boxH = o.boxH || 0.08;
+  o.boxX = Math.max(0.005, Math.min(0.98 - boxW, o.boxX));
+  o.boxY = Math.max(0.005, Math.min(0.98 - boxH, o.boxY));
+}
+
 function peCalloutFrames(o) {
   if (o.frames && o.frames.length) return o.frames;
   return [{ x: o.x, y: o.y, w: o.w, h: o.h }];
@@ -47274,6 +47291,7 @@ function peProcessDrag(clientX, clientY) {
       if (d.obj.type === 'callout') {
         if (d.oboxX != null) d.obj.boxX = d.oboxX + ndx;
         if (d.oboxY != null) d.obj.boxY = d.oboxY + ndy;
+        peClampCalloutBoxXY(d.obj);
         if (d.frames0) {
           d.obj.frames = d.frames0.map(f => ({ x: f.x + ndx, y: f.y + ndy, w: f.w, h: f.h }));
         }
@@ -47310,6 +47328,7 @@ function peProcessDrag(clientX, clientY) {
     if (d.obj.type === 'callout') {
       if (d.oboxX != null) d.obj.boxX = d.oboxX + ndx;
       if (d.oboxY != null) d.obj.boxY = d.oboxY + ndy;
+      peClampCalloutBoxXY(d.obj);
       if (d.frames0) {
         d.obj.frames = d.frames0.map(f => ({ x: f.x + ndx, y: f.y + ndy, w: f.w, h: f.h }));
       }
@@ -52306,10 +52325,21 @@ function peDrawEditorObjects(ctx, canvasW, canvasH, objects, stageW, stageH) {
       frames.forEach(f => {
         ctx.strokeRect(f.x * canvasW, f.y * canvasH, f.w * canvasW, f.h * canvasH);
       });
-      const bx = (o.boxX || 0) * canvasW;
-      const by = (o.boxY || 0) * canvasH;
-      const bw = Math.max(2, (o.boxW || 0.15) * canvasW);
-      const bh = Math.max(2, (o.boxH || 0.08) * canvasH);
+      const boxWfrac = o.boxW || 0.15;
+      const boxHfrac = o.boxH || 0.08;
+      // Clamped locally (not mutating o) - a comment box dragged past the
+      // page edge before this was fixed at the source (moving the frame it's
+      // attached to used to shift the box by the same delta with no bounds
+      // check) is still stored that way in already-saved documents. Without
+      // this, such a box silently falls outside the overlay canvas here and
+      // never appears in print/export, even though the live DOM editor -
+      // which isn't clipped the same way - still shows it fine.
+      const boxXfrac = Math.max(0.005, Math.min(0.98 - boxWfrac, o.boxX || 0));
+      const boxYfrac = Math.max(0.005, Math.min(0.98 - boxHfrac, o.boxY || 0));
+      const bx = boxXfrac * canvasW;
+      const by = boxYfrac * canvasH;
+      const bw = Math.max(2, boxWfrac * canvasW);
+      const bh = Math.max(2, boxHfrac * canvasH);
       const hlL = o.x * canvasW, hlT = o.y * canvasH;
       const hlR = hlL + o.w * canvasW, hlB = hlT + o.h * canvasH;
       const pts = peHlLeaderEndpoints(hlL, hlT, hlR, hlB, bx, by, bw, bh);
