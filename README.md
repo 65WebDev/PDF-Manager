@@ -67,16 +67,16 @@ After downloading, open the HTML file in your browser. The online version loads 
 
 - **pdf-lib** v1.17.1 — PDF assembly and editing (pages, rotation, merging, saving)
 - **pdf.js** v3.11.174 — rendering PDF pages (thumbnails, preview)
-- **mammoth** v1.6.0 — converting Word (`.docx`) files to HTML on import
+- **mammoth** v1.12.1 — converting Word (`.docx`) files to HTML on import
 - **SheetJS (xlsx)** v0.18.5 — reading Excel (`.xls`/`.xlsx`) tables on import
 - **html2canvas** v1.4.1 — rasterizing HTML markup into an image for PDF assembly
 - **JSZip** v3.10.1 — unpacking `.docx` archives for docx-preview
-- **docx-preview** v0.3.7 — page-accurate rendering of Word documents
+- **docx-preview** v0.4.0 — page-accurate rendering of Word documents
 - **ExcelJS** v4.4.0 — reading styled Excel tables with print/pagination settings
-- **postal-mime** v2.7.5 — parsing email messages (`.eml`)
+- **postal-mime** v3.0.0 — parsing email messages (`.eml`)
 - **@kenjiuno/msgreader-web-ng** v0.2.0-alpha1 — parsing Outlook messages (`.msg`)
 - **@kenjiuno/decompressrtf** v0.1.4 — decompressing RTF bodies inside `.msg` files
-- **@cantoo/pdf-lib** v2.7.4 — opening password-protected PDFs
+- **@cantoo/pdf-lib** v2.9.1 — opening password-protected PDFs
 - **@pdf-lib/fontkit** v1.1.1 — embedding a Unicode font for non-Latin text in filled-in form fields
 
 ---
@@ -144,14 +144,14 @@ After downloading, open the HTML file in your browser. The online version loads 
 
 - **pdf-lib** v1.17.1 — сборка и редактирование PDF (страницы, поворот, слияние, сохранение)
 - **pdf.js** v3.11.174 — рендер страниц PDF (миниатюры, предпросмотр)
-- **mammoth** v1.6.0 — конвертация файлов Word (`.docx`) в HTML при импорте
+- **mammoth** v1.12.1 — конвертация файлов Word (`.docx`) в HTML при импорте
 - **SheetJS (xlsx)** v0.18.5 — чтение таблиц Excel (`.xls`/`.xlsx`) при импорте
 - **html2canvas** v1.4.1 — растеризация HTML-разметки в изображение для сборки PDF
 - **JSZip** v3.10.1 — распаковка `.docx`-архивов для docx-preview
-- **docx-preview** v0.3.7 — постраничный рендер документов Word
+- **docx-preview** v0.4.0 — постраничный рендер документов Word
 - **ExcelJS** v4.4.0 — чтение таблиц Excel со стилями и настройками печати
-- **postal-mime** v2.7.5 — разбор писем (`.eml`)
+- **postal-mime** v3.0.0 — разбор писем (`.eml`)
 - **@kenjiuno/msgreader-web-ng** v0.2.0-alpha1 — разбор писем Outlook (`.msg`)
 - **@kenjiuno/decompressrtf** v0.1.4 — распаковка RTF-тела в файлах `.msg`
-- **@cantoo/pdf-lib** v2.7.4 — открытие PDF-файлов, защищённых паролем
+- **@cantoo/pdf-lib** v2.9.1 — открытие PDF-файлов, защищённых паролем
 - **@pdf-lib/fontkit** v1.1.1 — встраивание Unicode-шрифта для нелатинского текста в заполняемых полях форм

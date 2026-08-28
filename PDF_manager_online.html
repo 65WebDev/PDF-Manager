@@ -36,8 +36,8 @@
   <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
   <!--pdf.js: render PDF pages to canvas (thumbnails, preview)-->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-  <!--mammoth: Convert DOCX to HTML when importing Word documents-->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
+  <!--mammoth: Convert DOCX to HTML when importing Word documents (jsdelivr npm mirror, not cdnjs - avoids cdnjs's curation lag for a fresh release)-->
+  <script src="https://cdn.jsdelivr.net/npm/mammoth@1.12.1/mammoth.browser.min.js"></script>
   <!--SheetJS (xlsx): Read XLSX/XLS when importing tables-->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
   <!--html2canvas: rasterization of HTML markup (Word/Excel pages) into an image for PDF assembly-->
@@ -45,7 +45,7 @@
   <!--JSZip: DOCX unpacking (this is a zip archive) - needed for docx-preview-->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <!--docx-preview: page-by-page rendering of DOCX to HTML, taking into account Word page breaks-->
-  <script src="https://cdn.jsdelivr.net/npm/docx-preview@0.3.7/dist/docx-preview.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/docx-preview@0.4.0/dist/docx-preview.min.js"></script>
   <!--ExcelJS: Read XLSX with styles and print options for pagination when converting to PDF-->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
   <!-- postal-mime / msgreader are loaded on demand (see loadPostalMime, loadMsgLibs) -->
@@ -25130,16 +25130,16 @@
     const PDF_MANAGER_LIBRARIES = [
       ['pdf-lib', '1.17.1'],
       ['pdf.js', '3.11.174'],
-      ['mammoth', '1.6.0'],
+      ['mammoth', '1.12.1'],
       ['SheetJS (xlsx)', '0.18.5'],
       ['html2canvas', '1.4.1'],
       ['JSZip', '3.10.1'],
-      ['docx-preview', '0.3.7'],
+      ['docx-preview', '0.4.0'],
       ['ExcelJS', '4.4.0'],
-      ['postal-mime', '2.7.5'],
+      ['postal-mime', '3.0.0'],
       ['@kenjiuno/msgreader-web-ng', '0.2.0-alpha1'],
       ['@kenjiuno/decompressrtf', '0.1.4'],
-      ['@cantoo/pdf-lib', '2.7.4'],
+      ['@cantoo/pdf-lib', '2.9.1'],
       ['@pdf-lib/fontkit', '1.1.1']
     ];
 
@@ -25946,7 +25946,7 @@
     function loadPdfPasswordLib() {
       if (!pdfPasswordLibPromise) {
         // Fork of pdf-lib with password support for protected documents.
-        pdfPasswordLibPromise = import('https://esm.sh/@cantoo/pdf-lib@2.7.4')
+        pdfPasswordLibPromise = import('https://esm.sh/@cantoo/pdf-lib@2.9.1')
           .catch((err) => {
             pdfPasswordLibPromise = null;
             throw err;
@@ -26104,7 +26104,7 @@
     async function loadPostalMime() {
       if (window.PostalMime) return window.PostalMime;
       if (!postalMimeLibPromise) {
-        postalMimeLibPromise = import('https://cdn.jsdelivr.net/npm/postal-mime@2.7.5/+esm')
+        postalMimeLibPromise = import('https://cdn.jsdelivr.net/npm/postal-mime@3.0.0/+esm')
           .then((m) => {
             const PM = m && (m.default || m.PostalMime || m);
             window.PostalMime = PM;

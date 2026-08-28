@@ -24,8 +24,8 @@ const HEAD_SCRIPTS = [
     url: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
   },
   {
-    comment: 'mammoth: Convert DOCX to HTML when importing Word documents',
-    url: 'https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js',
+    comment: 'mammoth: Convert DOCX to HTML when importing Word documents (jsdelivr npm mirror, not cdnjs - avoids cdnjs\'s curation lag for a fresh release)',
+    url: 'https://cdn.jsdelivr.net/npm/mammoth@1.12.1/mammoth.browser.min.js',
   },
   {
     comment: 'SheetJS (xlsx): Read XLSX/XLS when importing tables',
@@ -41,7 +41,7 @@ const HEAD_SCRIPTS = [
   },
   {
     comment: 'docx-preview: page-by-page rendering of DOCX to HTML, taking into account Word page breaks',
-    url: 'https://cdn.jsdelivr.net/npm/docx-preview@0.3.7/dist/docx-preview.min.js',
+    url: 'https://cdn.jsdelivr.net/npm/docx-preview@0.4.0/dist/docx-preview.min.js',
   },
   {
     comment: 'ExcelJS: Read XLSX with styles and print options for pagination when converting to PDF',
@@ -53,13 +53,13 @@ const PDFJS_WORKER_URL =
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
 const CANTOO_IMPORT =
-  "import('https://esm.sh/@cantoo/pdf-lib@2.7.4')";
+  "import('https://esm.sh/@cantoo/pdf-lib@2.9.1')";
 
 const FONTKIT_IMPORT =
   "import('https://esm.sh/@pdf-lib/fontkit@1.1.1')";
 
 const POSTAL_MIME_IMPORT =
-  "import('https://cdn.jsdelivr.net/npm/postal-mime@2.7.5/+esm')";
+  "import('https://cdn.jsdelivr.net/npm/postal-mime@3.0.0/+esm')";
 
 const MSG_READER_IMPORT =
   "import('https://cdn.jsdelivr.net/npm/@kenjiuno/msgreader-web-ng@0.2.0-alpha1/+esm')";
