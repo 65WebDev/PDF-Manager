@@ -15900,15 +15900,24 @@
     // point, so the visible page only crawls a few pixels per click instead
     // of jumping a full page - at high zoom, where a single page spans many
     // viewport-heights, that crawl needs many clicks to actually cross into
-    // the next page. Cleared once scrollContainer goes quiet for a bit (see
-    // the 'scroll' listener in pmInitPageNavAutoScroll below), so it can't
-    // outlive its own animation or leak into an unrelated manual scroll.
+    // the next page. Cleared once the browser reports the scroll has actually
+    // settled (see pmInitPageNavAutoScroll below), so it can't outlive its
+    // own animation or leak into an unrelated manual scroll.
     let pmNavPendingTargetIdx = null;
     let pmNavPendingSettleTimer = null;
+    // 'scrollend' (Chrome 114+, Firefox 109+, Safari 17.4+) fires exactly
+    // when a scroll - including an interrupted-and-restarted smooth one -
+    // has genuinely stopped moving, so it isn't fooled by a real document's
+    // scroll producing uneven 'scroll' event timing (e.g. the main thread
+    // briefly stalling on HQ image rendering mid-scroll, at high zoom on a
+    // real multi-page PDF). Only browsers without it fall back to a plain
+    // 'scroll' debounce, kept generously long since it has no way to tell
+    // "still animating, just quiet for a moment" from "actually done".
+    const PM_NAV_SUPPORTS_SCROLLEND = typeof window !== 'undefined' && 'onscrollend' in window;
 
     function pmNavScheduleSettle() {
       clearTimeout(pmNavPendingSettleTimer);
-      pmNavPendingSettleTimer = setTimeout(() => { pmNavPendingTargetIdx = null; }, 150);
+      pmNavPendingSettleTimer = setTimeout(() => { pmNavPendingTargetIdx = null; }, 500);
     }
 
     function pmNavigateSingleColPage(dir) {
@@ -16040,13 +16049,18 @@
 
     (function pmInitPageNavAutoScroll() {
       pmNavApplyStaticTooltips();
-      // Keeps pmNavPendingTargetIdx alive for as long as scrollContainer is
-      // actually still moving (nav-triggered or not), and lets it clear
-      // itself out once scrolling goes quiet - see pmNavigateSingleColPage.
+      // Clears pmNavPendingTargetIdx once scrollContainer has genuinely
+      // settled (nav-triggered or not) - see pmNavigateSingleColPage.
       if (scrollContainer) {
-        scrollContainer.addEventListener('scroll', () => {
-          if (pmNavPendingTargetIdx != null) pmNavScheduleSettle();
-        }, { passive: true });
+        if (PM_NAV_SUPPORTS_SCROLLEND) {
+          scrollContainer.addEventListener('scrollend', () => {
+            pmNavPendingTargetIdx = null;
+          }, { passive: true });
+        } else {
+          scrollContainer.addEventListener('scroll', () => {
+            if (pmNavPendingTargetIdx != null) pmNavScheduleSettle();
+          }, { passive: true });
+        }
       }
       const prevBtn = document.getElementById('pmPagePrevBtn');
       const nextBtn = document.getElementById('pmPageNextBtn');
