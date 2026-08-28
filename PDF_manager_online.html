@@ -21276,6 +21276,23 @@
       }
       inner.className = 'textLayer page-text-layer-inner';
       inner.style.setProperty('--scale-factor', String(viewport.scale));
+      // pdf.js 5.x's TextLayer positions every span via
+      // calc(var(--total-scale-factor) * ...) instead of the old
+      // --scale-factor it used to read directly - without this, that calc()
+      // is invalid (undefined var) and spans end up mispositioned/unusable.
+      // No /UserUnit support here (matches the old behavior, which never
+      // accounted for it either), so this is just --scale-factor's value.
+      inner.style.setProperty('--total-scale-factor', String(viewport.scale));
+      // setLayerDimensions() (called inside the TextLayer constructor below)
+      // sizes the container with round(down, calc(...), var(--scale-round-x))
+      // when the browser supports CSS round() - with no fallback in that
+      // var(), an undefined --scale-round-x/-y makes the whole width/height
+      // declaration invalid, so the container silently falls back to
+      // content-sized (auto) instead of the actual page size. pdf.js's own
+      // viewer CSS normally defines both as 1px; we don't load that
+      // stylesheet, so set them here too.
+      inner.style.setProperty('--scale-round-x', '1px');
+      inner.style.setProperty('--scale-round-y', '1px');
       const task = new pdfjsLib.TextLayer({
         textContentSource: textContent,
         container: inner,
