@@ -20,10 +20,6 @@ const HEAD_SCRIPTS = [
     url: 'https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js',
   },
   {
-    comment: 'pdf.js: render PDF pages to canvas (thumbnails, preview)',
-    url: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
-  },
-  {
     comment: 'mammoth: Convert DOCX to HTML when importing Word documents (jsdelivr npm mirror, not cdnjs - avoids cdnjs\'s curation lag for a fresh release)',
     url: 'https://cdn.jsdelivr.net/npm/mammoth@1.12.1/mammoth.browser.min.js',
   },
@@ -49,8 +45,11 @@ const HEAD_SCRIPTS = [
   },
 ];
 
+const PDFJS_CORE_IMPORT =
+  "import('https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.149/build/pdf.min.mjs')";
+
 const PDFJS_WORKER_URL =
-  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.149/build/pdf.worker.min.mjs';
 
 const CANTOO_IMPORT =
   "import('https://esm.sh/@cantoo/pdf-lib@2.9.1')";
@@ -139,34 +138,47 @@ function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function replacePdfJsWorker(html, workerCode) {
+// pdf.js ships only ES module builds (pdf.min.mjs / pdf.worker.min.mjs) from
+// v4 onward - both files are already fully self-contained bundles (no bare
+// imports to resolve), so unlike @cantoo/pdf-lib etc. these just need their
+// text read from the locally installed package, not run through esbuild.
+function readPdfJsCore() {
+  return readFileSync(join(root, 'node_modules/pdfjs-dist/build/pdf.min.mjs'), 'utf8');
+}
+
+function readPdfJsWorker() {
+  return readFileSync(join(root, 'node_modules/pdfjs-dist/build/pdf.worker.min.mjs'), 'utf8');
+}
+
+function replacePdfjsCoreImport(html, bundledEsm) {
+  if (!html.includes(PDFJS_CORE_IMPORT)) {
+    throw new Error('Could not find pdf.js core dynamic import');
+  }
+  return html.replace(PDFJS_CORE_IMPORT, blobImportIIFE(bundledEsm));
+}
+
+// pdf.js's own worker bootstrap (inside pdf.min.mjs) does
+// `new Worker(workerSrc, { type: 'module' })`, so workerSrc just needs to
+// resolve to a URL serving valid module JS text - a blob URL works exactly
+// like the core-module blob above.
+function replacePdfjsWorkerUrl(html, workerCode) {
   const workerB64 = toBase64(workerCode);
   const replacement = [
-    '//Worker pdf.js - PDF rendering runs in a separate thread without blocking the interface',
     '(function () {',
     `  var workerB64 = '${workerB64}';`,
     "  var binary = atob(workerB64);",
     '  var bytes = new Uint8Array(binary.length);',
     '  for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);',
-    "  var blob = new Blob([bytes], { type: 'application/javascript' });",
-    '  pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(blob);',
-    '})();',
-  ].join('\n    ');
+    "  var blob = new Blob([bytes], { type: 'text/javascript' });",
+    '  return URL.createObjectURL(blob);',
+    '})()',
+  ].join('\n        ');
 
-  const pattern = new RegExp(
-    [
-      '//Worker pdf\\.js - PDF rendering runs in a separate thread without blocking the interface',
-      "\\s*pdfjsLib\\.GlobalWorkerOptions\\.workerSrc = '",
-      escapeRegExp(PDFJS_WORKER_URL),
-      "';",
-    ].join('\\s*'),
-    'm',
-  );
-
-  if (!pattern.test(html)) {
-    throw new Error('Could not find pdf.js workerSrc assignment');
+  const needle = `'${PDFJS_WORKER_URL}'`;
+  if (!html.includes(needle)) {
+    throw new Error('Could not find pdf.js worker URL string');
   }
-  return html.replace(pattern, replacement);
+  return html.replace(needle, replacement);
 }
 
 function replaceCantooImport(html, bundledEsm) {
@@ -335,8 +347,9 @@ async function main() {
     inlinedBlocks.set(spec.url, wrapInlineScript(code, spec.comment));
   }
 
-  console.log('Downloading pdf.js worker...');
-  const workerCode = await fetchText(PDFJS_WORKER_URL);
+  console.log('Reading pdf.js core + worker...');
+  const pdfjsCoreCode = readPdfJsCore();
+  const pdfjsWorkerCode = readPdfJsWorker();
 
   console.log('Bundling @cantoo/pdf-lib...');
   const cantooBundle = await bundleCantooPdfLib();
@@ -353,7 +366,8 @@ async function main() {
   html = addOfflineBanner(html);
   html = setOfflineFlag(html);
   html = replaceHeadScripts(html, inlinedBlocks);
-  html = replacePdfJsWorker(html, workerCode);
+  html = replacePdfjsCoreImport(html, pdfjsCoreCode);
+  html = replacePdfjsWorkerUrl(html, pdfjsWorkerCode);
   html = replaceCantooImport(html, cantooBundle);
   html = replaceFontkitImport(html, fontkitBundle);
   html = replacePostalMimeImport(html, postalMimeBundle);

@@ -66,7 +66,7 @@ After downloading, open the HTML file in your browser. The online version loads 
 **Embedded libraries:**
 
 - **pdf-lib** v1.17.1 — PDF assembly and editing (pages, rotation, merging, saving)
-- **pdf.js** v3.11.174 — rendering PDF pages (thumbnails, preview)
+- **pdf.js** v5.4.149 — rendering PDF pages (thumbnails, preview)
 - **mammoth** v1.12.1 — converting Word (`.docx`) files to HTML on import
 - **SheetJS (xlsx)** v0.18.5 — reading Excel (`.xls`/`.xlsx`) tables on import
 - **html2canvas** v1.4.1 — rasterizing HTML markup into an image for PDF assembly
@@ -143,7 +143,7 @@ After downloading, open the HTML file in your browser. The online version loads 
 **Используемые библиотеки:**
 
 - **pdf-lib** v1.17.1 — сборка и редактирование PDF (страницы, поворот, слияние, сохранение)
-- **pdf.js** v3.11.174 — рендер страниц PDF (миниатюры, предпросмотр)
+- **pdf.js** v5.4.149 — рендер страниц PDF (миниатюры, предпросмотр)
 - **mammoth** v1.12.1 — конвертация файлов Word (`.docx`) в HTML при импорте
 - **SheetJS (xlsx)** v0.18.5 — чтение таблиц Excel (`.xls`/`.xlsx`) при импорте
 - **html2canvas** v1.4.1 — растеризация HTML-разметки в изображение для сборки PDF

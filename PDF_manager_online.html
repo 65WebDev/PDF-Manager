@@ -34,8 +34,7 @@
 
   <!--pdf-lib: PDF assembly/editing (pages, rotations, merging, saving)-->
   <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
-  <!--pdf.js: render PDF pages to canvas (thumbnails, preview)-->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <!--pdf.js: render PDF pages to canvas (thumbnails, preview). Loaded via dynamic import further down (see the pdfjsLib stub near GlobalWorkerOptions.workerSrc below) - pdf.js dropped its UMD/global script-tag build entirely starting at its very first 4.x release (3.11.174, still used until this change, was the last 3.x/last-ever release with one), so there is no classic-script CDN URL to put here any more.-->
   <!--mammoth: Convert DOCX to HTML when importing Word documents (jsdelivr npm mirror, not cdnjs - avoids cdnjs's curation lag for a fresh release)-->
   <script src="https://cdn.jsdelivr.net/npm/mammoth@1.12.1/mammoth.browser.min.js"></script>
   <!--SheetJS (xlsx): Read XLSX/XLS when importing tables-->
@@ -7479,8 +7478,59 @@
       }, true);
     })();
 
-    //Worker pdf.js - PDF rendering runs in a separate thread without blocking the interface
-    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    // pdf.js (pdfjs-dist) dropped its classic UMD/global <script src> build
+    // entirely starting at its very first 4.x release - only ES modules
+    // ship now, in every version newer than 3.11.174 (the last 3.x/last-
+    // ever release with one). A bare top-level `import` isn't legal in a
+    // classic script, and converting this whole file to type="module" would
+    // stop every top-level function/var here from becoming a real global -
+    // breaking all the onclick="..."/inline HTML handlers used throughout
+    // the markup, which look functions up on window. So instead of loading
+    // pdf.js as a blocking global the old build did, `pdfjsLib` here is a
+    // synchronous stub object (real global, defined immediately, like
+    // before) whose methods lazily await the dynamic import() the first
+    // time they're actually invoked.
+    //
+    // This is safe for every existing pdfjsLib.* call site in this file
+    // (verified: only this stub definition itself touches pdfjsLib at
+    // script-load time - every one of the ~45 other usages is inside a
+    // function that only runs later, in response to user interaction or an
+    // already-open document, by which point pdfjsLibReal below is normally
+    // long since resolved) with one exception worth calling out: the
+    // getDocument()/renderTextLayer() stub methods below explicitly wait
+    // for the real module before doing anything, so those two are safe
+    // even in the split second before pdfjsLibReal resolves. The plain
+    // property getters (Util/OPS/PageViewport/GlobalWorkerOptions) are NOT
+    // awaited - they're only ever read by code that runs downstream of an
+    // already-awaited getDocument() call in the same flow (rendering/
+    // measuring an already-open pdf.js document), so pdfjsLibReal is
+    // guaranteed set by the time any of them are actually read.
+    var pdfjsLibReal = null;
+    var pdfjsLibReadyPromise = import('https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.149/build/pdf.min.mjs')
+      .then(function (mod) {
+        mod.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.149/build/pdf.worker.min.mjs';
+        pdfjsLibReal = mod;
+        return mod;
+      });
+    var pdfjsLib = {
+      getDocument: function () {
+        var args = arguments;
+        if (pdfjsLibReal) return pdfjsLibReal.getDocument.apply(pdfjsLibReal, args);
+        return {
+          promise: pdfjsLibReadyPromise.then(function (mod) {
+            return mod.getDocument.apply(mod, args).promise;
+          }),
+        };
+      },
+      get Util() { return pdfjsLibReal ? pdfjsLibReal.Util : undefined; },
+      get OPS() { return pdfjsLibReal ? pdfjsLibReal.OPS : undefined; },
+      get PageViewport() { return pdfjsLibReal ? pdfjsLibReal.PageViewport : undefined; },
+      // pdf.js 5.x replaced the renderTextLayer() function with a TextLayer
+      // class (new pdfjsLib.TextLayer({...}).render()) - only read downstream
+      // of an already-awaited getDocument() call, same as the other getters.
+      get TextLayer() { return pdfjsLibReal ? pdfjsLibReal.TextLayer : undefined; },
+      get GlobalWorkerOptions() { return pdfjsLibReal ? pdfjsLibReal.GlobalWorkerOptions : {}; },
+    };
 
     let pdfDoc = null;
     let originalFileBytes = null;
@@ -21221,17 +21271,17 @@
 
     // The standard PDF.js text layer is the same mechanism as in the pdf.js viewer.
     async function renderPdfjsTextLayer(inner, textContent, viewport) {
-      if (!pdfjsLib.renderTextLayer) {
-        throw new Error('pdfjsLib.renderTextLayer is not available');
+      if (!pdfjsLib.TextLayer) {
+        throw new Error('pdfjsLib.TextLayer is not available');
       }
       inner.className = 'textLayer page-text-layer-inner';
       inner.style.setProperty('--scale-factor', String(viewport.scale));
-      const task = pdfjsLib.renderTextLayer({
+      const task = new pdfjsLib.TextLayer({
         textContentSource: textContent,
         container: inner,
         viewport: viewport
       });
-      await task.promise;
+      await task.render();
       markTextLayerLineStarts(inner);
       const endOfContent = document.createElement('div');
       endOfContent.className = 'endOfContent';
@@ -25129,7 +25179,7 @@
 
     const PDF_MANAGER_LIBRARIES = [
       ['pdf-lib', '1.17.1'],
-      ['pdf.js', '3.11.174'],
+      ['pdf.js', '5.4.149'],
       ['mammoth', '1.12.1'],
       ['SheetJS (xlsx)', '0.18.5'],
       ['html2canvas', '1.4.1'],
@@ -34513,7 +34563,7 @@ function peRestorePageTextSelAnchor(anchor) {
 async function peBuildTextLayer(st, gen) {
   const container = document.getElementById('peTextLayer');
   if (!container || !st || !st.page || !st.viewport) return;
-  if (typeof pdfjsLib === 'undefined' || !pdfjsLib.renderTextLayer) return;
+  if (typeof pdfjsLib === 'undefined' || !pdfjsLib.TextLayer) return;
   // A rebuild for a different page must never carry the previous page's
   // selection into this one: peRestorePageTextSelAnchor re-applies plain
   // character OFFSETS, so on the new page's unrelated text those offsets
