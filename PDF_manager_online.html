@@ -12262,6 +12262,15 @@
       });
       const page = containing || best;
       if (!page) return null;
+      // One page per row: always anchor dead-center on it, rather than
+      // wherever the viewport's own center point happens to land (which can
+      // be a fraction of a pixel off page-center, e.g. from a scrollbar or
+      // an odd container width) - guarantees exact centering regardless of
+      // any small computed drift, matching what "one page fills the width"
+      // should always look like.
+      if (typeof isPagesSingleColumnLayout === 'function' && isPagesSingleColumnLayout()) {
+        return { idx: page.dataset.index, fracX: 0.5, fracY: 0.5 };
+      }
       const r = page.getBoundingClientRect();
       return {
         idx: page.dataset.index,
@@ -12334,13 +12343,30 @@
     function beginOrContinueZoomSession(clientX, clientY) {
       clearTimeout(zoomSessionResetTimer);
       zoomSessionResetTimer = setTimeout(resetZoomSession, ZOOM_SESSION_IDLE_MS);
+      // One page per row (real high zoom, or just a narrow window): the
+      // cursor position isn't a meaningful zoom target any more - the whole
+      // page width is already "at" the cursor - and anchoring to it just
+      // makes the page drift left/right of center depending on wherever the
+      // mouse happens to be. Force pure viewport-center anchoring instead,
+      // skipping pageAtClientPoint(clientX, clientY) entirely below.
+      const forceCenterOnly = typeof isPagesSingleColumnLayout === 'function' && isPagesSingleColumnLayout();
       if (zoomSessionAnchor) {
         const el = pagesContainer.querySelector('.page[data-index="' + zoomSessionAnchor.idx + '"]');
-        if (el && el.style.display !== 'none') return zoomSessionAnchor;
+        if (el && el.style.display !== 'none') {
+          // A cached anchor from earlier in this same continuous gesture may
+          // have captured a non-center fraction back when the layout wasn't
+          // single-column yet (e.g. zooming in past the point where a
+          // second column stops fitting) - don't keep chasing that stale
+          // off-center point once we're here.
+          if (forceCenterOnly && (zoomSessionAnchor.fracX !== 0.5 || zoomSessionAnchor.fracY !== 0.5)) {
+            zoomSessionAnchor = { idx: zoomSessionAnchor.idx, fracX: 0.5, fracY: 0.5 };
+          }
+          return zoomSessionAnchor;
+        }
         zoomSessionAnchor = null;   // anchor page was deleted/hidden mid-session
       }
       const { x: centerX, y: centerY } = scrollContainerContentCenter();
-      let page = pageAtClientPoint(clientX, clientY);
+      let page = forceCenterOnly ? null : pageAtClientPoint(clientX, clientY);
       let anchor = null;
       if (page) {
         const r = page.getBoundingClientRect();
@@ -12358,9 +12384,10 @@
           const r = el ? el.getBoundingClientRect() : null;
           const inside = r && centerX >= r.left && centerX <= r.right &&
                          centerY >= r.top && centerY <= r.bottom;
-          // Center falls between pages (grid gaps): center the nearest page
-          // itself rather than chasing its clamped edge point.
-          if (!inside) { anchor.fracX = 0.5; anchor.fracY = 0.5; }
+          // Center falls between pages (grid gaps), or single-column mode
+          // forces it regardless: center the page itself rather than
+          // chasing its clamped edge point (or the cursor).
+          if (!inside || forceCenterOnly) { anchor.fracX = 0.5; anchor.fracY = 0.5; }
         }
       }
       zoomSessionAnchor = anchor;
