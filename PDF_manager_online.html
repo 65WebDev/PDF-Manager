@@ -50986,83 +50986,23 @@ function peStartShapeRotate(e, o) {
   peUpdatePanUi();
 }
 
-function peBakeFillCommentText(ctx, txt, bx, by, bw, bh, fontPt, S) {
-  if (!txt) return;
-  const fontPx = Math.max(8, (fontPt || 12) * S);
-  ctx.fillStyle = '#2c3e50';
-  ctx.font = fontPx + 'px "Segoe UI", Arial, sans-serif';
-  ctx.textBaseline = 'top';
-  const pad = 4 * S;
-  const maxW = Math.max(8, bw - pad * 2);
-  const lineH = fontPx * 1.25;
-  let ty = by + pad;
-  const maxY = by + bh - pad;
-
-  function emitLine(s) {
-    if (ty + lineH > maxY + 0.5) return false;
-    ctx.fillText(s, bx + pad, ty);
-    ty += lineH;
-    return true;
-  }
-  function wrapChunk(chunk) {
-    if (!chunk) return true;
-    if (ctx.measureText(chunk).width <= maxW) return emitLine(chunk);
-    const words = chunk.split(/(\s+)/);
-    let cur = '';
-    for (let i = 0; i < words.length; i++) {
-      const word = words[i];
-      if (!word) continue;
-      const test = cur + word;
-      if (ctx.measureText(test).width <= maxW) {
-        cur = test;
-        continue;
-      }
-      if (cur && !emitLine(cur.replace(/\s+$/, ''))) return false;
-      cur = '';
-      if (ctx.measureText(word).width <= maxW) {
-        cur = word;
-        continue;
-      }
-      let piece = '';
-      for (let j = 0; j < word.length; j++) {
-        const ch = word[j];
-        if (ctx.measureText(piece + ch).width > maxW && piece) {
-          if (!emitLine(piece)) return false;
-          piece = ch;
-        } else piece += ch;
-      }
-      cur = piece;
-    }
-    if (cur && !emitLine(cur.replace(/\s+$/, ''))) return false;
-    return true;
-  }
-  String(txt).split('\n').forEach(line => { wrapChunk(line); });
-}
-
 /** Bake shape-linked yellow comment bubble + leader into overlay canvas. */
 function peBakeDrawShapeComment(ctx, o, canvasW, canvasH, S) {
   if (!peShapeHasComment(o)) return;
   const c = peShapeCommentData(o);
   if (!(c.boxW > 0) || !(c.boxH > 0) || c.boxX == null || c.boxY == null) return;
-  const bx = c.boxX * canvasW;
-  const by = c.boxY * canvasH;
-  const bw = Math.max(2, c.boxW * canvasW);
-  const bh = Math.max(2, c.boxH * canvasH);
-  const pts = peShapeCommentLeaderEndpoints(o, canvasW, canvasH, bx, by, bw, bh);
+  // Clamped (not mutating c) so a box saved outside the page bounds still
+  // lands somewhere visible in the print/export overlay - same reasoning as
+  // peClampedCommentBoxRectPx, used by the 'callout' object type.
+  const box = peClampedCommentBoxRectPx(c.boxX, c.boxY, c.boxW, c.boxH, canvasW, canvasH);
+  const pts = peShapeCommentLeaderEndpoints(o, canvasW, canvasH, box.x, box.y, box.w, box.h);
   const lw = Math.max(1, 1 * S);
   ctx.save();
   ctx.strokeStyle = '#000';
   ctx.lineWidth = lw;
-  ctx.beginPath();
-  ctx.moveTo(pts.x1, pts.y1);
-  ctx.lineTo(pts.x2, pts.y2);
-  ctx.stroke();
-  ctx.fillStyle = peCalloutBg(o);
-  ctx.fillRect(bx, by, bw, bh);
-  ctx.strokeRect(bx, by, bw, bh);
   const txt = String(c.text || '').replace(/\r\n/g, '\n').trim() ||
     String(c.html || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/\r\n/g, '\n').trim();
-  peBakeFillCommentText(ctx, txt, bx, by, bw, bh, c.fontPt || 12, S);
+  peDrawCommentBoxAndLeader(ctx, box.x, box.y, box.w, box.h, pts, peCalloutBg(o), txt, c.fontPt, S);
   ctx.restore();
 }
 
@@ -52303,6 +52243,91 @@ async function pePreloadEditorImages(objects) {
   })));
 }
 
+// Shared by the 'callout' object type and shape-attached comments
+// (o.shapeComment) below - both are "leader line + colored box + wrapped
+// text" call-outs, drawn identically once the box rect and leader-line
+// endpoints are known. bx/by/bw/bh are already in canvas pixels.
+function peDrawCommentBoxAndLeader(ctx, bx, by, bw, bh, pts, bg, txt, fontPt, S) {
+  ctx.beginPath();
+  ctx.moveTo(pts.x1, pts.y1);
+  ctx.lineTo(pts.x2, pts.y2);
+  ctx.stroke();
+  ctx.fillStyle = bg;
+  ctx.fillRect(bx, by, bw, bh);
+  ctx.strokeRect(bx, by, bw, bh);
+  if (!txt) return;
+  const fontPx = Math.max(8, (fontPt || 12) * S);
+  ctx.fillStyle = '#2c3e50';
+  ctx.font = fontPx + 'px "Segoe UI", Arial, sans-serif';
+  ctx.textBaseline = 'top';
+  const pad = 4 * S;
+  const maxW = Math.max(8, bw - pad * 2);
+  const lineH = fontPx * 1.25;
+  let ty = by + pad;
+  const maxY = by + bh - pad;
+
+  function emitLine(s) {
+    if (ty + lineH > maxY + 0.5) return false;
+    ctx.fillText(s, bx + pad, ty);
+    ty += lineH;
+    return true;
+  }
+  function wrapChunk(chunk) {
+    if (!chunk) return true;
+    if (ctx.measureText(chunk).width <= maxW) return emitLine(chunk);
+    // Word wrap, then hard-break oversized tokens.
+    const words = chunk.split(/(\s+)/);
+    let cur = '';
+    for (let i = 0; i < words.length; i++) {
+      const word = words[i];
+      if (!word) continue;
+      const test = cur + word;
+      if (ctx.measureText(test).width <= maxW) {
+        cur = test;
+        continue;
+      }
+      if (cur && !emitLine(cur.replace(/\s+$/, ''))) return false;
+      cur = '';
+      if (ctx.measureText(word).width <= maxW) {
+        cur = word;
+        continue;
+      }
+      // Character wrap for long unbroken strings
+      let piece = '';
+      for (let j = 0; j < word.length; j++) {
+        const ch = word[j];
+        if (ctx.measureText(piece + ch).width > maxW && piece) {
+          if (!emitLine(piece)) return false;
+          piece = ch;
+        } else piece += ch;
+      }
+      cur = piece;
+    }
+    if (cur && !emitLine(cur.replace(/\s+$/, ''))) return false;
+    return true;
+  }
+  txt.split('\n').forEach(line => { wrapChunk(line); });
+}
+
+// A comment box position, clamped locally (never mutates o) so a box saved
+// past the page edge - whether from the old unclamped frame-drag bug or
+// just never having been checked at all - still lands somewhere visible in
+// the print/export overlay canvas, which clips hard to the page bounds
+// (the live DOM editor isn't clipped the same way, so it always looked
+// fine there regardless).
+function peClampedCommentBoxRectPx(boxX, boxY, boxW, boxH, canvasW, canvasH) {
+  const wFrac = boxW || 0.15;
+  const hFrac = boxH || 0.08;
+  const xFrac = Math.max(0.005, Math.min(0.98 - wFrac, boxX || 0));
+  const yFrac = Math.max(0.005, Math.min(0.98 - hFrac, boxY || 0));
+  return {
+    x: xFrac * canvasW,
+    y: yFrac * canvasH,
+    w: Math.max(2, wFrac * canvasW),
+    h: Math.max(2, hFrac * canvasH),
+  };
+}
+
 function peDrawEditorObjects(ctx, canvasW, canvasH, objects, stageW, stageH) {
   if (!objects || !objects.length) return false;
   const sw = stageW || canvasW;
@@ -52325,86 +52350,13 @@ function peDrawEditorObjects(ctx, canvasW, canvasH, objects, stageW, stageH) {
       frames.forEach(f => {
         ctx.strokeRect(f.x * canvasW, f.y * canvasH, f.w * canvasW, f.h * canvasH);
       });
-      const boxWfrac = o.boxW || 0.15;
-      const boxHfrac = o.boxH || 0.08;
-      // Clamped locally (not mutating o) - a comment box dragged past the
-      // page edge before this was fixed at the source (moving the frame it's
-      // attached to used to shift the box by the same delta with no bounds
-      // check) is still stored that way in already-saved documents. Without
-      // this, such a box silently falls outside the overlay canvas here and
-      // never appears in print/export, even though the live DOM editor -
-      // which isn't clipped the same way - still shows it fine.
-      const boxXfrac = Math.max(0.005, Math.min(0.98 - boxWfrac, o.boxX || 0));
-      const boxYfrac = Math.max(0.005, Math.min(0.98 - boxHfrac, o.boxY || 0));
-      const bx = boxXfrac * canvasW;
-      const by = boxYfrac * canvasH;
-      const bw = Math.max(2, boxWfrac * canvasW);
-      const bh = Math.max(2, boxHfrac * canvasH);
+      const box = peClampedCommentBoxRectPx(o.boxX, o.boxY, o.boxW, o.boxH, canvasW, canvasH);
       const hlL = o.x * canvasW, hlT = o.y * canvasH;
       const hlR = hlL + o.w * canvasW, hlB = hlT + o.h * canvasH;
-      const pts = peHlLeaderEndpoints(hlL, hlT, hlR, hlB, bx, by, bw, bh);
-      ctx.beginPath();
-      ctx.moveTo(pts.x1, pts.y1);
-      ctx.lineTo(pts.x2, pts.y2);
-      ctx.stroke();
-      ctx.fillStyle = peCalloutBg(o);
-      ctx.fillRect(bx, by, bw, bh);
-      ctx.strokeRect(bx, by, bw, bh);
+      const pts = peHlLeaderEndpoints(hlL, hlT, hlR, hlB, box.x, box.y, box.w, box.h);
       const txt = String(o.text || '').replace(/\r\n/g, '\n').trim() ||
         String(o.html || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/\r\n/g, '\n').trim();
-      if (txt) {
-        const fontPx = Math.max(8, (o.fontPt || 12) * S);
-        ctx.fillStyle = '#2c3e50';
-        ctx.font = fontPx + 'px "Segoe UI", Arial, sans-serif';
-        ctx.textBaseline = 'top';
-        const pad = 4 * S;
-        const maxW = Math.max(8, bw - pad * 2);
-        const lineH = fontPx * 1.25;
-        let ty = by + pad;
-        const maxY = by + bh - pad;
-
-        function emitLine(s) {
-          if (ty + lineH > maxY + 0.5) return false;
-          ctx.fillText(s, bx + pad, ty);
-          ty += lineH;
-          return true;
-        }
-        function wrapChunk(chunk) {
-          if (!chunk) return true;
-          if (ctx.measureText(chunk).width <= maxW) return emitLine(chunk);
-          // Word wrap, then hard-break oversized tokens.
-          const words = chunk.split(/(\s+)/);
-          let cur = '';
-          for (let i = 0; i < words.length; i++) {
-            const word = words[i];
-            if (!word) continue;
-            const test = cur + word;
-            if (ctx.measureText(test).width <= maxW) {
-              cur = test;
-              continue;
-            }
-            if (cur && !emitLine(cur.replace(/\s+$/, ''))) return false;
-            cur = '';
-            if (ctx.measureText(word).width <= maxW) {
-              cur = word;
-              continue;
-            }
-            // Character wrap for long unbroken strings
-            let piece = '';
-            for (let j = 0; j < word.length; j++) {
-              const ch = word[j];
-              if (ctx.measureText(piece + ch).width > maxW && piece) {
-                if (!emitLine(piece)) return false;
-                piece = ch;
-              } else piece += ch;
-            }
-            cur = piece;
-          }
-          if (cur && !emitLine(cur.replace(/\s+$/, ''))) return false;
-          return true;
-        }
-        txt.split('\n').forEach(line => { wrapChunk(line); });
-      }
+      peDrawCommentBoxAndLeader(ctx, box.x, box.y, box.w, box.h, pts, peCalloutBg(o), txt, o.fontPt, S);
       ctx.restore();
       drew = true;
     } else if (o.type === 'strikeout' || o.type === 'underline') {
@@ -54084,6 +54036,27 @@ async function peVerifyRegionalRedaction(bytesBefore, bytesAfter, pageIdx, rects
   return true;
 }
 
+// Grows a page-fraction bounding box to also cover any of the given shapes'
+// attached comment boxes (leader line + box), matching the same clamp
+// peDrawEditorObjects itself applies before drawing them - used by
+// peOverlayRasterizedShapePatch, whose crop region would otherwise be sized
+// to just the shape(s)' own footprint and silently discard a comment box
+// sitting elsewhere on the page (see peBakeDrawShapeComment's rendering,
+// drawn onto the pre-crop canvas but then invisible once cropped away).
+function peExpandBoundsForShapeComments(shapes, minX, minY, maxX, maxY) {
+  (shapes || []).forEach(o => {
+    if (o.type !== 'shape' || !peShapeHasComment(o)) return;
+    const c = peShapeCommentData(o);
+    const boxW = c.boxW || 0.15;
+    const boxH = c.boxH || 0.08;
+    const boxX = Math.max(0.005, Math.min(0.98 - boxW, c.boxX || 0));
+    const boxY = Math.max(0.005, Math.min(0.98 - boxH, c.boxY || 0));
+    minX = Math.min(minX, boxX); minY = Math.min(minY, boxY);
+    maxX = Math.max(maxX, boxX + boxW); maxY = Math.max(maxY, boxY + boxH);
+  });
+  return { minX, minY, maxX, maxY };
+}
+
 // Local shape-region rasterization for EXPORT / file-save only (filled shapes).
 // Never touches the live editor document - callers always pass a disposable copy.
 // Outside the shapes the original page stays vector/selectable. Inside:
@@ -54116,6 +54089,13 @@ async function peOverlayRasterizedShapePatch(doc, pageIdx, shapes) {
     minX = Math.min(minX, r.minX); minY = Math.min(minY, r.minY);
     maxX = Math.max(maxX, r.maxX); maxY = Math.max(maxY, r.maxY);
   });
+  // A filled shape's own footprint can be far smaller than its attached
+  // comment box (a leader line points OUT to a box sitting elsewhere on the
+  // page) - peDrawEditorObjects below does draw that box+leader onto the
+  // full-page canvas, but without this the crop that follows is still sized
+  // to just the shape(s), silently throwing the comment away before the
+  // patch is ever placed onto the PDF page.
+  ({ minX, minY, maxX, maxY } = peExpandBoundsForShapeComments(shapeList, minX, minY, maxX, maxY));
 
   const bytes = await doc.save();
   const pj = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
@@ -54140,6 +54120,7 @@ async function peOverlayRasterizedShapePatch(doc, pageIdx, shapes) {
       });
       minX = Math.max(0, minX); minY = Math.max(0, minY);
       maxX = Math.min(1, maxX); maxY = Math.min(1, maxY);
+      ({ minX, minY, maxX, maxY } = peExpandBoundsForShapeComments(drawShapes, minX, minY, maxX, maxY));
     }
 
     const canvas = document.createElement('canvas');
@@ -54171,6 +54152,29 @@ async function peOverlayRasterizedShapePatch(doc, pageIdx, shapes) {
     drawShapes.forEach(o => {
       const maskObj = Object.assign({}, o, { color: '#ffffff', filled: true });
       peBakeDrawShape(maskCtx, maskObj, { width: canvas.width, height: canvas.height }, canvas.width / vp1.width);
+      // The mask above only covers the shape's OWN silhouette, so a
+      // comment box/leader drawn well outside that footprint (see the
+      // peExpandBoundsForShapeComments comment above) would otherwise be
+      // cut away by the destination-in step below even though the crop
+      // bounds were widened to include it. Punch the box + leader into the
+      // mask too so those pixels survive the crop.
+      if (peShapeHasComment(o)) {
+        const c = peShapeCommentData(o);
+        if (c.boxW > 0 && c.boxH > 0 && c.boxX != null && c.boxY != null) {
+          const box = peClampedCommentBoxRectPx(c.boxX, c.boxY, c.boxW, c.boxH, canvas.width, canvas.height);
+          const pts = peShapeCommentLeaderEndpoints(o, canvas.width, canvas.height, box.x, box.y, box.w, box.h);
+          maskCtx.save();
+          maskCtx.strokeStyle = '#ffffff';
+          maskCtx.lineWidth = Math.max(4, 4 * (canvas.width / vp1.width));
+          maskCtx.beginPath();
+          maskCtx.moveTo(pts.x1, pts.y1);
+          maskCtx.lineTo(pts.x2, pts.y2);
+          maskCtx.stroke();
+          maskCtx.fillStyle = '#ffffff';
+          maskCtx.fillRect(box.x, box.y, box.w, box.h);
+          maskCtx.restore();
+        }
+      }
     });
     maskCtx.restore();
     cropCtx.globalCompositeOperation = 'destination-in';
