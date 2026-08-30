@@ -1895,6 +1895,13 @@
     /*Shapes Tool: Button = Last Selected Shape + Dropdown Submenu*/
     .pe-shape-wrap { position: relative; display: inline-flex; }
     .pe-shape-wrap.pe-shape-menu-open { z-index: 45; }
+    /* .pe-shape-wrap's z-index only ranks it among siblings inside .pe-tb-mid
+       (z-index:1) - it can't out-rank .pe-toolbar-tail (z-index:2), a
+       separate sibling of .pe-tb-mid under .pe-toolbar. When the toolbar
+       wraps onto two rows, the tail (Масштаб/Cancel/Save) then paints over
+       the open shape menu and swallows its clicks. Bump .pe-tb-mid above
+       the tail only while the menu is actually open. */
+    .pe-toolbar:has(.pe-shape-menu-open) .pe-tb-mid { z-index: 3; }
     .pe-shape-wrap .pe-btn .pe-shape-btn-icon { display: flex; width: 20px; height: 20px; }
     .pe-shape-wrap .pe-btn .pe-shape-btn-icon svg { width: 20px; height: 20px; display: block; }
     .pe-shape-menu-bridge {
