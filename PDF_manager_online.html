@@ -38313,6 +38313,14 @@ async function peExpandPageEditHistoryIntoDoc(pageIdx, baseRot, baselineBytes, u
     for (let i = 1; i < steps.length; i++) materializeIdxs.push(i);
   }
 
+  // Object-only sessions run this loop exactly once (materializeIdxs holds
+  // only the final step - see above), so the pageNorm re-stamp below can be
+  // folded into that single save instead of triggering a second full-
+  // document save right after the loop. Content-rewrite (redact/crop)
+  // sessions keep the separate restamp pass, since `doc` there can get
+  // reloaded from a snap's own pdfBytes on later iterations.
+  let pageNormAppliedInline = false;
+
   for (let k = 0; k < materializeIdxs.length; k++) {
     const snap = steps[materializeIdxs[k]];
     if (snap.pdfBytes && snap.pdfBytes.length) {
@@ -38322,6 +38330,14 @@ async function peExpandPageEditHistoryIntoDoc(pageIdx, baseRot, baselineBytes, u
     // Keep global pdfDoc on the working doc so image-catalog cache and the
     // pePush guard stay valid across the loop.
     pdfDoc = doc;
+    if (!anyPageRewrite && k === materializeIdxs.length - 1 && peState && peState.page) {
+      try {
+        const rot = ((baseRot + (Number(snap.delta) || 0)) % 360 + 360) % 360;
+        const vp1 = peState.page.getViewport({ scale: 1, rotation: rot });
+        peSetPageNormSize(pageIdx, rot, { W: vp1.width, H: vp1.height });
+        pageNormAppliedInline = true;
+      } catch (_) { /* pageNorm best-effort - restamp pass below still runs as fallback */ }
+    }
     lastBytes = new Uint8Array(await doc.save(saveOpts));
     if (typeof originalFileBytes !== 'undefined') originalFileBytes = lastBytes;
     pePushPageEditHistoryBytes(lastBytes, pageIdx, { deferThumbFill: true, skipEqualCheck: true });
@@ -38343,7 +38359,10 @@ async function peExpandPageEditHistoryIntoDoc(pageIdx, baseRot, baselineBytes, u
   // Expand loads baseline catalog bytes and would otherwise drop the session’s
   // pageNorm (pdf.js viewport size). Re-stamp it onto the tip document so
   // later composites / undos use the same coordinate space as object x/y.
-  if (lastBytes && peState && peState.page && doc) {
+  // Skipped when the loop above already applied it inline (object-only
+  // sessions) - re-running this here would just re-serialize identical
+  // content for a second full-document save.
+  if (!pageNormAppliedInline && lastBytes && peState && peState.page && doc) {
     try {
       const rot = ((baseRot + (Number((steps[steps.length - 1] || {}).delta) || 0)) % 360 + 360) % 360;
       const vp1 = peState.page.getViewport({ scale: 1, rotation: rot });
@@ -56541,11 +56560,17 @@ async function pageEditSave(options) {
         bytes = (typeof peClonePdfBytes === 'function')
           ? peClonePdfBytes(await pdfDoc.save({ useObjectStreams: false }))
           : new Uint8Array(await pdfDoc.save({ useObjectStreams: false }));
-      } else {
-        bytes = (typeof peClonePdfBytes === 'function')
-          ? peClonePdfBytes(await pdfDoc.save({ useObjectStreams: false }))
-          : new Uint8Array(await pdfDoc.save({ useObjectStreams: false }));
       }
+      // No pending redact raster: `bytes` already carries this page's final
+      // editor metadata (peApplyEditorHistorySnapToDoc, called for the last
+      // history step inside peExpandPageEditHistoryIntoDoc, wrote the same
+      // persistObjs into the very doc that produced these bytes/
+      // authoritativeBytes). The peSavePageEditorObjects call above just
+      // re-applies that identical metadata onto the freshly reloaded pdfDoc
+      // in memory - re-serializing the whole document again here reproduced
+      // functionally identical bytes at the cost of a second full-document
+      // save, which is what made Save take tens of seconds to minutes on
+      // large (hundreds-of-pages) documents.
     } catch (err) {
       console.warn('pageEditSave: post-expand content restamp failed', err);
       try {
