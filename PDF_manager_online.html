@@ -52586,6 +52586,70 @@ function peOverlayPlacement(R, cb) {
   }
 }
 
+// Crops a fully-drawn (page-sized, mostly-transparent) overlay canvas down
+// to the tight bounding box of its actual ink, returning page-FRACTION
+// bounds alongside the cropped PNG. Embedding the UNCROPPED canvas placed
+// it as one Image XObject whose PDF-level bounding box was the entire
+// page - and the redact-safety scan that decides whether a box can be
+// regionally scrubbed or must fall back to full-page rasterization
+// (peBuildRegionalRedactedPage's "image /Name under box" check, see
+// boxHitsAnyRect) tests bounding-box overlap only, with no pixel-content
+// awareness. A full-page overlay image therefore "hit" every future redact
+// box drawn ANYWHERE on that page, forever forcing the expensive/lossy
+// full-page-raster fallback for a page that had ever had so much as one
+// comment or highlight added to it, regardless of whether the two actually
+// overlapped. Cropping to the real ink keeps that detection meaningful,
+// and each additional save/print no longer piles another full-page image
+// on top of the last one.
+function peCropCanvasToInk(canvas) {
+  const w = canvas.width, h = canvas.height;
+  const ctx = canvas.getContext('2d');
+  const data = ctx.getImageData(0, 0, w, h).data;
+  let minX = w, minY = h, maxX = -1, maxY = -1;
+  for (let y = 0; y < h; y++) {
+    const rowBase = y * w * 4;
+    for (let x = 0; x < w; x++) {
+      if (data[rowBase + x * 4 + 3] !== 0) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0) return null;
+  const pad = 2;
+  minX = Math.max(0, minX - pad); minY = Math.max(0, minY - pad);
+  maxX = Math.min(w - 1, maxX + pad); maxY = Math.min(h - 1, maxY + pad);
+  const cropW = maxX - minX + 1, cropH = maxY - minY + 1;
+  const cropCanvas = document.createElement('canvas');
+  cropCanvas.width = cropW; cropCanvas.height = cropH;
+  cropCanvas.getContext('2d').drawImage(canvas, minX, minY, cropW, cropH, 0, 0, cropW, cropH);
+  return {
+    dataUrl: cropCanvas.toDataURL('image/png'),
+    minXFrac: minX / w, minYFrac: minY / h, maxXFrac: (maxX + 1) / w, maxYFrac: (maxY + 1) / h
+  };
+}
+
+// Places a cropped-overlay result (see peCropCanvasToInk) onto `page`,
+// mapping its page-fraction bounds through the same rotate/CropBox
+// placement math peOverlayRasterizedShapePatch already uses for the same
+// purpose, instead of stretching it across the full page.
+async function peDrawCroppedOverlay(workDoc, page, baked, rot, cb) {
+  if (!baked) return;
+  const img = await workDoc.embedPng(baked.dataUrl);
+  const full = peOverlayPlacement(rot, cb);
+  const localX = full.x + baked.minXFrac * full.w;
+  const localY = full.y + (1 - baked.maxYFrac) * full.h;
+  const anchor = peRotatePointAround(localX, localY, full.x, full.y, rot);
+  page.drawImage(img, {
+    x: anchor.x, y: anchor.y,
+    width: (baked.maxXFrac - baked.minXFrac) * full.w,
+    height: (baked.maxYFrac - baked.minYFrac) * full.h,
+    rotate: PDFLib.degrees(rot)
+  });
+}
+
 function peHtmlHasVisibleText(html) {
   if (!html) return false;
   let t = String(html)
@@ -53369,7 +53433,7 @@ async function peBakeShapesOverlayPng(shapes, rot, cb) {
   ctx.clip();
   const drew = peDrawEditorObjects(ctx, canvas.width, canvas.height, list, visW, visH);
   ctx.restore();
-  return drew ? canvas.toDataURL('image/png') : null;
+  return drew ? peCropCanvasToInk(canvas) : null;
 }
 
 // Marks a page as needing full rasterization (to make text beneath an opaque
@@ -56287,11 +56351,9 @@ async function peReplaceDocPageWithRasterizedShapes(doc, pageIdx, shapes) {
 async function peBakeShapesOntoPdfPage(doc, page, shapes, rot, cb) {
   const list = (shapes || []).filter(o => o.type === 'shape');
   if (!list.length || !doc || !page) return false;
-  const png = await peBakeShapesOverlayPng(list, rot, cb);
-  if (!png) return false;
-  const img = await doc.embedPng(png);
-  const pl = peOverlayPlacement(rot, cb);
-  page.drawImage(img, { x: pl.x, y: pl.y, width: pl.w, height: pl.h, rotate: PDFLib.degrees(rot) });
+  const baked = await peBakeShapesOverlayPng(list, rot, cb);
+  if (!baked) return false;
+  await peDrawCroppedOverlay(doc, page, baked, rot, cb);
   return true;
 }
 
@@ -56322,7 +56384,7 @@ async function peBakeObjectsOverlayPng(objects, rot, cb) {
   ctx.clip();
   const drew = peDrawEditorObjects(ctx, canvas.width, canvas.height, objects, visW, visH);
   ctx.restore();
-  return drew ? canvas.toDataURL('image/png') : null;
+  return drew ? peCropCanvasToInk(canvas) : null;
 }
 
 // Bakes editor objects (from metadata) into a PDF copy - for exporting/saving to disk.
@@ -56364,22 +56426,14 @@ async function peFlattenEditorObjectsIntoDoc(targetDoc, sourcePageIndices) {
         page = workDoc.getPage(targetIdx);
       } else if (shapes.length) {
         await pePreloadEditorImages(shapes);
-        const png = await peBakeShapesOverlayPng(shapes, rot, cb);
-        if (png) {
-          const img = await workDoc.embedPng(png);
-          const pl = peOverlayPlacement(rot, cb);
-          page.drawImage(img, { x: pl.x, y: pl.y, width: pl.w, height: pl.h, rotate: PDFLib.degrees(rot) });
-        }
+        const baked = await peBakeShapesOverlayPng(shapes, rot, cb);
+        await peDrawCroppedOverlay(workDoc, page, baked, rot, cb);
         objects = rest;
       }
       if (pePageHasEditorVisuals(objects)) {
         await pePreloadEditorImages(objects);
-        const png = await peBakeObjectsOverlayPng(objects, rot, cb);
-        if (png) {
-          const img = await workDoc.embedPng(png);
-          const pl = peOverlayPlacement(rot, cb);
-          page.drawImage(img, { x: pl.x, y: pl.y, width: pl.w, height: pl.h, rotate: PDFLib.degrees(rot) });
-        }
+        const baked = await peBakeObjectsOverlayPng(objects, rot, cb);
+        await peDrawCroppedOverlay(workDoc, page, baked, rot, cb);
       }
       const pjPage = await pjDoc.getPage(targetIdx + 1);
       const pjRot = typeof pjPage.rotate === 'number' ? pjPage.rotate : rot;
