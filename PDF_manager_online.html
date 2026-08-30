@@ -53472,7 +53472,17 @@ function pePageNeedsRedactRaster(page) {
 function pePageShouldFullRasterForRedact(page, pageIdx) {
   if (!page) return false;
   if (pePageNeedsRedactRaster(page)) return true;
-  if (pePageRedactedRegions(page).length) return true;
+  // A region flagged flattened=true (see peOverlayRasterizedShapePatch) is
+  // already a finished raster patch, not text pending removal - counting it
+  // here made EVERY page that had ever had so much as one filled shape
+  // permanently re-trigger this same full-page-raster fallback on every
+  // later flatten pass: the shape patch registers its own (now-satisfied)
+  // region, that alone made this return true, and the regional-redact
+  // attempt right after predictably found "image under box" (the patch
+  // itself) and gave up to a full-page JPEG - discarding the very overlay
+  // that patch just correctly composited, plus every other object on the
+  // page, on every single export from then on.
+  if (pePageRedactedRegions(page).some(r => r[4] !== 1)) return true;
   if (pageIdx != null && peSessionRedactedRegions[pageIdx] && peSessionRedactedRegions[pageIdx].length) {
     return true;
   }
@@ -54325,7 +54335,12 @@ async function peOverlayRasterizedShapePatch(doc, pageIdx, shapes) {
       height: (maxY - minY) * full.h,
       rotate: PDFLib.degrees(rot)
     });
-    scrubRects.forEach(r => peAddPageRedactedRegion(workPage, r.minX, r.minY, r.maxX, r.maxY));
+    // flattened=true: this region is a finished raster patch (scrub +
+    // replacement image already applied above), not a pending redact box -
+    // see pePageShouldFullRasterForRedact, which now relies on this flag
+    // specifically to avoid re-triggering full-page rasterization for a
+    // region this same function just finished handling correctly.
+    scrubRects.forEach(r => peAddPageRedactedRegion(workPage, r.minX, r.minY, r.maxX, r.maxY, true));
 
     const [replacement] = await doc.copyPages(workDoc, [pageIdx]);
     doc.removePage(pageIdx);
