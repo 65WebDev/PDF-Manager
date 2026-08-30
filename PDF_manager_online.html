@@ -54287,7 +54287,18 @@ async function peOverlayRasterizedShapePatch(doc, pageIdx, shapes) {
     maskCtx.save();
     maskCtx.translate(-cropX, -cropY);
     drawShapes.forEach(o => {
-      const maskObj = Object.assign({}, o, { color: '#ffffff', filled: true });
+      // opacity: 100 is required here, not just color/filled - peBakeDrawShape
+      // applies the shape's own visual opacity as ctx.globalAlpha, which is
+      // correct for painting the visible fill onto `canvas` above (blended
+      // against the real original page pixels, matching the editor preview)
+      // but wrong for this mask: destination-in below uses the mask's alpha
+      // as an on/off (survives-the-crop) test, so a translucent shape (e.g.
+      // a 40% opacity highlight) left the mask itself only 40% opaque,
+      // diluting the ALREADY-correctly-blended patch a second time against
+      // whatever ends up behind it at print time - text and background
+      // alike washed toward white, exactly the reported "text recolored to
+      // one color, background lighter than it should be".
+      const maskObj = Object.assign({}, o, { color: '#ffffff', filled: true, opacity: 100 });
       peBakeDrawShape(maskCtx, maskObj, { width: canvas.width, height: canvas.height }, canvas.width / vp1.width);
       // The mask above only covers the shape's OWN silhouette, so a
       // comment box/leader drawn well outside that footprint (see the
