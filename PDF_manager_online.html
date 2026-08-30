@@ -52249,17 +52249,37 @@ function peSavePageEditorObjects(pageIdx, objects) {
 
 async function pePreloadEditorImages(objects) {
   const imgs = (objects || []).filter(o => o.type === 'image' && o.dataUrl);
-  await Promise.all(imgs.map(o => new Promise(resolve => {
+  await Promise.all(imgs.map(async (o) => {
     let im = o.imgEl;
-    if (!im) {
+    // A stale element from an earlier (failed or since-replaced) attempt
+    // must be re-pointed at the current dataUrl - otherwise it silently
+    // stays on whatever it last loaded (or never finished loading) and the
+    // "already have imgEl, skip" fast path below would wait on nothing.
+    if (!im || im.src !== o.dataUrl) {
       im = new Image();
       o.imgEl = im;
       im.src = o.dataUrl;
     }
-    if (im.complete && im.naturalWidth) { resolve(); return; }
-    im.onload = () => resolve();
-    im.onerror = () => resolve();
-  })));
+    // .complete/.naturalWidth can be true the instant `src` is set for a
+    // browser-cached image, but that doesn't guarantee the bitmap is fully
+    // decoded and safe to hand to ctx.drawImage() immediately after -
+    // decode() is the API built specifically to close that race. Bake/print
+    // silently omits an object.type === 'image' whose imgEl isn't ready
+    // (see peDrawEditorObjects) with no error surfaced anywhere, so a decode
+    // that hasn't settled here is exactly how a just-uploaded, just-rotated
+    // image can vanish from a printed page with nothing in the console.
+    if (typeof im.decode === 'function') {
+      try { await im.decode(); return; } catch (_) { /* fall through to onload/onerror below */ }
+    }
+    if (im.complete && im.naturalWidth) return;
+    await new Promise((resolve) => {
+      im.onload = () => resolve();
+      im.onerror = () => resolve();
+    });
+    if (!(im.complete && im.naturalWidth)) {
+      console.warn('pePreloadEditorImages: image object ' + o.id + ' never became ready to draw (dataUrl len=' + (o.dataUrl ? o.dataUrl.length : 0) + ')');
+    }
+  }));
 }
 
 // Shared by the 'callout' object type and shape-attached comments
@@ -52438,6 +52458,17 @@ function peDrawEditorObjects(ctx, canvasW, canvasH, objects, stageW, stageH) {
       }
       ctx.restore();
       drew = true;
+    } else if (o.type === 'image') {
+      // Falls through here when imgEl isn't ready (see pePreloadEditorImages,
+      // which now warns and should always be awaited before this runs) - was
+      // previously a silent no-op, indistinguishable from the object simply
+      // not existing, which is exactly how a print/export could drop an
+      // image with zero trace anywhere.
+      console.warn('peDrawEditorObjects: skipping image object ' + o.id + ' - imgEl not ready', {
+        hasImgEl: !!o.imgEl,
+        complete: o.imgEl ? o.imgEl.complete : null,
+        naturalWidth: o.imgEl ? o.imgEl.naturalWidth : null,
+      });
     } else if (o.type === 'shape' && o.w > 0 && o.h > 0) {
       const fakeCanvas = { width: canvasW, height: canvasH };
       peBakeDrawShape(ctx, o, fakeCanvas, S);
