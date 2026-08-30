@@ -1895,6 +1895,13 @@
     /*Shapes Tool: Button = Last Selected Shape + Dropdown Submenu*/
     .pe-shape-wrap { position: relative; display: inline-flex; }
     .pe-shape-wrap.pe-shape-menu-open { z-index: 45; }
+    /* .pe-shape-wrap's z-index only ranks it among siblings inside .pe-tb-mid
+       (z-index:1) - it can't out-rank .pe-toolbar-tail (z-index:2), a
+       separate sibling of .pe-tb-mid under .pe-toolbar. When the toolbar
+       wraps onto two rows, the tail (Масштаб/Cancel/Save) then paints over
+       the open shape menu and swallows its clicks. Bump .pe-tb-mid above
+       the tail only while the menu is actually open. */
+    .pe-toolbar:has(.pe-shape-menu-open) .pe-tb-mid { z-index: 3; }
     .pe-shape-wrap .pe-btn .pe-shape-btn-icon { display: flex; width: 20px; height: 20px; }
     .pe-shape-wrap .pe-btn .pe-shape-btn-icon svg { width: 20px; height: 20px; display: block; }
     .pe-shape-menu-bridge {
@@ -38313,6 +38320,14 @@ async function peExpandPageEditHistoryIntoDoc(pageIdx, baseRot, baselineBytes, u
     for (let i = 1; i < steps.length; i++) materializeIdxs.push(i);
   }
 
+  // Object-only sessions run this loop exactly once (materializeIdxs holds
+  // only the final step - see above), so the pageNorm re-stamp below can be
+  // folded into that single save instead of triggering a second full-
+  // document save right after the loop. Content-rewrite (redact/crop)
+  // sessions keep the separate restamp pass, since `doc` there can get
+  // reloaded from a snap's own pdfBytes on later iterations.
+  let pageNormAppliedInline = false;
+
   for (let k = 0; k < materializeIdxs.length; k++) {
     const snap = steps[materializeIdxs[k]];
     if (snap.pdfBytes && snap.pdfBytes.length) {
@@ -38322,6 +38337,14 @@ async function peExpandPageEditHistoryIntoDoc(pageIdx, baseRot, baselineBytes, u
     // Keep global pdfDoc on the working doc so image-catalog cache and the
     // pePush guard stay valid across the loop.
     pdfDoc = doc;
+    if (!anyPageRewrite && k === materializeIdxs.length - 1 && peState && peState.page) {
+      try {
+        const rot = ((baseRot + (Number(snap.delta) || 0)) % 360 + 360) % 360;
+        const vp1 = peState.page.getViewport({ scale: 1, rotation: rot });
+        peSetPageNormSize(pageIdx, rot, { W: vp1.width, H: vp1.height });
+        pageNormAppliedInline = true;
+      } catch (_) { /* pageNorm best-effort - restamp pass below still runs as fallback */ }
+    }
     lastBytes = new Uint8Array(await doc.save(saveOpts));
     if (typeof originalFileBytes !== 'undefined') originalFileBytes = lastBytes;
     pePushPageEditHistoryBytes(lastBytes, pageIdx, { deferThumbFill: true, skipEqualCheck: true });
@@ -38343,7 +38366,10 @@ async function peExpandPageEditHistoryIntoDoc(pageIdx, baseRot, baselineBytes, u
   // Expand loads baseline catalog bytes and would otherwise drop the session’s
   // pageNorm (pdf.js viewport size). Re-stamp it onto the tip document so
   // later composites / undos use the same coordinate space as object x/y.
-  if (lastBytes && peState && peState.page && doc) {
+  // Skipped when the loop above already applied it inline (object-only
+  // sessions) - re-running this here would just re-serialize identical
+  // content for a second full-document save.
+  if (!pageNormAppliedInline && lastBytes && peState && peState.page && doc) {
     try {
       const rot = ((baseRot + (Number((steps[steps.length - 1] || {}).delta) || 0)) % 360 + 360) % 360;
       const vp1 = peState.page.getViewport({ scale: 1, rotation: rot });
@@ -39519,6 +39545,23 @@ function peToggleArrowComment(o) {
 
 function peNormalizeShapeComment(o) {
   peShapeCommentData(o);
+}
+
+// Keeps a callout's comment box on-page after its box position is shifted
+// programmatically (e.g. dragging the frame/highlight it's attached to,
+// which carries the box along by the same delta). Dragging the box directly
+// already clamps like this; moving the frame did not, so the box could end
+// up positioned past the page edge - still visible in the live DOM editor
+// (not strictly clipped there) but silently dropped when baked to the
+// print/export overlay PNG, which clips hard to the page's own bounds -
+// this is what made a comment's box vanish only in print/export, not in
+// the editor.
+function peClampCalloutBoxXY(o) {
+  if (!o || o.boxX == null || o.boxY == null) return;
+  const boxW = o.boxW || 0.1;
+  const boxH = o.boxH || 0.08;
+  o.boxX = Math.max(0.005, Math.min(0.98 - boxW, o.boxX));
+  o.boxY = Math.max(0.005, Math.min(0.98 - boxH, o.boxY));
 }
 
 function peCalloutFrames(o) {
@@ -47274,6 +47317,7 @@ function peProcessDrag(clientX, clientY) {
       if (d.obj.type === 'callout') {
         if (d.oboxX != null) d.obj.boxX = d.oboxX + ndx;
         if (d.oboxY != null) d.obj.boxY = d.oboxY + ndy;
+        peClampCalloutBoxXY(d.obj);
         if (d.frames0) {
           d.obj.frames = d.frames0.map(f => ({ x: f.x + ndx, y: f.y + ndy, w: f.w, h: f.h }));
         }
@@ -47310,6 +47354,7 @@ function peProcessDrag(clientX, clientY) {
     if (d.obj.type === 'callout') {
       if (d.oboxX != null) d.obj.boxX = d.oboxX + ndx;
       if (d.oboxY != null) d.obj.boxY = d.oboxY + ndy;
+      peClampCalloutBoxXY(d.obj);
       if (d.frames0) {
         d.obj.frames = d.frames0.map(f => ({ x: f.x + ndx, y: f.y + ndy, w: f.w, h: f.h }));
       }
@@ -50967,83 +51012,23 @@ function peStartShapeRotate(e, o) {
   peUpdatePanUi();
 }
 
-function peBakeFillCommentText(ctx, txt, bx, by, bw, bh, fontPt, S) {
-  if (!txt) return;
-  const fontPx = Math.max(8, (fontPt || 12) * S);
-  ctx.fillStyle = '#2c3e50';
-  ctx.font = fontPx + 'px "Segoe UI", Arial, sans-serif';
-  ctx.textBaseline = 'top';
-  const pad = 4 * S;
-  const maxW = Math.max(8, bw - pad * 2);
-  const lineH = fontPx * 1.25;
-  let ty = by + pad;
-  const maxY = by + bh - pad;
-
-  function emitLine(s) {
-    if (ty + lineH > maxY + 0.5) return false;
-    ctx.fillText(s, bx + pad, ty);
-    ty += lineH;
-    return true;
-  }
-  function wrapChunk(chunk) {
-    if (!chunk) return true;
-    if (ctx.measureText(chunk).width <= maxW) return emitLine(chunk);
-    const words = chunk.split(/(\s+)/);
-    let cur = '';
-    for (let i = 0; i < words.length; i++) {
-      const word = words[i];
-      if (!word) continue;
-      const test = cur + word;
-      if (ctx.measureText(test).width <= maxW) {
-        cur = test;
-        continue;
-      }
-      if (cur && !emitLine(cur.replace(/\s+$/, ''))) return false;
-      cur = '';
-      if (ctx.measureText(word).width <= maxW) {
-        cur = word;
-        continue;
-      }
-      let piece = '';
-      for (let j = 0; j < word.length; j++) {
-        const ch = word[j];
-        if (ctx.measureText(piece + ch).width > maxW && piece) {
-          if (!emitLine(piece)) return false;
-          piece = ch;
-        } else piece += ch;
-      }
-      cur = piece;
-    }
-    if (cur && !emitLine(cur.replace(/\s+$/, ''))) return false;
-    return true;
-  }
-  String(txt).split('\n').forEach(line => { wrapChunk(line); });
-}
-
 /** Bake shape-linked yellow comment bubble + leader into overlay canvas. */
 function peBakeDrawShapeComment(ctx, o, canvasW, canvasH, S) {
   if (!peShapeHasComment(o)) return;
   const c = peShapeCommentData(o);
   if (!(c.boxW > 0) || !(c.boxH > 0) || c.boxX == null || c.boxY == null) return;
-  const bx = c.boxX * canvasW;
-  const by = c.boxY * canvasH;
-  const bw = Math.max(2, c.boxW * canvasW);
-  const bh = Math.max(2, c.boxH * canvasH);
-  const pts = peShapeCommentLeaderEndpoints(o, canvasW, canvasH, bx, by, bw, bh);
+  // Clamped (not mutating c) so a box saved outside the page bounds still
+  // lands somewhere visible in the print/export overlay - same reasoning as
+  // peClampedCommentBoxRectPx, used by the 'callout' object type.
+  const box = peClampedCommentBoxRectPx(c.boxX, c.boxY, c.boxW, c.boxH, canvasW, canvasH);
+  const pts = peShapeCommentLeaderEndpoints(o, canvasW, canvasH, box.x, box.y, box.w, box.h);
   const lw = Math.max(1, 1 * S);
   ctx.save();
   ctx.strokeStyle = '#000';
   ctx.lineWidth = lw;
-  ctx.beginPath();
-  ctx.moveTo(pts.x1, pts.y1);
-  ctx.lineTo(pts.x2, pts.y2);
-  ctx.stroke();
-  ctx.fillStyle = peCalloutBg(o);
-  ctx.fillRect(bx, by, bw, bh);
-  ctx.strokeRect(bx, by, bw, bh);
   const txt = String(c.text || '').replace(/\r\n/g, '\n').trim() ||
     String(c.html || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/\r\n/g, '\n').trim();
-  peBakeFillCommentText(ctx, txt, bx, by, bw, bh, c.fontPt || 12, S);
+  peDrawCommentBoxAndLeader(ctx, box.x, box.y, box.w, box.h, pts, peCalloutBg(o), txt, c.fontPt, S);
   ctx.restore();
 }
 
@@ -52271,17 +52256,122 @@ function peSavePageEditorObjects(pageIdx, objects) {
 
 async function pePreloadEditorImages(objects) {
   const imgs = (objects || []).filter(o => o.type === 'image' && o.dataUrl);
-  await Promise.all(imgs.map(o => new Promise(resolve => {
+  await Promise.all(imgs.map(async (o) => {
     let im = o.imgEl;
-    if (!im) {
+    // A stale element from an earlier (failed or since-replaced) attempt
+    // must be re-pointed at the current dataUrl - otherwise it silently
+    // stays on whatever it last loaded (or never finished loading) and the
+    // "already have imgEl, skip" fast path below would wait on nothing.
+    if (!im || im.src !== o.dataUrl) {
       im = new Image();
       o.imgEl = im;
       im.src = o.dataUrl;
     }
-    if (im.complete && im.naturalWidth) { resolve(); return; }
-    im.onload = () => resolve();
-    im.onerror = () => resolve();
-  })));
+    // .complete/.naturalWidth can be true the instant `src` is set for a
+    // browser-cached image, but that doesn't guarantee the bitmap is fully
+    // decoded and safe to hand to ctx.drawImage() immediately after -
+    // decode() is the API built specifically to close that race. Bake/print
+    // silently omits an object.type === 'image' whose imgEl isn't ready
+    // (see peDrawEditorObjects) with no error surfaced anywhere, so a decode
+    // that hasn't settled here is exactly how a just-uploaded, just-rotated
+    // image can vanish from a printed page with nothing in the console.
+    if (typeof im.decode === 'function') {
+      try { await im.decode(); return; } catch (_) { /* fall through to onload/onerror below */ }
+    }
+    if (im.complete && im.naturalWidth) return;
+    await new Promise((resolve) => {
+      im.onload = () => resolve();
+      im.onerror = () => resolve();
+    });
+    if (!(im.complete && im.naturalWidth)) {
+      console.warn('pePreloadEditorImages: image object ' + o.id + ' never became ready to draw (dataUrl len=' + (o.dataUrl ? o.dataUrl.length : 0) + ')');
+    }
+  }));
+}
+
+// Shared by the 'callout' object type and shape-attached comments
+// (o.shapeComment) below - both are "leader line + colored box + wrapped
+// text" call-outs, drawn identically once the box rect and leader-line
+// endpoints are known. bx/by/bw/bh are already in canvas pixels.
+function peDrawCommentBoxAndLeader(ctx, bx, by, bw, bh, pts, bg, txt, fontPt, S) {
+  ctx.beginPath();
+  ctx.moveTo(pts.x1, pts.y1);
+  ctx.lineTo(pts.x2, pts.y2);
+  ctx.stroke();
+  ctx.fillStyle = bg;
+  ctx.fillRect(bx, by, bw, bh);
+  ctx.strokeRect(bx, by, bw, bh);
+  if (!txt) return;
+  const fontPx = Math.max(8, (fontPt || 12) * S);
+  ctx.fillStyle = '#2c3e50';
+  ctx.font = fontPx + 'px "Segoe UI", Arial, sans-serif';
+  ctx.textBaseline = 'top';
+  const pad = 4 * S;
+  const maxW = Math.max(8, bw - pad * 2);
+  const lineH = fontPx * 1.25;
+  let ty = by + pad;
+  const maxY = by + bh - pad;
+
+  function emitLine(s) {
+    if (ty + lineH > maxY + 0.5) return false;
+    ctx.fillText(s, bx + pad, ty);
+    ty += lineH;
+    return true;
+  }
+  function wrapChunk(chunk) {
+    if (!chunk) return true;
+    if (ctx.measureText(chunk).width <= maxW) return emitLine(chunk);
+    // Word wrap, then hard-break oversized tokens.
+    const words = chunk.split(/(\s+)/);
+    let cur = '';
+    for (let i = 0; i < words.length; i++) {
+      const word = words[i];
+      if (!word) continue;
+      const test = cur + word;
+      if (ctx.measureText(test).width <= maxW) {
+        cur = test;
+        continue;
+      }
+      if (cur && !emitLine(cur.replace(/\s+$/, ''))) return false;
+      cur = '';
+      if (ctx.measureText(word).width <= maxW) {
+        cur = word;
+        continue;
+      }
+      // Character wrap for long unbroken strings
+      let piece = '';
+      for (let j = 0; j < word.length; j++) {
+        const ch = word[j];
+        if (ctx.measureText(piece + ch).width > maxW && piece) {
+          if (!emitLine(piece)) return false;
+          piece = ch;
+        } else piece += ch;
+      }
+      cur = piece;
+    }
+    if (cur && !emitLine(cur.replace(/\s+$/, ''))) return false;
+    return true;
+  }
+  txt.split('\n').forEach(line => { wrapChunk(line); });
+}
+
+// A comment box position, clamped locally (never mutates o) so a box saved
+// past the page edge - whether from the old unclamped frame-drag bug or
+// just never having been checked at all - still lands somewhere visible in
+// the print/export overlay canvas, which clips hard to the page bounds
+// (the live DOM editor isn't clipped the same way, so it always looked
+// fine there regardless).
+function peClampedCommentBoxRectPx(boxX, boxY, boxW, boxH, canvasW, canvasH) {
+  const wFrac = boxW || 0.15;
+  const hFrac = boxH || 0.08;
+  const xFrac = Math.max(0.005, Math.min(0.98 - wFrac, boxX || 0));
+  const yFrac = Math.max(0.005, Math.min(0.98 - hFrac, boxY || 0));
+  return {
+    x: xFrac * canvasW,
+    y: yFrac * canvasH,
+    w: Math.max(2, wFrac * canvasW),
+    h: Math.max(2, hFrac * canvasH),
+  };
 }
 
 function peDrawEditorObjects(ctx, canvasW, canvasH, objects, stageW, stageH) {
@@ -52306,75 +52396,13 @@ function peDrawEditorObjects(ctx, canvasW, canvasH, objects, stageW, stageH) {
       frames.forEach(f => {
         ctx.strokeRect(f.x * canvasW, f.y * canvasH, f.w * canvasW, f.h * canvasH);
       });
-      const bx = (o.boxX || 0) * canvasW;
-      const by = (o.boxY || 0) * canvasH;
-      const bw = Math.max(2, (o.boxW || 0.15) * canvasW);
-      const bh = Math.max(2, (o.boxH || 0.08) * canvasH);
+      const box = peClampedCommentBoxRectPx(o.boxX, o.boxY, o.boxW, o.boxH, canvasW, canvasH);
       const hlL = o.x * canvasW, hlT = o.y * canvasH;
       const hlR = hlL + o.w * canvasW, hlB = hlT + o.h * canvasH;
-      const pts = peHlLeaderEndpoints(hlL, hlT, hlR, hlB, bx, by, bw, bh);
-      ctx.beginPath();
-      ctx.moveTo(pts.x1, pts.y1);
-      ctx.lineTo(pts.x2, pts.y2);
-      ctx.stroke();
-      ctx.fillStyle = peCalloutBg(o);
-      ctx.fillRect(bx, by, bw, bh);
-      ctx.strokeRect(bx, by, bw, bh);
+      const pts = peHlLeaderEndpoints(hlL, hlT, hlR, hlB, box.x, box.y, box.w, box.h);
       const txt = String(o.text || '').replace(/\r\n/g, '\n').trim() ||
         String(o.html || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').replace(/\r\n/g, '\n').trim();
-      if (txt) {
-        const fontPx = Math.max(8, (o.fontPt || 12) * S);
-        ctx.fillStyle = '#2c3e50';
-        ctx.font = fontPx + 'px "Segoe UI", Arial, sans-serif';
-        ctx.textBaseline = 'top';
-        const pad = 4 * S;
-        const maxW = Math.max(8, bw - pad * 2);
-        const lineH = fontPx * 1.25;
-        let ty = by + pad;
-        const maxY = by + bh - pad;
-
-        function emitLine(s) {
-          if (ty + lineH > maxY + 0.5) return false;
-          ctx.fillText(s, bx + pad, ty);
-          ty += lineH;
-          return true;
-        }
-        function wrapChunk(chunk) {
-          if (!chunk) return true;
-          if (ctx.measureText(chunk).width <= maxW) return emitLine(chunk);
-          // Word wrap, then hard-break oversized tokens.
-          const words = chunk.split(/(\s+)/);
-          let cur = '';
-          for (let i = 0; i < words.length; i++) {
-            const word = words[i];
-            if (!word) continue;
-            const test = cur + word;
-            if (ctx.measureText(test).width <= maxW) {
-              cur = test;
-              continue;
-            }
-            if (cur && !emitLine(cur.replace(/\s+$/, ''))) return false;
-            cur = '';
-            if (ctx.measureText(word).width <= maxW) {
-              cur = word;
-              continue;
-            }
-            // Character wrap for long unbroken strings
-            let piece = '';
-            for (let j = 0; j < word.length; j++) {
-              const ch = word[j];
-              if (ctx.measureText(piece + ch).width > maxW && piece) {
-                if (!emitLine(piece)) return false;
-                piece = ch;
-              } else piece += ch;
-            }
-            cur = piece;
-          }
-          if (cur && !emitLine(cur.replace(/\s+$/, ''))) return false;
-          return true;
-        }
-        txt.split('\n').forEach(line => { wrapChunk(line); });
-      }
+      peDrawCommentBoxAndLeader(ctx, box.x, box.y, box.w, box.h, pts, peCalloutBg(o), txt, o.fontPt, S);
       ctx.restore();
       drew = true;
     } else if (o.type === 'strikeout' || o.type === 'underline') {
@@ -52437,6 +52465,17 @@ function peDrawEditorObjects(ctx, canvasW, canvasH, objects, stageW, stageH) {
       }
       ctx.restore();
       drew = true;
+    } else if (o.type === 'image') {
+      // Falls through here when imgEl isn't ready (see pePreloadEditorImages,
+      // which now warns and should always be awaited before this runs) - was
+      // previously a silent no-op, indistinguishable from the object simply
+      // not existing, which is exactly how a print/export could drop an
+      // image with zero trace anywhere.
+      console.warn('peDrawEditorObjects: skipping image object ' + o.id + ' - imgEl not ready', {
+        hasImgEl: !!o.imgEl,
+        complete: o.imgEl ? o.imgEl.complete : null,
+        naturalWidth: o.imgEl ? o.imgEl.naturalWidth : null,
+      });
     } else if (o.type === 'shape' && o.w > 0 && o.h > 0) {
       const fakeCanvas = { width: canvasW, height: canvasH };
       peBakeDrawShape(ctx, o, fakeCanvas, S);
@@ -52552,6 +52591,70 @@ function peOverlayPlacement(R, cb) {
     case 270: return { x: cb.x, y: cb.y + cb.height, w: cb.height, h: cb.width };
     default:  return { x: cb.x, y: cb.y, w: cb.width, h: cb.height };
   }
+}
+
+// Crops a fully-drawn (page-sized, mostly-transparent) overlay canvas down
+// to the tight bounding box of its actual ink, returning page-FRACTION
+// bounds alongside the cropped PNG. Embedding the UNCROPPED canvas placed
+// it as one Image XObject whose PDF-level bounding box was the entire
+// page - and the redact-safety scan that decides whether a box can be
+// regionally scrubbed or must fall back to full-page rasterization
+// (peBuildRegionalRedactedPage's "image /Name under box" check, see
+// boxHitsAnyRect) tests bounding-box overlap only, with no pixel-content
+// awareness. A full-page overlay image therefore "hit" every future redact
+// box drawn ANYWHERE on that page, forever forcing the expensive/lossy
+// full-page-raster fallback for a page that had ever had so much as one
+// comment or highlight added to it, regardless of whether the two actually
+// overlapped. Cropping to the real ink keeps that detection meaningful,
+// and each additional save/print no longer piles another full-page image
+// on top of the last one.
+function peCropCanvasToInk(canvas) {
+  const w = canvas.width, h = canvas.height;
+  const ctx = canvas.getContext('2d');
+  const data = ctx.getImageData(0, 0, w, h).data;
+  let minX = w, minY = h, maxX = -1, maxY = -1;
+  for (let y = 0; y < h; y++) {
+    const rowBase = y * w * 4;
+    for (let x = 0; x < w; x++) {
+      if (data[rowBase + x * 4 + 3] !== 0) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+  if (maxX < 0) return null;
+  const pad = 2;
+  minX = Math.max(0, minX - pad); minY = Math.max(0, minY - pad);
+  maxX = Math.min(w - 1, maxX + pad); maxY = Math.min(h - 1, maxY + pad);
+  const cropW = maxX - minX + 1, cropH = maxY - minY + 1;
+  const cropCanvas = document.createElement('canvas');
+  cropCanvas.width = cropW; cropCanvas.height = cropH;
+  cropCanvas.getContext('2d').drawImage(canvas, minX, minY, cropW, cropH, 0, 0, cropW, cropH);
+  return {
+    dataUrl: cropCanvas.toDataURL('image/png'),
+    minXFrac: minX / w, minYFrac: minY / h, maxXFrac: (maxX + 1) / w, maxYFrac: (maxY + 1) / h
+  };
+}
+
+// Places a cropped-overlay result (see peCropCanvasToInk) onto `page`,
+// mapping its page-fraction bounds through the same rotate/CropBox
+// placement math peOverlayRasterizedShapePatch already uses for the same
+// purpose, instead of stretching it across the full page.
+async function peDrawCroppedOverlay(workDoc, page, baked, rot, cb) {
+  if (!baked) return;
+  const img = await workDoc.embedPng(baked.dataUrl);
+  const full = peOverlayPlacement(rot, cb);
+  const localX = full.x + baked.minXFrac * full.w;
+  const localY = full.y + (1 - baked.maxYFrac) * full.h;
+  const anchor = peRotatePointAround(localX, localY, full.x, full.y, rot);
+  page.drawImage(img, {
+    x: anchor.x, y: anchor.y,
+    width: (baked.maxXFrac - baked.minXFrac) * full.w,
+    height: (baked.maxYFrac - baked.minYFrac) * full.h,
+    rotate: PDFLib.degrees(rot)
+  });
 }
 
 function peHtmlHasVisibleText(html) {
@@ -53337,7 +53440,7 @@ async function peBakeShapesOverlayPng(shapes, rot, cb) {
   ctx.clip();
   const drew = peDrawEditorObjects(ctx, canvas.width, canvas.height, list, visW, visH);
   ctx.restore();
-  return drew ? canvas.toDataURL('image/png') : null;
+  return drew ? peCropCanvasToInk(canvas) : null;
 }
 
 // Marks a page as needing full rasterization (to make text beneath an opaque
@@ -53376,7 +53479,17 @@ function pePageNeedsRedactRaster(page) {
 function pePageShouldFullRasterForRedact(page, pageIdx) {
   if (!page) return false;
   if (pePageNeedsRedactRaster(page)) return true;
-  if (pePageRedactedRegions(page).length) return true;
+  // A region flagged flattened=true (see peOverlayRasterizedShapePatch) is
+  // already a finished raster patch, not text pending removal - counting it
+  // here made EVERY page that had ever had so much as one filled shape
+  // permanently re-trigger this same full-page-raster fallback on every
+  // later flatten pass: the shape patch registers its own (now-satisfied)
+  // region, that alone made this return true, and the regional-redact
+  // attempt right after predictably found "image under box" (the patch
+  // itself) and gave up to a full-page JPEG - discarding the very overlay
+  // that patch just correctly composited, plus every other object on the
+  // page, on every single export from then on.
+  if (pePageRedactedRegions(page).some(r => r[4] !== 1)) return true;
   if (pageIdx != null && peSessionRedactedRegions[pageIdx] && peSessionRedactedRegions[pageIdx].length) {
     return true;
   }
@@ -54054,6 +54167,27 @@ async function peVerifyRegionalRedaction(bytesBefore, bytesAfter, pageIdx, rects
   return true;
 }
 
+// Grows a page-fraction bounding box to also cover any of the given shapes'
+// attached comment boxes (leader line + box), matching the same clamp
+// peDrawEditorObjects itself applies before drawing them - used by
+// peOverlayRasterizedShapePatch, whose crop region would otherwise be sized
+// to just the shape(s)' own footprint and silently discard a comment box
+// sitting elsewhere on the page (see peBakeDrawShapeComment's rendering,
+// drawn onto the pre-crop canvas but then invisible once cropped away).
+function peExpandBoundsForShapeComments(shapes, minX, minY, maxX, maxY) {
+  (shapes || []).forEach(o => {
+    if (o.type !== 'shape' || !peShapeHasComment(o)) return;
+    const c = peShapeCommentData(o);
+    const boxW = c.boxW || 0.15;
+    const boxH = c.boxH || 0.08;
+    const boxX = Math.max(0.005, Math.min(0.98 - boxW, c.boxX || 0));
+    const boxY = Math.max(0.005, Math.min(0.98 - boxH, c.boxY || 0));
+    minX = Math.min(minX, boxX); minY = Math.min(minY, boxY);
+    maxX = Math.max(maxX, boxX + boxW); maxY = Math.max(maxY, boxY + boxH);
+  });
+  return { minX, minY, maxX, maxY };
+}
+
 // Local shape-region rasterization for EXPORT / file-save only (filled shapes).
 // Never touches the live editor document - callers always pass a disposable copy.
 // Outside the shapes the original page stays vector/selectable. Inside:
@@ -54086,6 +54220,13 @@ async function peOverlayRasterizedShapePatch(doc, pageIdx, shapes) {
     minX = Math.min(minX, r.minX); minY = Math.min(minY, r.minY);
     maxX = Math.max(maxX, r.maxX); maxY = Math.max(maxY, r.maxY);
   });
+  // A filled shape's own footprint can be far smaller than its attached
+  // comment box (a leader line points OUT to a box sitting elsewhere on the
+  // page) - peDrawEditorObjects below does draw that box+leader onto the
+  // full-page canvas, but without this the crop that follows is still sized
+  // to just the shape(s), silently throwing the comment away before the
+  // patch is ever placed onto the PDF page.
+  ({ minX, minY, maxX, maxY } = peExpandBoundsForShapeComments(shapeList, minX, minY, maxX, maxY));
 
   const bytes = await doc.save();
   const pj = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
@@ -54096,20 +54237,33 @@ async function peOverlayRasterizedShapePatch(doc, pageIdx, shapes) {
     const vp = pjPage.getViewport({ scale: S, rotation: pjRot });
     const vp1 = pjPage.getViewport({ scale: 1, rotation: pjRot });
 
-    // Build scrub guide BEFORE painting so we can expand the black cover over
-    // every glyph the box only partially touches (ink outside the rect).
+    // Build scrub guide BEFORE painting so we can size the crop/mask to
+    // cover every glyph the box only partially touches (ink outside the
+    // rect). drawShapes is always the shapes AS THE USER DREW THEM - it
+    // draws both the visible shape on the canvas below and (further down)
+    // the mask's own silhouette, so it must stay undistorted: a shape
+    // stretched to reach a touched line changes what actually gets drawn
+    // (a circle used to circle a diagram, not to redact text, visibly grew
+    // into an egg after a nearby line got picked up this way). Touched
+    // text is instead guaranteed coverage two other ways - the crop bounds
+    // below still grow to include it (peExpandShapesToTouchedGlyphs, used
+    // ONLY for this bounding box, never for drawing), and touchedRunRects
+    // punches its exact rectangle into the mask directly (below).
     const guide = await peBuildTextScrubGuide(pjPage, vp1, scrubRects);
-    let drawShapes = shapeList;
+    const drawShapes = shapeList;
+    let touchedRunRects = [];
     if (guide.runs && guide.runs.length) {
-      drawShapes = peExpandShapesToTouchedGlyphs(shapeList, guide);
+      touchedRunRects = peGuideTouchedRunRects(shapeList, guide, padY);
+      const boundsShapes = peExpandShapesToTouchedGlyphs(shapeList, guide, padY);
       minX = 1; minY = 1; maxX = 0; maxY = 0;
-      drawShapes.forEach(o => {
+      boundsShapes.forEach(o => {
         const w = Number(o.w) || 0, h = Number(o.h) || 0;
         minX = Math.min(minX, o.x); minY = Math.min(minY, o.y);
         maxX = Math.max(maxX, o.x + w); maxY = Math.max(maxY, o.y + h);
       });
       minX = Math.max(0, minX); minY = Math.max(0, minY);
       maxX = Math.min(1, maxX); maxY = Math.min(1, maxY);
+      ({ minX, minY, maxX, maxY } = peExpandBoundsForShapeComments(shapeList, minX, minY, maxX, maxY));
     }
 
     const canvas = document.createElement('canvas');
@@ -54130,7 +54284,8 @@ async function peOverlayRasterizedShapePatch(doc, pageIdx, shapes) {
     const cropCtx = cropCanvas.getContext('2d');
     cropCtx.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
 
-    // Keep only pixels inside the (possibly glyph-expanded) shape geometry.
+    // Keep only pixels inside the shape's own (undistorted) geometry, plus
+    // whatever touchedRunRects punches in below for scrubbed text.
     const maskCanvas = document.createElement('canvas');
     maskCanvas.width = cropW;
     maskCanvas.height = cropH;
@@ -54139,8 +54294,56 @@ async function peOverlayRasterizedShapePatch(doc, pageIdx, shapes) {
     maskCtx.save();
     maskCtx.translate(-cropX, -cropY);
     drawShapes.forEach(o => {
-      const maskObj = Object.assign({}, o, { color: '#ffffff', filled: true });
+      // opacity: 100 is required here, not just color/filled - peBakeDrawShape
+      // applies the shape's own visual opacity as ctx.globalAlpha, which is
+      // correct for painting the visible fill onto `canvas` above (blended
+      // against the real original page pixels, matching the editor preview)
+      // but wrong for this mask: destination-in below uses the mask's alpha
+      // as an on/off (survives-the-crop) test, so a translucent shape (e.g.
+      // a 40% opacity highlight) left the mask itself only 40% opaque,
+      // diluting the ALREADY-correctly-blended patch a second time against
+      // whatever ends up behind it at print time - text and background
+      // alike washed toward white, exactly the reported "text recolored to
+      // one color, background lighter than it should be".
+      const maskObj = Object.assign({}, o, { color: '#ffffff', filled: true, opacity: 100 });
       peBakeDrawShape(maskCtx, maskObj, { width: canvas.width, height: canvas.height }, canvas.width / vp1.width);
+      // The mask above only covers the shape's OWN silhouette, so a
+      // comment box/leader drawn well outside that footprint (see the
+      // peExpandBoundsForShapeComments comment above) would otherwise be
+      // cut away by the destination-in step below even though the crop
+      // bounds were widened to include it. Punch the box + leader into the
+      // mask too so those pixels survive the crop.
+      if (peShapeHasComment(o)) {
+        const c = peShapeCommentData(o);
+        if (c.boxW > 0 && c.boxH > 0 && c.boxX != null && c.boxY != null) {
+          const box = peClampedCommentBoxRectPx(c.boxX, c.boxY, c.boxW, c.boxH, canvas.width, canvas.height);
+          const pts = peShapeCommentLeaderEndpoints(o, canvas.width, canvas.height, box.x, box.y, box.w, box.h);
+          maskCtx.save();
+          maskCtx.strokeStyle = '#ffffff';
+          maskCtx.lineWidth = Math.max(4, 4 * (canvas.width / vp1.width));
+          maskCtx.beginPath();
+          maskCtx.moveTo(pts.x1, pts.y1);
+          maskCtx.lineTo(pts.x2, pts.y2);
+          maskCtx.stroke();
+          maskCtx.fillStyle = '#ffffff';
+          maskCtx.fillRect(box.x, box.y, box.w, box.h);
+          maskCtx.restore();
+        }
+      }
+    });
+    // The shape's own silhouette (drawn above) is enough to cover a run that
+    // gets scrubbed near a RECTANGULAR shape, but a round one (ellipse/star)
+    // can have text sitting in the gap between its curve and its own
+    // bounding box - stretching the curve taller (peExpandShapesToTouchedGlyphs)
+    // doesn't fill that gap. Punch each actually-scrubbed run's own rect in
+    // directly so it survives the destination-in crop below no matter what
+    // shape is doing the scrubbing.
+    touchedRunRects.forEach(tr => {
+      maskCtx.fillStyle = '#ffffff';
+      maskCtx.fillRect(
+        tr.x0 * canvas.width, tr.y0 * canvas.height,
+        (tr.x1 - tr.x0) * canvas.width, (tr.y1 - tr.y0) * canvas.height
+      );
     });
     maskCtx.restore();
     cropCtx.globalCompositeOperation = 'destination-in';
@@ -54177,7 +54380,12 @@ async function peOverlayRasterizedShapePatch(doc, pageIdx, shapes) {
       height: (maxY - minY) * full.h,
       rotate: PDFLib.degrees(rot)
     });
-    scrubRects.forEach(r => peAddPageRedactedRegion(workPage, r.minX, r.minY, r.maxX, r.maxY));
+    // flattened=true: this region is a finished raster patch (scrub +
+    // replacement image already applied above), not a pending redact box -
+    // see pePageShouldFullRasterForRedact, which now relies on this flag
+    // specifically to avoid re-triggering full-page rasterization for a
+    // region this same function just finished handling correctly.
+    scrubRects.forEach(r => peAddPageRedactedRegion(workPage, r.minX, r.minY, r.maxX, r.maxY, true));
 
     const [replacement] = await doc.copyPages(workDoc, [pageIdx]);
     doc.removePage(pageIdx);
@@ -54189,33 +54397,90 @@ async function peOverlayRasterizedShapePatch(doc, pageIdx, shapes) {
 
 // Widen the black cover horizontally for glyphs the box only partly covers.
 // Vertical bounds stay as drawn — expanding Y was swallowing whole lines.
-function peExpandShapesToTouchedGlyphs(shapes, guide) {
+// The row gate below is padded by the SAME padY peOverlayRasterizedShapePatch
+// used to build scrubRects/the guide in the first place: peRemovePageTextInVisualRegion
+// scrubs a run based on that padded region regardless of this function, so a
+// run sitting just outside the raw shape bounds but inside the pad - close
+// enough to actually get its glyphs removed - must still count here, or the
+// raster patch's crop ends up too short to cover a line that WAS scrubbed,
+// leaving a genuine gap (glyphs gone, nothing painted back in their place).
+function peExpandShapesToTouchedGlyphs(shapes, guide, padY) {
   if (!guide || !guide.runs || !guide.runs.length) return shapes;
+  const pad = Number(padY) || 0;
   return (shapes || []).map(o => {
     const y0 = o.y, y1 = o.y + (Number(o.h) || 0);
     let x0 = o.x, x1 = o.x + (Number(o.w) || 0);
+    // Only grows beyond [y0,y1] for a run that both (a) falls within the
+    // scrub's own pad margin and (b) actually has glyphs removed - a tight,
+    // bounded nudge to close the scrub/crop gap above, not the unconditional
+    // whole-line growth the comment above warns against.
+    let yLo = y0, yHi = y1;
     guide.runs.forEach(r => {
       const n = r.n || (r.str || '').length || 0;
       if (!n || !r.charFlags) return;
       const runTop = r.ny - r.hNorm;
       const runBot = r.ny + r.hNorm * 0.25;
-      if (runBot < y0 || runTop > y1) return;
+      if (runBot < y0 - pad || runTop > y1 + pad) return;
+      let touched = false;
       for (let i = 0; i < n; i++) {
         if (!r.charFlags[i]) continue;
+        touched = true;
         const gLeft = r.nx + i / n * r.wNorm;
         const gRight = r.nx + (i + 1) / n * r.wNorm;
         x0 = Math.min(x0, gLeft);
         x1 = Math.max(x1, gRight);
       }
+      if (touched) {
+        yLo = Math.min(yLo, runTop);
+        yHi = Math.max(yHi, runBot);
+      }
     });
     x0 = Math.max(0, x0);
     x1 = Math.min(1, x1);
+    yLo = Math.max(0, yLo);
+    yHi = Math.min(1, yHi);
     return Object.assign({}, o, {
-      x: x0, y: y0,
+      x: x0, y: yLo,
       w: Math.max(0.001, x1 - x0),
-      h: Math.max(0.001, y1 - y0)
+      h: Math.max(0.001, yHi - yLo)
     });
   });
+}
+
+// Rectangles (page fractions) for every run that actually had glyphs
+// removed near a shape - i.e. exactly the ink peRemovePageTextInVisualRegion
+// is about to erase. peExpandShapesToTouchedGlyphs widens the SHAPE's own
+// silhouette to reach these, which is enough for a rectangular shape but
+// not for a round one: stretching an ellipse taller still leaves its
+// rounded corners short of a text row sitting in the (still rectangular)
+// gap between the curve and the shape's own bounding box. The mask step in
+// peOverlayRasterizedShapePatch punches these rects in directly (in
+// addition to the shape's own geometry) so a scrubbed run is covered by
+// the replacement patch regardless of what shape is doing the scrubbing.
+function peGuideTouchedRunRects(shapes, guide, padY) {
+  if (!guide || !guide.runs || !guide.runs.length) return [];
+  const pad = Number(padY) || 0;
+  const rects = [];
+  (shapes || []).forEach(o => {
+    const y0 = o.y, y1 = o.y + (Number(o.h) || 0);
+    guide.runs.forEach(r => {
+      const n = r.n || (r.str || '').length || 0;
+      if (!n || !r.charFlags) return;
+      const runTop = r.ny - r.hNorm;
+      const runBot = r.ny + r.hNorm * 0.25;
+      if (runBot < y0 - pad || runTop > y1 + pad) return;
+      let x0 = null, x1 = null;
+      for (let i = 0; i < n; i++) {
+        if (!r.charFlags[i]) continue;
+        const gLeft = r.nx + i / n * r.wNorm;
+        const gRight = r.nx + (i + 1) / n * r.wNorm;
+        x0 = x0 == null ? gLeft : Math.min(x0, gLeft);
+        x1 = x1 == null ? gRight : Math.max(x1, gRight);
+      }
+      if (x0 != null) rects.push({ x0, y0: runTop, x1, y1: runBot });
+    });
+  });
+  return rects;
 }
 
 function peMatMul(m, a, b, c, d, e, f) {
@@ -56203,11 +56468,9 @@ async function peReplaceDocPageWithRasterizedShapes(doc, pageIdx, shapes) {
 async function peBakeShapesOntoPdfPage(doc, page, shapes, rot, cb) {
   const list = (shapes || []).filter(o => o.type === 'shape');
   if (!list.length || !doc || !page) return false;
-  const png = await peBakeShapesOverlayPng(list, rot, cb);
-  if (!png) return false;
-  const img = await doc.embedPng(png);
-  const pl = peOverlayPlacement(rot, cb);
-  page.drawImage(img, { x: pl.x, y: pl.y, width: pl.w, height: pl.h, rotate: PDFLib.degrees(rot) });
+  const baked = await peBakeShapesOverlayPng(list, rot, cb);
+  if (!baked) return false;
+  await peDrawCroppedOverlay(doc, page, baked, rot, cb);
   return true;
 }
 
@@ -56238,7 +56501,7 @@ async function peBakeObjectsOverlayPng(objects, rot, cb) {
   ctx.clip();
   const drew = peDrawEditorObjects(ctx, canvas.width, canvas.height, objects, visW, visH);
   ctx.restore();
-  return drew ? canvas.toDataURL('image/png') : null;
+  return drew ? peCropCanvasToInk(canvas) : null;
 }
 
 // Bakes editor objects (from metadata) into a PDF copy - for exporting/saving to disk.
@@ -56280,22 +56543,14 @@ async function peFlattenEditorObjectsIntoDoc(targetDoc, sourcePageIndices) {
         page = workDoc.getPage(targetIdx);
       } else if (shapes.length) {
         await pePreloadEditorImages(shapes);
-        const png = await peBakeShapesOverlayPng(shapes, rot, cb);
-        if (png) {
-          const img = await workDoc.embedPng(png);
-          const pl = peOverlayPlacement(rot, cb);
-          page.drawImage(img, { x: pl.x, y: pl.y, width: pl.w, height: pl.h, rotate: PDFLib.degrees(rot) });
-        }
+        const baked = await peBakeShapesOverlayPng(shapes, rot, cb);
+        await peDrawCroppedOverlay(workDoc, page, baked, rot, cb);
         objects = rest;
       }
       if (pePageHasEditorVisuals(objects)) {
         await pePreloadEditorImages(objects);
-        const png = await peBakeObjectsOverlayPng(objects, rot, cb);
-        if (png) {
-          const img = await workDoc.embedPng(png);
-          const pl = peOverlayPlacement(rot, cb);
-          page.drawImage(img, { x: pl.x, y: pl.y, width: pl.w, height: pl.h, rotate: PDFLib.degrees(rot) });
-        }
+        const baked = await peBakeObjectsOverlayPng(objects, rot, cb);
+        await peDrawCroppedOverlay(workDoc, page, baked, rot, cb);
       }
       const pjPage = await pjDoc.getPage(targetIdx + 1);
       const pjRot = typeof pjPage.rotate === 'number' ? pjPage.rotate : rot;
@@ -56507,11 +56762,17 @@ async function pageEditSave(options) {
         bytes = (typeof peClonePdfBytes === 'function')
           ? peClonePdfBytes(await pdfDoc.save({ useObjectStreams: false }))
           : new Uint8Array(await pdfDoc.save({ useObjectStreams: false }));
-      } else {
-        bytes = (typeof peClonePdfBytes === 'function')
-          ? peClonePdfBytes(await pdfDoc.save({ useObjectStreams: false }))
-          : new Uint8Array(await pdfDoc.save({ useObjectStreams: false }));
       }
+      // No pending redact raster: `bytes` already carries this page's final
+      // editor metadata (peApplyEditorHistorySnapToDoc, called for the last
+      // history step inside peExpandPageEditHistoryIntoDoc, wrote the same
+      // persistObjs into the very doc that produced these bytes/
+      // authoritativeBytes). The peSavePageEditorObjects call above just
+      // re-applies that identical metadata onto the freshly reloaded pdfDoc
+      // in memory - re-serializing the whole document again here reproduced
+      // functionally identical bytes at the cost of a second full-document
+      // save, which is what made Save take tens of seconds to minutes on
+      // large (hundreds-of-pages) documents.
     } catch (err) {
       console.warn('pageEditSave: post-expand content restamp failed', err);
       try {
