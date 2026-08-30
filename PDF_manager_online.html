@@ -54230,23 +54230,33 @@ async function peOverlayRasterizedShapePatch(doc, pageIdx, shapes) {
     const vp = pjPage.getViewport({ scale: S, rotation: pjRot });
     const vp1 = pjPage.getViewport({ scale: 1, rotation: pjRot });
 
-    // Build scrub guide BEFORE painting so we can expand the black cover over
-    // every glyph the box only partially touches (ink outside the rect).
+    // Build scrub guide BEFORE painting so we can size the crop/mask to
+    // cover every glyph the box only partially touches (ink outside the
+    // rect). drawShapes is always the shapes AS THE USER DREW THEM - it
+    // draws both the visible shape on the canvas below and (further down)
+    // the mask's own silhouette, so it must stay undistorted: a shape
+    // stretched to reach a touched line changes what actually gets drawn
+    // (a circle used to circle a diagram, not to redact text, visibly grew
+    // into an egg after a nearby line got picked up this way). Touched
+    // text is instead guaranteed coverage two other ways - the crop bounds
+    // below still grow to include it (peExpandShapesToTouchedGlyphs, used
+    // ONLY for this bounding box, never for drawing), and touchedRunRects
+    // punches its exact rectangle into the mask directly (below).
     const guide = await peBuildTextScrubGuide(pjPage, vp1, scrubRects);
-    let drawShapes = shapeList;
+    const drawShapes = shapeList;
     let touchedRunRects = [];
     if (guide.runs && guide.runs.length) {
-      drawShapes = peExpandShapesToTouchedGlyphs(shapeList, guide, padY);
       touchedRunRects = peGuideTouchedRunRects(shapeList, guide, padY);
+      const boundsShapes = peExpandShapesToTouchedGlyphs(shapeList, guide, padY);
       minX = 1; minY = 1; maxX = 0; maxY = 0;
-      drawShapes.forEach(o => {
+      boundsShapes.forEach(o => {
         const w = Number(o.w) || 0, h = Number(o.h) || 0;
         minX = Math.min(minX, o.x); minY = Math.min(minY, o.y);
         maxX = Math.max(maxX, o.x + w); maxY = Math.max(maxY, o.y + h);
       });
       minX = Math.max(0, minX); minY = Math.max(0, minY);
       maxX = Math.min(1, maxX); maxY = Math.min(1, maxY);
-      ({ minX, minY, maxX, maxY } = peExpandBoundsForShapeComments(drawShapes, minX, minY, maxX, maxY));
+      ({ minX, minY, maxX, maxY } = peExpandBoundsForShapeComments(shapeList, minX, minY, maxX, maxY));
     }
 
     const canvas = document.createElement('canvas');
@@ -54267,7 +54277,8 @@ async function peOverlayRasterizedShapePatch(doc, pageIdx, shapes) {
     const cropCtx = cropCanvas.getContext('2d');
     cropCtx.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
 
-    // Keep only pixels inside the (possibly glyph-expanded) shape geometry.
+    // Keep only pixels inside the shape's own (undistorted) geometry, plus
+    // whatever touchedRunRects punches in below for scrubbed text.
     const maskCanvas = document.createElement('canvas');
     maskCanvas.width = cropW;
     maskCanvas.height = cropH;
