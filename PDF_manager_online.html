@@ -54234,8 +54234,10 @@ async function peOverlayRasterizedShapePatch(doc, pageIdx, shapes) {
     // every glyph the box only partially touches (ink outside the rect).
     const guide = await peBuildTextScrubGuide(pjPage, vp1, scrubRects);
     let drawShapes = shapeList;
+    let touchedRunRects = [];
     if (guide.runs && guide.runs.length) {
       drawShapes = peExpandShapesToTouchedGlyphs(shapeList, guide, padY);
+      touchedRunRects = peGuideTouchedRunRects(shapeList, guide, padY);
       minX = 1; minY = 1; maxX = 0; maxY = 0;
       drawShapes.forEach(o => {
         const w = Number(o.w) || 0, h = Number(o.h) || 0;
@@ -54299,6 +54301,20 @@ async function peOverlayRasterizedShapePatch(doc, pageIdx, shapes) {
           maskCtx.restore();
         }
       }
+    });
+    // The shape's own silhouette (drawn above) is enough to cover a run that
+    // gets scrubbed near a RECTANGULAR shape, but a round one (ellipse/star)
+    // can have text sitting in the gap between its curve and its own
+    // bounding box - stretching the curve taller (peExpandShapesToTouchedGlyphs)
+    // doesn't fill that gap. Punch each actually-scrubbed run's own rect in
+    // directly so it survives the destination-in crop below no matter what
+    // shape is doing the scrubbing.
+    touchedRunRects.forEach(tr => {
+      maskCtx.fillStyle = '#ffffff';
+      maskCtx.fillRect(
+        tr.x0 * canvas.width, tr.y0 * canvas.height,
+        (tr.x1 - tr.x0) * canvas.width, (tr.y1 - tr.y0) * canvas.height
+      );
     });
     maskCtx.restore();
     cropCtx.globalCompositeOperation = 'destination-in';
@@ -54400,6 +54416,42 @@ function peExpandShapesToTouchedGlyphs(shapes, guide, padY) {
       h: Math.max(0.001, yHi - yLo)
     });
   });
+}
+
+// Rectangles (page fractions) for every run that actually had glyphs
+// removed near a shape - i.e. exactly the ink peRemovePageTextInVisualRegion
+// is about to erase. peExpandShapesToTouchedGlyphs widens the SHAPE's own
+// silhouette to reach these, which is enough for a rectangular shape but
+// not for a round one: stretching an ellipse taller still leaves its
+// rounded corners short of a text row sitting in the (still rectangular)
+// gap between the curve and the shape's own bounding box. The mask step in
+// peOverlayRasterizedShapePatch punches these rects in directly (in
+// addition to the shape's own geometry) so a scrubbed run is covered by
+// the replacement patch regardless of what shape is doing the scrubbing.
+function peGuideTouchedRunRects(shapes, guide, padY) {
+  if (!guide || !guide.runs || !guide.runs.length) return [];
+  const pad = Number(padY) || 0;
+  const rects = [];
+  (shapes || []).forEach(o => {
+    const y0 = o.y, y1 = o.y + (Number(o.h) || 0);
+    guide.runs.forEach(r => {
+      const n = r.n || (r.str || '').length || 0;
+      if (!n || !r.charFlags) return;
+      const runTop = r.ny - r.hNorm;
+      const runBot = r.ny + r.hNorm * 0.25;
+      if (runBot < y0 - pad || runTop > y1 + pad) return;
+      let x0 = null, x1 = null;
+      for (let i = 0; i < n; i++) {
+        if (!r.charFlags[i]) continue;
+        const gLeft = r.nx + i / n * r.wNorm;
+        const gRight = r.nx + (i + 1) / n * r.wNorm;
+        x0 = x0 == null ? gLeft : Math.min(x0, gLeft);
+        x1 = x1 == null ? gRight : Math.max(x1, gRight);
+      }
+      if (x0 != null) rects.push({ x0, y0: runTop, x1, y1: runBot });
+    });
+  });
+  return rects;
 }
 
 function peMatMul(m, a, b, c, d, e, f) {
