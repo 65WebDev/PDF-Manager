@@ -54225,7 +54225,7 @@ async function peOverlayRasterizedShapePatch(doc, pageIdx, shapes) {
     const guide = await peBuildTextScrubGuide(pjPage, vp1, scrubRects);
     let drawShapes = shapeList;
     if (guide.runs && guide.runs.length) {
-      drawShapes = peExpandShapesToTouchedGlyphs(shapeList, guide);
+      drawShapes = peExpandShapesToTouchedGlyphs(shapeList, guide, padY);
       minX = 1; minY = 1; maxX = 0; maxY = 0;
       drawShapes.forEach(o => {
         const w = Number(o.w) || 0, h = Number(o.h) || 0;
@@ -54337,31 +54337,52 @@ async function peOverlayRasterizedShapePatch(doc, pageIdx, shapes) {
 
 // Widen the black cover horizontally for glyphs the box only partly covers.
 // Vertical bounds stay as drawn — expanding Y was swallowing whole lines.
-function peExpandShapesToTouchedGlyphs(shapes, guide) {
+// The row gate below is padded by the SAME padY peOverlayRasterizedShapePatch
+// used to build scrubRects/the guide in the first place: peRemovePageTextInVisualRegion
+// scrubs a run based on that padded region regardless of this function, so a
+// run sitting just outside the raw shape bounds but inside the pad - close
+// enough to actually get its glyphs removed - must still count here, or the
+// raster patch's crop ends up too short to cover a line that WAS scrubbed,
+// leaving a genuine gap (glyphs gone, nothing painted back in their place).
+function peExpandShapesToTouchedGlyphs(shapes, guide, padY) {
   if (!guide || !guide.runs || !guide.runs.length) return shapes;
+  const pad = Number(padY) || 0;
   return (shapes || []).map(o => {
     const y0 = o.y, y1 = o.y + (Number(o.h) || 0);
     let x0 = o.x, x1 = o.x + (Number(o.w) || 0);
+    // Only grows beyond [y0,y1] for a run that both (a) falls within the
+    // scrub's own pad margin and (b) actually has glyphs removed - a tight,
+    // bounded nudge to close the scrub/crop gap above, not the unconditional
+    // whole-line growth the comment above warns against.
+    let yLo = y0, yHi = y1;
     guide.runs.forEach(r => {
       const n = r.n || (r.str || '').length || 0;
       if (!n || !r.charFlags) return;
       const runTop = r.ny - r.hNorm;
       const runBot = r.ny + r.hNorm * 0.25;
-      if (runBot < y0 || runTop > y1) return;
+      if (runBot < y0 - pad || runTop > y1 + pad) return;
+      let touched = false;
       for (let i = 0; i < n; i++) {
         if (!r.charFlags[i]) continue;
+        touched = true;
         const gLeft = r.nx + i / n * r.wNorm;
         const gRight = r.nx + (i + 1) / n * r.wNorm;
         x0 = Math.min(x0, gLeft);
         x1 = Math.max(x1, gRight);
       }
+      if (touched) {
+        yLo = Math.min(yLo, runTop);
+        yHi = Math.max(yHi, runBot);
+      }
     });
     x0 = Math.max(0, x0);
     x1 = Math.min(1, x1);
+    yLo = Math.max(0, yLo);
+    yHi = Math.min(1, yHi);
     return Object.assign({}, o, {
-      x: x0, y: y0,
+      x: x0, y: yLo,
       w: Math.max(0.001, x1 - x0),
-      h: Math.max(0.001, y1 - y0)
+      h: Math.max(0.001, yHi - yLo)
     });
   });
 }
