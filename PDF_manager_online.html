@@ -8217,6 +8217,7 @@
         mergeOrderCancel: 'Отмена',
         mergeOrderConfirm: 'Подтвердить объединение',
         mergeOrderEmpty: 'Нет файлов в списке',
+        mergeOrderLoading: 'Загрузка файлов…',
         mergeOrderPages: '{n} стр.',
         mergeOrderUnavailable: 'Файл недоступен для открытия',
         mergeOrderPassword: 'пароль',
@@ -8608,6 +8609,7 @@
         mergeOrderCancel: 'Cancel',
         mergeOrderConfirm: 'Confirm merge',
         mergeOrderEmpty: 'No files in the list',
+        mergeOrderLoading: 'Loading files…',
         mergeOrderPages: '{n} pg.',
         mergeOrderUnavailable: 'File cannot be opened',
         mergeOrderPassword: 'password',
@@ -8999,6 +9001,7 @@
         mergeOrderCancel: 'Cancelar',
         mergeOrderConfirm: 'Confirmar combinación',
         mergeOrderEmpty: 'No hay archivos en la lista',
+        mergeOrderLoading: 'Cargando archivos…',
         mergeOrderPages: '{n} pág.',
         mergeOrderUnavailable: 'No se puede abrir el archivo',
         mergeOrderPassword: 'contraseña',
@@ -9451,6 +9454,7 @@
         mergeOrderCancel: '取消',
         mergeOrderConfirm: '确认合并',
         mergeOrderEmpty: '列表中没有文件',
+        mergeOrderLoading: '正在加载文件…',
         mergeOrderPages: '{n} 页',
         mergeOrderUnavailable: '无法打开文件',
         mergeOrderPassword: '密码',
@@ -27283,6 +27287,13 @@
 
       const listContainer = content.querySelector('#fileList');
       listContainer.style.position = 'relative';
+      // buildMergeFileEntry below reads and parses every file (arrayBuffer +
+      // PDFDocument.load) before the list has anything to show - for a
+      // handful of large scans (tens of MB each) that can take long enough
+      // that the modal just sits there blank with no feedback, reading as
+      // "the file list doesn't show up" even though it's still working.
+      listContainer.innerHTML =
+        '<div style="padding:20px;text-align:center;color:#888;font-size:14px;">' + escapeHtml(t('mergeOrderLoading')) + '</div>';
 
       // Build one list entry (page count / Office label) for initial load and OS drops.
       async function buildMergeFileEntry(file) {
@@ -27316,10 +27327,12 @@
         }
       }
 
-      const fileData = [];
-      for (let file of files) {
-        fileData.push(await buildMergeFileEntry(file));
-      }
+      // In parallel: buildMergeFileEntry's own work (reading bytes, pdf-lib
+      // parsing) is I/O/CPU per-file and independent - awaiting them one at
+      // a time made N large files take N times as long as the slowest one
+      // for no reason, on top of the modal already sitting blank until this
+      // finishes.
+      const fileData = await Promise.all(files.map(buildMergeFileEntry));
 
       let currentOrder = [...fileData]; // Now we store objects with metadata
       let mergeDragFromIndex = null; // index of the dragged string - needed to
