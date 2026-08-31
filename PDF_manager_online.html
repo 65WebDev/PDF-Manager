@@ -20892,8 +20892,15 @@
           const r = slice.getBoundingClientRect();
           if (!r || r.width <= 0) continue;
           const span = node.parentElement;
-          let fs = span ? parseFloat(span.style.fontSize) : NaN;
-          if (!(fs > 0) && span) {
+          // Read the RESOLVED font-size only. span.style.fontSize holds the
+          // calc(var(--total-scale-factor) * Npx) text pdf.js wrote in, and
+          // relying on that ever parsing to NaN (so this falls through to
+          // getComputedStyle below) depends on a browser never simplifying a
+          // var()-based calc() when serializing the specified value - not
+          // guaranteed across engines. getComputedStyle always returns the
+          // actually-resolved px value, so read it directly.
+          let fs = NaN;
+          if (span) {
             try { fs = parseFloat(getComputedStyle(span).fontSize); } catch (_) { fs = NaN; }
           }
           // Vertical position comes from the SPAN's own rect, not the
@@ -20919,7 +20926,13 @@
           // static CSS value has to be scaled by the same factor explicitly
           // or the selection highlight's bottom edge drifts from the glyph
           // by an amount that grows with how far the live scale is from 1.
-          const h = ((fs > 0) ? fs : Math.min(r.height, Math.max(4, r.height * 0.75))) * scaleY;
+          let h = ((fs > 0) ? fs : Math.min(r.height, Math.max(4, r.height * 0.75))) * scaleY;
+          // Defensive clamp: r.height is a live getBoundingClientRect()
+          // measurement of the actual glyph run, so it is ground truth for
+          // "how tall this really rendered" regardless of engine quirks in
+          // resolving the calc()-based font-size above. The highlight must
+          // never exceed it.
+          if (r.height > 0) h = Math.min(h, r.height);
           rects.push({
             left: r.left,
             right: r.right,
