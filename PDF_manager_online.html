@@ -7922,7 +7922,12 @@
     let isLoading = false;
     let isLoadingCancelled = false;
     let wasCreatingNewDocument = false;
-    let preMergePdfBytes = null;
+    // Page count pdfDoc had before the in-progress merge started, so a
+    // cancel can strip back to it by removing pages - not a full
+    // save()/reload snapshot (see performMerge/cancelLoading), which used to
+    // re-save the WHOLE existing document on every single merge call
+    // regardless of its own size.
+    let preMergePageCount = null;
     let activeOperationId = 0;
 
     //=== AUTO SCROLL WHEN DRAGING ===
@@ -10272,12 +10277,16 @@
         infoDiv.innerHTML = '';
         infoDiv.style.display = 'none';
         clearDocHistory();
-      } else if (preMergePdfBytes && pdfDoc) {
-        //Roll back merge changes to the previous state
+      } else if (preMergePageCount != null && pdfDoc) {
+        //Roll back merge changes to the previous state: performMerge only
+        //ever appends new pages, so stripping back to the pre-merge count
+        //undoes it without a save()/reload of the whole document.
         try {
           isLoadingCancelled = false; //enable recovery rendering
-          pdfDoc = await PDFLib.PDFDocument.load(preMergePdfBytes);
-          preMergePdfBytes = null;
+          while (pdfDoc.getPageCount() > preMergePageCount) {
+            pdfDoc.removePage(pdfDoc.getPageCount() - 1);
+          }
+          preMergePageCount = null;
           await renderInitialThumbnailsFromCurrentDoc(true);
           await resetDocHistoryToCurrent();
         } catch (e) {
@@ -10293,7 +10302,7 @@
       }
 
       wasCreatingNewDocument = false;
-      preMergePdfBytes = null;
+      preMergePageCount = null;
 
       //Resetting selections
       selectedPages.clear();
@@ -27171,17 +27180,16 @@
       activeOperationId++;
       isLoadingCancelled = false;
 
-      preMergePdfBytes = pdfDoc ? await pdfDoc.save() : null;
-
       if (!pdfDoc) {
         wasCreatingNewDocument = true;
+        preMergePageCount = null;
       } else {
         wasCreatingNewDocument = false;
+        preMergePageCount = pdfDoc.getPageCount();
       }
 
       showLoading(t('mergingFilesProgress', { count: files.length }));
-      const mergeFromScratch = !preMergePdfBytes;
-      if (mergeFromScratch) historyPushSuspended = true;
+      if (wasCreatingNewDocument) historyPushSuspended = true;
 
       try {
         if (!pdfDoc) {
@@ -27247,7 +27255,7 @@
       } catch (e) {
         console.error(e);
         alert(t('alertMergeError'));
-        if (mergeFromScratch) historyPushSuspended = false;
+        if (wasCreatingNewDocument) historyPushSuspended = false;
       } finally {
         hideLoading();
       }
