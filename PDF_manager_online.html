@@ -58,6 +58,26 @@
       height: 100dvh;           /*dynamic height: takes into account browser panels (mobile)*/
       overflow: hidden;         /*remove the external (browser) scrollbar*/
     }
+    /* pdf.js's TextLayer keeps one shared offscreen <canvas class=
+       "hiddenCanvasElement"> per language, appended directly to <body>, for
+       measuring glyph widths (ctx.measureText) - never drawn on screen by
+       design. Hiding it is normally pdf.js's own pdf_viewer.css's job,
+       which this app doesn't load (same gap as the --total-scale-factor /
+       --scale-round-x/-y custom properties fixed earlier for the same
+       reason). Left unstyled, body's `display:flex` treats it as a normal
+       flex item sized by pdf.js's own width/height attributes (which can
+       end up disproportionately large for an unusual page) and its 2D
+       context is created with alpha:false, so any undrawn area composites
+       as opaque black - a solid black rectangle overlapping the page grid.
+       Matches pdf.js's own rule verbatim. */
+    .hiddenCanvasElement {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 0;
+      height: 0;
+      display: none;
+    }
     .top-menu {
       background: #2c3e50; padding: 8px 20px;
       box-shadow: 0 2px 8px rgba(0,0,0,0.15);
