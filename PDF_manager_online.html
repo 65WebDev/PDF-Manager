@@ -44969,7 +44969,11 @@ async function peAddSignatureToLibrary(file) {
   }
   if (!peState) return;
   await pmSaveSignature(pngUrl, processed.im.naturalWidth, processed.im.naturalHeight);
-  peOpenSignatureMenu(); // re-render with the new slot and keep the flyout visible
+  // Refresh contents directly (not via peOpenSignatureMenu(), which now only
+  // renders on an actual closed->open transition) - the menu stays open the
+  // whole time here, but its slot list must still reflect the new signature.
+  const menu = document.getElementById('peSignatureMenu');
+  if (menu && menu.classList.contains('open')) void peRenderSignatureMenu();
 }
 
 function peOpenSignatureMenu() {
@@ -44977,10 +44981,19 @@ function peOpenSignatureMenu() {
   const menu = document.getElementById('peSignatureMenu');
   if (!menu || !wrap) return;
   peCancelSignatureMenuClose();
+  // Only rebuild the slot list on an actual closed->open transition. This
+  // fires on every 'mouseenter' of the wrap (including while the menu is
+  // ALREADY open and the pointer never really left it) - re-rendering here
+  // unconditionally replaced the DOM node currently under the pointer,
+  // which makes the browser re-fire mouseenter on the freshly-created
+  // element, calling this again: a self-sustaining loop that starved out
+  // real clicks on the slots (mousedown could land on a node that gets
+  // replaced before mouseup, so the click never completes).
+  const wasOpen = menu.classList.contains('open');
   wrap.classList.add('pe-shape-menu-open');
   menu.classList.add('open');
   menu.setAttribute('aria-hidden', 'false');
-  void peRenderSignatureMenu();
+  if (!wasOpen) void peRenderSignatureMenu();
 }
 
 function peCloseSignatureMenu() {
