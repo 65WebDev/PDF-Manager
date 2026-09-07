@@ -44786,7 +44786,13 @@ function peRemoveSignatureBackground(im) {
     data[p + 3] = Math.min(data[p + 3], alpha);
   }
   ctx.putImageData(imgData, 0, 0);
-  return canvas.toDataURL('image/png');
+  // Crop to the actual ink bounds (see peCropCanvasToInk, already used for
+  // the same purpose when baking shape/redact overlays) - without this, a
+  // full-page scan of a signed sheet (sign a blank A4, scan the whole page)
+  // would insert as a page-sized, mostly-transparent object with a tiny
+  // signature lost somewhere inside it instead of a compact signature image.
+  const cropped = peCropCanvasToInk(canvas);
+  return cropped ? cropped.dataUrl : canvas.toDataURL('image/png');
 }
 
 function peLoadImageFromDataUrl(dataUrl) {
