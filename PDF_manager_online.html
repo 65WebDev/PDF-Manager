@@ -28974,13 +28974,24 @@
           const cid = attMeta.pidContentId || attMeta.contentId || '';
           const mime = attMeta.attachMimeTag || attMeta.mimeType || 'application/octet-stream';
           const hidden = !!attMeta.attachmentHidden;
-          const inline = hidden || !!cid;
+          // Outlook sets PidTagAttachContentId on ordinary (non-inline)
+          // attachments too - it's an internal OLE identifier, not proof the
+          // attachment is actually embedded in the body. Per its own spec
+          // (PidTagAttachContentId) it's only meaningful as inline when it
+          // matches a "cid:" reference IN the HTML - treating mere presence
+          // as "inline" silently dropped every real attachment (a normal
+          // Outlook-added file always carries some content ID) from the
+          // "add as pages?" prompt, unlike the .eml/postal-mime path, which
+          // reads the MIME part's actual Content-Disposition header.
+          const cidClean = cid ? String(cid).replace(/^<|>$/g, '') : '';
+          const cidReferencedInBody = !!(cidClean && html && html.indexOf('cid:' + cidClean) !== -1);
+          const inline = hidden || cidReferencedInBody;
           attachments.push({
             filename: fileName,
             fileName: fileName,
             mimeType: mime,
             content: u8.slice(0),
-            contentId: cid ? String(cid).replace(/^<|>$/g, '') : undefined,
+            contentId: cidClean || undefined,
             disposition: inline ? 'inline' : 'attachment',
           });
         } catch (err) {
