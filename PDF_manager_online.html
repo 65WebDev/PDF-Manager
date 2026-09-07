@@ -2030,11 +2030,9 @@
       cursor: var(--pe-freehand-cursor, crosshair);
     }
     /* Signature stamp armed (a saved signature was picked from the menu):
-       cursor set from --pe-signature-cursor in JS (peUpdateSignaturePlacementCursor). */
-    #pageEditModal.pe-signature-placing .pe-stage-wrap,
-    #pageEditModal.pe-signature-placing .pe-stage-wrap .pe-obj {
-      cursor: var(--pe-signature-cursor, crosshair);
-    }
+       the actual cursor is left alone - a floating semi-transparent preview
+       (#peSignatureGhost, positioned in JS) follows the pointer instead, since
+       custom cursor images aren't reliable in every embedding context. */
     /*Shape color/fill - in the left property panel (#peProps), next to the text ones*/
     #pePropShapeWrap {
       display: none; align-items: center; gap: 8px;
@@ -44827,69 +44825,97 @@ async function peInsertSignatureFile(file, xFrac, yFrac) {
 
 // Re-inserts a previously saved (already background-removed) signature.
 // Picking a saved signature does not insert it immediately - it arms
-// "placement mode": the stage cursor becomes a signature stamp, and the
-// next click on the page places it there (see the stage pointerdown hook
-// and peOnKeyDown's Escape handling, which cancels this).
-let peSignaturePlacementPending = null; // { id, dataUrl } | null
+// "placement mode": a semi-transparent preview of the signature follows the
+// mouse (the actual cursor is left alone - some browsers/embeds restrict
+// custom cursor images, so a floating preview is the reliable signal), and
+// the next click on the page places it there (see the stage pointerdown
+// hook and peOnKeyDown's Escape handling, which cancels this).
+let peSignaturePlacementPending = null; // { id, dataUrl, im } | null
+let peSignatureGhostEl = null;
 
 async function peStartSignaturePlacement(id) {
   if (!peState || !id) return;
   const saved = await pmGetSavedSignatures();
   const sig = saved.find(s => s.id === id);
   if (!sig || !peState) return;
-  peSignaturePlacementPending = { id: sig.id, dataUrl: sig.dataUrl };
-  peUpdateSignaturePlacementCursor();
+  let loaded;
+  try {
+    loaded = await peLoadImageFromDataUrl(sig.dataUrl);
+  } catch (_) {
+    return;
+  }
+  if (!peState) return;
+  peSignaturePlacementPending = { id: sig.id, dataUrl: sig.dataUrl, im: loaded.im };
+  peSyncSignaturePlacementUi();
 }
 
 function peCancelSignaturePlacement() {
   if (!peSignaturePlacementPending) return;
   peSignaturePlacementPending = null;
-  peUpdateSignaturePlacementCursor();
+  peSyncSignaturePlacementUi();
 }
 
 function peIsSignaturePlacementPending() {
   return !!peSignaturePlacementPending;
 }
 
-async function peFinishSignaturePlacement(xFrac, yFrac) {
+function peFinishSignaturePlacement(xFrac, yFrac) {
   const pending = peSignaturePlacementPending;
   if (!pending || !peState) return;
-  // Clear the pending state / cursor up front so a slow decode can't leave
-  // the stamp cursor stuck if something below fails.
+  // Clear the pending state / ghost up front so a slow insert can't leave
+  // the preview stuck if something below fails.
   peCancelSignaturePlacement();
-  let loaded;
-  try {
-    loaded = await peLoadImageFromDataUrl(pending.dataUrl);
-  } catch (_) {
-    return;
-  }
-  if (!peState) return;
-  peInsertLoadedImagesAtFrac([loaded], xFrac, yFrac, { center: true });
+  peInsertLoadedImagesAtFrac([{ dataUrl: pending.dataUrl, im: pending.im }], xFrac, yFrac, { center: true });
 }
 
-/** CSS cursor value: the signature glyph on a small round badge. */
-function peSignatureCursorValue() {
-  const size = 32;
-  const svg =
-    '<svg xmlns="http://www.w3.org/2000/svg" width="' + size + '" height="' + size + '">' +
-    '<circle cx="16" cy="16" r="14" fill="#2c3e50" stroke="#ffffff" stroke-width="1.5"/>' +
-    '<g transform="translate(4,4) scale(0.094)">' +
-    '<path fill="#22d3ee" d="M232,170H60.6c3.34-6.54,6.73-13.35,10.06-20.29a26.64,26.64,0,0,0,4.3.35c14.23,0,31.09-11.12,50.33-33.22,1,3,2.2,6.25,3.68,9.56,6.89,15.45,15.68,23.39,26.14,23.6h.39c8.81,0,17.71-5.77,27-17.58C188.33,140.68,201.62,150,232,150a6,6,0,0,0,0-12c-39.69,0-41.88-16.61-42-18.06a5.83,5.83,0,0,0-4.15-5.8,6.09,6.09,0,0,0-6.88,2.59C166.81,135.4,158.9,138.06,155.34,138c-10.78-.21-19.11-23.68-21.46-35a6,6,0,0,0-10.57-2.53C104.64,123.86,88,137,76.18,137.92,100,85.84,107.23,52.7,98.23,36.78,95.44,31.86,89.66,26,77.91,26c-15,0-27,14.62-32.82,40.1C38.28,95.94,42.12,132,59.62,145c-4.15,8.64-8.4,17.08-12.52,25H24a6,6,0,0,0,0,12H40.76C28.65,204.58,19,220.66,18.86,220.91a6,6,0,1,0,10.28,6.18c.16-.26,11.56-19.27,25.21-45.09H232a6,6,0,0,0,0-12ZM56.79,68.77C61.05,50.08,69.34,38,77.91,38c6.4,0,8.64,2.51,9.87,4.69,4,7,6,28.15-22.88,91C54.59,123.39,50.73,95.3,56.79,68.77Z"/>' +
-    '</g></svg>';
-  const hs = Math.round(size / 2);
-  return 'url("data:image/svg+xml,' + encodeURIComponent(svg) + '") ' + hs + ' ' + hs + ', crosshair';
+function peEnsureSignatureGhostEl() {
+  if (peSignatureGhostEl && peSignatureGhostEl.isConnected) return peSignatureGhostEl;
+  const el = document.createElement('img');
+  el.id = 'peSignatureGhost';
+  el.alt = '';
+  el.style.cssText = 'position:fixed; left:0; top:0; z-index:100000; ' +
+    'pointer-events:none; opacity:0.55; display:none; ' +
+    'filter:drop-shadow(0 2px 6px rgba(0,0,0,.4));';
+  document.body.appendChild(el);
+  peSignatureGhostEl = el;
+  return el;
 }
 
-function peUpdateSignaturePlacementCursor() {
+function peSignatureGhostMouseMove(e) {
+  const el = peSignatureGhostEl;
+  if (!el) return;
+  const w = el.__peW || 0, h = el.__peH || 0;
+  el.style.transform = 'translate(' + (e.clientX - w / 2) + 'px, ' + (e.clientY - h / 2) + 'px)';
+}
+
+function peShowSignatureGhost(dataUrl, im) {
+  const el = peEnsureSignatureGhostEl();
+  const { w: W, h: H } = peStageSize();
+  const wFrac = 0.4;
+  const naturalW = (im && im.naturalWidth) || 1;
+  const naturalH = (im && im.naturalHeight) || 1;
+  const hFrac = Math.min(wFrac * (naturalH / naturalW) * (W / H), 0.9);
+  el.__peW = Math.max(20, wFrac * W);
+  el.__peH = Math.max(10, hFrac * H);
+  el.src = dataUrl;
+  el.style.width = el.__peW + 'px';
+  el.style.height = el.__peH + 'px';
+  el.style.display = 'block';
+  document.addEventListener('mousemove', peSignatureGhostMouseMove);
+}
+
+function peHideSignatureGhost() {
+  document.removeEventListener('mousemove', peSignatureGhostMouseMove);
+  if (peSignatureGhostEl) peSignatureGhostEl.style.display = 'none';
+}
+
+function peSyncSignaturePlacementUi() {
   const modal = document.getElementById('pageEditModal');
   if (!modal) return;
-  const pending = !!peSignaturePlacementPending;
-  modal.classList.toggle('pe-signature-placing', pending);
-  if (pending) {
-    modal.style.setProperty('--pe-signature-cursor', peSignatureCursorValue());
-  } else {
-    modal.style.removeProperty('--pe-signature-cursor');
-  }
+  const pending = peSignaturePlacementPending;
+  modal.classList.toggle('pe-signature-placing', !!pending);
+  if (pending) peShowSignatureGhost(pending.dataUrl, pending.im);
+  else peHideSignatureGhost();
 }
 
 let peSignatureMenuCloseTimer = null;
@@ -50148,12 +50174,17 @@ function peObjMouseDown(e, o) {
     if (peIsSignatureMenuOpen()) {
       peCloseSignatureMenu();
     } else {
+      peCloseShapeMenu();
       peOpenSignatureMenu();
     }
   });
   const peSignatureWrap = document.getElementById('peSignatureWrap');
   peSignatureWrap?.addEventListener('mouseenter', () => {
     if (!peState) return;
+    // Moving from the Shapes button straight to the Signature button (or
+    // vice versa - see peShapeWrap's mouseenter below) must swap the open
+    // flyout immediately, not wait for the other one's own close timer.
+    peCloseShapeMenu();
     peCancelSignatureMenuClose();
     peOpenSignatureMenu();
   });
@@ -50199,6 +50230,7 @@ function peObjMouseDown(e, o) {
   const peShapeWrap = document.getElementById('peShapeWrap');
   peShapeWrap?.addEventListener('mouseenter', () => {
     if (!peState) return;
+    peCloseSignatureMenu();
     peCancelShapeMenuClose();
     peOpenShapeMenu();
   });
@@ -50238,6 +50270,7 @@ function peObjMouseDown(e, o) {
       try { e.currentTarget.blur(); } catch (_) {}
       return;
     }
+    peCloseSignatureMenu();
     peSetTool('shape');
     peOpenShapeMenu();
   });
