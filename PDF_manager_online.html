@@ -1590,6 +1590,19 @@
     }
     #peCropCtxMenu button:hover:not(:disabled) { background: #eef4fa; }
 
+    #peSignatureCtxMenu {
+      position: fixed; z-index: 100002; display: none;
+      background: #fff; border: 1px solid #d5d9de; border-radius: 8px;
+      box-shadow: 0 6px 24px rgba(0,0,0,.18); padding: 4px; width: max-content;
+    }
+    #peSignatureCtxMenu.visible { display: block; }
+    #peSignatureCtxMenu button {
+      display: block; width: auto; white-space: nowrap;
+      border: none; background: transparent; padding: 8px 12px;
+      font-size: 13.5px; color: #2c3e50; border-radius: 6px; cursor: pointer; text-align: left;
+    }
+    #peSignatureCtxMenu button:hover { background: #eef4fa; }
+
     /*Context menu of an object in the page editor (RMB on text/key/marker, etc.)*/
     /* Outline around the image targeted by «Копировать изображение» (preview / PE).
        Clip host keeps the frame inside the work area (never over the top menu). */
@@ -2007,6 +2020,12 @@
       display: flex; align-items: center; justify-content: center;
     }
     .pe-signature-add:hover { background: rgba(255,255,255,.1); border-color: #8fd0ff; }
+    /* While the rename popover is open, every slot but the one being
+       renamed is faded and non-interactive to keep focus on it. */
+    .pe-signature-slot.pe-signature-dim,
+    .pe-signature-add.pe-signature-dim {
+      opacity: 0.25; pointer-events: none;
+    }
     .pe-obj-shape {
       box-sizing: border-box;
     }
@@ -6635,7 +6654,8 @@
     html[data-theme="dark"] .pm-modal-box #jpegCancel,
     html[data-theme="dark"] .pm-modal-box #pdfPwdCancel,
     html[data-theme="dark"] .pm-modal-box #encPwdCancel,
-    html[data-theme="dark"] .pm-modal-box #cancelBtn {
+    html[data-theme="dark"] .pm-modal-box #cancelBtn,
+    html[data-theme="dark"] .pm-modal-box #peSigRenameCancel {
       background: #333a44 !important; border-color: #4a5058 !important;
     }
     /* Encrypt-password dialog: hover feedback on both buttons (light + dark). */
@@ -6643,6 +6663,11 @@
     #encPwdOk:hover { background: #2471a3 !important; }
     html[data-theme="dark"] .pm-modal-box #encPwdCancel:hover { background: #3d4550 !important; }
     html[data-theme="dark"] .pm-modal-box #encPwdOk:hover { background: #1f618d !important; }
+    /* Signature rename popover: same hover feedback (light + dark). */
+    #peSigRenameCancel:hover { background: #f0f0f0 !important; }
+    #peSigRenameOk:hover { background: #2471a3 !important; }
+    html[data-theme="dark"] .pm-modal-box #peSigRenameCancel:hover { background: #3d4550 !important; }
+    html[data-theme="dark"] .pm-modal-box #peSigRenameOk:hover { background: #1f618d !important; }
     html[data-theme="dark"] .pm-modal-box input[type="password"],
     html[data-theme="dark"] .pm-modal-box input[type="text"] {
       background: #1c2128 !important; border-color: #4a5058 !important;
@@ -7154,6 +7179,9 @@
 
   <div id="peCropCtxMenu" aria-hidden="true">
     <button type="button" id="peCropCtxConfirmBtn" data-i18n="peCropCtxConfirm">Кадрировать</button>
+  </div>
+  <div id="peSignatureCtxMenu" aria-hidden="true">
+    <button type="button" id="peSignatureCtxRenameBtn" data-i18n="bookmarksRename">Переименовать</button>
   </div>
   <div id="peObjCtxMenu" aria-hidden="true">
     <button type="button" data-action="copy" data-i18n="peCopy">Скопировать</button>
@@ -8131,7 +8159,7 @@
         bookmarksConfirmLink: 'Связать эту закладку с текущим положением в документе?',
         newDocumentHint: 'Будет создан новый документ', openInNewTabs: 'Откроется в новых вкладках',
         tabClose: 'Закрыть вкладку', tabCloseOthers: 'Закрыть другие вкладки', tabCloseRight: 'Закрыть вкладки справа',
-        peInsertText: 'Вставить текст', peInsertImage: 'Вставить изображение', peInsertSignature: 'Вставить подпись', peSignatureAddNew: 'Добавить новую подпись', peAddShapes: 'Добавить фигуры',
+        peInsertText: 'Вставить текст', peInsertImage: 'Вставить изображение', peInsertSignature: 'Вставить подпись', peSignatureAddNew: 'Добавить новую подпись', peSignatureDefaultName: 'Подпись {n}', peSignatureRenameTitle: 'Переименовать подпись', peAddShapes: 'Добавить фигуры',
         peShapeRect: 'Прямоугольник', peShapeEllipse: 'Круг / овал', peShapeArrow: 'Стрелка',
         peShapeLine: 'Линия', peShapePlus: 'Плюс', peShapeFreehand: 'Свободная форма', peShapeStar: 'Звезда',
         peObjLabelText: 'Текст', peObjLabelImage: 'Изображение',
@@ -8523,7 +8551,7 @@
         bookmarksConfirmLink: 'Link this bookmark to the current position in the document?',
         newDocumentHint: 'A new document will be created', openInNewTabs: 'Open in new tabs',
         tabClose: 'Close tab', tabCloseOthers: 'Close other tabs', tabCloseRight: 'Close tabs to the right',
-        peInsertText: 'Insert text', peInsertImage: 'Insert image', peInsertSignature: 'Insert signature', peSignatureAddNew: 'Add new signature', peAddShapes: 'Add shapes',
+        peInsertText: 'Insert text', peInsertImage: 'Insert image', peInsertSignature: 'Insert signature', peSignatureAddNew: 'Add new signature', peSignatureDefaultName: 'Signature {n}', peSignatureRenameTitle: 'Rename signature', peAddShapes: 'Add shapes',
         peShapeRect: 'Rectangle', peShapeEllipse: 'Circle / oval', peShapeArrow: 'Arrow',
         peShapeLine: 'Line', peShapePlus: 'Plus', peShapeFreehand: 'Freeform', peShapeStar: 'Star',
         peObjLabelText: 'Text', peObjLabelImage: 'Image',
@@ -8915,7 +8943,7 @@
         bookmarksConfirmLink: '¿Vincular este marcador a la posición actual del documento?',
         newDocumentHint: 'Se creará un nuevo documento', openInNewTabs: 'Se abrirá en nuevas pestañas',
         tabClose: 'Cerrar pestaña', tabCloseOthers: 'Cerrar otras pestañas', tabCloseRight: 'Cerrar pestañas a la derecha',
-        peInsertText: 'Insertar texto', peInsertImage: 'Insertar imagen', peInsertSignature: 'Insertar firma', peSignatureAddNew: 'Añadir nueva firma', peAddShapes: 'Añadir formas',
+        peInsertText: 'Insertar texto', peInsertImage: 'Insertar imagen', peInsertSignature: 'Insertar firma', peSignatureAddNew: 'Añadir nueva firma', peSignatureDefaultName: 'Firma {n}', peSignatureRenameTitle: 'Renombrar firma', peAddShapes: 'Añadir formas',
         peShapeRect: 'Rectángulo', peShapeEllipse: 'Círculo / óvalo', peShapeArrow: 'Flecha',
         peShapeLine: 'Línea', peShapePlus: 'Cruz', peShapeFreehand: 'Forma libre', peShapeStar: 'Estrella',
         peObjLabelText: 'Texto', peObjLabelImage: 'Imagen',
@@ -9361,6 +9389,8 @@
         peInsertImage: '插入图片',
         peInsertSignature: '插入签名',
         peSignatureAddNew: '添加新签名',
+        peSignatureDefaultName: '签名 {n}',
+        peSignatureRenameTitle: '重命名签名',
         peAddShapes: '添加形状',
         peShapeRect: '矩形',
         peShapeEllipse: '圆形 / 椭圆',
@@ -10971,7 +11001,8 @@
       try {
         const existing = await pmGetSavedSignatures();
         const id = 'sig_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-        await pmIdbPut(PM_SIGNATURES_STORE, { id, dataUrl, w, h, createdAt: Date.now() });
+        const name = t('peSignatureDefaultName', { n: existing.length + 1 });
+        await pmIdbPut(PM_SIGNATURES_STORE, { id, dataUrl, w, h, createdAt: Date.now(), name });
         const overflow = existing.length + 1 - PM_SIGNATURES_MAX;
         if (overflow > 0) {
           for (const item of existing.slice(0, overflow)) {
@@ -10983,6 +11014,16 @@
 
     async function pmDeleteSavedSignature(id) {
       return pmIdbDelete(PM_SIGNATURES_STORE, id);
+    }
+
+    async function pmRenameSignature(id, name) {
+      const trimmed = String(name || '').trim();
+      if (!trimmed) return;
+      const saved = await pmGetSavedSignatures();
+      const sig = saved.find(s => s.id === id);
+      if (!sig) return;
+      sig.name = trimmed;
+      await pmIdbPut(PM_SIGNATURES_STORE, sig);
     }
 
     // --- Crash recovery ---------------------------------------------------
@@ -35009,7 +35050,7 @@ function peUpdateToolbarLock() {
     // (not cropping), even if nothing is selected.
     el.disabled = id === 'peDeleteObj' ? (cropMode || !peState.sel) : cropMode;
   });
-  if (cropMode) { peCloseShapeMenu(); peCloseSignatureMenu(); peCancelSignaturePlacement(); }
+  if (cropMode) { peCloseShapeMenu(); peCloseSignatureMenu(); peCancelSignaturePlacement(); peHideSignatureCtxMenu(); }
   peUpdateCropActionsUi();
   peUpdateRedactActionsUi();
   peUpdatePageNavButtons();
@@ -38792,6 +38833,7 @@ function peDestroy() {
   peCloseShapeMenu();
   peCloseShapeColorPopup();
   peCancelSignaturePlacement();
+  peHideSignatureCtxMenu();
   peRestorePageSelectionSnapshot();
 }
 
@@ -38944,6 +38986,7 @@ function peOnKeyDown(e) {
     if (typeof pmSearchState !== 'undefined' && pmSearchState.open) { pmSearchClose(); return; }
     if (peColorPreview) { peCloseColorPickerSession(); return; }
     if (peSignaturePlacementPending) { peCancelSignaturePlacement(); return; }
+    if (peIsSignatureCtxMenuOpen()) { peHideSignatureCtxMenu(); return; }
     if (peIsShapeMenuOpen()) { peCloseShapeMenu(); return; }
     const colorPop = document.getElementById('peShapeColorPopup');
     if (colorPop && colorPop.classList.contains('open')) { peCloseShapeColorPopup(); return; }
@@ -44950,12 +44993,14 @@ async function peRenderSignatureMenu() {
   const saved = await pmGetSavedSignatures();
   if (!menu.isConnected) return;
   menu.innerHTML = '';
-  saved.forEach(sig => {
+  saved.forEach((sig, idx) => {
     const slot = document.createElement('button');
     slot.type = 'button';
     slot.className = 'pe-signature-slot';
     slot.dataset.sigId = sig.id;
-    slot.title = t('peInsertSignature');
+    // Older saved signatures (before names existed) fall back to the same
+    // default numbering scheme, keyed by their position in the list.
+    slot.title = sig.name || t('peSignatureDefaultName', { n: idx + 1 });
     const img = document.createElement('img');
     img.src = sig.dataUrl;
     img.alt = '';
@@ -45029,6 +45074,13 @@ function peOpenSignatureMenu() {
 }
 
 function peCloseSignatureMenu() {
+  // Refuse to close outright while a rename popover is open - it lives
+  // outside #peSignatureWrap/#peSignatureMenu, so correctly cancelling every
+  // hover transition across wrap -> ctx menu -> popover turned out fragile
+  // (a still-pending close-timer from earlier could survive the whole
+  // chain and fire mid-edit). This flag is the single source of truth
+  // instead: no code path can close the flyout while it's set.
+  if (peSignatureRenamingId) return;
   const wrap = document.getElementById('peSignatureWrap');
   const menu = document.getElementById('peSignatureMenu');
   if (!menu) return;
@@ -45036,6 +45088,130 @@ function peCloseSignatureMenu() {
   wrap?.classList.remove('pe-shape-menu-open');
   menu.classList.remove('open');
   menu.setAttribute('aria-hidden', 'true');
+}
+
+// Small right-click menu on a saved-signature slot ("Rename" only).
+let peSignatureCtxTargetId = null;
+let peSignatureCtxAnchorRect = null; // the slot's own rect, so the rename popover can appear next to it
+
+// While a rename popover is open, this holds the id of the signature being
+// renamed - the flyout menu stays open behind the popover instead of being
+// closed by the usual "click outside closes it" handling, and every OTHER
+// slot is faded out (see the .pe-signature-dim CSS rule) to keep the focus
+// on the one actually being renamed.
+let peSignatureRenamingId = null;
+
+function peSetSignatureRenameDimming(activeId) {
+  const menu = document.getElementById('peSignatureMenu');
+  if (!menu) return;
+  menu.querySelectorAll('.pe-signature-slot, .pe-signature-add').forEach((el) => {
+    const isActiveSlot = el.classList.contains('pe-signature-slot') && el.dataset.sigId === activeId;
+    el.classList.toggle('pe-signature-dim', !!activeId && !isActiveSlot);
+  });
+}
+
+function peIsSignatureCtxMenuOpen() {
+  return !!document.getElementById('peSignatureCtxMenu')?.classList.contains('visible');
+}
+
+function peHideSignatureCtxMenu() {
+  const menu = document.getElementById('peSignatureCtxMenu');
+  if (!menu) return;
+  menu.classList.remove('visible');
+  menu.setAttribute('aria-hidden', 'true');
+  peSignatureCtxTargetId = null;
+  peSignatureCtxAnchorRect = null;
+}
+
+function peShowSignatureCtxMenu(clientX, clientY, id, anchorRect) {
+  const menu = document.getElementById('peSignatureCtxMenu');
+  if (!menu) return;
+  peSignatureCtxTargetId = id;
+  peSignatureCtxAnchorRect = anchorRect || null;
+  menu.classList.add('visible');
+  menu.setAttribute('aria-hidden', 'false');
+  const w = menu.offsetWidth, h = menu.offsetHeight;
+  let x = clientX, y = clientY;
+  if (x + w > window.innerWidth - 6) x = window.innerWidth - w - 6;
+  if (y + h > window.innerHeight - 6) y = window.innerHeight - h - 6;
+  menu.style.left = x + 'px';
+  menu.style.top = y + 'px';
+}
+
+// Small modal: rename a saved signature. Resolves to the trimmed new name,
+// or null if cancelled. Mirrors showSetPdfPasswordDialog's structure.
+// Small popover (not a full centered modal) so it reads as "edit this one
+// slot" rather than a heavyweight dialog - anchorRect (the slot's own
+// getBoundingClientRect()) is used to place it just to the right of the
+// signature being renamed, falling back to the left / clamped to the
+// viewport when there isn't room.
+function peShowRenameSignatureDialog(currentName, anchorRect) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed; inset:0; background:transparent; z-index:100003;';
+    const box = document.createElement('div');
+    box.className = 'pm-modal-box';
+    box.style.cssText = `
+      position:fixed; background:#fff; border-radius:8px; padding:10px 12px;
+      box-shadow:0 8px 26px rgba(0,0,0,.28); text-align:left;
+      width:200px; box-sizing:border-box;`;
+    box.innerHTML = `
+      <div style="font-size:12.5px; color:#2c3e50; margin-bottom:6px; font-weight:600; line-height:1.3;">
+        ${escapeHtml(t('peSignatureRenameTitle'))}
+      </div>
+      <input id="peSigRenameInput" type="text" maxlength="60"
+        style="width:100%; box-sizing:border-box; padding:6px 8px; font-size:13px;
+          border:1px solid #ccc; border-radius:5px; margin-bottom:8px;" />
+      <div style="display:flex; gap:6px;">
+        <button type="button" id="peSigRenameCancel" style="flex:1 1 0; box-sizing:border-box; padding:5px 0; border:1px solid #ccc; border-radius:5px;
+          background:#fff; color:#333; cursor:pointer; font-size:12.5px; text-align:center;">${escapeHtml(t('pwdCancel'))}</button>
+        <button type="button" id="peSigRenameOk" style="flex:1 1 0; box-sizing:border-box; padding:5px 0; border:1px solid transparent; border-radius:5px;
+          background:#2980b9; color:#fff; font-weight:bold; cursor:pointer; font-size:12.5px; text-align:center;">${escapeHtml(t('save'))}</button>
+      </div>`;
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    // Position next to the anchor now that the box has a real size.
+    const bw = box.offsetWidth, bh = box.offsetHeight;
+    const gap = 8;
+    let x, y;
+    if (anchorRect) {
+      x = anchorRect.right + gap;
+      if (x + bw > window.innerWidth - 6) x = anchorRect.left - bw - gap; // no room on the right - flip left
+      y = anchorRect.top;
+    } else {
+      x = (window.innerWidth - bw) / 2;
+      y = (window.innerHeight - bh) / 2;
+    }
+    x = Math.max(6, Math.min(x, window.innerWidth - bw - 6));
+    y = Math.max(6, Math.min(y, window.innerHeight - bh - 6));
+    box.style.left = x + 'px';
+    box.style.top = y + 'px';
+
+    const input = box.querySelector('#peSigRenameInput');
+    input.value = currentName || '';
+    const close = (result) => {
+      document.removeEventListener('keydown', onKey, true);
+      if (overlay.parentNode) document.body.removeChild(overlay);
+      resolve(result);
+    };
+    const submit = () => {
+      const v = input.value.trim();
+      if (!v) { input.focus(); return; }
+      close(v);
+    };
+    box.querySelector('#peSigRenameOk').onclick = submit;
+    box.querySelector('#peSigRenameCancel').onclick = () => close(null);
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) close(null);
+    });
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.preventDefault(); close(null); }
+      else if (e.key === 'Enter') { e.preventDefault(); submit(); }
+    };
+    document.addEventListener('keydown', onKey, true);
+    setTimeout(() => { input.focus(); input.select(); }, 0);
+  });
 }
 
 function peHideObjCtxMenu() {
@@ -49345,6 +49521,25 @@ function peObjMouseDown(e, o) {
     }
   });
 
+  // Signature stamp armed (peStartSignaturePlacement): intercept the very
+  // first capture-phase pointerdown on the stage, before every other
+  // handler below (text-layer hover/selection, per-object mousedown, border
+  // drag, ...) gets a chance to react to whatever happens to be under the
+  // pointer. Without stopImmediatePropagation here, clicking over existing
+  // text/objects while a stamp was armed let THEIR handlers fire too
+  // (selecting/moving the object, starting a text drag, etc.) instead of
+  // just placing the signature.
+  peBindPointerDown(stage, (e) => {
+    if (!peState || !peSignaturePlacementPending) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    peCapturePointer(e, stage);
+    const pt = peStagePoint(e);
+    const { w: W, h: H } = peStageSize();
+    void peFinishSignaturePlacement(pt.x / W, pt.y / H);
+  }, true);
+
   // Text selection must clear on ANY click elsewhere on the page - not just
   // clicks that happen to land on selectable text. Normally a browser does
   // this on its own (clicking outside the current selection collapses it),
@@ -49420,19 +49615,8 @@ function peObjMouseDown(e, o) {
   // stopPropagation so this handler must not run in capture on the same node.
   peBindPointerDown(stage, (e) => {
     if (!peState || peState.drag || pePinchActive) return;
-    // Signature stamp is armed (see peStartSignaturePlacement): the very next
-    // click anywhere on the page places it there, regardless of the current
-    // tool or whatever object happens to be underneath the pointer.
-    if (peSignaturePlacementPending) {
-      if (!peIsPrimaryPointer(e)) return;
-      e.preventDefault();
-      e.stopPropagation();
-      peCapturePointer(e, stage);
-      const pt = peStagePoint(e);
-      const { w: W, h: H } = peStageSize();
-      void peFinishSignaturePlacement(pt.x / W, pt.y / H);
-      return;
-    }
+    // (An armed signature stamp is handled earlier, in a capture-phase
+    // listener registered above - see peStartSignaturePlacement.)
     if (peDrawPlacementIgnoresObjects()) peUpdateDrawShiftPassthrough(e.shiftKey);
     if (e.target.closest && e.target.closest('.pe-obj')) {
       const passObj = e.shiftKey && peDrawPlacementIgnoresObjects();
@@ -50231,6 +50415,39 @@ function peObjMouseDown(e, o) {
       void peStartSignaturePlacement(id);
     }
   });
+  document.getElementById('peSignatureMenu')?.addEventListener('contextmenu', (e) => {
+    const slot = e.target.closest('.pe-signature-slot');
+    if (!slot) return;
+    e.preventDefault();
+    e.stopPropagation();
+    peShowSignatureCtxMenu(e.clientX, e.clientY, slot.dataset.sigId, slot.getBoundingClientRect());
+  });
+  // Hovering the "Rename" popup must not let the signature flyout underneath
+  // time out and close (it lives outside #peSignatureWrap, so without this
+  // its own mouseleave->close-timer would otherwise still be running).
+  document.getElementById('peSignatureCtxMenu')?.addEventListener('mouseenter', () => {
+    peCancelSignatureMenuClose();
+  });
+  document.getElementById('peSignatureCtxRenameBtn')?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const id = peSignatureCtxTargetId;
+    const anchorRect = peSignatureCtxAnchorRect;
+    peHideSignatureCtxMenu();
+    if (!id) return;
+    const saved = await pmGetSavedSignatures();
+    const idx = saved.findIndex(s => s.id === id);
+    if (idx === -1) return;
+    const currentName = saved[idx].name || t('peSignatureDefaultName', { n: idx + 1 });
+    peSignatureRenamingId = id;
+    peSetSignatureRenameDimming(id);
+    const newName = await peShowRenameSignatureDialog(currentName, anchorRect);
+    peSignatureRenamingId = null;
+    if (newName != null) await pmRenameSignature(id, newName);
+    // Re-render either way: on success it shows the new name, on cancel it
+    // simply rebuilds the slots fresh (clearing the dim state in the process).
+    void peRenderSignatureMenu();
+  });
 
   peSyncShapeToolbarUi();
   const peShapeWrap = document.getElementById('peShapeWrap');
@@ -50317,7 +50534,17 @@ function peObjMouseDown(e, o) {
     const wrapEl = document.getElementById('peShapeWrap');
     if (peIsShapeMenuOpen() && wrapEl && !wrapEl.contains(e.target)) peCloseShapeMenu();
     const sigWrapEl = document.getElementById('peSignatureWrap');
-    if (peIsSignatureMenuOpen() && sigWrapEl && !sigWrapEl.contains(e.target)) peCloseSignatureMenu();
+    const sigCtxMenu = document.getElementById('peSignatureCtxMenu');
+    // The flyout must not close for: clicks on the "Rename" item itself
+    // (peSignatureRenamingId isn't set yet at that click's pointerdown - it's
+    // the SAME click whose handler goes on to set it, so the flag alone is
+    // too late for it) or any click while the rename popover is open
+    // afterward (it - and the ctx menu - live outside #peSignatureWrap).
+    const sigOutsideException = (sigCtxMenu && sigCtxMenu.contains(e.target)) || !!peSignatureRenamingId;
+    if (peIsSignatureMenuOpen() && sigWrapEl && !sigWrapEl.contains(e.target) && !sigOutsideException) {
+      peCloseSignatureMenu();
+    }
+    if (peIsSignatureCtxMenuOpen() && sigCtxMenu && !sigCtxMenu.contains(e.target)) peHideSignatureCtxMenu();
     const colorPop = document.getElementById('peShapeColorPopup');
     if (colorPop && colorPop.classList.contains('open') &&
         !colorPop.contains(e.target) &&
