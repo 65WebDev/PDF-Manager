@@ -45074,6 +45074,13 @@ function peOpenSignatureMenu() {
 }
 
 function peCloseSignatureMenu() {
+  // Refuse to close outright while a rename popover is open - it lives
+  // outside #peSignatureWrap/#peSignatureMenu, so correctly cancelling every
+  // hover transition across wrap -> ctx menu -> popover turned out fragile
+  // (a still-pending close-timer from earlier could survive the whole
+  // chain and fire mid-edit). This flag is the single source of truth
+  // instead: no code path can close the flyout while it's set.
+  if (peSignatureRenamingId) return;
   const wrap = document.getElementById('peSignatureWrap');
   const menu = document.getElementById('peSignatureMenu');
   if (!menu) return;
