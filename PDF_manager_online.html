@@ -1969,7 +1969,7 @@
       transform: translateX(-50%); z-index: 47;
       background: #2c3e50; border: 1px solid rgba(255,255,255,.22);
       border-radius: 10px; padding: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.35);
-      grid-template-columns: repeat(4, 52px); grid-auto-rows: 40px; gap: 6px;
+      grid-template-columns: 72px; grid-auto-rows: 44px; gap: 6px;
       opacity: 0; visibility: hidden; pointer-events: none;
       transition: opacity 0.22s ease, visibility 0s linear 0.22s;
     }
@@ -1981,7 +1981,7 @@
       pointer-events: auto;
     }
     .pe-signature-slot {
-      position: relative; width: 52px; height: 40px; padding: 0;
+      position: relative; width: 72px; height: 44px; padding: 0;
       border: 1px solid rgba(255,255,255,.22); border-radius: 6px;
       background: #fff; cursor: pointer; overflow: visible;
     }
@@ -1998,7 +1998,7 @@
     }
     .pe-signature-slot-del:hover { background: #ff6b5b; }
     .pe-signature-add {
-      width: 52px; height: 40px; padding: 0;
+      width: 72px; height: 44px; padding: 0;
       border: 1px dashed rgba(255,255,255,.4); border-radius: 6px;
       background: transparent; color: #fff; cursor: pointer;
       display: flex; align-items: center; justify-content: center;
@@ -7128,6 +7128,7 @@
     </div>
     <input type="file" id="peImgInput" accept="image/png,image/jpeg" style="display:none">
     <input type="file" id="peSignatureInput" accept="image/png,image/jpeg" style="display:none">
+    <input type="file" id="peSignatureLibraryInput" accept="image/png,image/jpeg" style="display:none">
     <!-- Mobile Undo/Redo in page editor — same look/placement as preview chrome -->
     <div id="peMobileUndoRedoBar" aria-hidden="true">
       <button id="peMobileUndoBtn" type="button" data-tip="Вернуть на шаг назад" data-i18n-title="undoMobile" aria-label="Вернуть на шаг назад" data-i18n-aria="undoMobile">←</button>
@@ -10880,7 +10881,7 @@
     const PM_RECOVERY_DEBOUNCE_MS = 8000;   // write this long after edits go quiet
     const PM_RECOVERY_MAX_WAIT_MS = 45000;  // ...but never wait longer than this during continuous editing
     const PM_SIGNATURES_STORE = 'signatures';
-    const PM_SIGNATURES_MAX = 8; // library cap - oldest saved signature is dropped past this
+    const PM_SIGNATURES_MAX = 4; // library cap - oldest saved signature is dropped past this
     let pmIdbPromise = null;
     let pmRecoveryDebounceTimer = null;
     let pmRecoveryMaxWaitTimer = null;
@@ -44868,13 +44869,39 @@ async function peRenderSignatureMenu() {
     slot.appendChild(del);
     menu.appendChild(slot);
   });
-  const addBtn = document.createElement('button');
-  addBtn.type = 'button';
-  addBtn.className = 'pe-signature-add';
-  addBtn.title = t('peSignatureAddNew');
-  addBtn.setAttribute('aria-label', t('peSignatureAddNew'));
-  addBtn.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
-  menu.appendChild(addBtn);
+  if (saved.length < PM_SIGNATURES_MAX) {
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'pe-signature-add';
+    addBtn.title = t('peSignatureAddNew');
+    addBtn.setAttribute('aria-label', t('peSignatureAddNew'));
+    addBtn.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+    menu.appendChild(addBtn);
+  }
+}
+
+// Adds a signature to the saved library WITHOUT inserting it onto the page -
+// insertion happens only by picking a saved slot from the menu.
+async function peAddSignatureToLibrary(file) {
+  if (!peState || !file || !file.type || !file.type.startsWith('image/')) return;
+  let loaded;
+  try {
+    loaded = await peLoadImageFile(file);
+  } catch (_) {
+    return;
+  }
+  if (!peState) return;
+  const pngUrl = peRemoveSignatureBackground(loaded.im);
+  if (!pngUrl) return;
+  let processed;
+  try {
+    processed = await peLoadImageFromDataUrl(pngUrl);
+  } catch (_) {
+    return;
+  }
+  if (!peState) return;
+  await pmSaveSignature(pngUrl, processed.im.naturalWidth, processed.im.naturalHeight);
+  peOpenSignatureMenu(); // re-render with the new slot and keep the flyout visible
 }
 
 function peOpenSignatureMenu() {
@@ -50052,8 +50079,8 @@ function peObjMouseDown(e, o) {
     if (addBtn) {
       e.preventDefault();
       e.stopPropagation();
-      peCloseSignatureMenu();
-      document.getElementById('peSignatureInput').click();
+      peCancelSignatureMenuClose();
+      document.getElementById('peSignatureLibraryInput').click();
       return;
     }
     const slot = e.target.closest('.pe-signature-slot');
@@ -50204,6 +50231,12 @@ function peObjMouseDown(e, o) {
     e.target.value = '';
     if (!f || !peState) return;
     void peInsertSignatureFile(f, 0.3, 0.3);
+  });
+  document.getElementById('peSignatureLibraryInput').addEventListener('change', (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!f || !peState) return;
+    void peAddSignatureToLibrary(f);
   });
 
   // Drag-and-drop images from the OS file manager straight onto the page.
