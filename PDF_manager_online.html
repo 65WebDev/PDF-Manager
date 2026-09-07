@@ -28901,6 +28901,21 @@
       return '<div style="white-space:pre-wrap;">' + s.trim() + '</div>';
     }
 
+    // MSG's PidTagEmailAddress/PidTagSenderEmailAddress (email/senderEmail)
+    // hold a real "user@domain" address only when addressType is SMTP - for
+    // internal Exchange recipients (addressType EX, the common case for
+    // in-org mail) it's instead an X.500 legacy DN like
+    // "/o=ExchangeOrg/ou=.../cn=Recipients/cn=group2112", which is what
+    // PidTagSmtpAddress/PidTagSenderSmtpAddress exist to resolve to an
+    // actual SMTP form. Prefer the smtp field; fall back to the primary one
+    // only if it actually looks like an address rather than a DN (better to
+    // show nothing than the DN string).
+    function pmMsgPreferredAddress(primary, smtp) {
+      if (smtp && String(smtp).indexOf('@') !== -1) return smtp;
+      if (primary && String(primary).indexOf('@') !== -1 && primary[0] !== '/') return primary;
+      return '';
+    }
+
     async function pmParseMsgToEmailLike(file) {
       const { MsgReader, decompressRTF } = await loadMsgLibs();
       const buf = await file.arrayBuffer();
@@ -28955,9 +28970,9 @@
 
       const recipients = Array.isArray(data.recipients) ? data.recipients : [];
       const to = recipients.filter((r) => !r.recipType || r.recipType === 'to')
-        .map((r) => ({ name: r.name || '', address: r.email || r.smtpAddress || '' }));
+        .map((r) => ({ name: r.name || '', address: pmMsgPreferredAddress(r.email, r.smtpAddress) }));
       const cc = recipients.filter((r) => r.recipType === 'cc')
-        .map((r) => ({ name: r.name || '', address: r.email || r.smtpAddress || '' }));
+        .map((r) => ({ name: r.name || '', address: pmMsgPreferredAddress(r.email, r.smtpAddress) }));
 
       const attachments = [];
       (data.attachments || []).forEach((attMeta, idx) => {
@@ -29002,7 +29017,7 @@
       const dateRaw = data.clientSubmitTime || data.messageDeliveryTime || data.creationTime || null;
       return {
         subject: data.subject || '',
-        from: { name: data.senderName || '', address: data.senderEmail || data.senderSmtpAddress || '' },
+        from: { name: data.senderName || '', address: pmMsgPreferredAddress(data.senderEmail, data.senderSmtpAddress) },
         to,
         cc,
         date: dateRaw ? new Date(dateRaw) : null,
