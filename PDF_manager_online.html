@@ -1962,6 +1962,51 @@
     .pe-shape-menu button:hover { background: #3498db; }
     .pe-shape-menu button.active { background: #3498db; border-color: #8fd0ff; }
     .pe-shape-menu button svg { width: 20px; height: 20px; display: block; }
+    /* Signature tool: saved-signature slots + "add new", shown the same way
+       as the shape submenu (hover/tap the toolbar button opens it below). */
+    .pe-signature-menu {
+      display: grid; position: absolute; top: 42px; left: 50%;
+      transform: translateX(-50%); z-index: 47;
+      background: #2c3e50; border: 1px solid rgba(255,255,255,.22);
+      border-radius: 10px; padding: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.35);
+      grid-template-columns: 72px; grid-auto-rows: 44px; gap: 6px;
+      opacity: 0; visibility: hidden; pointer-events: none;
+      transition: opacity 0.22s ease, visibility 0s linear 0.22s;
+    }
+    .pe-signature-menu.open {
+      opacity: 1; visibility: visible; pointer-events: auto;
+      transition: opacity 0.18s ease, visibility 0s;
+    }
+    #pageEditModal:has(.pe-signature-menu.open) .pe-props {
+      pointer-events: auto;
+    }
+    .pe-signature-slot {
+      position: relative; width: 72px; height: 44px; padding: 0;
+      border: 1px solid rgba(255,255,255,.22); border-radius: 6px;
+      background: #fff; cursor: pointer; overflow: visible;
+    }
+    .pe-signature-slot:hover {
+      border-color: #8fd0ff;
+      box-shadow: 0 0 0 2px rgba(143, 208, 255, 0.6);
+    }
+    .pe-signature-slot img {
+      width: 100%; height: 100%; object-fit: contain; display: block;
+      border-radius: 5px;
+    }
+    .pe-signature-slot-del {
+      position: absolute; top: -7px; right: -7px; width: 18px; height: 18px;
+      padding: 0; border: none; border-radius: 50%; background: #e74c3c; color: #fff;
+      font-size: 12px; line-height: 1; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .pe-signature-slot-del:hover { background: #ff6b5b; }
+    .pe-signature-add {
+      width: 72px; height: 44px; padding: 0;
+      border: 1px dashed rgba(255,255,255,.4); border-radius: 6px;
+      background: transparent; color: #fff; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .pe-signature-add:hover { background: rgba(255,255,255,.1); border-color: #8fd0ff; }
     .pe-obj-shape {
       box-sizing: border-box;
     }
@@ -1984,6 +2029,10 @@
     #pageEditModal.pe-shape-freehand-drawing .pe-stage-wrap .pe-obj {
       cursor: var(--pe-freehand-cursor, crosshair);
     }
+    /* Signature stamp armed (a saved signature was picked from the menu):
+       the actual cursor is left alone - a floating semi-transparent preview
+       (#peSignatureGhost, positioned in JS) follows the pointer instead, since
+       custom cursor images aren't reliable in every embedding context. */
     /*Shape color/fill - in the left property panel (#peProps), next to the text ones*/
     #pePropShapeWrap {
       display: none; align-items: center; gap: 8px;
@@ -6899,9 +6948,13 @@
         <button class="pe-btn pe-btn-square" id="peToolImage" title="Вставить изображение" data-i18n-title="peInsertImage">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#3498db" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
         </button>
-        <button class="pe-btn pe-btn-square" id="peToolSignature" type="button" title="Вставить подпись" data-i18n-title="peInsertSignature">
-          <svg viewBox="0 0 256 256" width="24" height="24" fill="#22d3ee" aria-hidden="true"><path d="M232,170H60.6c3.34-6.54,6.73-13.35,10.06-20.29a26.64,26.64,0,0,0,4.3.35c14.23,0,31.09-11.12,50.33-33.22,1,3,2.2,6.25,3.68,9.56,6.89,15.45,15.68,23.39,26.14,23.6h.39c8.81,0,17.71-5.77,27-17.58C188.33,140.68,201.62,150,232,150a6,6,0,0,0,0-12c-39.69,0-41.88-16.61-42-18.06a5.83,5.83,0,0,0-4.15-5.8,6.09,6.09,0,0,0-6.88,2.59C166.81,135.4,158.9,138.06,155.34,138c-10.78-.21-19.11-23.68-21.46-35a6,6,0,0,0-10.57-2.53C104.64,123.86,88,137,76.18,137.92,100,85.84,107.23,52.7,98.23,36.78,95.44,31.86,89.66,26,77.91,26c-15,0-27,14.62-32.82,40.1C38.28,95.94,42.12,132,59.62,145c-4.15,8.64-8.4,17.08-12.52,25H24a6,6,0,0,0,0,12H40.76C28.65,204.58,19,220.66,18.86,220.91a6,6,0,1,0,10.28,6.18c.16-.26,11.56-19.27,25.21-45.09H232a6,6,0,0,0,0-12ZM56.79,68.77C61.05,50.08,69.34,38,77.91,38c6.4,0,8.64,2.51,9.87,4.69,4,7,6,28.15-22.88,91C54.59,123.39,50.73,95.3,56.79,68.77Z"/></svg>
-        </button>
+        <div class="pe-shape-wrap" id="peSignatureWrap">
+          <button class="pe-btn pe-btn-square" id="peToolSignature" type="button" title="Вставить подпись" data-i18n-title="peInsertSignature">
+            <svg viewBox="0 0 256 256" width="24" height="24" fill="#22d3ee" aria-hidden="true"><path d="M232,170H60.6c3.34-6.54,6.73-13.35,10.06-20.29a26.64,26.64,0,0,0,4.3.35c14.23,0,31.09-11.12,50.33-33.22,1,3,2.2,6.25,3.68,9.56,6.89,15.45,15.68,23.39,26.14,23.6h.39c8.81,0,17.71-5.77,27-17.58C188.33,140.68,201.62,150,232,150a6,6,0,0,0,0-12c-39.69,0-41.88-16.61-42-18.06a5.83,5.83,0,0,0-4.15-5.8,6.09,6.09,0,0,0-6.88,2.59C166.81,135.4,158.9,138.06,155.34,138c-10.78-.21-19.11-23.68-21.46-35a6,6,0,0,0-10.57-2.53C104.64,123.86,88,137,76.18,137.92,100,85.84,107.23,52.7,98.23,36.78,95.44,31.86,89.66,26,77.91,26c-15,0-27,14.62-32.82,40.1C38.28,95.94,42.12,132,59.62,145c-4.15,8.64-8.4,17.08-12.52,25H24a6,6,0,0,0,0,12H40.76C28.65,204.58,19,220.66,18.86,220.91a6,6,0,1,0,10.28,6.18c.16-.26,11.56-19.27,25.21-45.09H232a6,6,0,0,0,0-12ZM56.79,68.77C61.05,50.08,69.34,38,77.91,38c6.4,0,8.64,2.51,9.87,4.69,4,7,6,28.15-22.88,91C54.59,123.39,50.73,95.3,56.79,68.77Z"/></svg>
+          </button>
+          <div class="pe-shape-menu-bridge" id="peSignatureMenuBridge" aria-hidden="true"></div>
+          <div class="pe-signature-menu" id="peSignatureMenu" aria-hidden="true"></div>
+        </div>
         <button class="pe-btn pe-btn-square" id="peToolHl" title="Маркер" data-i18n-title="peMarker" hidden disabled aria-hidden="true" style="display:none">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#f1c40f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3 21 7 11 17 6 18 7 13 17 3z"/><line x1="3" y1="21" x2="10" y2="21"/></svg>
         </button>
@@ -7082,6 +7135,7 @@
     </div>
     <input type="file" id="peImgInput" accept="image/png,image/jpeg" style="display:none">
     <input type="file" id="peSignatureInput" accept="image/png,image/jpeg" style="display:none">
+    <input type="file" id="peSignatureLibraryInput" accept="image/png,image/jpeg" style="display:none">
     <!-- Mobile Undo/Redo in page editor — same look/placement as preview chrome -->
     <div id="peMobileUndoRedoBar" aria-hidden="true">
       <button id="peMobileUndoBtn" type="button" data-tip="Вернуть на шаг назад" data-i18n-title="undoMobile" aria-label="Вернуть на шаг назад" data-i18n-aria="undoMobile">←</button>
@@ -8077,7 +8131,7 @@
         bookmarksConfirmLink: 'Связать эту закладку с текущим положением в документе?',
         newDocumentHint: 'Будет создан новый документ', openInNewTabs: 'Откроется в новых вкладках',
         tabClose: 'Закрыть вкладку', tabCloseOthers: 'Закрыть другие вкладки', tabCloseRight: 'Закрыть вкладки справа',
-        peInsertText: 'Вставить текст', peInsertImage: 'Вставить изображение', peInsertSignature: 'Вставить подпись', peAddShapes: 'Добавить фигуры',
+        peInsertText: 'Вставить текст', peInsertImage: 'Вставить изображение', peInsertSignature: 'Вставить подпись', peSignatureAddNew: 'Добавить новую подпись', peAddShapes: 'Добавить фигуры',
         peShapeRect: 'Прямоугольник', peShapeEllipse: 'Круг / овал', peShapeArrow: 'Стрелка',
         peShapeLine: 'Линия', peShapePlus: 'Плюс', peShapeFreehand: 'Свободная форма', peShapeStar: 'Звезда',
         peObjLabelText: 'Текст', peObjLabelImage: 'Изображение',
@@ -8469,7 +8523,7 @@
         bookmarksConfirmLink: 'Link this bookmark to the current position in the document?',
         newDocumentHint: 'A new document will be created', openInNewTabs: 'Open in new tabs',
         tabClose: 'Close tab', tabCloseOthers: 'Close other tabs', tabCloseRight: 'Close tabs to the right',
-        peInsertText: 'Insert text', peInsertImage: 'Insert image', peInsertSignature: 'Insert signature', peAddShapes: 'Add shapes',
+        peInsertText: 'Insert text', peInsertImage: 'Insert image', peInsertSignature: 'Insert signature', peSignatureAddNew: 'Add new signature', peAddShapes: 'Add shapes',
         peShapeRect: 'Rectangle', peShapeEllipse: 'Circle / oval', peShapeArrow: 'Arrow',
         peShapeLine: 'Line', peShapePlus: 'Plus', peShapeFreehand: 'Freeform', peShapeStar: 'Star',
         peObjLabelText: 'Text', peObjLabelImage: 'Image',
@@ -8861,7 +8915,7 @@
         bookmarksConfirmLink: '¿Vincular este marcador a la posición actual del documento?',
         newDocumentHint: 'Se creará un nuevo documento', openInNewTabs: 'Se abrirá en nuevas pestañas',
         tabClose: 'Cerrar pestaña', tabCloseOthers: 'Cerrar otras pestañas', tabCloseRight: 'Cerrar pestañas a la derecha',
-        peInsertText: 'Insertar texto', peInsertImage: 'Insertar imagen', peInsertSignature: 'Insertar firma', peAddShapes: 'Añadir formas',
+        peInsertText: 'Insertar texto', peInsertImage: 'Insertar imagen', peInsertSignature: 'Insertar firma', peSignatureAddNew: 'Añadir nueva firma', peAddShapes: 'Añadir formas',
         peShapeRect: 'Rectángulo', peShapeEllipse: 'Círculo / óvalo', peShapeArrow: 'Flecha',
         peShapeLine: 'Línea', peShapePlus: 'Cruz', peShapeFreehand: 'Forma libre', peShapeStar: 'Estrella',
         peObjLabelText: 'Texto', peObjLabelImage: 'Imagen',
@@ -9306,6 +9360,7 @@
         peInsertText: '插入文字',
         peInsertImage: '插入图片',
         peInsertSignature: '插入签名',
+        peSignatureAddNew: '添加新签名',
         peAddShapes: '添加形状',
         peShapeRect: '矩形',
         peShapeEllipse: '圆形 / 椭圆',
@@ -10827,11 +10882,13 @@
     // breaking the editor.
     // ═══════════════════════════════════════════════════════════════════════
     const PM_IDB_NAME = 'PDFManagerLocal';
-    const PM_IDB_VERSION = 1;
+    const PM_IDB_VERSION = 2;
     const PM_RECOVERY_STORE = 'recovery';
     const PM_RECOVERY_SLOT = 'main'; // single-document scope; tabs get their own slot (see pmRecoverySlotId)
     const PM_RECOVERY_DEBOUNCE_MS = 8000;   // write this long after edits go quiet
     const PM_RECOVERY_MAX_WAIT_MS = 45000;  // ...but never wait longer than this during continuous editing
+    const PM_SIGNATURES_STORE = 'signatures';
+    const PM_SIGNATURES_MAX = 4; // library cap - oldest saved signature is dropped past this
     let pmIdbPromise = null;
     let pmRecoveryDebounceTimer = null;
     let pmRecoveryMaxWaitTimer = null;
@@ -10846,6 +10903,7 @@
           req.onupgradeneeded = () => {
             const db = req.result;
             if (!db.objectStoreNames.contains(PM_RECOVERY_STORE)) db.createObjectStore(PM_RECOVERY_STORE, { keyPath: 'slot' });
+            if (!db.objectStoreNames.contains(PM_SIGNATURES_STORE)) db.createObjectStore(PM_SIGNATURES_STORE, { keyPath: 'id' });
           };
           req.onsuccess = () => resolve(req.result);
           req.onerror = () => resolve(null);
@@ -10897,6 +10955,34 @@
           req.onerror = () => resolve(out);
         });
       } catch (e) { return []; }
+    }
+
+    // --- Saved signatures (page-editor "signature" tool library) ----------
+
+    async function pmGetSavedSignatures() {
+      const list = await pmIdbGetAll(PM_SIGNATURES_STORE);
+      return (list || []).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+    }
+
+    // Persists a background-removed signature PNG so it shows up as a reusable
+    // slot next time. Best-effort: failures (no IndexedDB, quota, etc.) just
+    // mean the signature won't be remembered, never block the insert itself.
+    async function pmSaveSignature(dataUrl, w, h) {
+      try {
+        const existing = await pmGetSavedSignatures();
+        const id = 'sig_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        await pmIdbPut(PM_SIGNATURES_STORE, { id, dataUrl, w, h, createdAt: Date.now() });
+        const overflow = existing.length + 1 - PM_SIGNATURES_MAX;
+        if (overflow > 0) {
+          for (const item of existing.slice(0, overflow)) {
+            await pmIdbDelete(PM_SIGNATURES_STORE, item.id);
+          }
+        }
+      } catch (_) { /* best effort only */ }
+    }
+
+    async function pmDeleteSavedSignature(id) {
+      return pmIdbDelete(PM_SIGNATURES_STORE, id);
     }
 
     // --- Crash recovery ---------------------------------------------------
@@ -34923,7 +35009,7 @@ function peUpdateToolbarLock() {
     // (not cropping), even if nothing is selected.
     el.disabled = id === 'peDeleteObj' ? (cropMode || !peState.sel) : cropMode;
   });
-  if (cropMode) peCloseShapeMenu();
+  if (cropMode) { peCloseShapeMenu(); peCloseSignatureMenu(); peCancelSignaturePlacement(); }
   peUpdateCropActionsUi();
   peUpdateRedactActionsUi();
   peUpdatePageNavButtons();
@@ -38705,6 +38791,7 @@ function peDestroy() {
   updatePeUndoRedoUI();
   peCloseShapeMenu();
   peCloseShapeColorPopup();
+  peCancelSignaturePlacement();
   peRestorePageSelectionSnapshot();
 }
 
@@ -38856,6 +38943,7 @@ function peOnKeyDown(e) {
     // (this capture-phase listener runs before the input's own handler).
     if (typeof pmSearchState !== 'undefined' && pmSearchState.open) { pmSearchClose(); return; }
     if (peColorPreview) { peCloseColorPickerSession(); return; }
+    if (peSignaturePlacementPending) { peCancelSignaturePlacement(); return; }
     if (peIsShapeMenuOpen()) { peCloseShapeMenu(); return; }
     const colorPop = document.getElementById('peShapeColorPopup');
     if (colorPop && colorPop.classList.contains('open')) { peCloseShapeColorPopup(); return; }
@@ -44575,18 +44663,24 @@ function peLoadImageFile(file) {
 // first image; each subsequent image cascades slightly so multi-file drops
 // don't stack exactly). Shared by the plain image tool and the signature
 // tool (which pre-processes the image before handing it here).
-function peInsertLoadedImagesAtFrac(loadedList, xFrac, yFrac) {
+function peInsertLoadedImagesAtFrac(loadedList, xFrac, yFrac, opts) {
   if (!peState || !loadedList || !loadedList.length) return;
   const { w: W, h: H } = peStageSize();
+  // center: (xFrac, yFrac) is where the user pointed - place the image
+  // centered under that point instead of anchoring its top-left corner
+  // there (used by click-to-place signature stamping).
+  const center = !!(opts && opts.center);
   const created = [];
   for (let i = 0; i < loadedList.length; i++) {
     const { dataUrl, im } = loadedList[i];
     const wFrac = 0.4;
     const hFrac = wFrac * (im.naturalHeight / im.naturalWidth) * (W / H);
-    const off = i * 0.03;
+    const off = center ? 0 : i * 0.03;
+    const baseX = center ? (xFrac - wFrac / 2) : xFrac;
+    const baseY = center ? (yFrac - hFrac / 2) : yFrac;
     const o = {
       id: ++peState.seq, type: 'image', dataUrl, imgEl: im,
-      x: Math.max(0, Math.min(0.98, xFrac + off)), y: Math.max(0, Math.min(0.98, yFrac + off)),
+      x: Math.max(0, Math.min(0.98, baseX + off)), y: Math.max(0, Math.min(0.98, baseY + off)),
       w: wFrac, h: Math.min(hFrac, 0.9), rot: 0
     };
     peState.objects.push(o);
@@ -44726,6 +44820,216 @@ async function peInsertSignatureFile(file, xFrac, yFrac) {
   }
   if (!peState) return;
   peInsertLoadedImagesAtFrac([processed], xFrac, yFrac);
+  void pmSaveSignature(pngUrl, processed.im.naturalWidth, processed.im.naturalHeight);
+}
+
+// Re-inserts a previously saved (already background-removed) signature.
+// Picking a saved signature does not insert it immediately - it arms
+// "placement mode": a semi-transparent preview of the signature follows the
+// mouse (the actual cursor is left alone - some browsers/embeds restrict
+// custom cursor images, so a floating preview is the reliable signal), and
+// the next click on the page places it there (see the stage pointerdown
+// hook and peOnKeyDown's Escape handling, which cancels this).
+let peSignaturePlacementPending = null; // { id, dataUrl, im } | null
+let peSignatureGhostEl = null;
+
+async function peStartSignaturePlacement(id) {
+  if (!peState || !id) return;
+  const saved = await pmGetSavedSignatures();
+  const sig = saved.find(s => s.id === id);
+  if (!sig || !peState) return;
+  let loaded;
+  try {
+    loaded = await peLoadImageFromDataUrl(sig.dataUrl);
+  } catch (_) {
+    return;
+  }
+  if (!peState) return;
+  peSignaturePlacementPending = { id: sig.id, dataUrl: sig.dataUrl, im: loaded.im };
+  peSyncSignaturePlacementUi();
+}
+
+function peCancelSignaturePlacement() {
+  if (!peSignaturePlacementPending) return;
+  peSignaturePlacementPending = null;
+  peSyncSignaturePlacementUi();
+}
+
+function peIsSignaturePlacementPending() {
+  return !!peSignaturePlacementPending;
+}
+
+function peFinishSignaturePlacement(xFrac, yFrac) {
+  const pending = peSignaturePlacementPending;
+  if (!pending || !peState) return;
+  // Clear the pending state / ghost up front so a slow insert can't leave
+  // the preview stuck if something below fails.
+  peCancelSignaturePlacement();
+  peInsertLoadedImagesAtFrac([{ dataUrl: pending.dataUrl, im: pending.im }], xFrac, yFrac, { center: true });
+}
+
+function peEnsureSignatureGhostEl() {
+  if (peSignatureGhostEl && peSignatureGhostEl.isConnected) return peSignatureGhostEl;
+  const el = document.createElement('img');
+  el.id = 'peSignatureGhost';
+  el.alt = '';
+  el.style.cssText = 'position:fixed; left:0; top:0; z-index:100000; ' +
+    'pointer-events:none; opacity:0.55; display:none; ' +
+    'filter:drop-shadow(0 2px 6px rgba(0,0,0,.4));';
+  document.body.appendChild(el);
+  peSignatureGhostEl = el;
+  return el;
+}
+
+function peSignatureGhostMouseMove(e) {
+  const el = peSignatureGhostEl;
+  if (!el) return;
+  const w = el.__peW || 0, h = el.__peH || 0;
+  el.style.transform = 'translate(' + (e.clientX - w / 2) + 'px, ' + (e.clientY - h / 2) + 'px)';
+}
+
+function peShowSignatureGhost(dataUrl, im) {
+  const el = peEnsureSignatureGhostEl();
+  const { w: W, h: H } = peStageSize();
+  const wFrac = 0.4;
+  const naturalW = (im && im.naturalWidth) || 1;
+  const naturalH = (im && im.naturalHeight) || 1;
+  const hFrac = Math.min(wFrac * (naturalH / naturalW) * (W / H), 0.9);
+  el.__peW = Math.max(20, wFrac * W);
+  el.__peH = Math.max(10, hFrac * H);
+  el.src = dataUrl;
+  el.style.width = el.__peW + 'px';
+  el.style.height = el.__peH + 'px';
+  el.style.display = 'block';
+  document.addEventListener('mousemove', peSignatureGhostMouseMove);
+}
+
+function peHideSignatureGhost() {
+  document.removeEventListener('mousemove', peSignatureGhostMouseMove);
+  if (peSignatureGhostEl) peSignatureGhostEl.style.display = 'none';
+}
+
+function peSyncSignaturePlacementUi() {
+  const modal = document.getElementById('pageEditModal');
+  if (!modal) return;
+  const pending = peSignaturePlacementPending;
+  modal.classList.toggle('pe-signature-placing', !!pending);
+  if (pending) peShowSignatureGhost(pending.dataUrl, pending.im);
+  else peHideSignatureGhost();
+}
+
+let peSignatureMenuCloseTimer = null;
+
+function peCancelSignatureMenuClose() {
+  if (peSignatureMenuCloseTimer) {
+    clearTimeout(peSignatureMenuCloseTimer);
+    peSignatureMenuCloseTimer = null;
+  }
+}
+
+function peScheduleSignatureMenuClose() {
+  peCancelSignatureMenuClose();
+  peSignatureMenuCloseTimer = setTimeout(() => peCloseSignatureMenu(), 500);
+}
+
+function peIsSignatureMenuOpen() {
+  return !!document.getElementById('peSignatureMenu')?.classList.contains('open');
+}
+
+// Rebuilds the signature-menu slots from the saved library, plus a
+// trailing "add new" slot that opens the file picker.
+async function peRenderSignatureMenu() {
+  const menu = document.getElementById('peSignatureMenu');
+  if (!menu) return;
+  const saved = await pmGetSavedSignatures();
+  if (!menu.isConnected) return;
+  menu.innerHTML = '';
+  saved.forEach(sig => {
+    const slot = document.createElement('button');
+    slot.type = 'button';
+    slot.className = 'pe-signature-slot';
+    slot.dataset.sigId = sig.id;
+    slot.title = t('peInsertSignature');
+    const img = document.createElement('img');
+    img.src = sig.dataUrl;
+    img.alt = '';
+    slot.appendChild(img);
+    const del = document.createElement('button');
+    del.type = 'button';
+    del.className = 'pe-signature-slot-del';
+    del.title = t('peDelete');
+    del.setAttribute('aria-label', t('peDelete'));
+    del.textContent = '×';
+    slot.appendChild(del);
+    menu.appendChild(slot);
+  });
+  if (saved.length < PM_SIGNATURES_MAX) {
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.className = 'pe-signature-add';
+    addBtn.title = t('peSignatureAddNew');
+    addBtn.setAttribute('aria-label', t('peSignatureAddNew'));
+    addBtn.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>';
+    menu.appendChild(addBtn);
+  }
+}
+
+// Adds a signature to the saved library WITHOUT inserting it onto the page -
+// insertion happens only by picking a saved slot from the menu.
+async function peAddSignatureToLibrary(file) {
+  if (!peState || !file || !file.type || !file.type.startsWith('image/')) return;
+  let loaded;
+  try {
+    loaded = await peLoadImageFile(file);
+  } catch (_) {
+    return;
+  }
+  if (!peState) return;
+  const pngUrl = peRemoveSignatureBackground(loaded.im);
+  if (!pngUrl) return;
+  let processed;
+  try {
+    processed = await peLoadImageFromDataUrl(pngUrl);
+  } catch (_) {
+    return;
+  }
+  if (!peState) return;
+  await pmSaveSignature(pngUrl, processed.im.naturalWidth, processed.im.naturalHeight);
+  // Refresh contents directly (not via peOpenSignatureMenu(), which now only
+  // renders on an actual closed->open transition) - the menu stays open the
+  // whole time here, but its slot list must still reflect the new signature.
+  const menu = document.getElementById('peSignatureMenu');
+  if (menu && menu.classList.contains('open')) void peRenderSignatureMenu();
+}
+
+function peOpenSignatureMenu() {
+  const wrap = document.getElementById('peSignatureWrap');
+  const menu = document.getElementById('peSignatureMenu');
+  if (!menu || !wrap) return;
+  peCancelSignatureMenuClose();
+  // Only rebuild the slot list on an actual closed->open transition. This
+  // fires on every 'mouseenter' of the wrap (including while the menu is
+  // ALREADY open and the pointer never really left it) - re-rendering here
+  // unconditionally replaced the DOM node currently under the pointer,
+  // which makes the browser re-fire mouseenter on the freshly-created
+  // element, calling this again: a self-sustaining loop that starved out
+  // real clicks on the slots (mousedown could land on a node that gets
+  // replaced before mouseup, so the click never completes).
+  const wasOpen = menu.classList.contains('open');
+  wrap.classList.add('pe-shape-menu-open');
+  menu.classList.add('open');
+  menu.setAttribute('aria-hidden', 'false');
+  if (!wasOpen) void peRenderSignatureMenu();
+}
+
+function peCloseSignatureMenu() {
+  const wrap = document.getElementById('peSignatureWrap');
+  const menu = document.getElementById('peSignatureMenu');
+  if (!menu) return;
+  peCancelSignatureMenuClose();
+  wrap?.classList.remove('pe-shape-menu-open');
+  menu.classList.remove('open');
+  menu.setAttribute('aria-hidden', 'true');
 }
 
 function peHideObjCtxMenu() {
@@ -49110,6 +49414,19 @@ function peObjMouseDown(e, o) {
   // stopPropagation so this handler must not run in capture on the same node.
   peBindPointerDown(stage, (e) => {
     if (!peState || peState.drag || pePinchActive) return;
+    // Signature stamp is armed (see peStartSignaturePlacement): the very next
+    // click anywhere on the page places it there, regardless of the current
+    // tool or whatever object happens to be underneath the pointer.
+    if (peSignaturePlacementPending) {
+      if (!peIsPrimaryPointer(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      peCapturePointer(e, stage);
+      const pt = peStagePoint(e);
+      const { w: W, h: H } = peStageSize();
+      void peFinishSignaturePlacement(pt.x / W, pt.y / H);
+      return;
+    }
     if (peDrawPlacementIgnoresObjects()) peUpdateDrawShiftPassthrough(e.shiftKey);
     if (e.target.closest && e.target.closest('.pe-obj')) {
       const passObj = e.shiftKey && peDrawPlacementIgnoresObjects();
@@ -49703,6 +50020,14 @@ function peObjMouseDown(e, o) {
 
   stage.addEventListener('contextmenu', async (e) => {
     if (!peState) return;
+    // Right-click cancels an armed signature stamp instead of opening the
+    // usual page/object context menu.
+    if (peSignaturePlacementPending) {
+      e.preventDefault();
+      e.stopPropagation();
+      peCancelSignaturePlacement();
+      return;
+    }
     // Crop mode keeps its own confirm menu over the crop box.
     if (peState.tool === 'crop') {
       if (peState.cropPdf && peIsClientOverCrop(e.clientX, e.clientY)) {
@@ -49839,18 +50164,73 @@ function peObjMouseDown(e, o) {
     }
     document.getElementById('peImgInput').click();
   });
-  document.getElementById('peToolSignature').addEventListener('click', () => {
+  document.getElementById('peToolSignature').addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
     if (!peState) return;
     if (peState.inlineEditId || peState.sel || (peState.multiSel && peState.multiSel.length)) {
       peDeselectKeepTool();
     }
-    document.getElementById('peSignatureInput').click();
+    if (peIsSignatureMenuOpen()) {
+      peCloseSignatureMenu();
+    } else {
+      peCloseShapeMenu();
+      peOpenSignatureMenu();
+    }
+  });
+  const peSignatureWrap = document.getElementById('peSignatureWrap');
+  peSignatureWrap?.addEventListener('mouseenter', () => {
+    if (!peState) return;
+    // Moving from the Shapes button straight to the Signature button (or
+    // vice versa - see peShapeWrap's mouseenter below) must swap the open
+    // flyout immediately, not wait for the other one's own close timer.
+    peCloseShapeMenu();
+    peCancelSignatureMenuClose();
+    peOpenSignatureMenu();
+  });
+  peSignatureWrap?.addEventListener('mouseleave', () => {
+    peScheduleSignatureMenuClose();
+  });
+  document.getElementById('peSignatureMenu')?.addEventListener('mouseenter', () => {
+    peCancelSignatureMenuClose();
+  });
+  document.getElementById('peSignatureMenu')?.addEventListener('mouseleave', () => {
+    if (peSignatureWrap?.matches(':hover')) return;
+    peScheduleSignatureMenuClose();
+  });
+  document.getElementById('peSignatureMenu')?.addEventListener('click', (e) => {
+    if (!peState) return;
+    const delBtn = e.target.closest('.pe-signature-slot-del');
+    if (delBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = delBtn.closest('.pe-signature-slot')?.dataset.sigId;
+      if (id) void pmDeleteSavedSignature(id).then(() => peRenderSignatureMenu());
+      return;
+    }
+    const addBtn = e.target.closest('.pe-signature-add');
+    if (addBtn) {
+      e.preventDefault();
+      e.stopPropagation();
+      peCancelSignatureMenuClose();
+      document.getElementById('peSignatureLibraryInput').click();
+      return;
+    }
+    const slot = e.target.closest('.pe-signature-slot');
+    if (slot) {
+      e.preventDefault();
+      e.stopPropagation();
+      const id = slot.dataset.sigId;
+      peCloseSignatureMenu();
+      void peStartSignaturePlacement(id);
+    }
   });
 
   peSyncShapeToolbarUi();
   const peShapeWrap = document.getElementById('peShapeWrap');
   peShapeWrap?.addEventListener('mouseenter', () => {
     if (!peState) return;
+    peCloseSignatureMenu();
     peCancelShapeMenuClose();
     peOpenShapeMenu();
   });
@@ -49890,6 +50270,7 @@ function peObjMouseDown(e, o) {
       try { e.currentTarget.blur(); } catch (_) {}
       return;
     }
+    peCloseSignatureMenu();
     peSetTool('shape');
     peOpenShapeMenu();
   });
@@ -49929,6 +50310,8 @@ function peObjMouseDown(e, o) {
   const peCloseFloatingMenusOnOutside = (e) => {
     const wrapEl = document.getElementById('peShapeWrap');
     if (peIsShapeMenuOpen() && wrapEl && !wrapEl.contains(e.target)) peCloseShapeMenu();
+    const sigWrapEl = document.getElementById('peSignatureWrap');
+    if (peIsSignatureMenuOpen() && sigWrapEl && !sigWrapEl.contains(e.target)) peCloseSignatureMenu();
     const colorPop = document.getElementById('peShapeColorPopup');
     if (colorPop && colorPop.classList.contains('open') &&
         !colorPop.contains(e.target) &&
@@ -49983,6 +50366,12 @@ function peObjMouseDown(e, o) {
     e.target.value = '';
     if (!f || !peState) return;
     void peInsertSignatureFile(f, 0.3, 0.3);
+  });
+  document.getElementById('peSignatureLibraryInput').addEventListener('change', (e) => {
+    const f = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!f || !peState) return;
+    void peAddSignatureToLibrary(f);
   });
 
   // Drag-and-drop images from the OS file manager straight onto the page.
