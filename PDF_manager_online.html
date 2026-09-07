@@ -2020,6 +2020,12 @@
       display: flex; align-items: center; justify-content: center;
     }
     .pe-signature-add:hover { background: rgba(255,255,255,.1); border-color: #8fd0ff; }
+    /* While the rename popover is open, every slot but the one being
+       renamed is faded and non-interactive to keep focus on it. */
+    .pe-signature-slot.pe-signature-dim,
+    .pe-signature-add.pe-signature-dim {
+      opacity: 0.25; pointer-events: none;
+    }
     .pe-obj-shape {
       box-sizing: border-box;
     }
@@ -45081,6 +45087,22 @@ function peCloseSignatureMenu() {
 let peSignatureCtxTargetId = null;
 let peSignatureCtxAnchorRect = null; // the slot's own rect, so the rename popover can appear next to it
 
+// While a rename popover is open, this holds the id of the signature being
+// renamed - the flyout menu stays open behind the popover instead of being
+// closed by the usual "click outside closes it" handling, and every OTHER
+// slot is faded out (see the .pe-signature-dim CSS rule) to keep the focus
+// on the one actually being renamed.
+let peSignatureRenamingId = null;
+
+function peSetSignatureRenameDimming(activeId) {
+  const menu = document.getElementById('peSignatureMenu');
+  if (!menu) return;
+  menu.querySelectorAll('.pe-signature-slot, .pe-signature-add').forEach((el) => {
+    const isActiveSlot = el.classList.contains('pe-signature-slot') && el.dataset.sigId === activeId;
+    el.classList.toggle('pe-signature-dim', !!activeId && !isActiveSlot);
+  });
+}
+
 function peIsSignatureCtxMenuOpen() {
   return !!document.getElementById('peSignatureCtxMenu')?.classList.contains('visible');
 }
@@ -45133,11 +45155,11 @@ function peShowRenameSignatureDialog(currentName, anchorRect) {
       <input id="peSigRenameInput" type="text" maxlength="60"
         style="width:100%; box-sizing:border-box; padding:6px 8px; font-size:13px;
           border:1px solid #ccc; border-radius:5px; margin-bottom:8px;" />
-      <div style="display:flex; gap:6px; justify-content:flex-end;">
-        <button type="button" id="peSigRenameCancel" style="padding:5px 10px; border:1px solid #ccc; border-radius:5px;
-          background:#fff; color:#333; cursor:pointer; font-size:12.5px;">${escapeHtml(t('pwdCancel'))}</button>
-        <button type="button" id="peSigRenameOk" style="padding:5px 12px; border:none; border-radius:5px;
-          background:#2980b9; color:#fff; font-weight:bold; cursor:pointer; font-size:12.5px;">${escapeHtml(t('save'))}</button>
+      <div style="display:flex; gap:6px;">
+        <button type="button" id="peSigRenameCancel" style="flex:1 1 0; box-sizing:border-box; padding:5px 0; border:1px solid #ccc; border-radius:5px;
+          background:#fff; color:#333; cursor:pointer; font-size:12.5px; text-align:center;">${escapeHtml(t('pwdCancel'))}</button>
+        <button type="button" id="peSigRenameOk" style="flex:1 1 0; box-sizing:border-box; padding:5px 0; border:1px solid transparent; border-radius:5px;
+          background:#2980b9; color:#fff; font-weight:bold; cursor:pointer; font-size:12.5px; text-align:center;">${escapeHtml(t('save'))}</button>
       </div>`;
     overlay.appendChild(box);
     document.body.appendChild(overlay);
@@ -50410,9 +50432,13 @@ function peObjMouseDown(e, o) {
     const idx = saved.findIndex(s => s.id === id);
     if (idx === -1) return;
     const currentName = saved[idx].name || t('peSignatureDefaultName', { n: idx + 1 });
+    peSignatureRenamingId = id;
+    peSetSignatureRenameDimming(id);
     const newName = await peShowRenameSignatureDialog(currentName, anchorRect);
-    if (newName == null) return;
-    await pmRenameSignature(id, newName);
+    peSignatureRenamingId = null;
+    if (newName != null) await pmRenameSignature(id, newName);
+    // Re-render either way: on success it shows the new name, on cancel it
+    // simply rebuilds the slots fresh (clearing the dim state in the process).
     void peRenderSignatureMenu();
   });
 
@@ -50501,8 +50527,16 @@ function peObjMouseDown(e, o) {
     const wrapEl = document.getElementById('peShapeWrap');
     if (peIsShapeMenuOpen() && wrapEl && !wrapEl.contains(e.target)) peCloseShapeMenu();
     const sigWrapEl = document.getElementById('peSignatureWrap');
-    if (peIsSignatureMenuOpen() && sigWrapEl && !sigWrapEl.contains(e.target)) peCloseSignatureMenu();
     const sigCtxMenu = document.getElementById('peSignatureCtxMenu');
+    // The flyout must not close for: clicks on the "Rename" item itself
+    // (peSignatureRenamingId isn't set yet at that click's pointerdown - it's
+    // the SAME click whose handler goes on to set it, so the flag alone is
+    // too late for it) or any click while the rename popover is open
+    // afterward (it - and the ctx menu - live outside #peSignatureWrap).
+    const sigOutsideException = (sigCtxMenu && sigCtxMenu.contains(e.target)) || !!peSignatureRenamingId;
+    if (peIsSignatureMenuOpen() && sigWrapEl && !sigWrapEl.contains(e.target) && !sigOutsideException) {
+      peCloseSignatureMenu();
+    }
     if (peIsSignatureCtxMenuOpen() && sigCtxMenu && !sigCtxMenu.contains(e.target)) peHideSignatureCtxMenu();
     const colorPop = document.getElementById('peShapeColorPopup');
     if (colorPop && colorPop.classList.contains('open') &&
