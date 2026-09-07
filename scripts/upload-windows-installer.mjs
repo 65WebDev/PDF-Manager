@@ -483,29 +483,6 @@ function pruneStaleSetupAssets(ghBin, tag, version, keepNames) {
   }
 }
 
-function updateRepoDescription(ghBin, version, tag) {
-  if (envFlag('SKIP_REPO_DESCRIPTION')) return;
-  const description =
-    `PDF Document Manager — HTML builds + Windows desktop (актуально: ${tag}).`;
-  const homepage = `https://github.com/${REPO_SLUG}/releases/tag/${tag}`;
-  const r = runGh(ghBin, [
-    'api',
-    '-X',
-    'PATCH',
-    `repos/${REPO_SLUG}`,
-    '-f',
-    `description=${description}`,
-    '-f',
-    `homepage=${homepage}`,
-  ]);
-  if (r.status === 0) {
-    console.log('Описание репозитория GitHub обновлено.');
-  } else {
-    console.warn('Описание репозитория обновить не удалось (нет прав или API).');
-    if (r.stderr) console.warn(String(r.stderr).trim());
-  }
-}
-
 /**
  * GitHub allows only one "Latest" release. `gh release create` may mark a new
  * windows-v* tag as Latest (semver vs build-N), which breaks
@@ -730,7 +707,6 @@ function main() {
     join(root, 'version.json'),
     join(root, 'version-feed.js'),
   ]);
-  updateRepoDescription(ghBin, version, tag);
 }
 
 main();
