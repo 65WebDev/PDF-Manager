@@ -6648,7 +6648,8 @@
     html[data-theme="dark"] .pm-modal-box #jpegCancel,
     html[data-theme="dark"] .pm-modal-box #pdfPwdCancel,
     html[data-theme="dark"] .pm-modal-box #encPwdCancel,
-    html[data-theme="dark"] .pm-modal-box #cancelBtn {
+    html[data-theme="dark"] .pm-modal-box #cancelBtn,
+    html[data-theme="dark"] .pm-modal-box #peSigRenameCancel {
       background: #333a44 !important; border-color: #4a5058 !important;
     }
     /* Encrypt-password dialog: hover feedback on both buttons (light + dark). */
@@ -6656,6 +6657,11 @@
     #encPwdOk:hover { background: #2471a3 !important; }
     html[data-theme="dark"] .pm-modal-box #encPwdCancel:hover { background: #3d4550 !important; }
     html[data-theme="dark"] .pm-modal-box #encPwdOk:hover { background: #1f618d !important; }
+    /* Signature rename popover: same hover feedback (light + dark). */
+    #peSigRenameCancel:hover { background: #f0f0f0 !important; }
+    #peSigRenameOk:hover { background: #2471a3 !important; }
+    html[data-theme="dark"] .pm-modal-box #peSigRenameCancel:hover { background: #3d4550 !important; }
+    html[data-theme="dark"] .pm-modal-box #peSigRenameOk:hover { background: #1f618d !important; }
     html[data-theme="dark"] .pm-modal-box input[type="password"],
     html[data-theme="dark"] .pm-modal-box input[type="text"] {
       background: #1c2128 !important; border-color: #4a5058 !important;
@@ -45073,6 +45079,7 @@ function peCloseSignatureMenu() {
 
 // Small right-click menu on a saved-signature slot ("Rename" only).
 let peSignatureCtxTargetId = null;
+let peSignatureCtxAnchorRect = null; // the slot's own rect, so the rename popover can appear next to it
 
 function peIsSignatureCtxMenuOpen() {
   return !!document.getElementById('peSignatureCtxMenu')?.classList.contains('visible');
@@ -45084,12 +45091,14 @@ function peHideSignatureCtxMenu() {
   menu.classList.remove('visible');
   menu.setAttribute('aria-hidden', 'true');
   peSignatureCtxTargetId = null;
+  peSignatureCtxAnchorRect = null;
 }
 
-function peShowSignatureCtxMenu(clientX, clientY, id) {
+function peShowSignatureCtxMenu(clientX, clientY, id, anchorRect) {
   const menu = document.getElementById('peSignatureCtxMenu');
   if (!menu) return;
   peSignatureCtxTargetId = id;
+  peSignatureCtxAnchorRect = anchorRect || null;
   menu.classList.add('visible');
   menu.setAttribute('aria-hidden', 'false');
   const w = menu.offsetWidth, h = menu.offsetHeight;
@@ -45102,33 +45111,53 @@ function peShowSignatureCtxMenu(clientX, clientY, id) {
 
 // Small modal: rename a saved signature. Resolves to the trimmed new name,
 // or null if cancelled. Mirrors showSetPdfPasswordDialog's structure.
-function peShowRenameSignatureDialog(currentName) {
+// Small popover (not a full centered modal) so it reads as "edit this one
+// slot" rather than a heavyweight dialog - anchorRect (the slot's own
+// getBoundingClientRect()) is used to place it just to the right of the
+// signature being renamed, falling back to the left / clamped to the
+// viewport when there isn't room.
+function peShowRenameSignatureDialog(currentName, anchorRect) {
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay-active';
-    overlay.style.cssText = `
-      position: fixed; inset: 0; background: rgba(0,0,0,0.6);
-      display: flex; align-items: center; justify-content: center; z-index: 100003;`;
+    overlay.style.cssText = 'position:fixed; inset:0; background:transparent; z-index:100003;';
     const box = document.createElement('div');
     box.className = 'pm-modal-box';
     box.style.cssText = `
-      background: #fff; border-radius: 12px; padding: 24px 28px; max-width: 92vw;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.3); text-align: left; min-width: min(320px, 92vw);`;
+      position:fixed; background:#fff; border-radius:8px; padding:10px 12px;
+      box-shadow:0 8px 26px rgba(0,0,0,.28); text-align:left;
+      width:200px; box-sizing:border-box;`;
     box.innerHTML = `
-      <div style="font-size:17px; color:#2c3e50; margin-bottom:14px; font-weight:600; line-height:1.35;">
+      <div style="font-size:12.5px; color:#2c3e50; margin-bottom:6px; font-weight:600; line-height:1.3;">
         ${escapeHtml(t('peSignatureRenameTitle'))}
       </div>
       <input id="peSigRenameInput" type="text" maxlength="60"
-        style="width:100%; box-sizing:border-box; padding:10px 12px; font-size:15px;
-          border:1px solid #ccc; border-radius:6px; margin-bottom:14px;" />
-      <div style="display:flex; gap:12px; justify-content:flex-end; flex-wrap:wrap;">
-        <button type="button" id="peSigRenameCancel" style="padding:10px 20px; border:1px solid #ccc; border-radius:6px;
-          background:#fff; color:#333; cursor:pointer; font-size:15px;">${escapeHtml(t('pwdCancel'))}</button>
-        <button type="button" id="peSigRenameOk" style="padding:10px 24px; border:none; border-radius:6px;
-          background:#2980b9; color:#fff; font-weight:bold; cursor:pointer; font-size:15px;">${escapeHtml(t('save'))}</button>
+        style="width:100%; box-sizing:border-box; padding:6px 8px; font-size:13px;
+          border:1px solid #ccc; border-radius:5px; margin-bottom:8px;" />
+      <div style="display:flex; gap:6px; justify-content:flex-end;">
+        <button type="button" id="peSigRenameCancel" style="padding:5px 10px; border:1px solid #ccc; border-radius:5px;
+          background:#fff; color:#333; cursor:pointer; font-size:12.5px;">${escapeHtml(t('pwdCancel'))}</button>
+        <button type="button" id="peSigRenameOk" style="padding:5px 12px; border:none; border-radius:5px;
+          background:#2980b9; color:#fff; font-weight:bold; cursor:pointer; font-size:12.5px;">${escapeHtml(t('save'))}</button>
       </div>`;
     overlay.appendChild(box);
     document.body.appendChild(overlay);
+
+    // Position next to the anchor now that the box has a real size.
+    const bw = box.offsetWidth, bh = box.offsetHeight;
+    const gap = 8;
+    let x, y;
+    if (anchorRect) {
+      x = anchorRect.right + gap;
+      if (x + bw > window.innerWidth - 6) x = anchorRect.left - bw - gap; // no room on the right - flip left
+      y = anchorRect.top;
+    } else {
+      x = (window.innerWidth - bw) / 2;
+      y = (window.innerHeight - bh) / 2;
+    }
+    x = Math.max(6, Math.min(x, window.innerWidth - bw - 6));
+    y = Math.max(6, Math.min(y, window.innerHeight - bh - 6));
+    box.style.left = x + 'px';
+    box.style.top = y + 'px';
 
     const input = box.querySelector('#peSigRenameInput');
     input.value = currentName || '';
@@ -50362,19 +50391,26 @@ function peObjMouseDown(e, o) {
     if (!slot) return;
     e.preventDefault();
     e.stopPropagation();
-    peShowSignatureCtxMenu(e.clientX, e.clientY, slot.dataset.sigId);
+    peShowSignatureCtxMenu(e.clientX, e.clientY, slot.dataset.sigId, slot.getBoundingClientRect());
+  });
+  // Hovering the "Rename" popup must not let the signature flyout underneath
+  // time out and close (it lives outside #peSignatureWrap, so without this
+  // its own mouseleave->close-timer would otherwise still be running).
+  document.getElementById('peSignatureCtxMenu')?.addEventListener('mouseenter', () => {
+    peCancelSignatureMenuClose();
   });
   document.getElementById('peSignatureCtxRenameBtn')?.addEventListener('click', async (e) => {
     e.preventDefault();
     e.stopPropagation();
     const id = peSignatureCtxTargetId;
+    const anchorRect = peSignatureCtxAnchorRect;
     peHideSignatureCtxMenu();
     if (!id) return;
     const saved = await pmGetSavedSignatures();
     const idx = saved.findIndex(s => s.id === id);
     if (idx === -1) return;
     const currentName = saved[idx].name || t('peSignatureDefaultName', { n: idx + 1 });
-    const newName = await peShowRenameSignatureDialog(currentName);
+    const newName = await peShowRenameSignatureDialog(currentName, anchorRect);
     if (newName == null) return;
     await pmRenameSignature(id, newName);
     void peRenderSignatureMenu();
