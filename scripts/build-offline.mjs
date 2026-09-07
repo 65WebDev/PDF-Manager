@@ -316,7 +316,7 @@ function replaceMsgLibsImports(html, bundledEsm) {
 }
 
 function addOfflineBanner(html) {
-  const marker = '<title>Менеджер документов PDF</title>';
+  const marker = '<title>PDF Manager — редактор PDF в одном HTML-файле</title>';
   const banner =
     '\n  <!-- Offline build: all editor libraries are inlined; no internet required. -->';
   if (!html.includes(marker)) {
