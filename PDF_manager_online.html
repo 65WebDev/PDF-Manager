@@ -49345,6 +49345,25 @@ function peObjMouseDown(e, o) {
     }
   });
 
+  // Signature stamp armed (peStartSignaturePlacement): intercept the very
+  // first capture-phase pointerdown on the stage, before every other
+  // handler below (text-layer hover/selection, per-object mousedown, border
+  // drag, ...) gets a chance to react to whatever happens to be under the
+  // pointer. Without stopImmediatePropagation here, clicking over existing
+  // text/objects while a stamp was armed let THEIR handlers fire too
+  // (selecting/moving the object, starting a text drag, etc.) instead of
+  // just placing the signature.
+  peBindPointerDown(stage, (e) => {
+    if (!peState || !peSignaturePlacementPending) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+    peCapturePointer(e, stage);
+    const pt = peStagePoint(e);
+    const { w: W, h: H } = peStageSize();
+    void peFinishSignaturePlacement(pt.x / W, pt.y / H);
+  }, true);
+
   // Text selection must clear on ANY click elsewhere on the page - not just
   // clicks that happen to land on selectable text. Normally a browser does
   // this on its own (clicking outside the current selection collapses it),
@@ -49420,19 +49439,8 @@ function peObjMouseDown(e, o) {
   // stopPropagation so this handler must not run in capture on the same node.
   peBindPointerDown(stage, (e) => {
     if (!peState || peState.drag || pePinchActive) return;
-    // Signature stamp is armed (see peStartSignaturePlacement): the very next
-    // click anywhere on the page places it there, regardless of the current
-    // tool or whatever object happens to be underneath the pointer.
-    if (peSignaturePlacementPending) {
-      if (!peIsPrimaryPointer(e)) return;
-      e.preventDefault();
-      e.stopPropagation();
-      peCapturePointer(e, stage);
-      const pt = peStagePoint(e);
-      const { w: W, h: H } = peStageSize();
-      void peFinishSignaturePlacement(pt.x / W, pt.y / H);
-      return;
-    }
+    // (An armed signature stamp is handled earlier, in a capture-phase
+    // listener registered above - see peStartSignaturePlacement.)
     if (peDrawPlacementIgnoresObjects()) peUpdateDrawShiftPassthrough(e.shiftKey);
     if (e.target.closest && e.target.closest('.pe-obj')) {
       const passObj = e.shiftKey && peDrawPlacementIgnoresObjects();
