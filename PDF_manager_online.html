@@ -2026,6 +2026,15 @@
     .pe-signature-add.pe-signature-dim {
       opacity: 0.25; pointer-events: none;
     }
+    /* Brief highlight on a newly-added signature slot, to show where it
+       landed in the list (see peAddSignatureToLibrary). */
+    @keyframes peSignatureFlash {
+      0% { box-shadow: 0 0 0 3px rgba(46, 204, 113, 0.95); }
+      100% { box-shadow: 0 0 0 3px rgba(46, 204, 113, 0); }
+    }
+    .pe-signature-slot.pe-signature-flash {
+      animation: peSignatureFlash 1.3s ease-out;
+    }
     .pe-obj-shape {
       box-sizing: border-box;
     }
@@ -38987,6 +38996,7 @@ function peOnKeyDown(e) {
     if (peColorPreview) { peCloseColorPickerSession(); return; }
     if (peSignaturePlacementPending) { peCancelSignaturePlacement(); return; }
     if (peIsSignatureCtxMenuOpen()) { peHideSignatureCtxMenu(); return; }
+    if (peIsSignatureMenuOpen()) { peSignaturePinnedOpen = false; peCloseSignatureMenu(); return; }
     if (peIsShapeMenuOpen()) { peCloseShapeMenu(); return; }
     const colorPop = document.getElementById('peShapeColorPopup');
     if (colorPop && colorPop.classList.contains('open')) { peCloseShapeColorPopup(); return; }
@@ -45046,11 +45056,27 @@ async function peAddSignatureToLibrary(file) {
   }
   if (!peState) return;
   await pmSaveSignature(pngUrl, processed.im.naturalWidth, processed.im.naturalHeight);
+  // Pin the flyout open: the native file picker above blocks this whole
+  // function for however long the user took to pick a file, so any close
+  // scheduled from mouse movement before that would otherwise fire the
+  // instant we resume - right as the new signature appears.
+  peSignaturePinnedOpen = true;
   // Refresh contents directly (not via peOpenSignatureMenu(), which now only
   // renders on an actual closed->open transition) - the menu stays open the
   // whole time here, but its slot list must still reflect the new signature.
   const menu = document.getElementById('peSignatureMenu');
-  if (menu && menu.classList.contains('open')) void peRenderSignatureMenu();
+  if (menu && menu.classList.contains('open')) {
+    await peRenderSignatureMenu();
+    // The newly-saved signature is always last (pmGetSavedSignatures sorts
+    // by creation time, and rendering preserves that order) - flash it
+    // briefly so it's obvious where it landed in the list.
+    const slots = menu.querySelectorAll('.pe-signature-slot');
+    const newSlot = slots[slots.length - 1];
+    if (newSlot) {
+      newSlot.classList.add('pe-signature-flash');
+      setTimeout(() => newSlot.classList.remove('pe-signature-flash'), 1300);
+    }
+  }
 }
 
 function peOpenSignatureMenu() {
@@ -45081,6 +45107,11 @@ function peCloseSignatureMenu() {
   // chain and fire mid-edit). This flag is the single source of truth
   // instead: no code path can close the flyout while it's set.
   if (peSignatureRenamingId) return;
+  // Same idea while a just-added signature is being shown off - only an
+  // explicit outside click or Escape may clear peSignaturePinnedOpen and
+  // actually close the flyout (see peCloseFloatingMenusOnOutside / Escape
+  // handling in peOnKeyDown).
+  if (peSignaturePinnedOpen) return;
   const wrap = document.getElementById('peSignatureWrap');
   const menu = document.getElementById('peSignatureMenu');
   if (!menu) return;
@@ -45100,6 +45131,13 @@ let peSignatureCtxAnchorRect = null; // the slot's own rect, so the rename popov
 // slot is faded out (see the .pe-signature-dim CSS rule) to keep the focus
 // on the one actually being renamed.
 let peSignatureRenamingId = null;
+
+// Keeps the flyout open after a new signature was just added, until the
+// user explicitly dismisses it (click outside / Escape) - otherwise a
+// close scheduled from BEFORE the (blocking) native file picker opened
+// would fire the instant it closes, however much wall-clock time the user
+// actually spent picking a file, making the new signature seem to vanish.
+let peSignaturePinnedOpen = false;
 
 function peSetSignatureRenameDimming(activeId) {
   const menu = document.getElementById('peSignatureMenu');
@@ -50542,6 +50580,7 @@ function peObjMouseDown(e, o) {
     // afterward (it - and the ctx menu - live outside #peSignatureWrap).
     const sigOutsideException = (sigCtxMenu && sigCtxMenu.contains(e.target)) || !!peSignatureRenamingId;
     if (peIsSignatureMenuOpen() && sigWrapEl && !sigWrapEl.contains(e.target) && !sigOutsideException) {
+      peSignaturePinnedOpen = false; // an explicit outside click always dismisses it
       peCloseSignatureMenu();
     }
     if (peIsSignatureCtxMenuOpen() && sigCtxMenu && !sigCtxMenu.contains(e.target)) peHideSignatureCtxMenu();
