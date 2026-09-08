@@ -24437,7 +24437,27 @@
       scrollPosition = scrollContainer.scrollTop;
       const removeSet = new Set(indices);
       const sortedDesc = [...indices].sort((a, b) => b - a);
+      // Must resolve/plan BEFORE removePage() runs (old page numbering is
+      // still intact here) and write back AFTER (doc.getPage(newIndex) then
+      // resolves against the already-shrunk page list) - see
+      // pmPrepareBookmarksForPageRemove's own comment for why this can't be
+      // a single before-or-after step the way the other migrations are.
+      const finishBookmarks = typeof pmPrepareBookmarksForPageRemove === 'function'
+        ? await pmPrepareBookmarksForPageRemove(pdfDoc, indices)
+        : null;
       for (const idx of sortedDesc) pdfDoc.removePage(idx);
+      // pdf-lib's own removePage() mutates the page tree but never
+      // invalidates PDFDocument's memoized page-list cache - if anything
+      // (pmPrepareBookmarksForPageRemove's own outline resolution included)
+      // already called getPage()/getPages()/save() earlier in this document's
+      // life, doc.getPage(newIndex) below would keep returning the STALE
+      // pre-removal page list/refs instead of the actual new layout. Forcing
+      // a recompute here is what makes finishBookmarks()'s doc.getPage() calls
+      // (inside pmWriteOutlineTree) resolve correctly.
+      if (pdfDoc.pageCache && typeof pdfDoc.pageCache.invalidate === 'function') {
+        pdfDoc.pageCache.invalidate();
+      }
+      if (finishBookmarks) finishBookmarks();
       if (typeof peRemapEditorMetaOnPageRemove === 'function') {
         peRemapEditorMetaOnPageRemove(pdfDoc, indices);
       }
@@ -34062,36 +34082,51 @@ async function pmBookmarksMigrateOnInsert(srcDoc, tgtDoc, insertAt, srcCount) {
   })(incomingTree);
 
   const mergedTree = existingTree.concat(incomingTree);
+  pmWriteOutlineTree(tgtDoc, mergedTree);
+}
 
+// Deletes doc's CURRENT /Outlines subtree (root dict plus every node in its
+// First/Next chain, recursively into children) - pdf-lib never garbage-
+// collects unreferenced objects on save(), so this must run before writing
+// a REPLACEMENT tree into the same document, or the old dict objects stick
+// around as permanent orphans forever (same lesson as
+// pmBookmarksSerializeToDoc's own writtenRefs cleanup).
+function pmDeleteOutlineSubtree(doc) {
   const PDFName = PDFLib.PDFName;
-  const tgtCtx = tgtDoc.context;
-
-  // Drop the OLD /Outlines subtree from tgtDoc before writing the merged one
-  // back, so re-saving doesn't carry the orphaned original dict objects
-  // forever (pdf-lib doesn't garbage-collect unreferenced objects on its
-  // own - same lesson as pmBookmarksSerializeToDoc's writtenRefs cleanup).
+  const ctx = doc.context;
   try {
-    const oldRef = tgtDoc.catalog.get(PDFName.of('Outlines'));
-    if (oldRef) {
-      const oldDict = tgtCtx.lookup(oldRef);
-      const seen = new Set();
-      (function collect(ref) {
-        while (ref && !seen.has(ref)) {
-          seen.add(ref);
-          const dict = tgtCtx.lookup(ref);
-          if (!dict) break;
-          const first = dict.get(PDFName.of('First'));
-          if (first) collect(first);
-          ref = dict.get(PDFName.of('Next'));
-        }
-      })(oldDict ? oldDict.get(PDFName.of('First')) : null);
-      seen.add(oldRef);
-      seen.forEach((ref) => { try { tgtCtx.delete(ref); } catch (_) {} });
-    }
+    const oldRef = doc.catalog.get(PDFName.of('Outlines'));
+    if (!oldRef) return;
+    const oldDict = ctx.lookup(oldRef);
+    const seen = new Set();
+    (function collect(ref) {
+      while (ref && !seen.has(ref)) {
+        seen.add(ref);
+        const dict = ctx.lookup(ref);
+        if (!dict) break;
+        const first = dict.get(PDFName.of('First'));
+        if (first) collect(first);
+        ref = dict.get(PDFName.of('Next'));
+      }
+    })(oldDict ? oldDict.get(PDFName.of('First')) : null);
+    seen.add(oldRef);
+    seen.forEach((ref) => { try { ctx.delete(ref); } catch (_) {} });
   } catch (_) {}
+}
 
-  if (!mergedTree.length) {
-    try { tgtDoc.catalog.delete(PDFName.of('Outlines')); } catch (_) {}
+// Shared writer: replaces doc's /Outlines with `tree` (title/pageIndex/bold/
+// italic/underline/children nodes, pageIndex already final for THIS doc's
+// CURRENT page list - buildNode below calls doc.getPage(node.pageIndex)
+// directly). Used by every migration that rebuilds a document's bookmarks
+// from a resolved+remapped tree (pmBookmarksMigrateOnInsert above,
+// pmPrepareBookmarksForPageRemove below).
+function pmWriteOutlineTree(doc, tree) {
+  const PDFName = PDFLib.PDFName;
+  const ctx = doc.context;
+  pmDeleteOutlineSubtree(doc);
+  if (!tree || !tree.length) {
+    try { doc.catalog.delete(PDFName.of('Outlines')); } catch (_) {}
+    if (typeof pmBookmarksState !== 'undefined') pmBookmarksState.writtenRefs = [];
     return;
   }
 
@@ -34100,8 +34135,8 @@ async function pmBookmarksMigrateOnInsert(srcDoc, tgtDoc, insertAt, srcCount) {
   const PDFBool = PDFLib.PDFBool;
   const written = [];
   function buildNode(node, parentRef) {
-    const dict = tgtCtx.obj({});
-    const ref = tgtCtx.register(dict);
+    const dict = ctx.obj({});
+    const ref = ctx.register(dict);
     written.push(ref);
     dict.set(PDFName.of('Title'), typeof pePdfAnnotText === 'function' ? pePdfAnnotText(node.title || '') : PDFString.of(node.title || ''));
     dict.set(PDFName.of('Parent'), parentRef);
@@ -34112,20 +34147,20 @@ async function pmBookmarksMigrateOnInsert(srcDoc, tgtDoc, insertAt, srcCount) {
     if (node.underline) dict.set(PDFName.of('PMU'), PDFBool.True);
     if (node.pageIndex != null) {
       try {
-        const page = tgtDoc.getPage(node.pageIndex);
-        dict.set(PDFName.of('Dest'), tgtCtx.obj([page.ref, PDFName.of('XYZ'), null, null, null]));
+        const page = doc.getPage(node.pageIndex);
+        dict.set(PDFName.of('Dest'), ctx.obj([page.ref, PDFName.of('XYZ'), null, null, null]));
       } catch (_) {}
     }
     let openCount = 0;
-    if (node.children.length) {
+    if (node.children && node.children.length) {
       let prevRef = null, firstRef = null;
       node.children.forEach((child, i) => {
         const built = buildNode(child, ref);
         openCount += 1 + built.count;
         if (i === 0) firstRef = built.ref;
         if (prevRef) {
-          tgtCtx.lookup(prevRef).set(PDFName.of('Next'), built.ref);
-          tgtCtx.lookup(built.ref).set(PDFName.of('Prev'), prevRef);
+          ctx.lookup(prevRef).set(PDFName.of('Next'), built.ref);
+          ctx.lookup(built.ref).set(PDFName.of('Prev'), prevRef);
         }
         prevRef = built.ref;
       });
@@ -34136,30 +34171,78 @@ async function pmBookmarksMigrateOnInsert(srcDoc, tgtDoc, insertAt, srcCount) {
     return { ref, count: openCount };
   }
 
-  const rootDict = tgtCtx.obj({ Type: PDFName.of('Outlines') });
-  const rootRef = tgtCtx.register(rootDict);
+  const rootDict = ctx.obj({ Type: PDFName.of('Outlines') });
+  const rootRef = ctx.register(rootDict);
   written.push(rootRef);
   let prevRef = null, firstRef = null, totalOpen = 0;
-  mergedTree.forEach((node, i) => {
+  tree.forEach((node, i) => {
     const built = buildNode(node, rootRef);
     totalOpen += 1 + built.count;
     if (i === 0) firstRef = built.ref;
     if (prevRef) {
-      tgtCtx.lookup(prevRef).set(PDFName.of('Next'), built.ref);
-      tgtCtx.lookup(built.ref).set(PDFName.of('Prev'), prevRef);
+      ctx.lookup(prevRef).set(PDFName.of('Next'), built.ref);
+      ctx.lookup(built.ref).set(PDFName.of('Prev'), prevRef);
     }
     prevRef = built.ref;
   });
   rootDict.set(PDFName.of('First'), firstRef);
   rootDict.set(PDFName.of('Last'), prevRef);
   rootDict.set(PDFName.of('Count'), PDFNumber.of(totalOpen));
-  tgtDoc.catalog.set(PDFName.of('Outlines'), rootRef);
+  doc.catalog.set(PDFName.of('Outlines'), rootRef);
   // Record the refs we just wrote so a LATER bookmark edit in the UI
   // (pmBookmarksSerializeToDoc(), which deletes pmBookmarksState.writtenRefs
   // before writing its own rebuild) cleans these up too instead of leaving
   // them as newly-orphaned objects - same reasoning as
   // pmBookmarksMigrateOnReorder's own writtenRefs handoff.
   if (typeof pmBookmarksState !== 'undefined') pmBookmarksState.writtenRefs = written;
+}
+
+// Prunes/remaps a document's OWN bookmarks for a hard, in-place page
+// removal - physicallyRemovePagesFromDoc()'s pdfDoc.removePage() loop (the
+// "cut" side of page drag-to-another-tab and of Cut-pages-to-clipboard).
+// Unlike the deletion-on-SAVE path (buildBytesForSave()/savePDF(), which
+// rebuilds into a brand-new document via pmBookmarksMigrateOnReorder), this
+// mutates a single LIVE document in place, so the outline must be resolved
+// BEFORE removePage() runs (afterwards the old page numbering is gone) but
+// written back AFTER (afterwards doc.getPage(newIndex) resolves against the
+// already-shrunk page list). Call this BEFORE the removePage() loop; it
+// returns a callback to invoke AFTER it (or null if there's nothing to do).
+async function pmPrepareBookmarksForPageRemove(doc, removedIndices) {
+  if (!doc || !removedIndices || !removedIndices.length) return null;
+  const tree = await pmResolveOutlineWithUnderline(doc);
+  if (!tree.length) return null;
+
+  const removeSet = new Set(removedIndices);
+  const oldToNew = new Map();
+  let next = 0;
+  const pageCount = doc.getPageCount();
+  for (let i = 0; i < pageCount; i++) {
+    if (!removeSet.has(i)) oldToNew.set(i, next++);
+  }
+
+  (function remap(nodes) {
+    nodes.forEach((n) => {
+      n.pageIndex = (n.pageIndex != null && oldToNew.has(n.pageIndex)) ? oldToNew.get(n.pageIndex) : null;
+      if (n.children.length) remap(n.children);
+    });
+  })(tree);
+
+  // A bookmark whose own page just got removed (it's leaving for another
+  // tab, or was cut to the clipboard) has nowhere left to point in THIS
+  // document - drop it instead of leaving a dest-less, permanently
+  // unclickable entry behind (same reasoning as pmBookmarksMigrateOnReorder's
+  // own pruneDeletedTargets).
+  function prune(nodes) {
+    const out = [];
+    for (const n of nodes) {
+      n.children = n.children.length ? prune(n.children) : [];
+      if (n.pageIndex != null || n.children.length) out.push(n);
+    }
+    return out;
+  }
+  const prunedTree = prune(tree);
+
+  return () => pmWriteOutlineTree(doc, prunedTree);
 }
 
 // Was a hand-rolled near-duplicate of setDocumentDirty() (same
