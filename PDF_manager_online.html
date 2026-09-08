@@ -11226,6 +11226,16 @@
       const newDoc = await PDFLib.PDFDocument.create();
       const copied = await newDoc.copyPages(pdfDoc, indicesToExport);
       copied.forEach(p => newDoc.addPage(p));
+      // Same catalog-loss issue pmBookmarksMigrateOnReorder was written for
+      // (PDFDocument.create() starts empty, so /Outlines never survives a
+      // copyPages rebuild) - indicesToExport is already exactly the
+      // "surviving old indices, in their new order" shape it expects, so it
+      // doubles here as the export-a-subset case: bookmarks pointing at an
+      // exported page follow it into the new file (remapped), others are
+      // pruned since their target isn't in the export at all.
+      if (typeof pmBookmarksMigrateOnReorder === 'function') {
+        await pmBookmarksMigrateOnReorder(pdfDoc, newDoc, indicesToExport, copied);
+      }
       let outDoc = await peFlattenEditorObjectsIntoDoc(newDoc, indicesToExport);
       outDoc = await peApplyPendingShapeRasterization(outDoc);
       return new Uint8Array(await outDoc.save());
