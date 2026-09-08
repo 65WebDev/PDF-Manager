@@ -33698,10 +33698,23 @@ async function pmBookmarksMigrateOnReorder(srcDoc, tgtDoc, orderedOldIndices, co
   if (!orderedOldIndices || !orderedOldIndices.length) return;
   const PDFName = PDFLib.PDFName;
   const srcCtx = srcDoc.context;
-  const outlinesRef = srcDoc.catalog.get(PDFName.of('Outlines'));
-  if (!outlinesRef) return;
-  const outlinesDict = srcCtx.lookup(outlinesRef);
-  if (!outlinesDict) return;
+  // Best-effort only, NOT a gate: some real-world documents' raw /Outlines
+  // dict isn't cleanly reachable through pdf-lib's own catalog.get() /
+  // context.lookup() (object-stream/xref-stream layouts pdf-lib's parser
+  // doesn't fully walk), even though pdf.js parses that exact same
+  // document's outline just fine below - the same resolution
+  // pmBookmarksBuildTree() already relies on for the live bookmarks panel.
+  // Bailing out here whenever this pdf-lib-only lookup came up empty used
+  // to silently drop every bookmark on export/deletion for such documents,
+  // even though the panel showed them correctly. This raw dict is only
+  // needed for reading back our own custom /PMU (underline) flag further
+  // down - losing it just means underline formatting doesn't survive the
+  // rebuild, a far smaller regression than dropping the bookmarks outright.
+  let outlinesDict = null;
+  try {
+    const outlinesRef = srcDoc.catalog.get(PDFName.of('Outlines'));
+    if (outlinesRef) outlinesDict = srcCtx.lookup(outlinesRef);
+  } catch (_) {}
 
   let resolvedTree;
   try {
@@ -33737,17 +33750,21 @@ async function pmBookmarksMigrateOnReorder(srcDoc, tgtDoc, orderedOldIndices, co
   // resolvedTree correctly (identical pairing trick pmBookmarksBuildTree
   // already relies on via pmBookmarksReadUnderlineFlags).
   const underlineFlags = [];
-  (function walkChain(ref) {
-    while (ref) {
-      const dict = srcCtx.lookup(ref);
-      if (!dict) break;
-      const u = dict.get(PDFName.of('PMU'));
-      underlineFlags.push(!!(u && typeof u.asBoolean === 'function' && u.asBoolean()));
-      const first = dict.get(PDFName.of('First'));
-      if (first) walkChain(first);
-      ref = dict.get(PDFName.of('Next'));
-    }
-  })(outlinesDict.get(PDFName.of('First')));
+  if (outlinesDict) {
+    try {
+      (function walkChain(ref) {
+        while (ref) {
+          const dict = srcCtx.lookup(ref);
+          if (!dict) break;
+          const u = dict.get(PDFName.of('PMU'));
+          underlineFlags.push(!!(u && typeof u.asBoolean === 'function' && u.asBoolean()));
+          const first = dict.get(PDFName.of('First'));
+          if (first) walkChain(first);
+          ref = dict.get(PDFName.of('Next'));
+        }
+      })(outlinesDict.get(PDFName.of('First')));
+    } catch (_) {}
+  }
   let uIdx = 0;
   (function stampUnderline(nodes) {
     nodes.forEach((n) => {
