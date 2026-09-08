@@ -7,9 +7,9 @@ window.__PDF_MANAGER_VERSION_FEED__ = {
   "date": "2026-09-07T15:02:52Z",
   "downloadUrl": "https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_online.html",
   "offlineDownloadUrl": "https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_offline.html",
-  "windowsVersion": "0.1.32",
-  "windowsDownloadUrl": "https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.32",
+  "windowsVersion": "0.1.33",
+  "windowsDownloadUrl": "https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.33",
   "linuxVersion": "0.1.32",
   "linuxDownloadUrl": "https://github.com/65WebDev/PDF-Manager/releases/tag/linux-v0.1.32",
-  "updatedAt": "2026-09-07T15:03:01.772Z"
+  "updatedAt": "2026-09-08T06:15:33.002Z"
 };
