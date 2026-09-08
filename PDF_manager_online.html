@@ -25955,6 +25955,7 @@
       const copied = await newDoc.copyPages(pdfDoc, keep);
       copied.forEach(p => newDoc.addPage(p));
       if (typeof peMigrateEditorMeta === 'function') peMigrateEditorMeta(pdfDoc, newDoc, keep);
+      if (typeof pmBookmarksMigrateOnReorder === 'function') await pmBookmarksMigrateOnReorder(pdfDoc, newDoc, keep, copied);
       return await newDoc.save();
     }
 
@@ -27101,6 +27102,7 @@
           const copied = await newDoc.copyPages(pdfDoc, keep);
           copied.forEach(p => newDoc.addPage(p));
           if (typeof peMigrateEditorMeta === 'function') peMigrateEditorMeta(pdfDoc, newDoc, keep);
+          if (typeof pmBookmarksMigrateOnReorder === 'function') await pmBookmarksMigrateOnReorder(pdfDoc, newDoc, keep, copied);
           pdfDoc = newDoc;
           markedForDeletion.clear();
           invalidateHQ();
@@ -33651,12 +33653,20 @@ function pmBookmarksSerializeToDoc() {
   pmBookmarksMarkDirty();
 }
 
-// Page reorder rebuilds the document via PDFDocument.create() + copyPages()
-// (see the page-move commit code), which copies each page into a BRAND NEW
-// page object with its own new ref, and starts the new document from an
-// empty catalog - the old document's /Outlines is not carried over at all,
-// so without this a reorder would silently drop every bookmark instead of
-// just misaligning it.
+// Page reorder AND page deletion both rebuild the document via
+// PDFDocument.create() + copyPages() (see the page-move commit code, and
+// savePDF()/buildBytesForSave()'s own deletion branch), which copies each
+// page into a BRAND NEW page object with its own new ref, and starts the
+// new document from an empty catalog - the old document's /Outlines is not
+// carried over at all, so without this a reorder would silently drop every
+// bookmark instead of just misaligning it, and a plain Save after deleting
+// a page would drop them outright. This function was extended to also
+// cover that deletion case: savePDF()'s own `keep` array (surviving old
+// indices, in their new order) is exactly what `orderedOldIndices` expects,
+// so it's passed straight through unchanged. The one real difference from
+// reorder is that deletion can point a bookmark at a page that no longer
+// exists at all - pruneDeletedTargets() below drops those instead of
+// leaving a dest-less, permanently unclickable entry behind.
 //
 // Destinations get resolved through REAL pdf.js (same call pmBookmarksBuildTree
 // uses to parse the outline on open) rather than hand-walking the raw /Dest
@@ -33747,6 +33757,24 @@ async function pmBookmarksMigrateOnReorder(srcDoc, tgtDoc, orderedOldIndices, co
       if (n.children.length) remap(n.children);
     });
   })(resolvedTree);
+
+  // Reorder never removes pages, so every old index is always present in
+  // oldToNew and the branch above never actually produces a null - but
+  // deletion (the other caller of this same migration) can drop the very
+  // page a bookmark points to. Rather than leaving a dest-less, permanently
+  // unclickable entry behind, prune it - unless it still has surviving
+  // children, in which case it's kept (with no destination of its own) as
+  // their folder.
+  function pruneDeletedTargets(nodes) {
+    const out = [];
+    for (const n of nodes) {
+      n.children = n.children.length ? pruneDeletedTargets(n.children) : [];
+      if (n.pageIndex != null || n.children.length) out.push(n);
+    }
+    return out;
+  }
+  resolvedTree = pruneDeletedTargets(resolvedTree);
+  if (!resolvedTree.length) return;
 
   // Write the resolved+remapped tree into tgtDoc - same builder shape as
   // pmBookmarksSerializeToDoc's own buildNode(), just against an explicit
