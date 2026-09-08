@@ -8391,6 +8391,7 @@
         alertNoRoomForTab: 'Недостаточно места для новой вкладки.\nЗакройте лишние вкладки и повторите.',
         loadingMovingPagesToTab: 'Перенос страниц...',
         alertCreateDocError: 'Ошибка создания документа',
+        alertShortcutDropped: 'Похоже, это ярлык, а не сам файл ({name}). Браузер не может прочитать файл через ярлык — перетащите оригинальный файл или откройте его через кнопку «Открыть».',
         alertMovePagesError: 'Ошибка переноса страниц',
         loadingInsertingPages: 'Вставка страниц...',
         loadingInsertingPagesCount: 'Вставка страниц... {i} из {srcCount}',
@@ -8783,6 +8784,7 @@
         alertNoRoomForTab: 'Not enough room for a new tab.\nClose some tabs and try again.',
         loadingMovingPagesToTab: 'Moving pages...',
         alertCreateDocError: 'Error creating the document',
+        alertShortcutDropped: 'This looks like a shortcut, not the file itself ({name}). Browsers can\'t read a file through a shortcut - please drag the original file, or use the Open button instead.',
         alertMovePagesError: 'Error moving pages',
         loadingInsertingPages: 'Inserting pages...',
         loadingInsertingPagesCount: 'Inserting pages... {i} of {srcCount}',
@@ -9175,6 +9177,7 @@
         alertNoRoomForTab: 'No hay espacio suficiente para una nueva pestaña.\nCierre algunas pestañas e inténtelo de nuevo.',
         loadingMovingPagesToTab: 'Moviendo páginas...',
         alertCreateDocError: 'Error al crear el documento',
+        alertShortcutDropped: 'Esto parece un acceso directo, no el archivo en sí ({name}). El navegador no puede leer un archivo a través de un acceso directo: arrastre el archivo original o utilice el botón «Abrir».',
         alertMovePagesError: 'Error al mover páginas',
         loadingInsertingPages: 'Insertando páginas...',
         loadingInsertingPagesCount: 'Insertando páginas... {i} de {srcCount}',
@@ -9639,6 +9642,7 @@
         alertNoRoomForTab: '没有足够的空间打开新标签页。\n请关闭部分标签页后重试。',
         loadingMovingPagesToTab: '正在移动页面...',
         alertCreateDocError: '创建文档时出错',
+        alertShortcutDropped: '这似乎是一个快捷方式，而不是文件本身（{name}）。浏览器无法通过快捷方式读取文件 — 请拖拽原始文件，或使用"打开"按钮。',
         alertMovePagesError: '移动页面时出错',
         loadingInsertingPages: '正在插入页面...',
         loadingInsertingPagesCount: '正在插入页面... {i} / {srcCount}',
@@ -30105,7 +30109,10 @@
         if (isLoading) return;
 
         const files = filterSupportedDroppedFiles(e.dataTransfer.files);
-        if (files.length === 0) return;
+        if (files.length === 0) {
+          await pmWarnIfShortcutDrop(e.dataTransfer.files);
+          return;
+        }
 
         if (!pdfDoc) {
           await handleOsFilesDrop(e, dropCapture);
@@ -30840,13 +30847,68 @@ function filterSupportedDroppedFiles(fileList) {
     isSupported(f.name));
 }
 
+// A desktop "shortcut" (Linux .desktop launcher, Windows .lnk, Windows .url
+// Internet Shortcut, macOS .webloc) is its own small text/binary descriptor
+// file, not the target it points at - dragging one in gives us THAT
+// descriptor's bytes, never the PDF's. There is no browser API to resolve
+// it to the real file (reading an arbitrary local path from page JS would
+// be a sandbox escape), so filterSupportedDroppedFiles() correctly rejects
+// it - the only thing we CAN fix is the silence: telling the user why
+// nothing happened instead of the drop just doing nothing.
+const PM_SHORTCUT_EXTS = ['desktop', 'lnk', 'url', 'webloc'];
+function isLikelyShortcutFile(f) {
+  if (!f) return false;
+  const ext = ((f.name || '').split('.').pop() || '').toLowerCase();
+  return PM_SHORTCUT_EXTS.includes(ext) || f.type === 'application/x-desktop';
+}
+
+// Best-effort: pulls the ORIGINAL file name out of a shortcut's own text
+// content, so the warning can name the actual PDF the user meant to open
+// instead of just echoing the shortcut's own file name.
+//   .desktop (freedesktop.org XDG launcher): [Desktop Entry]\nURL=file:///...
+//   .url (Windows Internet Shortcut): [InternetShortcut]\nURL=file:///...
+// .lnk (Windows) and .webloc (macOS, an XML plist) don't store a plain-text
+// path this simply, so this returns null for those - falls back to the
+// shortcut's own name at the call site either way.
+async function pmExtractShortcutTargetName(file) {
+  try {
+    const text = await file.text();
+    const m = text.match(/^\s*URL\s*=\s*(.+)$/im);
+    if (!m) return null;
+    let raw = m[1].trim();
+    if (/^file:\/\//i.test(raw)) {
+      try { raw = decodeURIComponent(new URL(raw).pathname); } catch (_) {}
+    }
+    const base = raw.split(/[\\/]/).pop();
+    return base || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// Call when a drop that contained real OS files still ended up with nothing
+// supported to open - if a shortcut is among the rejected files, surfaces
+// an explanatory alert instead of leaving the drop silently do nothing.
+// Returns true if it found (and warned about) a shortcut.
+async function pmWarnIfShortcutDrop(fileList) {
+  const files = Array.from(fileList || []);
+  const shortcut = files.find(isLikelyShortcutFile);
+  if (!shortcut) return false;
+  const targetName = await pmExtractShortcutTargetName(shortcut);
+  alert(t('alertShortcutDropped', { name: targetName || shortcut.name }));
+  return true;
+}
+
 async function handleOsFilesDrop(e, dropSnapshot) {
   if (!e || !e.dataTransfer) return;
   if (e._pmOsDropHandled) return;
   e._pmOsDropHandled = true;
 
   const droppedFiles = filterSupportedDroppedFiles(e.dataTransfer.files);
-  if (!droppedFiles.length) return;
+  if (!droppedFiles.length) {
+    await pmWarnIfShortcutDrop(e.dataTransfer.files);
+    return;
+  }
 
   const dropCapture = dropSnapshot || captureDropEntries(e.dataTransfer);
 
