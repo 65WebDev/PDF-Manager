@@ -44672,7 +44672,8 @@ async function pePasteAtStage(stageX, stageY) {
     const hFrac = wFrac * (im.naturalHeight / im.naturalWidth) * (W / H);
     const o = {
       id: ++peState.seq, type: 'image', dataUrl: clip.dataUrl, imgEl: im,
-      x: targetX, y: targetY, w: wFrac, h: Math.min(hFrac, 0.9), rot: 0
+      x: targetX, y: targetY, w: wFrac, h: Math.min(hFrac, 0.9), rot: 0,
+      origAspect: Math.max(0.01, im.naturalWidth / im.naturalHeight)
     };
     peState.objects.push(o);
     // Match peImgInput: land in Object-select so the image can be moved.
@@ -44734,7 +44735,8 @@ function peInsertLoadedImagesAtFrac(loadedList, xFrac, yFrac, opts) {
     const o = {
       id: ++peState.seq, type: 'image', dataUrl, imgEl: im,
       x: Math.max(0, Math.min(0.98, baseX + off)), y: Math.max(0, Math.min(0.98, baseY + off)),
-      w: wFrac, h: Math.min(hFrac, 0.9), rot: 0
+      w: wFrac, h: Math.min(hFrac, 0.9), rot: 0,
+      origAspect: Math.max(0.01, im.naturalWidth / im.naturalHeight)
     };
     peState.objects.push(o);
     created.push(o);
@@ -47735,14 +47737,15 @@ function peStartShapeCornerResize(e, o, corner) {
   const draggedPt = peShapeRotatedLocalPoint(o, dragged.x, dragged.y, W, H);
   // Magnet target by kind:
   // - rect / ellipse / plus → 1:1
-  // - freehand → draw-time origAspect; image → aspect at resize start
+  // - freehand / image → true original aspect (drawn stroke / inserted image,
+  //   the latter after any background-removal crop for signatures)
   // - star → none
   const magnetMode = peShapeAspectMagnetMode(o);
   let magnetAspect = null;
   if (magnetMode === 'square') {
     magnetAspect = 1;
   } else if (magnetMode === 'original') {
-    if (o && o.type === 'shape' && o.shape === 'freehand' && Number(o.origAspect) > 0.01) {
+    if (o && Number(o.origAspect) > 0.01) {
       magnetAspect = Number(o.origAspect);
     } else {
       magnetAspect = Math.max(0.01, wPx / hPx);
