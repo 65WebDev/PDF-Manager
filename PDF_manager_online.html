@@ -8391,6 +8391,7 @@
         alertNoRoomForTab: 'Недостаточно места для новой вкладки.\nЗакройте лишние вкладки и повторите.',
         loadingMovingPagesToTab: 'Перенос страниц...',
         alertCreateDocError: 'Ошибка создания документа',
+        alertShortcutDropped: 'Похоже, это ярлык, а не сам файл ({name}). Браузер не может прочитать файл через ярлык — перетащите оригинальный файл или откройте его через кнопку «Открыть».',
         alertMovePagesError: 'Ошибка переноса страниц',
         loadingInsertingPages: 'Вставка страниц...',
         loadingInsertingPagesCount: 'Вставка страниц... {i} из {srcCount}',
@@ -8783,6 +8784,7 @@
         alertNoRoomForTab: 'Not enough room for a new tab.\nClose some tabs and try again.',
         loadingMovingPagesToTab: 'Moving pages...',
         alertCreateDocError: 'Error creating the document',
+        alertShortcutDropped: 'This looks like a shortcut, not the file itself ({name}). Browsers can\'t read a file through a shortcut - please drag the original file, or use the Open button instead.',
         alertMovePagesError: 'Error moving pages',
         loadingInsertingPages: 'Inserting pages...',
         loadingInsertingPagesCount: 'Inserting pages... {i} of {srcCount}',
@@ -9175,6 +9177,7 @@
         alertNoRoomForTab: 'No hay espacio suficiente para una nueva pestaña.\nCierre algunas pestañas e inténtelo de nuevo.',
         loadingMovingPagesToTab: 'Moviendo páginas...',
         alertCreateDocError: 'Error al crear el documento',
+        alertShortcutDropped: 'Esto parece un acceso directo, no el archivo en sí ({name}). El navegador no puede leer un archivo a través de un acceso directo: arrastre el archivo original o utilice el botón «Abrir».',
         alertMovePagesError: 'Error al mover páginas',
         loadingInsertingPages: 'Insertando páginas...',
         loadingInsertingPagesCount: 'Insertando páginas... {i} de {srcCount}',
@@ -9639,6 +9642,7 @@
         alertNoRoomForTab: '没有足够的空间打开新标签页。\n请关闭部分标签页后重试。',
         loadingMovingPagesToTab: '正在移动页面...',
         alertCreateDocError: '创建文档时出错',
+        alertShortcutDropped: '这似乎是一个快捷方式，而不是文件本身（{name}）。浏览器无法通过快捷方式读取文件 — 请拖拽原始文件，或使用"打开"按钮。',
         alertMovePagesError: '移动页面时出错',
         loadingInsertingPages: '正在插入页面...',
         loadingInsertingPagesCount: '正在插入页面... {i} / {srcCount}',
@@ -11226,6 +11230,16 @@
       const newDoc = await PDFLib.PDFDocument.create();
       const copied = await newDoc.copyPages(pdfDoc, indicesToExport);
       copied.forEach(p => newDoc.addPage(p));
+      // Same catalog-loss issue pmBookmarksMigrateOnReorder was written for
+      // (PDFDocument.create() starts empty, so /Outlines never survives a
+      // copyPages rebuild) - indicesToExport is already exactly the
+      // "surviving old indices, in their new order" shape it expects, so it
+      // doubles here as the export-a-subset case: bookmarks pointing at an
+      // exported page follow it into the new file (remapped), others are
+      // pruned since their target isn't in the export at all.
+      if (typeof pmBookmarksMigrateOnReorder === 'function') {
+        await pmBookmarksMigrateOnReorder(pdfDoc, newDoc, indicesToExport, copied);
+      }
       let outDoc = await peFlattenEditorObjectsIntoDoc(newDoc, indicesToExport);
       outDoc = await peApplyPendingShapeRasterization(outDoc);
       return new Uint8Array(await outDoc.save());
@@ -21902,7 +21916,16 @@
         clearInsertIndicators();
       }
       // Desktop still blocks page reorder at high zoom; mobile allows blank-area drag.
-      if (on && !isTouchDevice) {
+      // pmPageTabDropInProgress guards the one case where "high zoom" here
+      // does NOT mean the user zoomed in ON THE PAGE BEING DRAGGED: hovering
+      // a cross-tab page drag over another tab activates that tab (restoring
+      // ITS OWN stored zoom) purely to preview/drop into it, which can easily
+      // land above the threshold without the user doing anything zoom-related
+      // at all. Cancelling the drag right then dropped the whole transfer
+      // the instant the target tab's zoom happened to be high enough to show
+      // a single page - the drag itself is still happening over tab bar/page
+      // real estate in a perfectly normal-zoom source tab.
+      if (on && !isTouchDevice && !pmPageTabDropInProgress) {
         cancelDesktopPageDrag();
       }
     }
@@ -24398,6 +24421,14 @@
       const copied = await tmp.copyPages(pdfDoc, indices);
       copied.forEach(p => tmp.addPage(p));
       if (typeof peMigrateEditorMeta === 'function') peMigrateEditorMeta(pdfDoc, tmp, indices);
+      // Same PDFDocument.create()-drops-/Outlines issue fixed for export and
+      // for save-after-deletion (see pmBookmarksMigrateOnReorder) - this is
+      // the page-drag-to-a-new-tab path, another place pages get copied into
+      // a brand-new document. `indices` is already the "surviving old
+      // indices, in their new order" shape the migration expects.
+      if (typeof pmBookmarksMigrateOnReorder === 'function') {
+        await pmBookmarksMigrateOnReorder(pdfDoc, tmp, indices, copied);
+      }
       return await tmp.save();
     }
 
@@ -24406,7 +24437,27 @@
       scrollPosition = scrollContainer.scrollTop;
       const removeSet = new Set(indices);
       const sortedDesc = [...indices].sort((a, b) => b - a);
+      // Must resolve/plan BEFORE removePage() runs (old page numbering is
+      // still intact here) and write back AFTER (doc.getPage(newIndex) then
+      // resolves against the already-shrunk page list) - see
+      // pmPrepareBookmarksForPageRemove's own comment for why this can't be
+      // a single before-or-after step the way the other migrations are.
+      const finishBookmarks = typeof pmPrepareBookmarksForPageRemove === 'function'
+        ? await pmPrepareBookmarksForPageRemove(pdfDoc, indices)
+        : null;
       for (const idx of sortedDesc) pdfDoc.removePage(idx);
+      // pdf-lib's own removePage() mutates the page tree but never
+      // invalidates PDFDocument's memoized page-list cache - if anything
+      // (pmPrepareBookmarksForPageRemove's own outline resolution included)
+      // already called getPage()/getPages()/save() earlier in this document's
+      // life, doc.getPage(newIndex) below would keep returning the STALE
+      // pre-removal page list/refs instead of the actual new layout. Forcing
+      // a recompute here is what makes finishBookmarks()'s doc.getPage() calls
+      // (inside pmWriteOutlineTree) resolve correctly.
+      if (pdfDoc.pageCache && typeof pdfDoc.pageCache.invalidate === 'function') {
+        pdfDoc.pageCache.invalidate();
+      }
+      if (finishBookmarks) finishBookmarks();
       if (typeof peRemapEditorMetaOnPageRemove === 'function') {
         peRemapEditorMetaOnPageRemove(pdfDoc, indices);
       }
@@ -24499,6 +24550,9 @@
         copied.forEach((p, i) => pdfDoc.insertPage(insertAt + i, p));
         if (typeof peRemapEditorMetaOnPageInsert === 'function') {
           peRemapEditorMetaOnPageInsert(pdfDoc, insertAt, srcCount, srcDoc, 0);
+        }
+        if (typeof pmBookmarksMigrateOnInsert === 'function') {
+          await pmBookmarksMigrateOnInsert(srcDoc, pdfDoc, insertAt, srcCount);
         }
         setDocumentDirty(true);
         invalidateHQ();
@@ -25955,6 +26009,7 @@
       const copied = await newDoc.copyPages(pdfDoc, keep);
       copied.forEach(p => newDoc.addPage(p));
       if (typeof peMigrateEditorMeta === 'function') peMigrateEditorMeta(pdfDoc, newDoc, keep);
+      if (typeof pmBookmarksMigrateOnReorder === 'function') await pmBookmarksMigrateOnReorder(pdfDoc, newDoc, keep, copied);
       return await newDoc.save();
     }
 
@@ -27101,6 +27156,7 @@
           const copied = await newDoc.copyPages(pdfDoc, keep);
           copied.forEach(p => newDoc.addPage(p));
           if (typeof peMigrateEditorMeta === 'function') peMigrateEditorMeta(pdfDoc, newDoc, keep);
+          if (typeof pmBookmarksMigrateOnReorder === 'function') await pmBookmarksMigrateOnReorder(pdfDoc, newDoc, keep, copied);
           pdfDoc = newDoc;
           markedForDeletion.clear();
           invalidateHQ();
@@ -30073,7 +30129,10 @@
         if (isLoading) return;
 
         const files = filterSupportedDroppedFiles(e.dataTransfer.files);
-        if (files.length === 0) return;
+        if (files.length === 0) {
+          await pmWarnIfShortcutDrop(e.dataTransfer.files);
+          return;
+        }
 
         if (!pdfDoc) {
           await handleOsFilesDrop(e, dropCapture);
@@ -30808,13 +30867,68 @@ function filterSupportedDroppedFiles(fileList) {
     isSupported(f.name));
 }
 
+// A desktop "shortcut" (Linux .desktop launcher, Windows .lnk, Windows .url
+// Internet Shortcut, macOS .webloc) is its own small text/binary descriptor
+// file, not the target it points at - dragging one in gives us THAT
+// descriptor's bytes, never the PDF's. There is no browser API to resolve
+// it to the real file (reading an arbitrary local path from page JS would
+// be a sandbox escape), so filterSupportedDroppedFiles() correctly rejects
+// it - the only thing we CAN fix is the silence: telling the user why
+// nothing happened instead of the drop just doing nothing.
+const PM_SHORTCUT_EXTS = ['desktop', 'lnk', 'url', 'webloc'];
+function isLikelyShortcutFile(f) {
+  if (!f) return false;
+  const ext = ((f.name || '').split('.').pop() || '').toLowerCase();
+  return PM_SHORTCUT_EXTS.includes(ext) || f.type === 'application/x-desktop';
+}
+
+// Best-effort: pulls the ORIGINAL file name out of a shortcut's own text
+// content, so the warning can name the actual PDF the user meant to open
+// instead of just echoing the shortcut's own file name.
+//   .desktop (freedesktop.org XDG launcher): [Desktop Entry]\nURL=file:///...
+//   .url (Windows Internet Shortcut): [InternetShortcut]\nURL=file:///...
+// .lnk (Windows) and .webloc (macOS, an XML plist) don't store a plain-text
+// path this simply, so this returns null for those - falls back to the
+// shortcut's own name at the call site either way.
+async function pmExtractShortcutTargetName(file) {
+  try {
+    const text = await file.text();
+    const m = text.match(/^\s*URL\s*=\s*(.+)$/im);
+    if (!m) return null;
+    let raw = m[1].trim();
+    if (/^file:\/\//i.test(raw)) {
+      try { raw = decodeURIComponent(new URL(raw).pathname); } catch (_) {}
+    }
+    const base = raw.split(/[\\/]/).pop();
+    return base || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// Call when a drop that contained real OS files still ended up with nothing
+// supported to open - if a shortcut is among the rejected files, surfaces
+// an explanatory alert instead of leaving the drop silently do nothing.
+// Returns true if it found (and warned about) a shortcut.
+async function pmWarnIfShortcutDrop(fileList) {
+  const files = Array.from(fileList || []);
+  const shortcut = files.find(isLikelyShortcutFile);
+  if (!shortcut) return false;
+  const targetName = await pmExtractShortcutTargetName(shortcut);
+  alert(t('alertShortcutDropped', { name: targetName || shortcut.name }));
+  return true;
+}
+
 async function handleOsFilesDrop(e, dropSnapshot) {
   if (!e || !e.dataTransfer) return;
   if (e._pmOsDropHandled) return;
   e._pmOsDropHandled = true;
 
   const droppedFiles = filterSupportedDroppedFiles(e.dataTransfer.files);
-  if (!droppedFiles.length) return;
+  if (!droppedFiles.length) {
+    await pmWarnIfShortcutDrop(e.dataTransfer.files);
+    return;
+  }
 
   const dropCapture = dropSnapshot || captureDropEntries(e.dataTransfer);
 
@@ -33651,12 +33765,20 @@ function pmBookmarksSerializeToDoc() {
   pmBookmarksMarkDirty();
 }
 
-// Page reorder rebuilds the document via PDFDocument.create() + copyPages()
-// (see the page-move commit code), which copies each page into a BRAND NEW
-// page object with its own new ref, and starts the new document from an
-// empty catalog - the old document's /Outlines is not carried over at all,
-// so without this a reorder would silently drop every bookmark instead of
-// just misaligning it.
+// Page reorder AND page deletion both rebuild the document via
+// PDFDocument.create() + copyPages() (see the page-move commit code, and
+// savePDF()/buildBytesForSave()'s own deletion branch), which copies each
+// page into a BRAND NEW page object with its own new ref, and starts the
+// new document from an empty catalog - the old document's /Outlines is not
+// carried over at all, so without this a reorder would silently drop every
+// bookmark instead of just misaligning it, and a plain Save after deleting
+// a page would drop them outright. This function was extended to also
+// cover that deletion case: savePDF()'s own `keep` array (surviving old
+// indices, in their new order) is exactly what `orderedOldIndices` expects,
+// so it's passed straight through unchanged. The one real difference from
+// reorder is that deletion can point a bookmark at a page that no longer
+// exists at all - pruneDeletedTargets() below drops those instead of
+// leaving a dest-less, permanently unclickable entry behind.
 //
 // Destinations get resolved through REAL pdf.js (same call pmBookmarksBuildTree
 // uses to parse the outline on open) rather than hand-walking the raw /Dest
@@ -33678,10 +33800,23 @@ async function pmBookmarksMigrateOnReorder(srcDoc, tgtDoc, orderedOldIndices, co
   if (!orderedOldIndices || !orderedOldIndices.length) return;
   const PDFName = PDFLib.PDFName;
   const srcCtx = srcDoc.context;
-  const outlinesRef = srcDoc.catalog.get(PDFName.of('Outlines'));
-  if (!outlinesRef) return;
-  const outlinesDict = srcCtx.lookup(outlinesRef);
-  if (!outlinesDict) return;
+  // Best-effort only, NOT a gate: some real-world documents' raw /Outlines
+  // dict isn't cleanly reachable through pdf-lib's own catalog.get() /
+  // context.lookup() (object-stream/xref-stream layouts pdf-lib's parser
+  // doesn't fully walk), even though pdf.js parses that exact same
+  // document's outline just fine below - the same resolution
+  // pmBookmarksBuildTree() already relies on for the live bookmarks panel.
+  // Bailing out here whenever this pdf-lib-only lookup came up empty used
+  // to silently drop every bookmark on export/deletion for such documents,
+  // even though the panel showed them correctly. This raw dict is only
+  // needed for reading back our own custom /PMU (underline) flag further
+  // down - losing it just means underline formatting doesn't survive the
+  // rebuild, a far smaller regression than dropping the bookmarks outright.
+  let outlinesDict = null;
+  try {
+    const outlinesRef = srcDoc.catalog.get(PDFName.of('Outlines'));
+    if (outlinesRef) outlinesDict = srcCtx.lookup(outlinesRef);
+  } catch (_) {}
 
   let resolvedTree;
   try {
@@ -33717,17 +33852,21 @@ async function pmBookmarksMigrateOnReorder(srcDoc, tgtDoc, orderedOldIndices, co
   // resolvedTree correctly (identical pairing trick pmBookmarksBuildTree
   // already relies on via pmBookmarksReadUnderlineFlags).
   const underlineFlags = [];
-  (function walkChain(ref) {
-    while (ref) {
-      const dict = srcCtx.lookup(ref);
-      if (!dict) break;
-      const u = dict.get(PDFName.of('PMU'));
-      underlineFlags.push(!!(u && typeof u.asBoolean === 'function' && u.asBoolean()));
-      const first = dict.get(PDFName.of('First'));
-      if (first) walkChain(first);
-      ref = dict.get(PDFName.of('Next'));
-    }
-  })(outlinesDict.get(PDFName.of('First')));
+  if (outlinesDict) {
+    try {
+      (function walkChain(ref) {
+        while (ref) {
+          const dict = srcCtx.lookup(ref);
+          if (!dict) break;
+          const u = dict.get(PDFName.of('PMU'));
+          underlineFlags.push(!!(u && typeof u.asBoolean === 'function' && u.asBoolean()));
+          const first = dict.get(PDFName.of('First'));
+          if (first) walkChain(first);
+          ref = dict.get(PDFName.of('Next'));
+        }
+      })(outlinesDict.get(PDFName.of('First')));
+    } catch (_) {}
+  }
   let uIdx = 0;
   (function stampUnderline(nodes) {
     nodes.forEach((n) => {
@@ -33747,6 +33886,24 @@ async function pmBookmarksMigrateOnReorder(srcDoc, tgtDoc, orderedOldIndices, co
       if (n.children.length) remap(n.children);
     });
   })(resolvedTree);
+
+  // Reorder never removes pages, so every old index is always present in
+  // oldToNew and the branch above never actually produces a null - but
+  // deletion (the other caller of this same migration) can drop the very
+  // page a bookmark points to. Rather than leaving a dest-less, permanently
+  // unclickable entry behind, prune it - unless it still has surviving
+  // children, in which case it's kept (with no destination of its own) as
+  // their folder.
+  function pruneDeletedTargets(nodes) {
+    const out = [];
+    for (const n of nodes) {
+      n.children = n.children.length ? pruneDeletedTargets(n.children) : [];
+      if (n.pageIndex != null || n.children.length) out.push(n);
+    }
+    return out;
+  }
+  resolvedTree = pruneDeletedTargets(resolvedTree);
+  if (!resolvedTree.length) return;
 
   // Write the resolved+remapped tree into tgtDoc - same builder shape as
   // pmBookmarksSerializeToDoc's own buildNode(), just against an explicit
@@ -33822,6 +33979,270 @@ async function pmBookmarksMigrateOnReorder(srcDoc, tgtDoc, orderedOldIndices, co
   tgtRootDict.set(PDFName.of('Count'), PDFNumber.of(totalOpen));
   tgtDoc.catalog.set(PDFName.of('Outlines'), tgtRootRef);
   if (typeof pmBookmarksState !== 'undefined') pmBookmarksState.writtenRefs = written;
+}
+
+// Best-effort pdf.js-based outline resolution shared by
+// pmBookmarksMigrateOnInsert() below - same technique as
+// pmBookmarksMigrateOnReorder() (pdf.js handles named destinations and GoTo
+// actions pdf-lib's raw /Dest walk never could), including the same
+// non-fatal fallback for the app's own /PMU (underline) flag when pdf-lib's
+// own catalog.get()/context.lookup() can't reach the raw dict on some
+// real-world documents.
+async function pmResolveOutlineWithUnderline(doc) {
+  let resolvedTree = [];
+  try {
+    const bytes = await doc.save();
+    const jsDoc = await pdfjsLib.getDocument({ data: bytes }).promise;
+    const rawOutline = await jsDoc.getOutline();
+    if (!rawOutline || !rawOutline.length) return [];
+    async function walk(nodes) {
+      const out = [];
+      for (const node of nodes) {
+        let pageIndex = null;
+        try {
+          let dest = node.dest;
+          if (typeof dest === 'string') dest = await jsDoc.getDestination(dest);
+          if (Array.isArray(dest) && dest[0] != null) pageIndex = await jsDoc.getPageIndex(dest[0]);
+        } catch (_) {}
+        const children = (node.items && node.items.length) ? await walk(node.items) : [];
+        out.push({ title: node.title || '', pageIndex, bold: !!node.bold, italic: !!node.italic, underline: false, children });
+      }
+      return out;
+    }
+    resolvedTree = await walk(rawOutline);
+  } catch (_) {
+    return [];
+  }
+  if (!resolvedTree.length) return [];
+
+  const PDFName = PDFLib.PDFName;
+  let outlinesDict = null;
+  try {
+    const ref = doc.catalog.get(PDFName.of('Outlines'));
+    if (ref) outlinesDict = doc.context.lookup(ref);
+  } catch (_) {}
+  if (outlinesDict) {
+    try {
+      const underlineFlags = [];
+      (function walkChain(ref) {
+        while (ref) {
+          const dict = doc.context.lookup(ref);
+          if (!dict) break;
+          const u = dict.get(PDFName.of('PMU'));
+          underlineFlags.push(!!(u && typeof u.asBoolean === 'function' && u.asBoolean()));
+          const first = dict.get(PDFName.of('First'));
+          if (first) walkChain(first);
+          ref = dict.get(PDFName.of('Next'));
+        }
+      })(outlinesDict.get(PDFName.of('First')));
+      let uIdx = 0;
+      (function stampUnderline(nodes) {
+        nodes.forEach((n) => { n.underline = !!underlineFlags[uIdx]; uIdx++; if (n.children.length) stampUnderline(n.children); });
+      })(resolvedTree);
+    } catch (_) {}
+  }
+  return resolvedTree;
+}
+
+// Merges srcDoc's own bookmarks into tgtDoc's EXISTING outline when pages
+// copied from srcDoc land inside an already-open document - insertPagesFromPdfBytes()'s
+// case (drag a page into another tab, paste copied pages, insert-PDF-at-position),
+// which is a different shape of the same bookmark-loss family
+// pmBookmarksMigrateOnReorder() covers for PDFDocument.create() rebuilds:
+// here tgtDoc is NOT a fresh empty-catalog document, so its own outline
+// survives untouched by default - nothing merges the INCOMING document's
+// bookmarks into it without this. MUST be called AFTER the caller has
+// already copied srcDoc's pages into tgtDoc (tgtDoc.insertPage(...) already
+// done) - tgtDoc's own existing bookmarks need no index adjustment at all
+// in that case, since pdf.js resolves each one against its page's actual
+// ref identity, which insertPage() never changes. insertAt/srcCount only
+// need to describe where the copied pages landed so srcDoc's OWN bookmarks
+// (0-based within srcDoc itself) can be remapped onto that same range in
+// tgtDoc.
+async function pmBookmarksMigrateOnInsert(srcDoc, tgtDoc, insertAt, srcCount) {
+  if (!srcDoc || !tgtDoc || typeof PDFLib === 'undefined') return;
+  if (!(srcCount > 0)) return;
+
+  // existingTree is resolved from tgtDoc AFTER the caller has already
+  // inserted the new pages (this must be called post-insert, per the
+  // function comment above) - pdf.js resolves each destination against the
+  // page's actual ref identity, which insertPage() never changes, so these
+  // pageIndex values already reflect the NEW layout with no adjustment
+  // needed. (Unlike markedForDeletion/shiftPageIndicesFrom elsewhere, which
+  // track plain integers that don't automatically follow a page around.)
+  const existingTree = await pmResolveOutlineWithUnderline(tgtDoc);
+  const incomingTree = await pmResolveOutlineWithUnderline(srcDoc);
+  if (!existingTree.length && !incomingTree.length) return;
+
+  (function remapIncoming(nodes) {
+    nodes.forEach((n) => {
+      if (n.pageIndex != null) n.pageIndex = insertAt + n.pageIndex;
+      if (n.children.length) remapIncoming(n.children);
+    });
+  })(incomingTree);
+
+  const mergedTree = existingTree.concat(incomingTree);
+  pmWriteOutlineTree(tgtDoc, mergedTree);
+}
+
+// Deletes doc's CURRENT /Outlines subtree (root dict plus every node in its
+// First/Next chain, recursively into children) - pdf-lib never garbage-
+// collects unreferenced objects on save(), so this must run before writing
+// a REPLACEMENT tree into the same document, or the old dict objects stick
+// around as permanent orphans forever (same lesson as
+// pmBookmarksSerializeToDoc's own writtenRefs cleanup).
+function pmDeleteOutlineSubtree(doc) {
+  const PDFName = PDFLib.PDFName;
+  const ctx = doc.context;
+  try {
+    const oldRef = doc.catalog.get(PDFName.of('Outlines'));
+    if (!oldRef) return;
+    const oldDict = ctx.lookup(oldRef);
+    const seen = new Set();
+    (function collect(ref) {
+      while (ref && !seen.has(ref)) {
+        seen.add(ref);
+        const dict = ctx.lookup(ref);
+        if (!dict) break;
+        const first = dict.get(PDFName.of('First'));
+        if (first) collect(first);
+        ref = dict.get(PDFName.of('Next'));
+      }
+    })(oldDict ? oldDict.get(PDFName.of('First')) : null);
+    seen.add(oldRef);
+    seen.forEach((ref) => { try { ctx.delete(ref); } catch (_) {} });
+  } catch (_) {}
+}
+
+// Shared writer: replaces doc's /Outlines with `tree` (title/pageIndex/bold/
+// italic/underline/children nodes, pageIndex already final for THIS doc's
+// CURRENT page list - buildNode below calls doc.getPage(node.pageIndex)
+// directly). Used by every migration that rebuilds a document's bookmarks
+// from a resolved+remapped tree (pmBookmarksMigrateOnInsert above,
+// pmPrepareBookmarksForPageRemove below).
+function pmWriteOutlineTree(doc, tree) {
+  const PDFName = PDFLib.PDFName;
+  const ctx = doc.context;
+  pmDeleteOutlineSubtree(doc);
+  if (!tree || !tree.length) {
+    try { doc.catalog.delete(PDFName.of('Outlines')); } catch (_) {}
+    if (typeof pmBookmarksState !== 'undefined') pmBookmarksState.writtenRefs = [];
+    return;
+  }
+
+  const PDFString = PDFLib.PDFString;
+  const PDFNumber = PDFLib.PDFNumber;
+  const PDFBool = PDFLib.PDFBool;
+  const written = [];
+  function buildNode(node, parentRef) {
+    const dict = ctx.obj({});
+    const ref = ctx.register(dict);
+    written.push(ref);
+    dict.set(PDFName.of('Title'), typeof pePdfAnnotText === 'function' ? pePdfAnnotText(node.title || '') : PDFString.of(node.title || ''));
+    dict.set(PDFName.of('Parent'), parentRef);
+    let flags = 0;
+    if (node.italic) flags |= 1;
+    if (node.bold) flags |= 2;
+    if (flags) dict.set(PDFName.of('F'), PDFNumber.of(flags));
+    if (node.underline) dict.set(PDFName.of('PMU'), PDFBool.True);
+    if (node.pageIndex != null) {
+      try {
+        const page = doc.getPage(node.pageIndex);
+        dict.set(PDFName.of('Dest'), ctx.obj([page.ref, PDFName.of('XYZ'), null, null, null]));
+      } catch (_) {}
+    }
+    let openCount = 0;
+    if (node.children && node.children.length) {
+      let prevRef = null, firstRef = null;
+      node.children.forEach((child, i) => {
+        const built = buildNode(child, ref);
+        openCount += 1 + built.count;
+        if (i === 0) firstRef = built.ref;
+        if (prevRef) {
+          ctx.lookup(prevRef).set(PDFName.of('Next'), built.ref);
+          ctx.lookup(built.ref).set(PDFName.of('Prev'), prevRef);
+        }
+        prevRef = built.ref;
+      });
+      dict.set(PDFName.of('First'), firstRef);
+      dict.set(PDFName.of('Last'), prevRef);
+      dict.set(PDFName.of('Count'), PDFNumber.of(openCount));
+    }
+    return { ref, count: openCount };
+  }
+
+  const rootDict = ctx.obj({ Type: PDFName.of('Outlines') });
+  const rootRef = ctx.register(rootDict);
+  written.push(rootRef);
+  let prevRef = null, firstRef = null, totalOpen = 0;
+  tree.forEach((node, i) => {
+    const built = buildNode(node, rootRef);
+    totalOpen += 1 + built.count;
+    if (i === 0) firstRef = built.ref;
+    if (prevRef) {
+      ctx.lookup(prevRef).set(PDFName.of('Next'), built.ref);
+      ctx.lookup(built.ref).set(PDFName.of('Prev'), prevRef);
+    }
+    prevRef = built.ref;
+  });
+  rootDict.set(PDFName.of('First'), firstRef);
+  rootDict.set(PDFName.of('Last'), prevRef);
+  rootDict.set(PDFName.of('Count'), PDFNumber.of(totalOpen));
+  doc.catalog.set(PDFName.of('Outlines'), rootRef);
+  // Record the refs we just wrote so a LATER bookmark edit in the UI
+  // (pmBookmarksSerializeToDoc(), which deletes pmBookmarksState.writtenRefs
+  // before writing its own rebuild) cleans these up too instead of leaving
+  // them as newly-orphaned objects - same reasoning as
+  // pmBookmarksMigrateOnReorder's own writtenRefs handoff.
+  if (typeof pmBookmarksState !== 'undefined') pmBookmarksState.writtenRefs = written;
+}
+
+// Prunes/remaps a document's OWN bookmarks for a hard, in-place page
+// removal - physicallyRemovePagesFromDoc()'s pdfDoc.removePage() loop (the
+// "cut" side of page drag-to-another-tab and of Cut-pages-to-clipboard).
+// Unlike the deletion-on-SAVE path (buildBytesForSave()/savePDF(), which
+// rebuilds into a brand-new document via pmBookmarksMigrateOnReorder), this
+// mutates a single LIVE document in place, so the outline must be resolved
+// BEFORE removePage() runs (afterwards the old page numbering is gone) but
+// written back AFTER (afterwards doc.getPage(newIndex) resolves against the
+// already-shrunk page list). Call this BEFORE the removePage() loop; it
+// returns a callback to invoke AFTER it (or null if there's nothing to do).
+async function pmPrepareBookmarksForPageRemove(doc, removedIndices) {
+  if (!doc || !removedIndices || !removedIndices.length) return null;
+  const tree = await pmResolveOutlineWithUnderline(doc);
+  if (!tree.length) return null;
+
+  const removeSet = new Set(removedIndices);
+  const oldToNew = new Map();
+  let next = 0;
+  const pageCount = doc.getPageCount();
+  for (let i = 0; i < pageCount; i++) {
+    if (!removeSet.has(i)) oldToNew.set(i, next++);
+  }
+
+  (function remap(nodes) {
+    nodes.forEach((n) => {
+      n.pageIndex = (n.pageIndex != null && oldToNew.has(n.pageIndex)) ? oldToNew.get(n.pageIndex) : null;
+      if (n.children.length) remap(n.children);
+    });
+  })(tree);
+
+  // A bookmark whose own page just got removed (it's leaving for another
+  // tab, or was cut to the clipboard) has nowhere left to point in THIS
+  // document - drop it instead of leaving a dest-less, permanently
+  // unclickable entry behind (same reasoning as pmBookmarksMigrateOnReorder's
+  // own pruneDeletedTargets).
+  function prune(nodes) {
+    const out = [];
+    for (const n of nodes) {
+      n.children = n.children.length ? prune(n.children) : [];
+      if (n.pageIndex != null || n.children.length) out.push(n);
+    }
+    return out;
+  }
+  const prunedTree = prune(tree);
+
+  return () => pmWriteOutlineTree(doc, prunedTree);
 }
 
 // Was a hand-rolled near-duplicate of setDocumentDirty() (same
