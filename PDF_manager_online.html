@@ -17393,6 +17393,16 @@
       // touch-action leaves scrolling entirely to the browser otherwise.
       scrollContainer.addEventListener('touchmove', (e) => {
         if (!pmActiveTouchScrollFallback || e.touches.length !== 1) return;
+        // A rubber-band selection frame is armed/drawn by its own double-tap
+        // gesture (see canStartRubberTouch/rubberTouchMove), tracked
+        // independently of the page fit-width double-tap system above - the
+        // same two taps that arm a frame can ALSO look like a fast
+        // double-tap to THIS mechanism, leaving the fallback active while
+        // rubberTouchMove is moving the selection rectangle. Defer to the
+        // frame entirely once it takes over; scrolling while drawing one
+        // makes no sense anyway (rubberTouchMove already preventDefaults
+        // the native scroll for exactly this reason).
+        if (rubberArmed || rubberActive || isDragActive || pinchActive) return;
         const t = e.touches[0];
         if (pmActiveTouchLastX != null) {
           if (!document.body.classList.contains('pm-vertical-scroll-lock')) {
@@ -17857,6 +17867,13 @@
         cancelPageTouchDrag();
         rubberActive = true;
         document.body.classList.add('rubber-selecting');
+        // The double-tap that armed this frame can also look like a fast
+        // double-tap to the page fit-width double-tap system (see the
+        // touchmove guard above) - stop it explicitly so it can't manually
+        // scroll the container out from under the selection frame.
+        pmActiveTouchScrollFallback = false;
+        pmActiveTouchLastX = null;
+        pmActiveTouchLastY = null;
       }
       if (!rubberActive) return;
       e.preventDefault(); // block scrolling while drawing a frame
