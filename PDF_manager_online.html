@@ -6051,8 +6051,8 @@
         with no transition class present, so it snaps back instantly instead
         of visibly fading out.*/
       .page.page-select-charging {
-        transition: border-color var(--pm-select-charge-ms, 450ms) linear,
-                    box-shadow var(--pm-select-charge-ms, 450ms) linear;
+        transition: border-color var(--pm-select-charge-ms, 293ms) linear,
+                    box-shadow var(--pm-select-charge-ms, 293ms) linear;
       }
       .page.page-select-charging.page-select-charge-fill {
         border-color: #007bff !important;
@@ -17057,13 +17057,23 @@
     // Stage 3: keep holding to PAGE_DRAG_HOLD_MS → the existing
     // startPageTouchDrag() picks the (already-selected) page up to reorder
     // it, same as the grid's plain LONG_PRESS_MS but measured longer here so
-    // it can't be reached before stage 2 already fired. Grid/multi-column
-    // layout is untouched - there a tap still selects instantly and
-    // LONG_PRESS_MS alone gates the drag pickup.
-    const PAGE_SELECT_HOLD_MS = 450;
+    // it can't be reached before stage 2 already fired. Once stage 2 has
+    // selected a page, a plain quick tap on it (in a LATER gesture) removes
+    // that selection right away - no need for a second full hold, since the
+    // deliberate-hold requirement only exists to guard against SELECTING by
+    // accident, not against dismissing a selection you already made on
+    // purpose. Grid/multi-column layout is untouched - there a tap still
+    // selects instantly and LONG_PRESS_MS alone gates the drag pickup.
+    const PAGE_SELECT_HOLD_MS = 293; // 450ms, cut 35% short per feedback
     const PAGE_DRAG_HOLD_MS = 900;
     let pageSelectStageTimer = null;
     let pageSelectStageFired = false;
+    // isPagesSingleColumnLayout() can force a synchronous layout pass
+    // (getBoundingClientRect() per visible page) when its cheap geometry
+    // shortcut doesn't apply - cached once per gesture at pointerdown and
+    // reused at pointerup instead of calling it again there, so a plain tap
+    // (half of a double-tap, most of the time) doesn't pay for it twice.
+    let pageSelectSingleColumnAtDown = false;
     let longPressTimer = null;
     let longPressActive = false;
     let pagePointerId = null;
@@ -17331,18 +17341,30 @@
       clearTimeout(pageSelectStageTimer);
       pageSelectStageTimer = null;
       const singleColumnHold = typeof isPagesSingleColumnLayout === 'function' && isPagesSingleColumnLayout();
+      pageSelectSingleColumnAtDown = singleColumnHold;
       if (singleColumnHold) {
         const pendingDiv = dragSourceDiv;
         const pendingPointerId = pagePointerId;
-        pendingDiv.style.setProperty('--pm-select-charge-ms', PAGE_SELECT_HOLD_MS + 'ms');
-        pendingDiv.classList.add('page-select-charging');
-        // The transition-property class and the end-state class need to land
-        // in separate style recalcs, or the browser has no "before" state to
-        // animate from and the border just jumps straight to blue.
+        // Deferred to a frame instead of done synchronously here: a plain
+        // tap (either half of a double-tap, most of the time) releases well
+        // before the next paint, so dragSourceDiv/pagePointerId have already
+        // moved on and this never touches the DOM at all for it - keeping
+        // the actual double-tap-sensitive pointerdown/pointerup handlers as
+        // cheap as the old code's (a forced style recalc on every single tap
+        // here was adding enough jank on real devices to intermittently miss
+        // the double-tap window).
         requestAnimationFrame(() => {
-          if (dragSourceDiv === pendingDiv && pagePointerId === pendingPointerId) {
-            pendingDiv.classList.add('page-select-charge-fill');
-          }
+          if (dragSourceDiv !== pendingDiv || pagePointerId !== pendingPointerId) return;
+          pendingDiv.style.setProperty('--pm-select-charge-ms', PAGE_SELECT_HOLD_MS + 'ms');
+          pendingDiv.classList.add('page-select-charging');
+          // The transition-property class and the end-state class need to
+          // land in separate style recalcs, or the browser has no "before"
+          // state to animate from and the border just jumps straight to blue.
+          requestAnimationFrame(() => {
+            if (dragSourceDiv === pendingDiv && pagePointerId === pendingPointerId) {
+              pendingDiv.classList.add('page-select-charge-fill');
+            }
+          });
         });
         pageSelectStageTimer = setTimeout(() => {
           pageSelectStageTimer = null;
@@ -17495,13 +17517,19 @@
             }
           } else {
             // Single-column: released before PAGE_SELECT_HOLD_MS - a plain
-            // tap/scroll-end, not a deliberate hold, so it no longer toggles
-            // selection on its own (see the pageSelectStageTimer above).
-            // Still record it so a fast second tap is recognized as
-            // double-tap-zoom instead of doing nothing.
-            const singleColumnTap = typeof isPagesSingleColumnLayout === 'function' && isPagesSingleColumnLayout();
+            // tap/scroll-end, not a deliberate hold, so it no longer selects
+            // on its own (see the pageSelectStageTimer above) - EXCEPT when
+            // the tapped page is already selected (stage 2 already fired,
+            // mini-tools showing): a standard quick tap on it then removes
+            // that selection immediately, without needing another full hold.
+            // Reuses the layout check already done once at this gesture's
+            // pointerdown instead of calling isPagesSingleColumnLayout()
+            // again here - it can force a synchronous layout pass, and doing
+            // that twice per tap was adding enough jank on real devices to
+            // intermittently push a genuine double-tap outside
+            // PAGE_DOUBLE_TAP_MS.
             preTapSelectionSnapshot = { selected: new Set(selectedPages), last: lastSelectedIndex };
-            if (!singleColumnTap) handlePageClick(tapIdx, pageDiv, e);
+            if (!pageSelectSingleColumnAtDown || selectedPages.has(tapIdx)) handlePageClick(tapIdx, pageDiv, e);
             lastPageTapTime = now;
             lastPageTapIdx = tapIdx;
             lastPageTapX = e.clientX;
