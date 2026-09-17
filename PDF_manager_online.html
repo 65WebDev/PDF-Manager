@@ -5934,15 +5934,16 @@
         touch-action: none;
       }
 
-      /*During pinch - GPU layer and CSS scale without layout recalculation*/
+      /*During pinch - GPU layer and CSS scale without layout recalculation.
+        Only #pagesContainer itself needs promoting - that's the one element
+        JS actually applies `transform: scale()` to. Also forcing every
+        individual page image (each with its own box-shadow) into its OWN
+        nested compositing layer at the same instant made the browser
+        re-rasterize all of them at once right as the pinch starts, visible
+        as a brief flicker across the page - removed as unnecessary since
+        they already scale for free as part of the promoted parent layer.*/
       body.pinch-zooming .pages {
         will-change: transform;
-      }
-      body.pinch-zooming .page .img-wrapper,
-      body.pinch-zooming .page img {
-        backface-visibility: hidden;
-        -webkit-backface-visibility: hidden;
-        transform: translateZ(0);
       }
 
       /*In the mobile version, remove the scale slider - the scale changes with a pinch*/
@@ -13039,23 +13040,33 @@
       return el && el.isConnected ? el : null;
     }
 
-    // Aspect ratio to fit width against: prefer the specific page actually
-    // being zoomed (from a double-tap/dblclick/fit-width-button anchor) when
-    // it's portrait, falling back to the whole-document pmAllPagesPortrait()
-    // check when there's no anchor (e.g. the live resize re-track in
-    // pmReapplyFitWidthIfActive). Without this, a mixed-orientation document
-    // always fell back to cardRowWidth()'s orientation-agnostic SQUARE card
-    // width - fitting a portrait page's actual (narrower) content to that
-    // square under-zoomed it, and over-zooming past the square then had
-    // double-tap "zoom out" land on the square's width too, not the page's.
-    function pmFitWidthAspectFor(anchorPage) {
-      if (anchorPage && !anchorPage.classList.contains('page-rotated')) {
+    // Real rendered content width at `scale` to fit against: prefer the
+    // specific page actually being zoomed (from a double-tap/dblclick/fit-
+    // width-button anchor) when known, falling back to the whole-document
+    // pmAllPagesPortrait() check when there's no anchor (e.g. the live
+    // resize re-track in pmReapplyFitWidthIfActive before any page has been
+    // tapped). Without a per-anchor check at all, a mixed-orientation
+    // document always fell back to cardRowWidth()'s orientation-agnostic
+    // SQUARE card width - fitting a portrait page's actual (narrower)
+    // content to that square under-zoomed it. A landscape (page-rotated)
+    // anchor needs its own branch rather than reusing the portrait aspect
+    // formula: per the .page-rotated img CSS rule, a landscape page's
+    // rendered WIDTH is capped straight to pmPreviewLongPx(scale),
+    // independent of its own aspect ratio (only its height varies with
+    // aspect) - portraitPreviewWidth()'s aspect multiplication is only
+    // correct for a portrait page, whose HEIGHT is what's capped instead.
+    // mobileSinglePageContentWidth() already draws this exact distinction
+    // for the pinch fill-snap; mirrored here for fit-width.
+    function pmFitWidthTargetWidth(scale, anchorPage) {
+      if (anchorPage) {
+        if (anchorPage.classList.contains('page-rotated')) return pmPreviewLongPx(scale);
         const img = anchorPage.querySelector('img');
         if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
-          return img.naturalWidth / img.naturalHeight;
+          return portraitPreviewWidth(scale, img.naturalWidth / img.naturalHeight);
         }
       }
-      return pmAllPagesPortrait() ? pmMaxPortraitAspect() : null;
+      const portraitAspect = pmAllPagesPortrait() ? pmMaxPortraitAspect() : null;
+      return portraitAspect ? portraitPreviewWidth(scale, portraitAspect) : cardRowWidth(scale, 1);
     }
 
     function applyFitWidthScaleValue(scale, opts) {
@@ -13172,7 +13183,7 @@
         // already covers it there. This re-track can land a big scale swing
         // with no user gesture behind it at all: e.g. rotating the anchor
         // page itself flips it between "fits its own portrait content
-        // width" and "fits the square card" (see pmFitWidthAspectFor) the
+        // width" and "fits the square card" (see pmFitWidthTargetWidth) the
         // moment its rotated thumbnail finishes loading - without
         // preserving the anchor here, that swing reflowed the whole
         // document under a raw scrollTop pixel value with nothing keeping
@@ -13182,7 +13193,7 @@
           applyFitWidthScaleValue(target);
           requestAnimationFrame(() => {
             const page = anchorPage.isConnected ? anchorPage : pmFitWidthAnchorPage();
-            if (page) scrollPageIntoViewTop(page);
+            if (page) scrollFitWidthPageIntoView(page);
           });
         } else {
           applyFitWidthScaleValue(target);
@@ -13220,6 +13231,26 @@
       const containerRect = scrollContainer.getBoundingClientRect();
       const targetRect = pageEl.getBoundingClientRect();
       const targetTop = scrollContainer.scrollTop + (targetRect.top - containerRect.top);
+      const maxTop = Math.max(0, scrollContainer.scrollHeight - scrollContainer.clientHeight);
+      scrollContainer.scrollTo({ top: Math.max(0, Math.min(targetTop, maxTop)), behavior: 'auto' });
+      if (typeof syncScrollLockFromContainer === 'function') syncScrollLockFromContainer();
+    }
+
+    // Fit-width on a landscape (page-rotated) page caps its WIDTH, leaving a
+    // much shorter HEIGHT than a portrait page fit the same way - top-
+    // aligning it (fine for a tall portrait page you'd scroll down through)
+    // instead leaves a large empty gap below and reads as "misplaced", so
+    // center it vertically in the viewport like a single framed page.
+    function scrollFitWidthPageIntoView(pageEl) {
+      if (!pageEl || !scrollContainer) return;
+      if (!pageEl.classList.contains('page-rotated')) {
+        scrollPageIntoViewTop(pageEl);
+        return;
+      }
+      const containerRect = scrollContainer.getBoundingClientRect();
+      const targetRect = pageEl.getBoundingClientRect();
+      const targetTop = scrollContainer.scrollTop + (targetRect.top - containerRect.top)
+        - (containerRect.height - targetRect.height) / 2;
       const maxTop = Math.max(0, scrollContainer.scrollHeight - scrollContainer.clientHeight);
       scrollContainer.scrollTo({ top: Math.max(0, Math.min(targetTop, maxTop)), behavior: 'auto' });
       if (typeof syncScrollLockFromContainer === 'function') syncScrollLockFromContainer();
@@ -13304,7 +13335,7 @@
           page = pagesContainer.querySelector('.page[data-index="' + anchorIdx + '"]');
         }
         if (!page) page = findNearestPageToPoint(ptrX, ptrY);
-        if (page) scrollPageIntoViewTop(page);
+        if (page) scrollFitWidthPageIntoView(page);
       });
     }
     window.toggleFitWidthScale = toggleFitWidthScale;
@@ -19569,11 +19600,9 @@
     function computeReadModeDesktopScale(anchorPage) {
       const avail = getScrollAvailWidth();
       if (avail <= 0) return clampScale(1300);
-      const aspect = pmFitWidthAspectFor(anchorPage);
       let best = 70;
       for (let s = 70; s <= 1300; s++) {
-        const w = aspect ? portraitPreviewWidth(s, aspect) : cardRowWidth(s, 1);
-        if (w <= avail) best = s;
+        if (pmFitWidthTargetWidth(s, anchorPage) <= avail) best = s;
         else break;
       }
       return best;
@@ -19700,11 +19729,9 @@
     function computeReadModeMobileScale(anchorPage) {
       const avail = getScrollAvailWidth();
       if (avail <= 0) return clampScale(700);
-      const aspect = pmFitWidthAspectFor(anchorPage);
       let best = 70;
       for (let s = 70; s <= 700; s++) {
-        const w = aspect ? portraitPreviewWidth(s, aspect) : cardRowWidth(s, 1);
-        if (w <= avail) best = s;
+        if (pmFitWidthTargetWidth(s, anchorPage) <= avail) best = s;
         else break;
       }
       return best;
@@ -51987,9 +52014,6 @@ function peObjMouseDown(e, o) {
 
     // Clear prior edge-align transform before measuring title for nav/lead.
     title.style.transform = '';
-    // Clear any stale navrow+tail-wrap clearance from a previous call before
-    // re-measuring - only the pe-tb-navrow branch below ever re-adds it.
-    if (tail) tail.style.marginTop = '';
 
     const barRect = bar.getBoundingClientRect();
     const titleRect = title.getBoundingClientRect();
@@ -52005,25 +52029,24 @@ function peObjMouseDown(e, o) {
     // here - they just follow title normally, like plain stage 1.
     if (bar.classList.contains('pe-tb-navrow')) {
       if (lead) lead.style.marginLeft = '';
-      nav.style.left = Math.max(0, Math.round(titleRect.left - barRect.left)) + 'px';
-      nav.style.top = Math.max(0, Math.round(titleRect.bottom - barRect.top + 6)) + 'px';
       const mid = document.getElementById('peTbMid');
-      if (mid) {
-        const navRight = nav.getBoundingClientRect().right;
-        const extra = Math.max(0, Math.round(navRight - titleRect.right));
-        mid.style.paddingLeft = extra ? (extra + 'px') : '';
-      }
-      // When the tail (Scale/Cancel/Save) ALSO wraps to its own row, plain
-      // flex-wrap flows it right after row 1's content - which has no idea
-      // #pePageNav (out of flow, position:absolute) occupies its own band
-      // just below that row, so the wrapped tail rendered on top of the nav
-      // buttons and ate every tap meant for them. Push it down to clear the
-      // nav row's own bottom edge.
+      nav.style.left = Math.max(0, Math.round(titleRect.left - barRect.left)) + 'px';
       if (tail && bar.classList.contains('pe-tb-tail-wrap')) {
-        const navBottom = nav.getBoundingClientRect().bottom;
-        const tailTop = tail.getBoundingClientRect().top;
-        const clearance = Math.round(navBottom - tailTop) + 6;
-        if (clearance > 0) tail.style.marginTop = clearance + 'px';
+        // Tail (Scale/Cancel/Save) already wraps to its own row here - share
+        // that row with ←→ (left side) instead of giving nav a separate band
+        // under the title, which used to add a 3rd row (title+tools / nav /
+        // tail) where only 2 are needed (title+tools / nav+tail).
+        if (mid) mid.style.paddingLeft = '';
+        const tailRect = tail.getBoundingClientRect();
+        const navTop = tailRect.top + (tailRect.height - 40) / 2;
+        nav.style.top = Math.max(0, Math.round(navTop - barRect.top)) + 'px';
+      } else {
+        nav.style.top = Math.max(0, Math.round(titleRect.bottom - barRect.top + 6)) + 'px';
+        if (mid) {
+          const navRight = nav.getBoundingClientRect().right;
+          const extra = Math.max(0, Math.round(navRight - titleRect.right));
+          mid.style.paddingLeft = extra ? (extra + 'px') : '';
+        }
       }
       peLayoutToolbarEdgeAlign();
       peLayoutMenuToggleOverDelete();
@@ -52065,9 +52088,25 @@ function peObjMouseDown(e, o) {
         if (shift > maxShiftRight) shift = Math.max(maxShiftLeft, maxShiftRight);
 
         lead.style.marginLeft = Math.max(0, Math.round(shift)) + 'px';
-        // Place ←→ immediately left of the nav divider (inside lead).
-        const navDivAfter = navDivider.getBoundingClientRect().left;
-        nav.style.left = Math.max(0, Math.round(navDivAfter - barRect.left - navW - groupGap)) + 'px';
+        // Place ←→ directly above "Добавить подпись"/"Добавить фигуру"
+        // (the pair immediately before the row-2 divider) by centering it
+        // over their combined span. Deriving ←→'s position from the
+        // divider gap alone (like lead's own margin above) looked close but
+        // wasn't exact - the two dividers' surrounding margins/gaps differ
+        // by a few px, visibly shifting ←→ to the right of those buttons.
+        const signatureEl = document.getElementById('peSignatureWrap') || document.getElementById('peToolSignature');
+        const shapeEl = document.getElementById('peShapeWrap') || document.getElementById('peToolShape');
+        if (signatureEl && shapeEl) {
+          const sigRect = signatureEl.getBoundingClientRect();
+          const shapeRect = shapeEl.getBoundingClientRect();
+          const spanLeft = sigRect.left;
+          const spanWidth = shapeRect.right - sigRect.left;
+          const centeredLeft = spanLeft + (spanWidth - navW) / 2;
+          nav.style.left = Math.max(0, Math.round(centeredLeft - barRect.left)) + 'px';
+        } else {
+          const navDivAfter = navDivider.getBoundingClientRect().left;
+          nav.style.left = Math.max(0, Math.round(navDivAfter - barRect.left - navW - groupGap)) + 'px';
+        }
       } else {
         const leadW = lead ? lead.scrollWidth : 0;
         const barStyles = getComputedStyle(bar);
