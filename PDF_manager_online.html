@@ -20678,6 +20678,26 @@
 
       div.addEventListener('mousedown', onPageMouseDown);
       div.addEventListener('pointerdown', onPagePointerDown, { passive: false });
+      // Real double-tap-to-zoom suppression of the browser's OWN native
+      // double-tap-zoom gesture has to happen here, on the raw TouchEvent -
+      // pointerdown's own preventDefault() (see onPagePointerDown) only ever
+      // suppresses the compatibility mouse events (click etc.) that follow
+      // it, not the UA's native gesture recognition, which is governed by
+      // touch-action (see .main's pan-x pan-y) and by preventDefault() on
+      // touchstart/touchmove specifically. On engines that still race their
+      // own double-tap-zoom detector against ours despite touch-action
+      // being set, a fast enough second tap could get intercepted by the
+      // native gesture before our JS ever finished deciding - this reacts
+      // at the same, earliest point the browser itself does, regardless of
+      // how fast the two taps land.
+      div.addEventListener('touchstart', (e) => {
+        if (e.touches.length !== 1) return;
+        const t = e.touches[0];
+        if (typeof pmLooksLikeFastDoubleTapOn === 'function' &&
+            pmLooksLikeFastDoubleTapOn(div, { clientX: t.clientX, clientY: t.clientY })) {
+          e.preventDefault();
+        }
+      }, { passive: false });
 
       const imgWrapper = document.createElement('div'); imgWrapper.className = 'img-wrapper';
       const img = document.createElement('img');
