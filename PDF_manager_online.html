@@ -17311,6 +17311,18 @@
       if (e.touches.length === 2) {
         // Start of pinch - cancel possible drag/long press
         cancelPageTouchDrag();
+        // A manual pinch is a deliberate zoom action, same as dragging the
+        // (desktop) slider or wheel-zooming - both of those already exit
+        // fit-width mode via changeScale()/setScaleProgrammatic()'s own
+        // clearFitWidthToggle() call. Pinch was the one manual-zoom path
+        // that didn't: fitWidthToggleOn stayed true through applyPinchScale-
+        // Change(), so any later live re-track (pmReapplyFitWidthIfActive -
+        // e.g. the very next thumbnail to finish decoding) fought the pinch
+        // by silently re-snapping the scale back to fit-width's own target -
+        // anchored to whatever page fit-width was ORIGINALLY toggled on for,
+        // not the page just pinched, which is what looked like a scroll
+        // jump back to that first page.
+        if (typeof clearFitWidthToggle === 'function') clearFitWidthToggle();
         pinchActive = true;
         pinchStartScale = currentScale;
         // What the user actually sees at gesture start (DOM), with math fallback.
