@@ -36344,13 +36344,25 @@ function peRecordSoloTap(clientX, clientY) {
 // actually acted (false in object-select mode / while inline-editing text,
 // where a double-tap has its own, unrelated meaning) so callers can let an
 // unclaimed tap fall through to their own normal handling instead.
+let peLastZoomToggleAt = 0;
+// Some touch browsers deliver a single physical double-tap as more than one
+// claimable gesture here (e.g. the touch pointerdown path above AND a
+// trailing compatibility dblclick, or a duplicate pointerdown some touch
+// stacks emit) - without a guard, the second claim immediately toggled the
+// zoom right back to where it started (zoom in, then an instant zoom back
+// out, and vice versa). A short cooldown lets the first claim win and makes
+// every later one in the same instant a no-op instead of an undo.
+const PE_ZOOM_TOGGLE_COOLDOWN_MS = 450;
 function peToggleDoubleTapZoom(clientX, clientY) {
   if (!peState || peState.tool !== 'select' || peState.objSelectMode || peState.inlineEditId) return false;
+  const now = Date.now();
+  if (now - peLastZoomToggleAt < PE_ZOOM_TOGGLE_COOLDOWN_MS) return true;
   const sl = document.getElementById('peScaleSlider');
   if (!sl) return false;
   const minSlider = parseInt(sl.min, 10) || 100;
   const maxSlider = parseInt(sl.max, 10) || 200;
   const target = peIsEditorPageFitView() ? maxSlider : minSlider;
+  peLastZoomToggleAt = now;
   peApplyZoomSlider(target, clientX, clientY, { immediate: true, syncSlider: true, force: true });
   return true;
 }
