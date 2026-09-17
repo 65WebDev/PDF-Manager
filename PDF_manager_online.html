@@ -7784,6 +7784,13 @@
     // double-tap/dblclick on an already-fit-width page is asking for - that
     // case is a no-op instead (see toggleFitWidthScale).
     let fitWidthWasZoomIn = false;
+    // True while a repeat double-tap/dblclick on the fit-width anchor page
+    // has zoomed to the maximum scale at the tapped point instead of being
+    // a no-op (see toggleFitWidthScale's !fitWidthWasZoomIn branch) -
+    // fitWidthMaxZoomRestoreScale is the fit-width scale to return to on the
+    // NEXT repeat tap on that same page.
+    let fitWidthMaxZoomActive = false;
+    let fitWidthMaxZoomRestoreScale = null;
     let fitWidthPointer = { x: null, y: null };
     let pdfjsPreloadTask = null;   //parallel parsing of pdf.js when opening a file
     //“Dirty” state of the document: were there any changes (rotation/movement/insertion/
@@ -12808,6 +12815,8 @@
       fitWidthSavedScale = null;
       fitWidthAnchorIdx = null;
       fitWidthWasZoomIn = false;
+      fitWidthMaxZoomActive = false;
+      fitWidthMaxZoomRestoreScale = null;
       updateFitWidthBtnUI();
     }
 
@@ -13107,6 +13116,44 @@
       pmRecenterFitWidthPage();
     }
 
+    // Zooms to the maximum scale, keeping the exact tapped/clicked point
+    // (ptrX, ptrY) stationary on screen - used when a repeat double-tap/
+    // dblclick on the fit-width anchor page would otherwise be a no-op (see
+    // toggleFitWidthScale). Anchoring by the page's own fraction (fx, fy),
+    // recomputed against the page's NEW rect after the reflow, mirrors how
+    // the pinch gesture keeps its own anchor point fixed across a scale
+    // change (see capturePinchContentPoint/restorePinchViewportPoint) -
+    // needed here on both touch AND desktop since this is a precise point
+    // anchor, unlike applyFitWidthScaleValue's generic captureZoomAnchor().
+    function applyMaxZoomAtPoint(anchorPage, ptrX, ptrY) {
+      const r = anchorPage.getBoundingClientRect();
+      const lx = Math.max(r.left, Math.min(ptrX, r.right));
+      const ly = Math.max(r.top, Math.min(ptrY, r.bottom));
+      const fx = r.width > 0 ? (lx - r.left) / r.width : 0.5;
+      const fy = r.height > 0 ? (ly - r.top) / r.height : 0.5;
+      currentScale = clampScale(Infinity);
+      scaleUserLocked = true;
+      autoScaleEnabled = false;
+      pmVerticalMagnetActive = false;
+      pmLandscapeMagnetActive = false;
+      const sliderVal = Math.max(0, Math.min(200, scaleToSlider(currentScale)));
+      if (scaleSlider) scaleSlider.value = sliderVal;
+      const rms = document.getElementById('readModeScaleSlider');
+      if (rms) rms.value = sliderVal;
+      applyScale();
+      const settle = () => {
+        const page = anchorPage.isConnected ? anchorPage : pmFitWidthAnchorPage();
+        if (!page) return;
+        const pt = getPageAnchorContentPoint(page, fx, fy);
+        if (pt) restorePinchViewportPoint(pt, ptrX, ptrY);
+      };
+      settle();
+      requestAnimationFrame(() => {
+        settle();
+        requestAnimationFrame(settle);
+      });
+    }
+
     // "Fit page width" should always end up perfectly horizontally centered
     // (no leftover horizontal scroll) unless the page is genuinely too wide
     // to fit even fully zoomed out (pages-row-overflow, meant for panning).
@@ -13188,7 +13235,14 @@
         }
       }
       if (typeof pmUpdateVerticalOnlyScrollLock === 'function') pmUpdateVerticalOnlyScrollLock();
-      if (!fitWidthToggleOn || typeof computeFitWidthScale !== 'function') return;
+      // While a repeat double-tap/dblclick has zoomed to the max at a point
+      // (see toggleFitWidthScale's !fitWidthWasZoomIn branch), fitWidthToggleOn
+      // deliberately stays true (so a further repeat tap can find its way
+      // back to fit-width), but currentScale is intentionally NOT the
+      // fit-width target anymore - re-tracking here would silently snap
+      // straight back out of the max-zoom the moment anything else
+      // triggers a re-track (a thumbnail decoding, a resize, ...).
+      if (!fitWidthToggleOn || fitWidthMaxZoomActive || typeof computeFitWidthScale !== 'function') return;
       const anchorPage = pmFitWidthAnchorPage();
       const target = computeFitWidthScale(anchorPage);
       if (Math.abs(target - currentScale) > 0.25) {
@@ -13313,11 +13367,39 @@
       // FIRST page's zoom instead of fitting the one just tapped.
       const sameAnchor = fitWidthToggleOn && !Number.isNaN(anchorIdx) && anchorIdx === fitWidthAnchorIdx;
       if (sameAnchor) {
+        // A repeat tap while zoomed to the max at a point (see below)
+        // returns to the fit-width view it came from, same as the
+        // fitWidthWasZoomIn undo path just below - just restoring a
+        // different saved scale.
+        if (fitWidthMaxZoomActive) {
+          const restore = fitWidthMaxZoomRestoreScale;
+          fitWidthMaxZoomActive = false;
+          fitWidthMaxZoomRestoreScale = null;
+          if (restore != null && Math.abs(restore - currentScale) > 0.25) {
+            applyFitWidthScaleValue(restore);
+          }
+          requestAnimationFrame(() => {
+            let page = null;
+            if (!Number.isNaN(anchorIdx)) {
+              page = pagesContainer.querySelector('.page[data-index="' + anchorIdx + '"]');
+            }
+            if (!page) page = findNearestPageToPoint(ptrX, ptrY);
+            if (page) scrollFitWidthPageIntoView(page);
+          });
+          return;
+        }
         // Fit-width zoomed OUT (the user was already zoomed in past it) -
-        // repeating the same gesture (double-tap/dblclick) is asking for
-        // "fit width" again, not "go back to being zoomed in past it", so
-        // there's nothing to undo.
-        if (!fitWidthWasZoomIn) return;
+        // repeating the same gesture used to be a no-op here ("fit width"
+        // again is where we already are), but there's something more useful
+        // to do with a THIRD tap than nothing: zoom all the way in at the
+        // tapped point instead. A further repeat tap returns to this
+        // fit-width view (the fitWidthMaxZoomActive branch above).
+        if (!fitWidthWasZoomIn) {
+          fitWidthMaxZoomRestoreScale = currentScale;
+          fitWidthMaxZoomActive = true;
+          applyMaxZoomAtPoint(anchorPage, ptrX, ptrY);
+          return;
+        }
         const restore = fitWidthSavedScale;
         fitWidthToggleOn = false;
         fitWidthSavedScale = null;
@@ -13339,6 +13421,8 @@
       }
       fitWidthSavedScale = currentScale;
       fitWidthAnchorIdx = Number.isNaN(anchorIdx) ? null : anchorIdx;
+      fitWidthMaxZoomActive = false;
+      fitWidthMaxZoomRestoreScale = null;
       const target = computeFitWidthScale(anchorPage);
       fitWidthWasZoomIn = target > fitWidthSavedScale + 0.25;
       fitWidthToggleOn = true;
