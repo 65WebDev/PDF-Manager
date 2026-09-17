@@ -16976,6 +16976,35 @@
     let lastPageTapTime = 0;
     let lastPageTapIdx = null;
     let lastPageTapX = 0, lastPageTapY = 0;
+    // Set by onPagePointerDown when IT decides (using tap-tracking state as
+    // of before this same event) that this touch is the second half of a
+    // fast double-tap, so the paired touchstart listener below (added
+    // alongside pointerdown - see its own comment) can just act on that
+    // verdict instead of recomputing pmLooksLikeFastDoubleTapOn independently.
+    // Recomputing it there was the bug: onPagePointerDown's own
+    // pmRecordSoloTapOn() call (for a SOLO tap on a secondary control/text)
+    // already overwrites lastPageTapTime/Idx/X/Y with THIS SAME tap's own
+    // data before touchstart got a chance to run its check - so touchstart
+    // was comparing the tap against itself and always "matched" (zero
+    // elapsed time, zero movement), wrongly preventDefault-ing every single
+    // tap on a quick-action button/checkbox/link/text span and silently
+    // eating its click - one shared, single-source-of-truth decision avoids
+    // that entirely.
+    let pmPendingDoubleTapPreventDefault = false;
+    // preventDefault() on a touch's touchstart (see the div-level listener
+    // below) suppresses the browser's native handling - including native
+    // scroll/pan - for that ENTIRE touch sequence, not just the click/zoom
+    // it was meant to suppress. Since a "looks like a fast double-tap"
+    // match only needs matching position+timing against the LAST completed
+    // tap, it also matches the ordinary case of tapping a page (e.g. to
+    // select it) and then almost immediately touching down again nearby to
+    // start scrolling - .main's touch-action leaves scrolling entirely to
+    // the browser, so once native handling is suppressed for that touch
+    // there is nothing left to move the content at all. These take over
+    // scrolling manually via touchmove for just that one touch, so
+    // suppressing the native gesture doesn't cost the ability to scroll.
+    let pmActiveTouchScrollFallback = false;
+    let pmActiveTouchLastX = null, pmActiveTouchLastY = null;
     // Selection state from just before the most recent single tap's
     // handlePageClick() - restored verbatim if that tap turns out to be the
     // first half of a fast double-tap, so the zoom leaves selection exactly
@@ -17106,6 +17135,7 @@
     function onPagePointerDown(e) {
       if (e.pointerType !== 'touch') return;
       if (isLoading || interactionMode === 'nav') return;
+      pmPendingDoubleTapPreventDefault = false;
       if (isPageSecondaryControlTarget(e.target)) {
         // ...unless this finger-down looks like the second tap of a fast
         // double-tap on the SAME page - a genuine double-tap landing on a
@@ -17120,6 +17150,7 @@
         }
         // Suppress the link/checkbox/quick-action's own click for this tap -
         // it belongs to the double-tap instead.
+        pmPendingDoubleTapPreventDefault = true;
         e.preventDefault();
       }
       if (rubberArmed || rubberActive || pinchActive || isDragActive) return;
@@ -17138,6 +17169,7 @@
           pmRecordSoloTapOn(hostPage, e);
           return;
         }
+        pmPendingDoubleTapPreventDefault = true;
         e.preventDefault();
       }
       if (computeInsertAt(e.clientX, e.clientY)) {
@@ -17179,6 +17211,7 @@
       if (lastPageTapIdx === pageIdx &&
           (Date.now() - lastPageTapTime) < PAGE_DOUBLE_TAP_MS &&
           Math.hypot(e.clientX - lastPageTapX, e.clientY - lastPageTapY) < PAGE_DOUBLE_TAP_MOVE_MAX) {
+        pmPendingDoubleTapPreventDefault = true;
         e.preventDefault();
       }
 
@@ -17351,6 +17384,32 @@
       scrollContainer.addEventListener('scroll', () => {
         requestAnimationFrame(updateMobileQuickActions);
       }, { passive: true });
+
+      // Manual scroll takeover for a touch whose native handling we
+      // suppressed (see pmActiveTouchScrollFallback / the div-level
+      // touchstart listener) on the chance it was the second half of a
+      // fast double-tap - if it turns out to actually be a scroll-start,
+      // there is nothing else left to move the content, since .main's
+      // touch-action leaves scrolling entirely to the browser otherwise.
+      scrollContainer.addEventListener('touchmove', (e) => {
+        if (!pmActiveTouchScrollFallback || e.touches.length !== 1) return;
+        const t = e.touches[0];
+        if (pmActiveTouchLastX != null) {
+          if (!document.body.classList.contains('pm-vertical-scroll-lock')) {
+            scrollContainer.scrollLeft += pmActiveTouchLastX - t.clientX;
+          }
+          scrollContainer.scrollTop += pmActiveTouchLastY - t.clientY;
+        }
+        pmActiveTouchLastX = t.clientX;
+        pmActiveTouchLastY = t.clientY;
+      }, { passive: true });
+      const pmEndActiveTouchScrollFallback = () => {
+        pmActiveTouchScrollFallback = false;
+        pmActiveTouchLastX = null;
+        pmActiveTouchLastY = null;
+      };
+      scrollContainer.addEventListener('touchend', pmEndActiveTouchScrollFallback);
+      scrollContainer.addEventListener('touchcancel', pmEndActiveTouchScrollFallback);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -17547,6 +17606,13 @@
       if (e.touches.length === 2) {
         // Start of pinch - cancel possible drag/long press
         cancelPageTouchDrag();
+        // A second finger joining mid-touch turns this into a pinch instead
+        // of whatever the first finger's touch was tracking - stop the
+        // manual-scroll takeover (see the div-level touchstart listener) so
+        // it doesn't resume with stale coordinates once the pinch ends.
+        pmActiveTouchScrollFallback = false;
+        pmActiveTouchLastX = null;
+        pmActiveTouchLastY = null;
         // A manual pinch is a deliberate zoom action, same as dragging the
         // (desktop) slider or wheel-zooming - both of those already exit
         // fit-width mode via changeScale()/setScaleProgrammatic()'s own
@@ -20731,12 +20797,30 @@
       // native gesture before our JS ever finished deciding - this reacts
       // at the same, earliest point the browser itself does, regardless of
       // how fast the two taps land.
+      //
+      // Acts purely on pmPendingDoubleTapPreventDefault - onPagePointerDown's
+      // OWN verdict, set moments earlier on the same touch (pointerdown
+      // fires before touchstart) - rather than recomputing
+      // pmLooksLikeFastDoubleTapOn independently. Recomputing it here was a
+      // real bug: for a solo tap on a quick-action button/checkbox/link/text
+      // span, onPagePointerDown's pmRecordSoloTapOn() call already
+      // overwrites lastPageTapTime/Idx/X/Y with THIS SAME tap's own data
+      // before this listener ran its check, so it ended up comparing the
+      // tap against itself (zero elapsed time, zero movement - always a
+      // "match") and preventDefault-ed every single such tap, silently
+      // eating its click.
       div.addEventListener('touchstart', (e) => {
         if (e.touches.length !== 1) return;
-        const t = e.touches[0];
-        if (typeof pmLooksLikeFastDoubleTapOn === 'function' &&
-            pmLooksLikeFastDoubleTapOn(div, { clientX: t.clientX, clientY: t.clientY })) {
+        if (pmPendingDoubleTapPreventDefault) {
+          pmPendingDoubleTapPreventDefault = false;
           e.preventDefault();
+          // Suppressing native handling for this touch also suppresses
+          // native scrolling - take it over manually (see the touchmove/
+          // touchend listeners near cancelPageTouchDrag) so a touch that
+          // turns out to be a scroll-start, not a double-tap, still works.
+          pmActiveTouchScrollFallback = true;
+          pmActiveTouchLastX = e.touches[0].clientX;
+          pmActiveTouchLastY = e.touches[0].clientY;
         }
       }, { passive: false });
 
