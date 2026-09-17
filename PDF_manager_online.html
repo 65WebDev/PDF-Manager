@@ -16913,6 +16913,36 @@
       notifySelectionChanged();
     }
 
+    // Shared by every onPagePointerDown() gate that would otherwise bail out
+    // before tap-tracking even starts (isPageSecondaryControlTarget's link
+    // hotzone/checkbox/quick-action, and the high-zoom text-select glyph
+    // gate) - a fast double-tap landing on one of those should still zoom,
+    // not silently do nothing (or, for text, start a native selection).
+    function pmLooksLikeFastDoubleTapOn(hostPage, e) {
+      const hostIdx = hostPage ? parseInt(hostPage.dataset.index, 10) : NaN;
+      if (Number.isNaN(hostIdx)) return false;
+      return lastPageTapIdx === hostIdx &&
+        (Date.now() - lastPageTapTime) < PAGE_DOUBLE_TAP_MS &&
+        Math.hypot(e.clientX - lastPageTapX, e.clientY - lastPageTapY) < PAGE_DOUBLE_TAP_MOVE_MAX;
+    }
+
+    // Records a tap that's ABOUT to be handed off to some other control's
+    // own handling (a link/checkbox/quick-action click, or native text
+    // selection) instead of going through handlePageClick() - so a SECOND
+    // such tap still has something to match against via
+    // pmLooksLikeFastDoubleTapOn() above. Selection is unchanged by this tap
+    // (something else owns the interaction), so the snapshot is just the
+    // current state - a no-op if a later double-tap "restores" it.
+    function pmRecordSoloTapOn(hostPage, e) {
+      const hostIdx = hostPage ? parseInt(hostPage.dataset.index, 10) : NaN;
+      if (Number.isNaN(hostIdx)) return;
+      preTapSelectionSnapshot = { selected: new Set(selectedPages), last: lastSelectedIndex };
+      lastPageTapTime = Date.now();
+      lastPageTapIdx = hostIdx;
+      lastPageTapX = e.clientX;
+      lastPageTapY = e.clientY;
+    }
+
     function lockScrollForDrag() {
       scrollContainer.classList.add('drag-scroll-locked');
     }
@@ -16994,33 +17024,14 @@
       if (isLoading || interactionMode === 'nav') return;
       if (isPageSecondaryControlTarget(e.target)) {
         // ...unless this finger-down looks like the second tap of a fast
-        // double-tap on the SAME page (matching check in onPagePointerUp) -
-        // a genuine double-tap landing on a link hotzone/checkbox/quick-
-        // action is almost certainly meant as "zoom", not two separate
-        // single actions on that control, so let it fall through to normal
-        // tap tracking instead of the whole gesture silently doing nothing.
+        // double-tap on the SAME page - a genuine double-tap landing on a
+        // link hotzone/checkbox/quick-action is almost certainly meant as
+        // "zoom", not two separate single actions on that control, so let
+        // it fall through to normal tap tracking instead of the whole
+        // gesture silently doing nothing.
         const hostPage = e.target.closest && e.target.closest('.page');
-        const hostIdx = hostPage ? parseInt(hostPage.dataset.index, 10) : NaN;
-        const looksLikeDoubleTap = !Number.isNaN(hostIdx) && lastPageTapIdx === hostIdx &&
-          (Date.now() - lastPageTapTime) < PAGE_DOUBLE_TAP_MS &&
-          Math.hypot(e.clientX - lastPageTapX, e.clientY - lastPageTapY) < PAGE_DOUBLE_TAP_MOVE_MAX;
-        if (!looksLikeDoubleTap) {
-          // This tap alone still needs recording - onPagePointerUp() never
-          // runs for it (we're about to return before dragSourceDiv/
-          // pagePointerId get set), so without this a SECOND tap landing on
-          // the same link/checkbox/quick-action would have nothing to match
-          // against either, and two taps on the same control could never be
-          // recognized as a double-tap at all. Selection is unchanged by a
-          // tap here (its own control handles the interaction instead), so
-          // the snapshot is just the current state - a no-op if later
-          // "restored".
-          if (!Number.isNaN(hostIdx)) {
-            preTapSelectionSnapshot = { selected: new Set(selectedPages), last: lastSelectedIndex };
-            lastPageTapTime = Date.now();
-            lastPageTapIdx = hostIdx;
-            lastPageTapX = e.clientX;
-            lastPageTapY = e.clientY;
-          }
+        if (!pmLooksLikeFastDoubleTapOn(hostPage, e)) {
+          pmRecordSoloTapOn(hostPage, e);
           return;
         }
         // Suppress the link/checkbox/quick-action's own click for this tap -
@@ -17029,10 +17040,21 @@
       }
       if (rubberArmed || rubberActive || pinchActive || isDragActive) return;
       if (isPointInMobileQuickActions(e.clientX, e.clientY)) return;
-      // High-zoom text select: let native long-press select glyphs (do not arm page drag).
+      // High-zoom text select: let native long-press select glyphs (do not
+      // arm page drag) - unless, again, this looks like the second tap of a
+      // fast double-tap on the SAME page, which should zoom instead of
+      // starting a text selection. At high zoom almost every tap lands on
+      // text, so without this a double-tap could "far from always" register
+      // (exactly this report) - it was being swallowed here just as often as
+      // by the secondary-control-target gate above.
       if (typeof isZoomTextSelect === 'function' && isZoomTextSelect() &&
           e.target.closest && e.target.closest('.page-text-layer span, .page-text-layer br')) {
-        return;
+        const hostPage = e.target.closest('.page');
+        if (!pmLooksLikeFastDoubleTapOn(hostPage, e)) {
+          pmRecordSoloTapOn(hostPage, e);
+          return;
+        }
+        e.preventDefault();
       }
       if (computeInsertAt(e.clientX, e.clientY)) {
         e.preventDefault();
@@ -21949,6 +21971,24 @@
               typeof peOnObjSelectTextLayerPointerDown === 'function' &&
               peOnObjSelectTextLayerPointerDown(e)) {
             return;
+          }
+          // Main grid only: this capture-phase stopPropagation is what
+          // stops onPagePointerDown() from ever seeing a tap that lands on
+          // text - no matter what its own isZoomTextSelect() bypass checks,
+          // the event never reaches it at all. At high zoom almost every tap
+          // lands on text, so a fast double-tap there almost never got to
+          // register as "zoom" - it always looked like the start of a text
+          // selection instead. Let it through when it looks like the second
+          // tap of one, so it can bubble up and be handled as a zoom.
+          if (layer.id !== 'peTextLayer' && typeof pmLooksLikeFastDoubleTapOn === 'function') {
+            const hostPage = layer.closest('.page');
+            if (pmLooksLikeFastDoubleTapOn(hostPage, e)) return;
+            // This lone tap never reaches onPagePointerDown() either (this
+            // stopPropagation is exactly what blocks that), so it has to be
+            // recorded here instead - otherwise a second tap landing on text
+            // would have nothing to match against and two taps on text could
+            // never be recognized as a double-tap at all.
+            if (typeof pmRecordSoloTapOn === 'function') pmRecordSoloTapOn(hostPage, e);
           }
           e.stopPropagation();
         }, true);
