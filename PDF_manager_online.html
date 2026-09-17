@@ -1758,12 +1758,18 @@
       font-size: 14px; font-weight: 600; margin-right: 0; white-space: nowrap;
       flex-shrink: 0; position: relative; z-index: 2; order: 1;
     }
-    /* Prev/next between title and Object-select (left set in JS). */
+    /* Prev/next between title and Object-select (left set in JS). Above
+       .pe-toolbar-tail's own z-index (2, see below) - the landscape navrow
+       layout can park ←→ on the same row as a wrapped tail (see
+       peLayoutPageNavButtons), and the tail's flex box spans the full row
+       width even though its own content is right-aligned, so its (empty)
+       left portion still hit-tests as the tail div and ate every tap meant
+       for ←→ sitting underneath it at an equal z-index. */
     .pe-page-nav {
       position: absolute;
       top: 8px;
       height: 40px;
-      z-index: 2;
+      z-index: 3;
       display: inline-flex; align-items: center; gap: 6px;
       flex-shrink: 0; pointer-events: auto; order: 2;
     }
@@ -13282,22 +13288,28 @@
         ptrY = (opts.clientY != null && Number.isFinite(opts.clientY))
           ? opts.clientY : fitWidthPointer.y;
       }
-      if (fitWidthToggleOn) {
+      // Capture the nearest page BEFORE scale changes reflow the layout.
+      const anchorPage = findNearestPageToPoint(ptrX, ptrY);
+      const anchorIdx = anchorPage ? parseInt(anchorPage.dataset.index, 10) : NaN;
+      // A repeat gesture only means "undo" when it lands on the SAME page
+      // fit-width is currently anchored to - the toggle stays on across a
+      // rotation of that same page (pmReapplyFitWidthIfActive's live
+      // re-track), so this is also what makes rotating the anchored page
+      // "keep it fit-widthed" rather than a candidate for undo. Landing on
+      // a DIFFERENT page (any orientation) is a fresh "fit THIS page"
+      // request instead, regardless of whatever fitWidthWasZoomIn was left
+      // at by the previous page - without this check, double-tapping a
+      // second, different page while already fit-widthed either silently
+      // did nothing (if the stale flag said "zoomed out") or undid the
+      // FIRST page's zoom instead of fitting the one just tapped.
+      const sameAnchor = fitWidthToggleOn && !Number.isNaN(anchorIdx) && anchorIdx === fitWidthAnchorIdx;
+      if (sameAnchor) {
         // Fit-width zoomed OUT (the user was already zoomed in past it) -
         // repeating the same gesture (double-tap/dblclick) is asking for
         // "fit width" again, not "go back to being zoomed in past it", so
         // there's nothing to undo.
         if (!fitWidthWasZoomIn) return;
         const restore = fitWidthSavedScale;
-        // Capture the nearest page BEFORE scale changes reflow the layout -
-        // same anchor-preserving approach turning fit-width ON already uses
-        // below. Without this, applyScale() has no zoomAnchor on touch (see
-        // applyFitWidthScaleValue), so scrollTop stays whatever raw pixel
-        // value it was at the bigger scale - restoring to a much SMALLER
-        // scale shrinks the document height under it, which clamps scrollTop
-        // to the new (much shorter) max and reads as a jump to the end.
-        const anchorPage = findNearestPageToPoint(ptrX, ptrY);
-        const anchorIdx = anchorPage ? parseInt(anchorPage.dataset.index, 10) : NaN;
         fitWidthToggleOn = false;
         fitWidthSavedScale = null;
         fitWidthAnchorIdx = null;
@@ -13316,9 +13328,6 @@
         });
         return;
       }
-      // Capture the nearest page BEFORE scale changes reflow the layout.
-      const anchorPage = findNearestPageToPoint(ptrX, ptrY);
-      const anchorIdx = anchorPage ? parseInt(anchorPage.dataset.index, 10) : NaN;
       fitWidthSavedScale = currentScale;
       fitWidthAnchorIdx = Number.isNaN(anchorIdx) ? null : anchorIdx;
       const target = computeFitWidthScale(anchorPage);
@@ -17311,6 +17320,13 @@
     let pinchAnchorIndex = null;
     let pinchAnchorFx = 0.5, pinchAnchorFy = 0.5;
     let pinchOriginX = 0, pinchOriginY = 0;
+    // Midpoint at gesture start, for the live pan feedback below - the final
+    // scroll position (see endPinch/settle) already tracks a two-finger drag
+    // correctly via the anchor page's fraction and the LAST midpoint, but the
+    // live CSS transform during the gesture only ever scaled around the
+    // FIXED starting origin, so moving both fingers together while still
+    // pinching didn't visually pan until you lifted them.
+    let pinchStartMidX = 0, pinchStartMidY = 0;
 
     function getPinchAnchorPage() {
       if (pinchAnchorIndex == null) return null;
@@ -17411,7 +17427,14 @@
 
     function applyPinchVisualScale() {
       const ratio = pinchStartScale > 0 ? currentScale / pinchStartScale : 1;
-      pagesContainer.style.transform = 'scale(' + ratio + ')';
+      // translate() is listed first so it applies in screen pixels AFTER
+      // the scale (CSS transform functions compose right-to-left) - moving
+      // both fingers together (ratio unchanged) then pans the already-
+      // scaled content by exactly that many screen pixels, on top of the
+      // fixed-origin scale below.
+      const dx = pinchLastMidX != null ? pinchLastMidX - pinchStartMidX : 0;
+      const dy = pinchLastMidY != null ? pinchLastMidY - pinchStartMidY : 0;
+      pagesContainer.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(' + ratio + ')';
     }
 
     function clearPinchVisualScale() {
@@ -17440,15 +17463,19 @@
 
     function applyPinchScaleChange(newScale) {
       newScale = clampScale(newScale);
-      if (newScale === currentScale) return;
-
-      currentScale = newScale;
-      scaleUserLocked = true;
-      autoScaleEnabled = false;
-      if (scaleSlider) {
-        // Keep the (hidden-on-mobile) slider in sync for any UI that reads it.
-        scaleSlider.value = Math.max(0, Math.min(200, scaleToSlider(currentScale)));
+      if (newScale !== currentScale) {
+        currentScale = newScale;
+        scaleUserLocked = true;
+        autoScaleEnabled = false;
+        if (scaleSlider) {
+          // Keep the (hidden-on-mobile) slider in sync for any UI that reads it.
+          scaleSlider.value = Math.max(0, Math.min(200, scaleToSlider(currentScale)));
+        }
       }
+      // Always reapply, even when the scale itself didn't change - two
+      // fingers moving together (a pure pan, no pinch) still needs to
+      // update the live translate in applyPinchVisualScale(), which an
+      // early return here used to skip entirely.
       applyPinchVisualScale();
     }
 
@@ -17505,6 +17532,8 @@
 
         const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
         const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        pinchStartMidX = midX;
+        pinchStartMidY = midY;
         pinchLastMidX = midX;
         pinchLastMidY = midY;
 
