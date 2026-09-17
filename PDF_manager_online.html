@@ -6037,6 +6037,15 @@
         transform: scale(0.98);
         transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
       }
+      /*Single-column layout (see PAGE_PRESS_PENDING_DELAY_MS/isPagesSingleColumnLayout):
+         the page already fills the width, so the little scale-down "pop" -
+         meant as a drag-to-reorder affordance in the grid - just reads as an
+         odd wobble on a single full-width page; keep the border/shadow cue
+         but drop the scale and the eased transition in/out.*/
+      .page.page-press-pending-instant {
+        transform: none !important;
+        transition: none !important;
+      }
       /*Undo/Redo - round buttons under the file name (top right)*/
       #mobileUndoRedoBar.visible,
       #peMobileUndoRedoBar.visible {
@@ -12181,7 +12190,7 @@
           div.dataset.index = idx;
           //Transition classes (drag and drop, etc.) are not content related
           //pages - should not “stick” to someone else’s page when reusing the node.
-          div.classList.remove('drag-source', 'page-press-pending');
+          div.classList.remove('drag-source', 'page-press-pending', 'page-press-pending-instant');
           div.classList.toggle('page-rotated', !!p.rotated);
         } else {
           //Changed/new page - create a shell and put a thumbnail.
@@ -16937,6 +16946,18 @@
     initZoomPanHandBadge();
     const TAP_MOVE_MAX = 12;       // max. finger shift for “tap” (page selection)
     const TAP_SCROLL_MAX = 4;      // max. scrolling by gesture - otherwise it’s a scroll, not a tap
+    // Single-column layout (one page fills the width, e.g. fit-width/high
+    // zoom) delays the page-press-pending "pop" (border/shadow/scale, see
+    // .page.page-press-pending) instead of showing it the instant a finger
+    // touches down - almost every scroll gesture in that layout starts with
+    // a finger literally on the (only) page, so applying it immediately
+    // made every scroll-start flash a brief blue "selected"-looking border
+    // that was cancelled a moment later once the movement threshold was
+    // crossed. Waiting this long first means a genuine scroll (which starts
+    // moving well within this window) never gets a chance to show it at
+    // all, while a real press-and-hold still does.
+    const PAGE_PRESS_PENDING_DELAY_MS = 140;
+    let pagePressPendingTimer = null;
     let longPressTimer = null;
     let longPressActive = false;
     let pagePointerId = null;
@@ -17025,6 +17046,8 @@
       suppressPageTap = true;
       clearTimeout(longPressTimer);
       longPressTimer = null;
+      clearTimeout(pagePressPendingTimer);
+      pagePressPendingTimer = null;
       detachPagePointerListeners();
       document.body.classList.remove('page-touch-armed');
       if (dragSourceDiv && pagePointerId !== null) {
@@ -17040,7 +17063,7 @@
       }
       pagesContainer.classList.remove('dragging-active');
       pagesContainer.querySelectorAll('.page.drag-source, .page.page-press-pending').forEach(p => {
-        p.classList.remove('drag-source', 'page-press-pending');
+        p.classList.remove('drag-source', 'page-press-pending', 'page-press-pending-instant');
       });
       invalidateDragGeometry();
       dragSourceDiv = null;
@@ -17055,9 +17078,9 @@
 
     function startPageTouchDrag() {
       if (!dragSourceDiv || pagePointerId === null) return;
-      dragSourceDiv.classList.remove('page-press-pending');
+      dragSourceDiv.classList.remove('page-press-pending', 'page-press-pending-instant');
       pagesContainer.querySelectorAll('.page.page-press-pending').forEach(p => {
-        p.classList.remove('page-press-pending');
+        p.classList.remove('page-press-pending', 'page-press-pending-instant');
       });
       longPressActive = true;
       lockScrollForDrag();
@@ -17159,7 +17182,23 @@
         e.preventDefault();
       }
 
-      dragSourceDiv.classList.add('page-press-pending');
+      clearTimeout(pagePressPendingTimer);
+      pagePressPendingTimer = null;
+      if (typeof isPagesSingleColumnLayout === 'function' && isPagesSingleColumnLayout()) {
+        const pendingDiv = dragSourceDiv;
+        const pendingPointerId = pagePointerId;
+        pagePressPendingTimer = setTimeout(() => {
+          pagePressPendingTimer = null;
+          if (dragSourceDiv === pendingDiv && pagePointerId === pendingPointerId) {
+            // -instant skips the transition entirely (see its CSS rule) -
+            // single-column mode wants a plain, non-animated highlight, not
+            // the little scale/shadow "pop" grid mode uses.
+            pendingDiv.classList.add('page-press-pending', 'page-press-pending-instant');
+          }
+        }, PAGE_PRESS_PENDING_DELAY_MS);
+      } else {
+        dragSourceDiv.classList.add('page-press-pending');
+      }
       clearTimeout(longPressTimer);
       longPressTimer = setTimeout(() => {
         longPressTimer = null;
@@ -17221,9 +17260,11 @@
 
       clearTimeout(longPressTimer);
       longPressTimer = null;
+      clearTimeout(pagePressPendingTimer);
+      pagePressPendingTimer = null;
       pageTouchActive = false;
       document.body.classList.remove('page-touch-armed');
-      if (dragSourceDiv) dragSourceDiv.classList.remove('page-press-pending');
+      if (dragSourceDiv) dragSourceDiv.classList.remove('page-press-pending', 'page-press-pending-instant');
       detachPagePointerListeners();
       if (dragSourceDiv) {
         try {
@@ -21062,7 +21103,7 @@
           // only after that does he risk “sticking” to someone else’s page with such
           // reuse.
           pagesContainer.querySelectorAll('.page.drag-source, .page.page-press-pending').forEach(p => {
-            p.classList.remove('drag-source', 'page-press-pending');
+            p.classList.remove('drag-source', 'page-press-pending', 'page-press-pending-instant');
           });
 
           if (pageTabSwitchPromise) {
@@ -21105,7 +21146,7 @@
         pagesContainer.classList.remove('dragging-active');
         // Repeat just in case something might have managed to add the class again.
         pagesContainer.querySelectorAll('.page.drag-source, .page.page-press-pending').forEach(p => {
-          p.classList.remove('drag-source', 'page-press-pending');
+          p.classList.remove('drag-source', 'page-press-pending', 'page-press-pending-instant');
         });
         dragSourceDiv = null;
         isDragActive  = false;
@@ -21138,7 +21179,7 @@
       }
       pagesContainer.classList.remove('dragging-active');
       pagesContainer.querySelectorAll('.page.drag-source, .page.page-press-pending').forEach(p => {
-        p.classList.remove('drag-source', 'page-press-pending');
+        p.classList.remove('drag-source', 'page-press-pending', 'page-press-pending-instant');
       });
       dragSourceDiv = null;
       isDragActive = false;
