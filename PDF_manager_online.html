@@ -16774,6 +16774,34 @@
     let pageTouchScrollX = 0, pageTouchScrollY = 0;
     const pagePointerOpts = { passive: false, capture: true };
 
+    // Fast double-tap on a page → fit-width zoom (mirrors desktop's dblclick,
+    // see handleDoubleClick). A slow second tap is just another independent
+    // tap, so it keeps toggling selection as usual - only taps landing
+    // within PAGE_DOUBLE_TAP_MS of each other, on the same page, count.
+    const PAGE_DOUBLE_TAP_MS = 300;
+    const PAGE_DOUBLE_TAP_MOVE_MAX = 40;
+    let lastPageTapTime = 0;
+    let lastPageTapIdx = null;
+    let lastPageTapX = 0, lastPageTapY = 0;
+    // Selection state from just before the most recent single tap's
+    // handlePageClick() - restored verbatim if that tap turns out to be the
+    // first half of a fast double-tap, so the zoom leaves selection exactly
+    // as it was (handlePageClick's multi-select collapse isn't reversible
+    // by just calling it again).
+    let preTapSelectionSnapshot = null;
+
+    function restorePageSelectionSnapshot(snapshot) {
+      selectedPages.clear();
+      snapshot.selected.forEach(idx => selectedPages.add(idx));
+      lastSelectedIndex = snapshot.last;
+      document.querySelectorAll('.page').forEach(p => {
+        p.classList.toggle('selected', selectedPages.has(parseInt(p.dataset.index, 10)));
+      });
+      refreshCheckboxes();
+      updateUIState();
+      notifySelectionChanged();
+    }
+
     function lockScrollForDrag() {
       scrollContainer.classList.add('drag-scroll-locked');
     }
@@ -16986,7 +17014,37 @@
             interactionMode !== 'nav' &&
             !isPointInMobileQuickActions(e.clientX, e.clientY) &&
             !computeInsertAt(e.clientX, e.clientY)) {
-          handlePageClick(parseInt(pageDiv.dataset.index), pageDiv, e);
+          const tapIdx = parseInt(pageDiv.dataset.index, 10);
+          const now = Date.now();
+          const isFastDoubleTap = lastPageTapIdx === tapIdx && preTapSelectionSnapshot &&
+            (now - lastPageTapTime) < PAGE_DOUBLE_TAP_MS &&
+            Math.hypot(e.clientX - lastPageTapX, e.clientY - lastPageTapY) < PAGE_DOUBLE_TAP_MOVE_MAX;
+          if (isFastDoubleTap) {
+            // Consume it (don't chain into a triple-tap) and undo the first
+            // tap's selection toggle - handlePageClick's multi-select
+            // collapse isn't reversible by just calling it again, so the
+            // snapshot from right before that call is restored verbatim.
+            lastPageTapTime = 0;
+            lastPageTapIdx = null;
+            const snapshot = preTapSelectionSnapshot;
+            preTapSelectionSnapshot = null;
+            // Restore first, then act - pmUnmarkPageDeletion() may itself
+            // deselect tapIdx, which needs to apply on top of the restored
+            // selection, not on top of whatever the first tap left behind.
+            restorePageSelectionSnapshot(snapshot);
+            if (markedForDeletion.has(tapIdx)) {
+              pmUnmarkPageDeletion(tapIdx, pageDiv);
+            } else if (typeof toggleFitWidthScale === 'function') {
+              toggleFitWidthScale({ clientX: e.clientX, clientY: e.clientY });
+            }
+          } else {
+            preTapSelectionSnapshot = { selected: new Set(selectedPages), last: lastSelectedIndex };
+            handlePageClick(tapIdx, pageDiv, e);
+            lastPageTapTime = now;
+            lastPageTapIdx = tapIdx;
+            lastPageTapX = e.clientX;
+            lastPageTapY = e.clientY;
+          }
         }
         suppressPageClickForTextSelect = false;
         dragSourceDiv = null;
@@ -24807,23 +24865,30 @@
       }
     }
 
+    // Shared by desktop's dblclick handler and the touch fast-double-tap
+    // detector in onPagePointerUp() - unmarks a page pending deletion.
+    // Takes priority over fit-width zoom on both.
+    function pmUnmarkPageDeletion(idx, pageDiv) {
+      markedForDeletion.delete(idx);
+      setDocumentDirty(true);
+      pageDiv.classList.remove('to-delete');
+      pageDiv.style.display = ''; // restore visibility when unchecking
+      pageDiv.title = "";
+
+      if (selectedPages.has(idx)) {
+        selectedPages.delete(idx);
+        pageDiv.classList.remove('selected');
+      }
+
+      refreshCheckboxes();
+      updateUIState();
+    }
+
     function handleDoubleClick(idx, pageDiv, e) {
       if (isLoading) return;
       e.stopImmediatePropagation();
       if (markedForDeletion.has(idx)) {
-        markedForDeletion.delete(idx);
-        setDocumentDirty(true);
-        pageDiv.classList.remove('to-delete');
-        pageDiv.style.display = ''; // restore visibility when unchecking
-        pageDiv.title = "";
-
-        if (selectedPages.has(idx)) {
-          selectedPages.delete(idx);
-          pageDiv.classList.remove('selected');
-        }
-
-        refreshCheckboxes();
-        updateUIState();
+        pmUnmarkPageDeletion(idx, pageDiv);
         return;
       }
       // Desktop: double-click a page → toggle fit-width.
