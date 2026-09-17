@@ -51826,11 +51826,15 @@ function peObjMouseDown(e, o) {
     const objBtn = document.getElementById('peToolObjSelect');
     const prev = document.getElementById('pePagePrev');
     const next = document.getElementById('pePageNext');
+    const tail = document.getElementById('peToolbarTail');
     if (!bar || !title || !nav || !objBtn || !prev || !next) return;
     if (!document.getElementById('pageEditModal')?.classList.contains('open')) return;
 
     // Clear prior edge-align transform before measuring title for nav/lead.
     title.style.transform = '';
+    // Clear any stale navrow+tail-wrap clearance from a previous call before
+    // re-measuring - only the pe-tb-navrow branch below ever re-adds it.
+    if (tail) tail.style.marginTop = '';
 
     const barRect = bar.getBoundingClientRect();
     const titleRect = title.getBoundingClientRect();
@@ -51853,6 +51857,18 @@ function peObjMouseDown(e, o) {
         const navRight = nav.getBoundingClientRect().right;
         const extra = Math.max(0, Math.round(navRight - titleRect.right));
         mid.style.paddingLeft = extra ? (extra + 'px') : '';
+      }
+      // When the tail (Scale/Cancel/Save) ALSO wraps to its own row, plain
+      // flex-wrap flows it right after row 1's content - which has no idea
+      // #pePageNav (out of flow, position:absolute) occupies its own band
+      // just below that row, so the wrapped tail rendered on top of the nav
+      // buttons and ate every tap meant for them. Push it down to clear the
+      // nav row's own bottom edge.
+      if (tail && bar.classList.contains('pe-tb-tail-wrap')) {
+        const navBottom = nav.getBoundingClientRect().bottom;
+        const tailTop = tail.getBoundingClientRect().top;
+        const clearance = Math.round(navBottom - tailTop) + 6;
+        if (clearance > 0) tail.style.marginTop = clearance + 'px';
       }
       peLayoutToolbarEdgeAlign();
       peLayoutMenuToggleOverDelete();
