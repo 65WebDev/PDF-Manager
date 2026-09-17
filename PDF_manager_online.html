@@ -35434,6 +35434,17 @@ let pePinchLastAppliedMidX = null;
 let pePinchLastAppliedMidY = null;
 let pePinchRaf = 0;
 let pePinchPending = null;
+// Double-tap-to-zoom for the single-page editor (mirrors the preview grid's
+// double-tap fit-width toggle, see toggleFitWidthScale): from the whole-page
+// (fit) view, zoom in to the max at the tapped point; from any other zoom
+// level (however reached - a previous double-tap, pinch, or the slider),
+// return to the whole-page view. No separate "undo" direction is needed
+// here (unlike the grid's asymmetric zoom-in/zoom-out split) since the
+// editor has only the one page and one natural "reset" state to return to.
+let peLastTapTime = 0;
+let peLastTapX = 0, peLastTapY = 0;
+const PE_DOUBLE_TAP_MS = 300;
+const PE_DOUBLE_TAP_MOVE_MAX = 40;
 let peTextKbTimer = null;
 /** Nested timeouts from peScheduleTextEditVisibility (must clear on geom-drag). */
 let peTextKbFollowupTimers = [];
@@ -36312,6 +36323,36 @@ function peIsEditorPageFitView() {
     if (peState._liveZoomMul > minMul + 0.02) return false;
   }
   return !peCanPan();
+}
+
+/** Does this touch look like the second half of a fast double-tap on the stage? */
+function peLooksLikeFastDoubleTap(clientX, clientY) {
+  return (Date.now() - peLastTapTime) < PE_DOUBLE_TAP_MS &&
+    Math.hypot(clientX - peLastTapX, clientY - peLastTapY) < PE_DOUBLE_TAP_MOVE_MAX;
+}
+
+function peRecordSoloTap(clientX, clientY) {
+  peLastTapTime = Date.now();
+  peLastTapX = clientX;
+  peLastTapY = clientY;
+}
+
+// Double-tap/dblclick toggle: whole-page (fit) view <-> max zoom at the
+// tapped/clicked point. Reuses peApplyZoomSlider - the same commit path the
+// pinch gesture ends on - so it gets the identical anchor-preserving scroll
+// restore and a proper full-resolution re-render. Returns whether it
+// actually acted (false in object-select mode / while inline-editing text,
+// where a double-tap has its own, unrelated meaning) so callers can let an
+// unclaimed tap fall through to their own normal handling instead.
+function peToggleDoubleTapZoom(clientX, clientY) {
+  if (!peState || peState.tool !== 'select' || peState.objSelectMode || peState.inlineEditId) return false;
+  const sl = document.getElementById('peScaleSlider');
+  if (!sl) return false;
+  const minSlider = parseInt(sl.min, 10) || 100;
+  const maxSlider = parseInt(sl.max, 10) || 200;
+  const target = peIsEditorPageFitView() ? maxSlider : minSlider;
+  peApplyZoomSlider(target, clientX, clientY, { immediate: true, syncSlider: true, force: true });
+  return true;
 }
 
 /** Page swipe nav: Hand or Cursor (object-select) only — not draw/crop/text tools. */
@@ -50935,6 +50976,17 @@ function peObjMouseDown(e, o) {
       peFocusInlineEditorNow();
       return;
     }
+    if (tool === 'select' && touchLike) {
+      if (peLooksLikeFastDoubleTap(e.clientX, e.clientY)) {
+        peLastTapTime = 0;
+        if (peToggleDoubleTapZoom(e.clientX, e.clientY)) {
+          e.preventDefault();
+          return;
+        }
+      } else {
+        peRecordSoloTap(e.clientX, e.clientY);
+      }
+    }
     if (tool === 'select' && peState.inlineEditId) {
       e.preventDefault();
       const editing = peState.objects.find(x => x.id === peState.inlineEditId);
@@ -50953,6 +51005,12 @@ function peObjMouseDown(e, o) {
     }
     // select: click on an empty space - deselect
     if (!isDrawTool) peSelect(null);
+  });
+
+  // Desktop counterpart of the touch double-tap zoom toggle above.
+  stage.addEventListener('dblclick', (e) => {
+    if (e.target.closest && e.target.closest('.pe-obj, #peTextLayer, #peCrop')) return;
+    if (peToggleDoubleTapZoom(e.clientX, e.clientY)) e.preventDefault();
   });
 
   peBindPointerMoveUp((e) => {
