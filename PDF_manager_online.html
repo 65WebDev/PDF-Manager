@@ -13163,9 +13163,30 @@
       }
       if (typeof pmUpdateVerticalOnlyScrollLock === 'function') pmUpdateVerticalOnlyScrollLock();
       if (!fitWidthToggleOn || typeof computeFitWidthScale !== 'function') return;
-      const target = computeFitWidthScale(pmFitWidthAnchorPage());
+      const anchorPage = pmFitWidthAnchorPage();
+      const target = computeFitWidthScale(anchorPage);
       if (Math.abs(target - currentScale) > 0.25) {
-        applyFitWidthScaleValue(target);
+        // On touch, applyScale() has no zoom-anchor to keep the view stable
+        // across a scale change (see applyFitWidthScaleValue) - desktop
+        // doesn't need this because captureZoomAnchor()/restoreZoomAnchor()
+        // already covers it there. This re-track can land a big scale swing
+        // with no user gesture behind it at all: e.g. rotating the anchor
+        // page itself flips it between "fits its own portrait content
+        // width" and "fits the square card" (see pmFitWidthAspectFor) the
+        // moment its rotated thumbnail finishes loading - without
+        // preserving the anchor here, that swing reflowed the whole
+        // document under a raw scrollTop pixel value with nothing keeping
+        // the same page in view, and looked like the view jumping to some
+        // other page for no reason.
+        if (isTouchDevice && anchorPage) {
+          applyFitWidthScaleValue(target);
+          requestAnimationFrame(() => {
+            const page = anchorPage.isConnected ? anchorPage : pmFitWidthAnchorPage();
+            if (page) scrollPageIntoViewTop(page);
+          });
+        } else {
+          applyFitWidthScaleValue(target);
+        }
       }
     }
 
