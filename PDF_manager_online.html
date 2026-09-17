@@ -1768,6 +1768,26 @@
       flex-shrink: 0; pointer-events: auto; order: 2;
     }
     .pe-page-nav .pe-btn:disabled { opacity: 0.38; cursor: default; }
+    /* Landscape-only alternate to stage 2/3: parks ←→ on their own row right
+       under "Страница №..." (JS repositions #pePageNav for this, see
+       peUpdateToolbarWrap/peLayoutPageNavButtons) instead of reserving a
+       row-1 gap beside the title for it. Frees exactly the width that was
+       forcing Delete to collide with the hamburger menu button/overflow
+       into a full tools-wrap on landscape phones - portrait keeps the
+       regular 3-stage system untouched. */
+    .pe-toolbar.pe-tb-navrow {
+      align-items: flex-start;
+      min-height: 68px;
+      box-sizing: border-box;
+    }
+    .pe-toolbar.pe-tb-navrow > .pe-title {
+      align-self: flex-start;
+      margin-top: 10px;
+    }
+    .pe-toolbar.pe-tb-navrow > .pe-tb-mid,
+    .pe-toolbar.pe-tb-navrow > .pe-toolbar-tail {
+      align-self: center;
+    }
     /* Middle flex zone: tools stay centered here; tail keeps a fixed right slot
        on row 1 so only the nav side-gaps shrink during stage 1. */
     .pe-tb-mid {
@@ -1895,6 +1915,14 @@
       .pe-btn:hover:not(:disabled) { background: #3498db; }
       .pe-btn:hover:not(:disabled) svg { stroke: #fff; }
     }
+    /* Real press feedback, safe on touch (unlike :hover, :active always
+       releases on touchend/mouseup - it can't get "stuck" highlighted).
+       Needed for one-shot buttons with no persistent tool state of their
+       own (Insert image/signature, Rotate) - without this, tapping them
+       gave no visible response at all, unlike Crop/Text/etc. staying
+       highlighted via .active while their tool mode is selected. */
+    .pe-btn:active:not(:disabled) { background: #3498db; }
+    .pe-btn:active:not(:disabled) svg { stroke: #fff; }
     .pe-btn:disabled { opacity: .4; cursor: default; }
     .pe-btn.active { background: #3498db; border-color: #8fd0ff; }
     .pe-btn.active svg { stroke: #fff; }
@@ -1928,6 +1956,14 @@
     .pe-btn-square {
       width: 36px; height: 36px; padding: 0;
       justify-content: center; font-size: 19px; line-height: 1;
+      /* Direct flex children of .pe-tools-main (Crop/Redact/Text/Image) sit
+         next to buttons wrapped in .pe-shape-wrap (Signature/Shape), whose
+         own DIV - not the button - is the flex item; under space pressure
+         the un-wrapped buttons shrank past 36px (default min-width:auto lets
+         a flex item shrink to its min-content, and these buttons' min-content
+         is smaller than 36px) while the wrapped ones didn't, leaving every
+         icon button a different width. Fixed size, always. */
+      flex-shrink: 0;
     }
     .rotate-glyph { display: inline-block; transform: scaleX(-1) scaleY(-1); }
     .pe-btn-square .rotate-glyph { font-size: 19px; line-height: 1; display: inline-block; }
@@ -49770,7 +49806,23 @@ function peObjMouseDown(e, o) {
     pePinchPending = null;
     // Drop OSK focus pad / flex-center so pinch anchors under the fingers.
     peClearEditorKbScrollRoom();
+    // pe-stage-pad-pinching switches the pad from flex-centered to flex-start
+    // (see its CSS comment: once the page fits within the viewport there's no
+    // scroll room to express centering as an offset, so pinch needs real
+    // flex-start + scroll to track the anchor point instead). Added on its
+    // own, that switch is a visible one-frame jump to the top-left - a plain
+    // scrollLeft/Top compensation (peUpdateStageWrapOverflow()'s own trick for
+    // its overflow-class toggles) only works when scroll room already exists,
+    // which is exactly untrue in the common case a pinch starts from (page
+    // fits, nothing to scroll yet). peRestoreScrollToAnchor() already solves
+    // this properly during the pinch itself, by growing the pad's padding
+    // first when the needed scroll would go out of range, then scrolling -
+    // running that same routine right here, anchored on the still-centered
+    // layout's fraction under the fingers' midpoint, converts the centering
+    // gap into real padding before the class visibly moves anything.
+    const pinchStartFrac = peStageFracUnderPoint(pePinchLastMidX, pePinchLastMidY);
     document.getElementById('peStagePad')?.classList.add('pe-stage-pad-pinching');
+    peRestoreScrollToAnchor(pePinchLastMidX, pePinchLastMidY, pinchStartFrac.fx, pinchStartFrac.fy);
     peCancelZoomRender();
     e.preventDefault();
   }, { passive: false });
@@ -51609,70 +51661,43 @@ function peObjMouseDown(e, o) {
     nav.style.gap = innerGap + 'px';
     const navW = nav.offsetWidth || ((prev.offsetWidth || 32) + (next.offsetWidth || 32) + innerGap);
     const barGap = parseFloat(getComputedStyle(bar).gap) || 8;
-    const portrait = typeof window.matchMedia === 'function'
-      && window.matchMedia('(orientation: portrait)').matches;
+
+    // Landscape alternate to stage 2/3 (see .pe-tb-navrow CSS): park ←→ on
+    // their own row directly under the title instead of reserving row-1
+    // space beside it. Object-select/Hand (lead) need no special alignment
+    // here - they just follow title normally, like plain stage 1.
+    if (bar.classList.contains('pe-tb-navrow')) {
+      if (lead) lead.style.marginLeft = '';
+      nav.style.left = Math.max(0, Math.round(titleRect.left - barRect.left)) + 'px';
+      nav.style.top = Math.max(0, Math.round(titleRect.bottom - barRect.top + 6)) + 'px';
+      const mid = document.getElementById('peTbMid');
+      if (mid) {
+        const navRight = nav.getBoundingClientRect().right;
+        const extra = Math.max(0, Math.round(navRight - titleRect.right));
+        mid.style.paddingLeft = extra ? (extra + 'px') : '';
+      }
+      peLayoutToolbarEdgeAlign();
+      peLayoutMenuToggleOverDelete();
+      return;
+    }
 
     // Align nav to the title row (padding-top), not the full multi-row toolbar.
     nav.style.top = Math.max(0, titleRect.top - barRect.top + (titleRect.height - 40) / 2) + 'px';
 
-    // Stage 3: in portrait, park ←→ directly above Image + Shapes.
-    // Otherwise align pe-tools-divider-nav with the Shapes↔Rotate divider.
+    // Stage 3 (both orientations): keep ←→ as a tight adjacent pair
+    // immediately left of pe-tools-divider-nav, and align that divider with
+    // the Shapes↔Rotate divider on row 2 so Object-select / Hand sit
+    // strictly above RotL / RotR. (Portrait used to instead spread ←→ apart
+    // to park them over Image + Shapes - dropped in favor of this single
+    // consistent layout for both orientations.)
     if (bar.classList.contains('pe-tb-tools-wrap')) {
       const navDivider = lead?.querySelector(':scope > .pe-tools-divider-nav');
       const mainDivider = document.querySelector('#peToolsMain > .pe-tools-divider');
       const titleRightRel = titleRect.right - barRect.left;
       const groupGap = minGap;
-      const imgBtn = document.getElementById('peToolImage');
-      const shapeBtn = document.getElementById('peToolShape');
 
       if (lead) lead.style.marginLeft = '0px';
       nav.style.left = (titleRightRel + minGap) + 'px';
-
-      if (portrait && imgBtn && shapeBtn
-          && imgBtn.offsetParent != null && shapeBtn.offsetParent != null) {
-        const imgRect = imgBtn.getBoundingClientRect();
-        const shapeRect = shapeBtn.getBoundingClientRect();
-        if (imgRect.width > 0 && shapeRect.width > 0) {
-          // Match tools-main gap so ← sits over Image and → over Shapes.
-          nav.style.gap = Math.max(0, Math.round(
-            shapeRect.left - imgRect.right
-          )) + 'px';
-          const navLeft = Math.max(0, Math.round(imgRect.left - barRect.left));
-          nav.style.left = navLeft + 'px';
-          // Align nav-divider with the Shapes↔Rotate divider so Object-select /
-          // Hand sit strictly above RotL / RotR (same columns as landscape).
-          if (lead && navDivider && mainDivider) {
-            lead.style.marginLeft = '0px';
-            const mainDivLeft = mainDivider.getBoundingClientRect().left;
-            const navDivLeft = navDivider.getBoundingClientRect().left;
-            let shift = mainDivLeft - navDivLeft;
-            const leadLeft = lead.getBoundingClientRect().left;
-            const navWNow = nav.offsetWidth
-              || ((prev.offsetWidth || 32) + (next.offsetWidth || 32)
-                  + (parseFloat(nav.style.gap) || innerGap));
-            const minLeadLeft = navLeft + navWNow + groupGap;
-            const maxShiftLeft = minLeadLeft - leadLeft;
-            if (shift < maxShiftLeft) shift = maxShiftLeft;
-            const barStyles = getComputedStyle(bar);
-            const barPadR = parseFloat(barStyles.paddingRight) || 0;
-            const leadW = lead.offsetWidth || lead.scrollWidth;
-            const maxLeadLeft = barRect.right - barPadR - leadW;
-            const maxShiftRight = maxLeadLeft - leadLeft;
-            if (shift > maxShiftRight) shift = Math.max(maxShiftLeft, maxShiftRight);
-            lead.style.marginLeft = Math.max(0, Math.round(shift)) + 'px';
-          } else if (lead) {
-            const navWNow = nav.offsetWidth
-              || ((prev.offsetWidth || 32) + (next.offsetWidth || 32)
-                  + (parseFloat(nav.style.gap) || innerGap));
-            const leadDesiredLeft = navLeft + navWNow + groupGap;
-            const leadNaturalLeft = titleRightRel + barGap;
-            lead.style.marginLeft = Math.max(0, Math.round(leadDesiredLeft - leadNaturalLeft)) + 'px';
-          }
-          peLayoutMenuToggleOverDelete();
-          peLayoutToolbarEdgeAlign();
-          return;
-        }
-      }
 
       if (lead && navDivider && mainDivider) {
         const mainDivLeft = mainDivider.getBoundingClientRect().left;
@@ -51793,6 +51818,51 @@ function peObjMouseDown(e, o) {
     const toolsW = leadW + toolsGap + mainW;
     // Intrinsic tail width (not the stretched 100% row width in stage 2/3).
     const tailW = peFlexContentWidth(tail, tailInnerGap) || tail.scrollWidth;
+
+    // Landscape-only alternate to stage 2/3 (see .pe-tb-navrow CSS): touch
+    // phones have a fixed hamburger menu button anchored top-right that this
+    // width budget otherwise never reserves for at all, so Delete could
+    // collide with it right at the stage-1/2 boundary without ever
+    // escalating to a full tools-wrap. Freeing the nav's own row-1
+    // reservation entirely (it moves to its own row under the title instead
+    // - see peLayoutPageNavButtons) buys back exactly that width, dodging
+    // the collision without adding stage 3's extra row.
+    const coarse = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+    const landscape = typeof window.matchMedia === 'function' && window.matchMedia('(orientation: landscape)').matches;
+    if (coarse && landscape) {
+      const hamburgerReserve = 40;
+      const navRowAvail = avail - hamburgerReserve;
+      const wasNavRow = bar.classList.contains('pe-tb-navrow');
+      // Tools actually start after whichever is wider, the title or the nav
+      // pair parked under it (peLayoutPageNavButtons pads .pe-tb-mid by that
+      // same difference when nav is the wider one) - using titleW alone here
+      // let the tools row claim width nav's own footprint still needed,
+      // pushing Delete past navRowAvail without this ever registering as a
+      // wrap trigger.
+      const toolsRowW = Math.max(titleW, navW) + barGap + toolsW;
+      const fitsToolsOnly = toolsRowW <= navRowAvail - 0.5
+        || (wasNavRow && toolsRowW <= navRowAvail + hyst - 0.5);
+      if (fitsToolsOnly) {
+        bar.classList.add('pe-tb-navrow');
+        bar.classList.remove('pe-tb-tools-wrap');
+        mid.style.paddingLeft = '';
+        const fullRowW = toolsRowW + barGap + tailW;
+        const wasTailWrapAlready = bar.classList.contains('pe-tb-tail-wrap');
+        const fitsTailToo = fullRowW <= navRowAvail - 0.5
+          || (wasTailWrapAlready && fullRowW <= navRowAvail + hyst - 0.5);
+        if (fitsTailToo) {
+          bar.classList.remove('pe-tb-tail-wrap');
+          tail.classList.remove('wrapped');
+        } else {
+          bar.classList.add('pe-tb-tail-wrap');
+          tail.classList.add('wrapped');
+        }
+        requestAnimationFrame(() => peLayoutPageNavButtons());
+        return;
+      }
+    }
+    bar.classList.remove('pe-tb-navrow');
+
     // Row 1 with tail reserved on the right: [title][mid flex][tail].
     // Hysteresis: enter stage 2 at toolsW, leave only after toolsW + hyst.
     const midWithTail = avail - titleW - tailW - 2 * barGap;
