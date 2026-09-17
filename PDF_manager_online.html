@@ -7752,6 +7752,14 @@
     // down the script would have run yet.
     let fitWidthToggleOn = false;
     let fitWidthSavedScale = null;
+    // Index of the page fit-width was anchored to when it was turned ON (the
+    // one under the double-tap/dblclick/button that triggered it) - null
+    // means "no specific page" (e.g. enabled for a freshly opened document).
+    // Re-read by pmFitWidthAnchorPage() below so live re-tracking (resize,
+    // thumbnails finishing decode, ...) keeps fitting THAT page's own width
+    // instead of falling back to the orientation-agnostic square-card width
+    // the very next time it re-runs.
+    let fitWidthAnchorIdx = null;
     let fitWidthPointer = { x: null, y: null };
     let pdfjsPreloadTask = null;   //parallel parsing of pdf.js when opening a file
     //“Dirty” state of the document: were there any changes (rotation/movement/insertion/
@@ -12774,6 +12782,7 @@
       if (!fitWidthToggleOn && fitWidthSavedScale == null) return;
       fitWidthToggleOn = false;
       fitWidthSavedScale = null;
+      fitWidthAnchorIdx = null;
       updateFitWidthBtnUI();
     }
 
@@ -12976,11 +12985,41 @@
       }, true);
     })();
 
-    function computeFitWidthScale() {
+    function computeFitWidthScale(anchorPage) {
       if (typeof computeReadModeDesktopScale !== 'function') return currentScale;
       return isTouchDevice
-        ? computeReadModeMobileScale()
-        : computeReadModeDesktopScale();
+        ? computeReadModeMobileScale(anchorPage)
+        : computeReadModeDesktopScale(anchorPage);
+    }
+
+    // Re-resolves fitWidthAnchorIdx to a live element by index rather than
+    // holding onto the DOM node itself, since thumbnails get rebuilt (HQ
+    // upgrade, reorder, etc.) while the same page stays conceptually
+    // anchored - a stale node reference would silently stop matching once
+    // replaced.
+    function pmFitWidthAnchorPage() {
+      if (fitWidthAnchorIdx == null || !pagesContainer) return null;
+      const el = pagesContainer.querySelector('.page[data-index="' + fitWidthAnchorIdx + '"]');
+      return el && el.isConnected ? el : null;
+    }
+
+    // Aspect ratio to fit width against: prefer the specific page actually
+    // being zoomed (from a double-tap/dblclick/fit-width-button anchor) when
+    // it's portrait, falling back to the whole-document pmAllPagesPortrait()
+    // check when there's no anchor (e.g. the live resize re-track in
+    // pmReapplyFitWidthIfActive). Without this, a mixed-orientation document
+    // always fell back to cardRowWidth()'s orientation-agnostic SQUARE card
+    // width - fitting a portrait page's actual (narrower) content to that
+    // square under-zoomed it, and over-zooming past the square then had
+    // double-tap "zoom out" land on the square's width too, not the page's.
+    function pmFitWidthAspectFor(anchorPage) {
+      if (anchorPage && !anchorPage.classList.contains('page-rotated')) {
+        const img = anchorPage.querySelector('img');
+        if (img && img.naturalWidth > 0 && img.naturalHeight > 0) {
+          return img.naturalWidth / img.naturalHeight;
+        }
+      }
+      return pmAllPagesPortrait() ? pmMaxPortraitAspect() : null;
     }
 
     function applyFitWidthScaleValue(scale, opts) {
@@ -13088,7 +13127,7 @@
       }
       if (typeof pmUpdateVerticalOnlyScrollLock === 'function') pmUpdateVerticalOnlyScrollLock();
       if (!fitWidthToggleOn || typeof computeFitWidthScale !== 'function') return;
-      const target = computeFitWidthScale();
+      const target = computeFitWidthScale(pmFitWidthAnchorPage());
       if (Math.abs(target - currentScale) > 0.25) {
         applyFitWidthScaleValue(target);
       }
@@ -13159,6 +13198,7 @@
         const restore = fitWidthSavedScale;
         fitWidthToggleOn = false;
         fitWidthSavedScale = null;
+        fitWidthAnchorIdx = null;
         updateFitWidthBtnUI();
         if (restore != null && Math.abs(restore - currentScale) > 0.25) {
           applyFitWidthScaleValue(restore);
@@ -13169,7 +13209,8 @@
       const anchorPage = findNearestPageToPoint(ptrX, ptrY);
       const anchorIdx = anchorPage ? parseInt(anchorPage.dataset.index, 10) : NaN;
       fitWidthSavedScale = currentScale;
-      const target = computeFitWidthScale();
+      fitWidthAnchorIdx = Number.isNaN(anchorIdx) ? null : anchorIdx;
+      const target = computeFitWidthScale(anchorPage);
       fitWidthToggleOn = true;
       updateFitWidthBtnUI();
       if (Math.abs(target - currentScale) > 0.25) {
@@ -15754,6 +15795,16 @@
           const boxRect = box.getBoundingClientRect();
           if (boxRect.height > 0) top = Math.max(top, boxRect.bottom + 10);
         }
+        // Nor on top of the sticky file-name bar once scrolling has revealed
+        // it - referenceBottom only tracks the top menu's bottom edge, which
+        // is also exactly where the sticky bar's own top gets pinned
+        // (stickyBarTop(), see updateStickyFileBar()), so without this the
+        // arrows landed inside the bar's own 35px band instead of below it.
+        const stickyBar = document.getElementById('stickyFileBar');
+        if (stickyBar && stickyBar.classList.contains('visible')) {
+          const stickyRect = stickyBar.getBoundingClientRect();
+          if (stickyRect.height > 0) top = Math.max(top, stickyRect.bottom + 10);
+        }
       }
       // Default left=20px (the buttons' own base CSS) - but while the
       // bookmarks popup is open (always pinned to the left edge) the arrows
@@ -16913,6 +16964,21 @@
       // Block native OS selection on the card chrome / blank raster (avoids
       // empty caret-width “selections”). Glyph long-press returns earlier.
       if (selectedPages.has(pageIdx)) {
+        e.preventDefault();
+      }
+      // This finger-down looks like it may be the second tap of a fast
+      // double-tap (see the matching check in onPagePointerUp) - preventDefault
+      // as early as possible (touchstart-equivalent) so the browser's own
+      // native double-tap-to-zoom gesture recognizer - which watches
+      // raw touch/click timing independently of our JS and can still fire
+      // even with touch-action set on some engines - never arms alongside
+      // our own fit-width toggle. Without this, a real fast double-tap could
+      // trigger both at once: our zoom, and the browser's own zoom toggling
+      // right on top of it, looking like the page "zooms out by itself" or
+      // jumps.
+      if (lastPageTapIdx === pageIdx &&
+          (Date.now() - lastPageTapTime) < PAGE_DOUBLE_TAP_MS &&
+          Math.hypot(e.clientX - lastPageTapX, e.clientY - lastPageTapY) < PAGE_DOUBLE_TAP_MOVE_MAX) {
         e.preventDefault();
       }
 
@@ -19351,10 +19417,10 @@
     // page's own (narrower) rendered width is used instead, so "fit width"
     // zooms further and actually fills the working area with visible page
     // content rather than stopping once the surrounding square card fits.
-    function computeReadModeDesktopScale() {
+    function computeReadModeDesktopScale(anchorPage) {
       const avail = getScrollAvailWidth();
       if (avail <= 0) return clampScale(1300);
-      const aspect = pmAllPagesPortrait() ? pmMaxPortraitAspect() : null;
+      const aspect = pmFitWidthAspectFor(anchorPage);
       let best = 70;
       for (let s = 70; s <= 1300; s++) {
         const w = aspect ? portraitPreviewWidth(s, aspect) : cardRowWidth(s, 1);
@@ -19482,10 +19548,10 @@
     // Calculate target zoom for reading mode on mobile:
     // the maximum possible at which one page fits in width (same
     // portrait-aware exception as computeReadModeDesktopScale above).
-    function computeReadModeMobileScale() {
+    function computeReadModeMobileScale(anchorPage) {
       const avail = getScrollAvailWidth();
       if (avail <= 0) return clampScale(700);
-      const aspect = pmAllPagesPortrait() ? pmMaxPortraitAspect() : null;
+      const aspect = pmFitWidthAspectFor(anchorPage);
       let best = 70;
       for (let s = 70; s <= 700; s++) {
         const w = aspect ? portraitPreviewWidth(s, aspect) : cardRowWidth(s, 1);
