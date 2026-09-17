@@ -1954,7 +1954,13 @@
     .pe-btn.pe-save:hover:not(:disabled) { background: #2ecc71; }
     /*Editor tools (crop, text, ...) and rotate/delete - square icons.*/
     .pe-btn-square {
-      width: 36px; height: 36px; padding: 0;
+      /* --pe-tool-sq is set on .pe-toolbar by peUpdateToolbarWrap() when even
+         stage 3's full-width tools row can't fit all 9 squares at 36px on a
+         narrow phone - shrinking every square on the bar together keeps
+         them equal (see the flex-shrink note below) and keeps Object
+         select/Hand/prev/next aligned to Crop...Delete's columns, instead
+         of letting the row spill past the screen edges uncropped. */
+      width: var(--pe-tool-sq, 36px); height: var(--pe-tool-sq, 36px); padding: 0;
       justify-content: center; font-size: 19px; line-height: 1;
       /* Direct flex children of .pe-tools-main (Crop/Redact/Text/Image) sit
          next to buttons wrapped in .pe-shape-wrap (Signature/Shape), whose
@@ -51829,6 +51835,12 @@ function peObjMouseDown(e, o) {
     const next = document.getElementById('pePageNext');
     if (!bar || !mid || !tail || !title || !tools || !lead || !main) return;
 
+    // Always re-measure at the full 36px size first - otherwise a shrink
+    // applied on a previous (narrower) pass would mask the fact that a
+    // since-widened viewport no longer needs it, and the squares would
+    // stay shrunk forever.
+    bar.style.removeProperty('--pe-tool-sq');
+
     const styles = getComputedStyle(bar);
     const pad = (parseFloat(styles.paddingLeft) || 0) + (parseFloat(styles.paddingRight) || 0);
     const barGap = parseFloat(styles.columnGap) || parseFloat(styles.gap) || 8;
@@ -51924,6 +51936,23 @@ function peObjMouseDown(e, o) {
         bar.classList.add('pe-tb-tail-wrap', 'pe-tb-tools-wrap');
         tail.classList.add('wrapped');
         nextPad = '';
+        // Stage 3 already gives #peToolsMain the entire row (width:100% =
+        // avail) - on a narrow phone even that isn't always enough room for
+        // all 9 squares (Crop...Delete) at their default 36px, and there is
+        // no further stage to fall back to. Shrink every square on the bar
+        // together - not just #peToolsMain's - by just enough to fit: Object
+        // select/Hand (row 1) and prev/next are aligned to Crop...Delete's
+        // columns by peLayoutPageNavButtons() below, so shrinking only
+        // #peToolsMain's own squares would throw that alignment off again.
+        const sqEls = Array.from(main.querySelectorAll('.pe-btn-square'))
+          .filter(el => getComputedStyle(el).display !== 'none');
+        const overflowPx = mainW - avail;
+        if (sqEls.length && overflowPx > 0.5) {
+          const defaultSq = 36;
+          const minSq = 26;
+          const shrinkPer = Math.ceil(overflowPx / sqEls.length);
+          bar.style.setProperty('--pe-tool-sq', Math.max(minSq, defaultSq - shrinkPer) + 'px');
+        }
       } else {
         bar.classList.add('pe-tb-tail-wrap');
         bar.classList.remove('pe-tb-tools-wrap');
