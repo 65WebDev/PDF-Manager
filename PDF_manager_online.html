@@ -6037,14 +6037,26 @@
         transform: scale(0.98);
         transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
       }
-      /*Single-column layout (see PAGE_PRESS_PENDING_DELAY_MS/isPagesSingleColumnLayout):
-         the page already fills the width, so the little scale-down "pop" -
-         meant as a drag-to-reorder affordance in the grid - just reads as an
-         odd wobble on a single full-width page; keep the border/shadow cue
-         but drop the scale and the eased transition in/out.*/
-      .page.page-press-pending-instant {
-        transform: none !important;
-        transition: none !important;
+      /*page-press-pending-instant used to gate a single-column-only variant
+        of the above (no scale/transition) - single-column now uses its own
+        .page-select-charging below instead, but classList.remove() calls
+        elsewhere still harmlessly reference the name during cleanup.*/
+      /*Single-column layout's 3-stage hold (see PAGE_SELECT_HOLD_MS/
+        PAGE_DRAG_HOLD_MS/isPagesSingleColumnLayout): holding a finger on the
+        one full-width page gradually fills its border/glow from transparent
+        to the same blue ring .selected uses - by the time the fill finishes,
+        the page IS selected, so removing this class and adding .selected at
+        that exact moment is visually seamless. Moving away or releasing
+        early (a normal scroll-starting touch) resets both classes at once
+        with no transition class present, so it snaps back instantly instead
+        of visibly fading out.*/
+      .page.page-select-charging {
+        transition: border-color var(--pm-select-charge-ms, 450ms) linear,
+                    box-shadow var(--pm-select-charge-ms, 450ms) linear;
+      }
+      .page.page-select-charging.page-select-charge-fill {
+        border-color: #007bff !important;
+        box-shadow: 0 0 0 4px rgba(0, 123, 255, 0.2) !important;
       }
       /*Undo/Redo - round buttons under the file name (top right)*/
       #mobileUndoRedoBar.visible,
@@ -17031,17 +17043,27 @@
     const TAP_MOVE_MAX = 12;       // max. finger shift for “tap” (page selection)
     const TAP_SCROLL_MAX = 4;      // max. scrolling by gesture - otherwise it’s a scroll, not a tap
     // Single-column layout (one page fills the width, e.g. fit-width/high
-    // zoom) delays the page-press-pending "pop" (border/shadow/scale, see
-    // .page.page-press-pending) instead of showing it the instant a finger
-    // touches down - almost every scroll gesture in that layout starts with
-    // a finger literally on the (only) page, so applying it immediately
-    // made every scroll-start flash a brief blue "selected"-looking border
-    // that was cancelled a moment later once the movement threshold was
-    // crossed. Waiting this long first means a genuine scroll (which starts
-    // moving well within this window) never gets a chance to show it at
-    // all, while a real press-and-hold still does.
-    const PAGE_PRESS_PENDING_DELAY_MS = 140;
-    let pagePressPendingTimer = null;
+    // zoom) uses its own 3-stage press-and-hold instead of the grid's
+    // instant-tap-to-select: almost every scroll gesture in that layout
+    // starts with a finger literally on the (only) page, so selecting on
+    // every quick tap-release made ordinary scrolling/navigating flip
+    // selection on and off constantly. Stage 1: move before PAGE_SELECT_HOLD_MS
+    // elapses → treated as a plain scroll (see onPagePointerMove's movement
+    // cancel), nothing selected. Stage 2: hold PAGE_SELECT_HOLD_MS without
+    // moving → the page is selected and its mini-tools appear (see
+    // pageSelectStageTimer below) - .page-select-charging/-charge-fill
+    // animate the border/glow from transparent to blue over exactly that
+    // long, so it's visibly "charging" toward selection while you hold.
+    // Stage 3: keep holding to PAGE_DRAG_HOLD_MS → the existing
+    // startPageTouchDrag() picks the (already-selected) page up to reorder
+    // it, same as the grid's plain LONG_PRESS_MS but measured longer here so
+    // it can't be reached before stage 2 already fired. Grid/multi-column
+    // layout is untouched - there a tap still selects instantly and
+    // LONG_PRESS_MS alone gates the drag pickup.
+    const PAGE_SELECT_HOLD_MS = 450;
+    const PAGE_DRAG_HOLD_MS = 900;
+    let pageSelectStageTimer = null;
+    let pageSelectStageFired = false;
     let longPressTimer = null;
     let longPressActive = false;
     let pagePointerId = null;
@@ -17159,8 +17181,8 @@
       suppressPageTap = true;
       clearTimeout(longPressTimer);
       longPressTimer = null;
-      clearTimeout(pagePressPendingTimer);
-      pagePressPendingTimer = null;
+      clearTimeout(pageSelectStageTimer);
+      pageSelectStageTimer = null;
       detachPagePointerListeners();
       document.body.classList.remove('page-touch-armed');
       if (dragSourceDiv && pagePointerId !== null) {
@@ -17175,13 +17197,18 @@
         dragGhostEl = null;
       }
       pagesContainer.classList.remove('dragging-active');
-      pagesContainer.querySelectorAll('.page.drag-source, .page.page-press-pending').forEach(p => {
-        p.classList.remove('drag-source', 'page-press-pending', 'page-press-pending-instant');
+      // Removing charging + fill together (no lingering transition class) so
+      // an aborted charge (e.g. movement turned out to be a scroll) snaps
+      // back instantly instead of visibly fading back out.
+      pagesContainer.querySelectorAll('.page.drag-source, .page.page-press-pending, .page.page-select-charging').forEach(p => {
+        p.classList.remove('drag-source', 'page-press-pending', 'page-press-pending-instant',
+          'page-select-charging', 'page-select-charge-fill');
       });
       invalidateDragGeometry();
       dragSourceDiv = null;
       isDragActive = false;
       longPressActive = false;
+      pageSelectStageFired = false;
       pagePointerId = null;
       endScrollLock();
       unlockScrollForDrag();
@@ -17191,7 +17218,8 @@
 
     function startPageTouchDrag() {
       if (!dragSourceDiv || pagePointerId === null) return;
-      dragSourceDiv.classList.remove('page-press-pending', 'page-press-pending-instant');
+      dragSourceDiv.classList.remove('page-press-pending', 'page-press-pending-instant',
+        'page-select-charging', 'page-select-charge-fill');
       pagesContainer.querySelectorAll('.page.page-press-pending').forEach(p => {
         p.classList.remove('page-press-pending', 'page-press-pending-instant');
       });
@@ -17271,6 +17299,7 @@
       isDragActive = false;
       dragWasActive = false;
       longPressActive = false;
+      pageSelectStageFired = false;
       suppressPageTap = false;
       pageTouchActive = true;
       pageTouchScrollX = scrollContainer.scrollLeft;
@@ -17299,20 +17328,38 @@
         e.preventDefault();
       }
 
-      clearTimeout(pagePressPendingTimer);
-      pagePressPendingTimer = null;
-      if (typeof isPagesSingleColumnLayout === 'function' && isPagesSingleColumnLayout()) {
+      clearTimeout(pageSelectStageTimer);
+      pageSelectStageTimer = null;
+      const singleColumnHold = typeof isPagesSingleColumnLayout === 'function' && isPagesSingleColumnLayout();
+      if (singleColumnHold) {
         const pendingDiv = dragSourceDiv;
         const pendingPointerId = pagePointerId;
-        pagePressPendingTimer = setTimeout(() => {
-          pagePressPendingTimer = null;
+        pendingDiv.style.setProperty('--pm-select-charge-ms', PAGE_SELECT_HOLD_MS + 'ms');
+        pendingDiv.classList.add('page-select-charging');
+        // The transition-property class and the end-state class need to land
+        // in separate style recalcs, or the browser has no "before" state to
+        // animate from and the border just jumps straight to blue.
+        requestAnimationFrame(() => {
           if (dragSourceDiv === pendingDiv && pagePointerId === pendingPointerId) {
-            // -instant skips the transition entirely (see its CSS rule) -
-            // single-column mode wants a plain, non-animated highlight, not
-            // the little scale/shadow "pop" grid mode uses.
-            pendingDiv.classList.add('page-press-pending', 'page-press-pending-instant');
+            pendingDiv.classList.add('page-select-charge-fill');
           }
-        }, PAGE_PRESS_PENDING_DELAY_MS);
+        });
+        pageSelectStageTimer = setTimeout(() => {
+          pageSelectStageTimer = null;
+          if (dragSourceDiv !== pendingDiv || pagePointerId !== pendingPointerId) return;
+          if (rubberArmed || rubberActive || pinchActive || isDragActive) return;
+          const dx = touchLastX - dragStartX;
+          const dy = touchLastY - dragStartY;
+          if (Math.hypot(dx, dy) > LONG_PRESS_MOVE) return;
+          pageSelectStageFired = true;
+          if (navigator.vibrate) navigator.vibrate(8);
+          preTapSelectionSnapshot = { selected: new Set(selectedPages), last: lastSelectedIndex };
+          handlePageClick(pageIdx, pendingDiv, { shiftKey: false, ctrlKey: false, metaKey: false });
+          lastPageTapTime = Date.now();
+          lastPageTapIdx = pageIdx;
+          lastPageTapX = touchLastX;
+          lastPageTapY = touchLastY;
+        }, PAGE_SELECT_HOLD_MS);
       } else {
         dragSourceDiv.classList.add('page-press-pending');
       }
@@ -17325,7 +17372,7 @@
         const dy = touchLastY - dragStartY;
         if (Math.hypot(dx, dy) > LONG_PRESS_MOVE) return;
         startPageTouchDrag();
-      }, LONG_PRESS_MS);
+      }, singleColumnHold ? PAGE_DRAG_HOLD_MS : LONG_PRESS_MS);
 
       document.addEventListener('pointermove', onPagePointerMove, pagePointerOpts);
       document.addEventListener('pointerup', onPagePointerUp, pagePointerOpts);
@@ -17377,11 +17424,19 @@
 
       clearTimeout(longPressTimer);
       longPressTimer = null;
-      clearTimeout(pagePressPendingTimer);
-      pagePressPendingTimer = null;
+      clearTimeout(pageSelectStageTimer);
+      pageSelectStageTimer = null;
       pageTouchActive = false;
       document.body.classList.remove('page-touch-armed');
-      if (dragSourceDiv) dragSourceDiv.classList.remove('page-press-pending', 'page-press-pending-instant');
+      // Removing charging + fill together (no lingering transition class) so
+      // a release before the select stage fired snaps back instantly rather
+      // than visibly fading out; if it DID fire, .selected (just applied by
+      // handlePageClick below) already renders the identical blue border/
+      // glow, so removing these here causes no visible change.
+      if (dragSourceDiv) {
+        dragSourceDiv.classList.remove('page-press-pending', 'page-press-pending-instant',
+          'page-select-charging', 'page-select-charge-fill');
+      }
       detachPagePointerListeners();
       if (dragSourceDiv) {
         try {
@@ -17411,7 +17466,7 @@
             }
           } catch (_) {}
         }
-        if (isTap && !textSelBlocksTap && !suppressPageClickForTextSelect && !isLoading &&
+        if (isTap && !pageSelectStageFired && !textSelBlocksTap && !suppressPageClickForTextSelect && !isLoading &&
             interactionMode !== 'nav' &&
             !isPointInMobileQuickActions(e.clientX, e.clientY) &&
             !computeInsertAt(e.clientX, e.clientY)) {
@@ -17439,8 +17494,14 @@
               toggleFitWidthScale({ clientX: e.clientX, clientY: e.clientY });
             }
           } else {
+            // Single-column: released before PAGE_SELECT_HOLD_MS - a plain
+            // tap/scroll-end, not a deliberate hold, so it no longer toggles
+            // selection on its own (see the pageSelectStageTimer above).
+            // Still record it so a fast second tap is recognized as
+            // double-tap-zoom instead of doing nothing.
+            const singleColumnTap = typeof isPagesSingleColumnLayout === 'function' && isPagesSingleColumnLayout();
             preTapSelectionSnapshot = { selected: new Set(selectedPages), last: lastSelectedIndex };
-            handlePageClick(tapIdx, pageDiv, e);
+            if (!singleColumnTap) handlePageClick(tapIdx, pageDiv, e);
             lastPageTapTime = now;
             lastPageTapIdx = tapIdx;
             lastPageTapX = e.clientX;
@@ -17452,6 +17513,7 @@
         isDragActive = false;
       }
       longPressActive = false;
+      pageSelectStageFired = false;
       pagePointerId = null;
       suppressPageTap = false;
       endScrollLock();
