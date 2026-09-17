@@ -10396,6 +10396,10 @@
 
     function hideLoading() {
       isLoading = false;
+      if (pmDeferredLoadingTimer !== null) {
+        clearTimeout(pmDeferredLoadingTimer);
+        pmDeferredLoadingTimer = null;
+      }
       loadingOverlay.style.display = 'none';
       updateUIState();
       // After the first document is ready, restore the last desktop cursor tool
@@ -10404,6 +10408,28 @@
         pmNeedRestoreCursorMode = false;
         pmApplyPersistedCursorMode(pmGetPersistedCursorMode());
       }
+    }
+
+    let pmDeferredLoadingTimer = null;
+
+    // Like showLoading(), but only actually paints the full-screen dark
+    // overlay if the operation is still running after delayMs. Interaction
+    // is blocked (isLoading/updateUIState) right away either way - only the
+    // visible overlay is delayed. Page reordering finishes in a handful of
+    // milliseconds for any normal-sized document, so showing then instantly
+    // hiding the overlay (as showLoading()/hideLoading() would) just reads
+    // as a full-screen flash/blink; deferring it means that flash never
+    // happens for the common fast case, while a genuinely slow move (huge
+    // document) still gets a spinner after a short, imperceptible delay.
+    function showLoadingDeferred(text, delayMs) {
+      if (text == null || text === '') text = t('loadingPages');
+      isLoading = true;
+      loadingText.textContent = text;
+      updateUIState();
+      pmDeferredLoadingTimer = setTimeout(() => {
+        pmDeferredLoadingTimer = null;
+        if (isLoading) loadingOverlay.style.display = 'flex';
+      }, delayMs);
     }
 
     async function cancelLoading() {
@@ -24688,7 +24714,10 @@
       pmBookmarksSuppressAutoClose = true;
       try {
         scrollPosition = scrollContainer.scrollTop;
-        showLoading(t('loadingMovingPage'));
+        // Deferred: this finishes almost instantly for any normal document -
+        // showing the full-screen overlay immediately just flashed it on and
+        // back off, reading as a blink (see showLoadingDeferred() comment).
+        showLoadingDeferred(t('loadingMovingPage'), 150);
 
         const numPages = pdfDoc.getPageCount();
         let indicesToMove = (selectedPages.size > 0 && selectedPages.has(draggedIndex))
