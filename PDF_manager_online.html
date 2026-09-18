@@ -5886,15 +5886,62 @@
       #pageEditModal.pe-obj-select-mode #peTextLayer.pe-text-active {
         touch-action: manipulation;
       }
-      #pageEditModal .pe-scale {
-        font-size: 14px;
-        gap: 8px;
-        height: 36px;
-        padding: 0 7px 0 10px;
+      /* Shortened mobile editor toolbar: drop the page-number label, the
+         Object-select/Hand mode toggle (Object-select is the only mode now
+         - see peToggleDoubleTapZoom/peStartObjSelectBlankGesture's
+         isTouchDevice branches), and the Scale slider; Cancel/Save become a
+         red X / green check (below). Collapsed to zero size rather than
+         display:none - peLayoutPageNavButtons()'s extensive title/Object-
+         select-relative math reads their getBoundingClientRect() to
+         position the prev/next nav buttons, and display:none would zero out
+         their POSITION too, not just their size, breaking that math instead
+         of just giving it a (now harmless) zero-width reference point. */
+      #pageEditModal .pe-title,
+      #pageEditModal #peToolObjSelect,
+      #pageEditModal #peToolHand {
+        width: 0;
+        min-width: 0;
+        padding: 0;
+        margin: 0;
+        border-width: 0;
+        overflow: hidden;
+        pointer-events: none;
       }
-      #pageEditModal .pe-scale input[type=range] { width: 72px; }
+      #pageEditModal .pe-tools-lead .pe-tools-divider {
+        display: none;
+      }
+      #pageEditModal .pe-scale {
+        display: none;
+      }
       #pageEditModal #peEndActions .pe-btn {
         height: 36px;
+      }
+      /* Cancel/Save: red X / green check instead of text labels. font-size:0
+         hides the original text (still present for desktop/i18n) without
+         removing it, and the ::before pseudo-element supplies the icon at
+         its own font-size. */
+      #pageEditModal #peCancelBtn,
+      #pageEditModal #peSaveBtn {
+        font-size: 0;
+        gap: 0;
+        width: 34px;
+        height: 34px;
+        padding: 0;
+        justify-content: center;
+      }
+      #pageEditModal #peCancelBtn::before,
+      #pageEditModal #peSaveBtn::before {
+        font-size: 16px;
+        line-height: 1;
+      }
+      #pageEditModal #peCancelBtn::before { content: '\2715'; }
+      #pageEditModal #peSaveBtn::before { content: '\2713'; }
+      #pageEditModal #peCancelBtn {
+        background: #c0392b;
+        border-color: rgba(255,255,255,.35);
+      }
+      #pageEditModal #peCancelBtn:active:not(:disabled) {
+        background: #e74c3c;
       }
       .page.to-delete .quick-actions,
       .dragging-active .page .quick-actions,
@@ -36443,7 +36490,15 @@ let peLastZoomToggleAt = 0;
 // every later one in the same instant a no-op instead of an undo.
 const PE_ZOOM_TOGGLE_COOLDOWN_MS = 450;
 function peToggleDoubleTapZoom(clientX, clientY) {
-  if (!peState || peState.tool !== 'select' || peState.objSelectMode || peState.inlineEditId) return false;
+  if (!peState || peState.tool !== 'select' || peState.inlineEditId) return false;
+  // Desktop: Object-select mode still means "double-tap arms a multi-object
+  // marquee, not zoom" (see peStartObjSelectBlankGesture) - switch to Hand
+  // for this toggle there. Mobile has no Hand/Object-select toggle anymore
+  // (Object-select is the only mode - see the coarse-pointer CSS collapsing
+  // #peToolHand/#peToolObjSelect) and its marquee gesture is disabled in
+  // favor of this zoom toggle instead (same functions, gated the same way).
+  const touch = typeof isTouchDevice !== 'undefined' && isTouchDevice;
+  if (peState.objSelectMode && !touch) return false;
   const now = Date.now();
   if (now - peLastZoomToggleAt < PE_ZOOM_TOGGLE_COOLDOWN_MS) return true;
   const sl = document.getElementById('peScaleSlider');
@@ -49778,6 +49833,10 @@ function peBeginObjSelectMarquee(e) {
 function peTryStartObjSelectMarqueeFromTouch(e) {
   if (!peState || !peState.objSelectMode) return false;
   if (!(e.pointerType === 'touch' || e.pointerType === 'pen')) return false;
+  // Mobile has no Hand/Object-select toggle (Object-select is the only
+  // mode there) and double-tap is the zoom-in/out gesture instead - see
+  // peToggleDoubleTapZoom, which now handles objSelectMode on touch too.
+  if (typeof isTouchDevice !== 'undefined' && isTouchDevice) return false;
   if (pePinchActive || Date.now() < pePinchBlockObjUntil) return false;
   if (!peRegisterObjSelectTap(e.clientX, e.clientY)) return false;
   peBeginObjSelectMarquee(e);
@@ -49789,7 +49848,10 @@ function peStartObjSelectBlankGesture(e, opts) {
   // forcePan: finger moved on the text layer — pan only; do not treat as dbl-tap
   // (the pointerdown already registered the first tap).
   const forcePan = !!(opts && opts.forcePan);
-  const isDbl = forcePan ? false : peRegisterObjSelectTap(e.clientX, e.clientY);
+  // Mobile: double-tap is the zoom gesture now (peToggleDoubleTapZoom
+  // already claims it before this runs) - never arm a marquee from here.
+  const marqueeDisabled = typeof isTouchDevice !== 'undefined' && isTouchDevice;
+  const isDbl = (forcePan || marqueeDisabled) ? false : peRegisterObjSelectTap(e.clientX, e.clientY);
   if (isDbl) {
     peBeginObjSelectMarquee(e);
   } else {
