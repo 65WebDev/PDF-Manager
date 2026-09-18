@@ -5913,19 +5913,17 @@
       #pageEditModal .pe-scale {
         display: none;
       }
-      #pageEditModal #peEndActions .pe-btn {
-        height: 36px;
-      }
-      /* Cancel/Save: red X / green check instead of text labels. font-size:0
-         hides the original text (still present for desktop/i18n) without
+      /* Cancel/Save: red X / green check instead of text labels, sized like
+         every other toolbar square (see .pe-btn-square). font-size:0 hides
+         the original text (still present for desktop/i18n) without
          removing it, and the ::before pseudo-element supplies the icon at
          its own font-size. */
       #pageEditModal #peCancelBtn,
       #pageEditModal #peSaveBtn {
         font-size: 0;
         gap: 0;
-        width: 34px;
-        height: 34px;
+        width: 36px;
+        height: 36px;
         padding: 0;
         justify-content: center;
       }
@@ -5942,6 +5940,43 @@
       }
       #pageEditModal #peCancelBtn:active:not(:disabled) {
         background: #e74c3c;
+      }
+      /* Portrait: move Cancel/Save (now icons) onto row 1, left of the
+         hamburger menu toggle, with a divider separating them from the nav
+         prev/next pair - instead of sitting on their own row 3 below the
+         tools. Absolutely positioned (like the hamburger itself, which is
+         always at a fixed top-right offset) rather than fought into row 1
+         through the flex-wrap stage system: peUpdateToolbarWrap's stage
+         classes exist to decide what wraps to its own row on a crowded
+         toolbar, but this is a fixed placement independent of how much
+         content is currently on row 1. */
+      @media (orientation: portrait) {
+        #pageEditModal .pe-toolbar-tail {
+          position: absolute;
+          top: max(8px, env(safe-area-inset-top, 0px));
+          right: calc(36px + 8px + max(8px, env(safe-area-inset-right, 0px)));
+          /* Overrides .pe-tb-tail-wrap/.wrapped's width:100% (a "stretch to
+             fill the wrapped row" rule from the flex-wrap stage system) -
+             this is a fixed-size, absolutely positioned corner element now,
+             not a row participant, so it must size to its own content. */
+          width: auto;
+          max-width: none;
+          flex: none;
+          padding: 0;
+          z-index: 40;
+        }
+        #pageEditModal .pe-toolbar-tail::before {
+          content: '';
+          position: absolute;
+          left: -9px;
+          top: 2px;
+          bottom: 2px;
+          width: 1px;
+          background: rgba(255,255,255,.28);
+        }
+        #pageEditModal #peEndActions {
+          gap: 8px;
+        }
       }
       .page.to-delete .quick-actions,
       .dragging-active .page .quick-actions,
@@ -50690,6 +50725,22 @@ function peObjMouseDown(e, o) {
       return (w && w.clientHeight) ? w.clientHeight : window.innerHeight;
     }
 
+    // Which vertical fifth-quarters of the work area a touch started in -
+    // 'top'/'bottom' (each the outer 25%) are the only zones that can arm a
+    // page-switch swipe; the central 50% ('middle') never does, so dragging
+    // around in the middle of a fully-visible page (panning objects,
+    // reading, ...) can't accidentally flip to another page.
+    function zoneForY(clientY) {
+      const w = document.getElementById('peStageWrap');
+      if (!w) return 'middle';
+      const r = w.getBoundingClientRect();
+      if (r.height <= 0) return 'middle';
+      const rel = (clientY - r.top) / r.height;
+      if (rel <= 0.25) return 'top';
+      if (rel >= 0.75) return 'bottom';
+      return 'middle';
+    }
+
     function onStart(e) {
       if (typeof isTouchDevice === 'undefined' || !isTouchDevice) return;
       if (!peState || pePageSwipeBusy || pePinchActive) return;
@@ -50702,6 +50753,7 @@ function peObjMouseDown(e, o) {
         id: t.identifier,
         x0: t.clientX,
         y0: t.clientY,
+        zone: zoneForY(t.clientY),
         dir: 0,
         active: false,
         progress: 0
@@ -50739,6 +50791,14 @@ function peObjMouseDown(e, o) {
         }
         // dy > 0 = finger down = previous; dy < 0 = finger up = next
         const dir = dy > 0 ? -1 : 1;
+        // Only the matching edge zone arms each direction - bottom 25% for
+        // swipe-up/next, top 25% for swipe-down/previous (see zoneForY) -
+        // and the central 50% never arms either, regardless of direction.
+        const allowedZone = dir === 1 ? 'bottom' : 'top';
+        if (pePageSwipe.zone !== allowedZone) {
+          pePageSwipeCancel();
+          return;
+        }
         if (peFindNeighborEditablePage(peState.idx, dir) < 0) {
           pePageSwipeCancel();
           return;
@@ -52693,7 +52753,16 @@ function peObjMouseDown(e, o) {
     const styles = getComputedStyle(bar);
     const pad = (parseFloat(styles.paddingLeft) || 0) + (parseFloat(styles.paddingRight) || 0);
     const barGap = parseFloat(styles.columnGap) || parseFloat(styles.gap) || 8;
-    const avail = bar.clientWidth - pad;
+    // Landscape-only: touch phones have a fixed hamburger menu button
+    // anchored top-right that the flex layout below never reserves room for
+    // on its own, so the last tool button could sit right underneath it.
+    // Reserving its width up front here (rather than only within the
+    // pe-tb-navrow branch below) means the plain single-row layout also
+    // respects it, instead of only the navrow escape hatch doing so.
+    const coarse = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+    const landscape = typeof window.matchMedia === 'function' && window.matchMedia('(orientation: landscape)').matches;
+    const hamburgerReserve = (coarse && landscape) ? 40 : 0;
+    const avail = bar.clientWidth - pad - hamburgerReserve;
     if (avail <= 0) return;
 
     const minSide = 10;
@@ -52701,7 +52770,12 @@ function peObjMouseDown(e, o) {
     const toolsGap = 6;
     const tailInnerGap = 16;
     const hyst = barGap + 12;
-    const titleW = title.scrollWidth;
+    // getBoundingClientRect(), not scrollWidth - the mobile-only CSS that
+    // collapses the title to width:0 (see the coarse-pointer editor rules)
+    // doesn't shrink its intrinsic content width, so scrollWidth would keep
+    // reporting the un-collapsed "Page N" width and overstate how much
+    // space the (now invisible) title actually still occupies.
+    const titleW = title.getBoundingClientRect().width;
     const navW = (prev?.offsetWidth || 32) + (next?.offsetWidth || 32) + navInner;
     const leadW = peFlexContentWidth(lead, toolsGap);
     const mainW = peFlexContentWidth(main, toolsGap);
@@ -52709,46 +52783,48 @@ function peObjMouseDown(e, o) {
     // Intrinsic tail width (not the stretched 100% row width in stage 2/3).
     const tailW = peFlexContentWidth(tail, tailInnerGap) || tail.scrollWidth;
 
-    // Landscape-only alternate to stage 2/3 (see .pe-tb-navrow CSS): touch
-    // phones have a fixed hamburger menu button anchored top-right that this
-    // width budget otherwise never reserves for at all, so Delete could
-    // collide with it right at the stage-1/2 boundary without ever
-    // escalating to a full tools-wrap. Freeing the nav's own row-1
-    // reservation entirely (it moves to its own row under the title instead
-    // - see peLayoutPageNavButtons) buys back exactly that width, dodging
-    // the collision without adding stage 3's extra row.
-    const coarse = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
-    const landscape = typeof window.matchMedia === 'function' && window.matchMedia('(orientation: landscape)').matches;
+    // Landscape-only alternate to stage 2/3 (see .pe-tb-navrow CSS): parks
+    // nav on its own row directly under the title so the main row doesn't
+    // need to reserve room for it beside the title. With the mobile-only
+    // simplified toolbar (title/Object-select/Hand/Scale all collapsed or
+    // hidden - see the coarse-pointer editor CSS) everything now usually
+    // fits as one plain row even with the hamburger's width reserved above,
+    // so this is skipped whenever a plain single row (nav included, inline)
+    // already fits - nav would otherwise sit on a separate band, visibly
+    // offset from the rest of the toolbar for no reason.
     if (coarse && landscape) {
-      const hamburgerReserve = 40;
-      const navRowAvail = avail - hamburgerReserve;
       const wasNavRow = bar.classList.contains('pe-tb-navrow');
-      // Tools actually start after whichever is wider, the title or the nav
-      // pair parked under it (peLayoutPageNavButtons pads .pe-tb-mid by that
-      // same difference when nav is the wider one) - using titleW alone here
-      // let the tools row claim width nav's own footprint still needed,
-      // pushing Delete past navRowAvail without this ever registering as a
-      // wrap trigger.
-      const toolsRowW = Math.max(titleW, navW) + barGap + toolsW;
-      const fitsToolsOnly = toolsRowW <= navRowAvail - 0.5
-        || (wasNavRow && toolsRowW <= navRowAvail + hyst - 0.5);
-      if (fitsToolsOnly) {
-        bar.classList.add('pe-tb-navrow');
-        bar.classList.remove('pe-tb-tools-wrap');
-        mid.style.paddingLeft = '';
-        const fullRowW = toolsRowW + barGap + tailW;
-        const wasTailWrapAlready = bar.classList.contains('pe-tb-tail-wrap');
-        const fitsTailToo = fullRowW <= navRowAvail - 0.5
-          || (wasTailWrapAlready && fullRowW <= navRowAvail + hyst - 0.5);
-        if (fitsTailToo) {
-          bar.classList.remove('pe-tb-tail-wrap');
-          tail.classList.remove('wrapped');
-        } else {
-          bar.classList.add('pe-tb-tail-wrap');
-          tail.classList.add('wrapped');
+      const simpleRowW = navW + barGap + toolsW + barGap + tailW;
+      const simpleRowFits = simpleRowW <= avail - 0.5
+        || (wasNavRow && simpleRowW <= avail + hyst - 0.5);
+      if (!simpleRowFits) {
+        // Tools actually start after whichever is wider, the title or the
+        // nav pair parked under it (peLayoutPageNavButtons pads .pe-tb-mid
+        // by that same difference when nav is the wider one) - using
+        // titleW alone here let the tools row claim width nav's own
+        // footprint still needed, pushing Delete past avail without this
+        // ever registering as a wrap trigger.
+        const toolsRowW = Math.max(titleW, navW) + barGap + toolsW;
+        const fitsToolsOnly = toolsRowW <= avail - 0.5
+          || (wasNavRow && toolsRowW <= avail + hyst - 0.5);
+        if (fitsToolsOnly) {
+          bar.classList.add('pe-tb-navrow');
+          bar.classList.remove('pe-tb-tools-wrap');
+          mid.style.paddingLeft = '';
+          const fullRowW = toolsRowW + barGap + tailW;
+          const wasTailWrapAlready = bar.classList.contains('pe-tb-tail-wrap');
+          const fitsTailToo = fullRowW <= avail - 0.5
+            || (wasTailWrapAlready && fullRowW <= avail + hyst - 0.5);
+          if (fitsTailToo) {
+            bar.classList.remove('pe-tb-tail-wrap');
+            tail.classList.remove('wrapped');
+          } else {
+            bar.classList.add('pe-tb-tail-wrap');
+            tail.classList.add('wrapped');
+          }
+          requestAnimationFrame(() => peLayoutPageNavButtons());
+          return;
         }
-        requestAnimationFrame(() => peLayoutPageNavButtons());
-        return;
       }
     }
     bar.classList.remove('pe-tb-navrow');
