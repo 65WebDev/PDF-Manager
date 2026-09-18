@@ -5919,8 +5919,8 @@
       #pageEditModal #peSaveBtn {
         font-size: 0;
         gap: 0;
-        width: 36px;
-        height: 36px;
+        width: var(--pe-tool-sq, 36px);
+        height: var(--pe-tool-sq, 36px);
         padding: 0;
         justify-content: center;
       }
@@ -15304,6 +15304,18 @@
 
     async function runHQUpgrade(opts) {
       if (!pdfDoc) return;
+      // A page-reorder drag (touch or mouse) needs every free main-thread
+      // cycle for smooth pointermove handling - the render+toDataURL work
+      // below is heavy enough (a full-resolution canvas render and JPEG
+      // encode per visible page) to visibly compete with it, which is
+      // exactly why a drag started right after a zoom change (the zoom's
+      // own scheduleHQUpgrade call, timed 180ms later) could feel jerky
+      // for its first attempt but smooth on a later one once this had
+      // already finished. Defer entirely and retry once the drag ends.
+      if (isDragActive) {
+        scheduleHQUpgrade(opts);
+        return;
+      }
       if (typeof whenPdfDocIdle === 'function') await whenPdfDocIdle();
       const token = hqPdfjsToken;
 
@@ -15322,6 +15334,7 @@
 
       for (const div of visible) {
         if (token !== hqPdfjsToken) return;
+        if (isDragActive) { scheduleHQUpgrade(opts); return; }
         const idx = parseInt(div.dataset.index);
         // Skip pages still showing a CSS rotate (animating OR waiting for raster
         // swap). Writing a baked /Rotate image under a non-zero transform doubles
@@ -51122,7 +51135,23 @@ function peObjMouseDown(e, o) {
     // shield on #peTextLayer already stops this event from bubbling here in
     // the normal case, but that relies on capture-phase propagation timing;
     // checking the target directly here is unambiguous regardless of that.
-    if (e.target.closest && e.target.closest('#peTextLayer')) return;
+    if (e.target.closest && e.target.closest('#peTextLayer')) {
+      // Double-tap-zoom must still fire when the tap lands on PDF text -
+      // peOnObjSelectTextLayerPointerDown (the capture-phase shield on
+      // #peTextLayer) already lets a fast double-tap bubble through instead
+      // of claiming it for text selection, but this early return would
+      // otherwise swallow it before the tool==='select' double-tap check
+      // further below ever runs - same fix as the .pe-obj case just above.
+      const touchLikeText = e.pointerType === 'touch' || e.pointerType === 'pen';
+      if (touchLikeText && peState.tool === 'select' && peState.objSelectMode &&
+          typeof peLooksLikeFastDoubleTap === 'function' && peLooksLikeFastDoubleTap(e.clientX, e.clientY)) {
+        peLastTapTime = 0;
+        if (peToggleDoubleTapZoom(e.clientX, e.clientY)) {
+          if (e.cancelable) e.preventDefault();
+        }
+      }
+      return;
+    }
 
     const tool = peState.tool;
     const isDrawTool = tool === 'shape' || tool === 'text' || tool === 'redact' || tool === 'crop';
@@ -52902,8 +52931,18 @@ function peObjMouseDown(e, o) {
     // respects it, instead of only the navrow escape hatch doing so.
     const coarse = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
     const landscape = typeof window.matchMedia === 'function' && window.matchMedia('(orientation: landscape)').matches;
+    const portrait = typeof window.matchMedia === 'function' && window.matchMedia('(orientation: portrait)').matches;
     const hamburgerReserve = (coarse && landscape) ? 40 : 0;
-    const avail = bar.clientWidth - pad - hamburgerReserve;
+    // Portrait: Cancel/Save sit in the same fixed top-right corner as the
+    // hamburger there (position:absolute - see the coarse-pointer portrait
+    // CSS) - only the part of that corner which never shrinks (the
+    // hamburger itself, plus its gap and edge margin) is reserved here;
+    // Cancel/Save's own footprint is handled below, in the same per-square
+    // shrink pass as the main toolbar squares (they now share the
+    // --pe-tool-sq variable - see that CSS), not double-reserved at their
+    // full unshrunk size here too.
+    const portraitCornerReserve = (coarse && portrait) ? 52 : 0;
+    const avail = bar.clientWidth - pad - hamburgerReserve - portraitCornerReserve;
     if (avail <= 0) return;
 
     const minSide = 10;
@@ -53012,11 +53051,19 @@ function peObjMouseDown(e, o) {
         // #peToolsMain's own squares would throw that alignment off again.
         const sqEls = Array.from(main.querySelectorAll('.pe-btn-square'))
           .filter(el => getComputedStyle(el).display !== 'none');
-        const overflowPx = mainW - avail;
-        if (sqEls.length && overflowPx > 0.5) {
+        // Portrait: Cancel/Save shrink together with everything else too
+        // (same --pe-tool-sq variable - see their CSS), so their footprint
+        // (tailW, measured above at the still-unshrunk 36px size) has to
+        // join the same overflow/shrink-target count - otherwise the main
+        // squares alone absorb the whole reserve and end up smaller than
+        // Cancel/Save instead of matching them.
+        const tailSqCount = (coarse && portrait) ? 2 : 0;
+        const overflowPx = mainW - avail + (tailSqCount ? tailW : 0);
+        const shrinkTargetCount = sqEls.length + tailSqCount;
+        if (shrinkTargetCount && overflowPx > 0.5) {
           const defaultSq = 36;
           const minSq = 26;
-          const shrinkPer = Math.ceil(overflowPx / sqEls.length);
+          const shrinkPer = Math.ceil(overflowPx / shrinkTargetCount);
           bar.style.setProperty('--pe-tool-sq', Math.max(minSq, defaultSq - shrinkPer) + 'px');
         }
       } else {
