@@ -52766,51 +52766,53 @@ function peObjMouseDown(e, o) {
       tail.style.width = '';
       return;
     }
+    // No clamp against the hamburger any more: it sits at the far left of
+    // this cluster now, not after the tail, so the tail can mirror row 2's
+    // group exactly - which is the whole point (Cancel/Save land squarely
+    // over Rotate/Rotate/Delete, sharing both edges).
     const left = dividerRect.left - barRect.left;
-    // Clamp the right edge clear of where the hamburger will land right
-    // after the tail (see peLayoutMenuFollowTailPortrait) - a known, fixed
-    // reserve now (its own size + two cluster gaps + the edge margin),
-    // not a moving target read off the hamburger's own (now dependent)
-    // position, which would be circular.
-    const hbSize = parseFloat(getComputedStyle(bar).getPropertyValue('--pe-tool-sq')) || 36;
-    const barStyles = getComputedStyle(bar);
-    const barPadR = parseFloat(barStyles.paddingRight) || 0;
-    const maxRight = barRect.width - barPadR
-      - PE_PORTRAIT_CLUSTER_GAP - hbSize - PE_PORTRAIT_CLUSTER_GAP;
-    const right = Math.min(actionsRect.right - barRect.left, maxRight);
+    const right = actionsRect.right - barRect.left;
     const width = Math.max(0, right - left);
     tail.style.right = 'auto';
     tail.style.left = Math.round(left) + 'px';
     tail.style.width = Math.round(width) + 'px';
   }
 
-  /** Portrait only: the hamburger sits right after the tail (Cancel/Save),
-   * clustered with it instead of pinned to the far top-right corner -
-   * landscape and desktop keep the plain fixed-corner CSS position. */
-  function peLayoutMenuToggleOverDelete() {
+  /** Portrait only: the hamburger leads the row-1 cluster, one gap to the
+   * LEFT of the nav pair, rather than sitting in the top-right corner.
+   * That corner belongs to Cancel/Save now, which have to reach row 2's
+   * Delete to stay column-aligned with it; anything parked to their right
+   * would either overlap them or force row 2 to give up width (and with it
+   * icon size) to make room. Row 1's left half is empty anyway - row 2
+   * carries three more buttons than row 1 does. Landscape and desktop keep
+   * the plain fixed-corner CSS position. */
+  function peLayoutMenuTogglePortraitCluster() {
     const modal = document.getElementById('pageEditModal');
     const bar = document.querySelector('#pageEditModal .pe-toolbar');
     const btn = document.getElementById('peMenuToggleBtn');
-    const tail = document.getElementById('peToolbarTail');
-    if (!modal || !bar || !btn || !tail) return;
+    const nav = document.getElementById('pePageNav');
+    if (!modal || !bar || !btn || !nav) return;
     const coarse = typeof window.matchMedia === 'function'
       && window.matchMedia('(pointer: coarse)').matches;
     const portrait = typeof window.matchMedia === 'function'
       && window.matchMedia('(orientation: portrait)').matches;
-    if (!coarse || !portrait || !modal.classList.contains('open') || tail.offsetParent == null) {
+    if (!coarse || !portrait || !modal.classList.contains('open') || nav.offsetParent == null) {
       btn.style.left = '';
       btn.style.right = '';
       return;
     }
     const barRect = bar.getBoundingClientRect();
-    const tailRect = tail.getBoundingClientRect();
-    if (!(tailRect.width > 0)) {
+    const navRect = nav.getBoundingClientRect();
+    const btnW = btn.offsetWidth;
+    if (!(navRect.width > 0) || !btnW) {
       btn.style.left = '';
       btn.style.right = '';
       return;
     }
+    const padL = parseFloat(getComputedStyle(bar).paddingLeft) || 0;
+    const left = navRect.left - barRect.left - PE_PORTRAIT_CLUSTER_GAP - btnW;
     btn.style.right = 'auto';
-    btn.style.left = Math.round(tailRect.right - barRect.left + PE_PORTRAIT_CLUSTER_GAP) + 'px';
+    btn.style.left = Math.round(Math.max(padL, left)) + 'px';
   }
 
   /** Portrait only: nav (←→) sits right before the divider+tail, clustered
@@ -52840,6 +52842,17 @@ function peObjMouseDown(e, o) {
     const dividerLeftOffset = 2;
     const left = tailRect.left - barRect.left + dividerLeftOffset - PE_PORTRAIT_CLUSTER_GAP - navW;
     nav.style.left = Math.round(Math.max(0, left)) + 'px';
+  }
+
+  /** Portrait row 1 is one cluster laid out right-to-left, and the order
+   * matters: the tail is measured off row 2, nav is placed against the
+   * tail, the hamburger against nav. Call sites go through this wrapper so
+   * none of them can get that order wrong - two separate regressions in
+   * this toolbar came from exactly that. */
+  function peLayoutPortraitRow1Cluster() {
+    peLayoutTailAlignRotateGroupPortrait();
+    peLayoutNavBeforeTailPortrait();
+    peLayoutMenuTogglePortraitCluster();
   }
 
   function peLayoutPageNavButtons() {
@@ -52892,9 +52905,7 @@ function peObjMouseDown(e, o) {
       }
       peLayoutToolbarEdgeAlign();
       peLayoutTailCenterLandscape();
-      peLayoutTailAlignRotateGroupPortrait();
-      peLayoutMenuToggleOverDelete();
-      peLayoutNavBeforeTailPortrait();
+      peLayoutPortraitRow1Cluster();
       return;
     }
 
@@ -52973,20 +52984,16 @@ function peObjMouseDown(e, o) {
       }
       peLayoutToolbarEdgeAlign();
       peLayoutTailCenterLandscape();
-      peLayoutTailAlignRotateGroupPortrait();
-      peLayoutMenuToggleOverDelete();
-      peLayoutNavBeforeTailPortrait();
+      peLayoutPortraitRow1Cluster();
       return;
     }
     if (lead) lead.style.marginLeft = '';
     peLayoutToolbarEdgeAlign();
     peLayoutTailCenterLandscape();
-    peLayoutTailAlignRotateGroupPortrait();
-    peLayoutMenuToggleOverDelete();
-    // peLayoutNavBeforeTailPortrait() itself runs at the end of this
-    // function instead of here - the legacy title/Object-select nav
-    // placement below still needs to run first in every case (it also
-    // drives lead's own marginLeft), and would otherwise clobber this.
+    // peLayoutPortraitRow1Cluster() runs at the END of this function
+    // instead of here - the legacy title/Object-select nav placement below
+    // still has to run in every case (it also drives lead's own
+    // marginLeft), and would otherwise clobber the cluster's nav position.
 
     const objRect = objBtn.getBoundingClientRect();
     const available = objRect.left - titleRect.right;
@@ -53005,11 +53012,11 @@ function peObjMouseDown(e, o) {
       nav.style.left = minLeft + 'px';
     }
     // The above targets desktop's title/Object-select layout and has no
-    // idea the portrait cluster (tail/hamburger) even exists - it happened
-    // to run after the portrait override further up and clobber it every
-    // time this branch (stage 1/2, not tools-wrap) fired. Give the cluster
-    // the final word here for coarse+portrait.
-    peLayoutNavBeforeTailPortrait();
+    // idea the portrait cluster (tail/nav/hamburger) even exists - it
+    // happened to run after the portrait override further up and clobber it
+    // every time this branch (stage 1/2, not tools-wrap) fired. Give the
+    // cluster the final word here for coarse+portrait.
+    peLayoutPortraitRow1Cluster();
   }
 
   /** Intrinsic width of a nowrap flex row (ignores stretched width:100% in stage 2/3). */
@@ -53023,7 +53030,11 @@ function peObjMouseDown(e, o) {
       if (cs.position === 'fixed' || cs.position === 'absolute') continue;
       const cw = child.offsetWidth || child.scrollWidth;
       if (cw <= 0) continue;
-      total += cw;
+      // Horizontal margins count toward the row's real width too -
+      // .pe-tools-divider carries `margin: 0 2px`, so leaving them out
+      // under-measured every row holding one by 4px, and the fit math
+      // downstream sized row 2's squares just past its own padding.
+      total += cw + (parseFloat(cs.marginLeft) || 0) + (parseFloat(cs.marginRight) || 0);
       visible++;
     }
     return total + gap * Math.max(0, visible - 1);
@@ -53183,19 +53194,24 @@ function peObjMouseDown(e, o) {
         // this row's own overflow the way portrait briefly did (portrait's
         // Cancel/Save now fill whatever peLayoutTailAlignRotateGroupPortrait
         // gives them instead, entirely decoupled from this variable's size).
-        // Portrait only, sizing math alone (never the stage-selection avail
-        // above - reserving there scrambled which stage got picked on wider
-        // phones, see an earlier fix): Delete's right edge needs to stay
-        // clear of the hamburger's fixed corner so
-        // peLayoutTailAlignRotateGroupPortrait() can actually copy row 2's
-        // right edge onto row 1 instead of forever clamping short of it.
-        // #peToolsMain is justify-content:center (see its CSS), so shrinking
-        // its total width only moves the RIGHT edge in by HALF the
-        // reduction - the other half goes to the left margin instead -
-        // hence 2x the actual 52px (hamburger + gap + edge) needed there.
-        const portraitHamburgerReserve = (coarse && portrait) ? 104 : 0;
-        const overflowPx = mainW - avail + portraitHamburgerReserve;
+        // Portrait used to additionally reserve room here for the
+        // hamburger's old top-right corner spot, so row 1's Cancel/Save
+        // could mirror Delete's right edge without running into it. The
+        // hamburger now sits at the far LEFT of row 1's cluster instead
+        // (see peLayoutMenuTogglePortraitCluster), in space row 1 has to
+        // spare, so row 2 no longer owes it anything and gets the full
+        // width back - worth ~6px per square on a 360px phone, which is
+        // the difference between hitting the 26px floor and not.
         const defaultSq = 36;
+        // mainW was measured at whatever --pe-tool-sq is applied right now,
+        // but the shrink/grow below is expressed as an offset from
+        // defaultSq - so normalize the measurement to that same baseline
+        // first. Without this the two disagree whenever a previous pass
+        // already resized the squares, and the result only converges by
+        // re-running on the next layout pass, landing a pixel or two off
+        // (row 2 overflowing its own padding at some widths).
+        const curSq = parseFloat(getComputedStyle(bar).getPropertyValue('--pe-tool-sq')) || defaultSq;
+        const overflowPx = mainW + sqEls.length * (defaultSq - curSq) - avail;
         if (sqEls.length && overflowPx > 0.5) {
           const minSq = 26;
           const shrinkPer = Math.ceil(overflowPx / sqEls.length);
