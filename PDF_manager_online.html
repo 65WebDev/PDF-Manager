@@ -53044,11 +53044,23 @@ function peObjMouseDown(e, o) {
         const tailSqCount = (coarse && portrait) ? 2 : 0;
         const overflowPx = mainW - avail + (tailSqCount ? tailW : 0);
         const shrinkTargetCount = sqEls.length + tailSqCount;
+        const defaultSq = 36;
         if (shrinkTargetCount && overflowPx > 0.5) {
-          const defaultSq = 36;
           const minSq = 26;
           const shrinkPer = Math.ceil(overflowPx / shrinkTargetCount);
           bar.style.setProperty('--pe-tool-sq', Math.max(minSq, defaultSq - shrinkPer) + 'px');
+        } else if (shrinkTargetCount && overflowPx < -0.5) {
+          // Leftover room: #peToolsMain's own justify-content:center (see
+          // its CSS) just centers the still-36px squares as a group inside
+          // the full-width row instead of using the extra space, leaving
+          // equal dead margins on both sides on a wide-enough phone. Grow
+          // every square (mirroring the shrink above) to fill it, capped
+          // well short of comical so a tablet-width portrait view doesn't
+          // balloon them.
+          const maxSq = 48;
+          const growPer = Math.floor(-overflowPx / shrinkTargetCount);
+          const grown = Math.min(maxSq, defaultSq + growPer);
+          if (grown > defaultSq) bar.style.setProperty('--pe-tool-sq', grown + 'px');
         }
       } else {
         bar.classList.add('pe-tb-tail-wrap');
