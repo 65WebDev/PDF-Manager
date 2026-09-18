@@ -5919,10 +5919,27 @@
       #pageEditModal #peSaveBtn {
         font-size: 0;
         gap: 0;
-        width: var(--pe-tool-sq, 36px);
         height: var(--pe-tool-sq, 36px);
         padding: 0;
         justify-content: center;
+      }
+      /* Portrait only: Cancel/Save fill whatever width
+         peLayoutTailAlignRotateGroupPortrait() gives the tail (matching the
+         Rotate/Delete group on row 2) evenly, instead of a fixed square -
+         landscape keeps the plain square size from #peEndActions .pe-btn
+         below. */
+      @media (orientation: portrait) {
+        #pageEditModal #peCancelBtn,
+        #pageEditModal #peSaveBtn {
+          flex: 1 1 0;
+          width: auto;
+        }
+      }
+      @media (orientation: landscape) {
+        #pageEditModal #peCancelBtn,
+        #pageEditModal #peSaveBtn {
+          width: var(--pe-tool-sq, 36px);
+        }
       }
       #pageEditModal #peCancelBtn::before,
       #pageEditModal #peSaveBtn::before {
@@ -5942,37 +5959,40 @@
          hamburger menu toggle, with a divider separating them from the nav
          prev/next pair - instead of sitting on their own row 3 below the
          tools. Absolutely positioned (like the hamburger itself, which is
-         always at a fixed top-right offset) rather than fought into row 1
-         through the flex-wrap stage system: peUpdateToolbarWrap's stage
-         classes exist to decide what wraps to its own row on a crowded
-         toolbar, but this is a fixed placement independent of how much
-         content is currently on row 1. */
+         always at a fixed top-right offset), with left/width then set at
+         runtime by peLayoutTailAlignRotateGroupPortrait() to exactly match
+         row 2's Rotate/Delete group (same left edge, same total width) -
+         the `right`/`width:auto` here are only the fallback for the one
+         layout frame before that function first runs. The divider (::before)
+         sits INSIDE that box now (left:2px, not the old -9px outside it),
+         copying .pe-tools-divider's own box model (1px wide, 28px tall,
+         2px margin each side) so it lines up with - and matches the exact
+         size of - the divider before Rotate/Delete on row 2. */
       @media (orientation: portrait) {
         #pageEditModal .pe-toolbar-tail {
           position: absolute;
           top: max(8px, env(safe-area-inset-top, 0px));
           right: calc(36px + 8px + max(8px, env(safe-area-inset-right, 0px)));
-          /* Overrides .pe-tb-tail-wrap/.wrapped's width:100% (a "stretch to
-             fill the wrapped row" rule from the flex-wrap stage system) -
-             this is a fixed-size, absolutely positioned corner element now,
-             not a row participant, so it must size to its own content. */
           width: auto;
           max-width: none;
           flex: none;
-          padding: 0;
+          padding: 0 0 0 5px;
+          box-sizing: border-box;
           z-index: 40;
         }
         #pageEditModal .pe-toolbar-tail::before {
           content: '';
           position: absolute;
-          left: -9px;
-          top: 2px;
-          bottom: 2px;
+          left: 2px;
+          top: 50%;
+          transform: translateY(-50%);
           width: 1px;
+          height: 28px;
           background: rgba(255,255,255,.28);
         }
         #pageEditModal #peEndActions {
-          gap: 8px;
+          gap: 6px;
+          width: 100%;
         }
       }
       /* Landscape: Cancel/Save also taken out of the row-1 flex flow, but
@@ -52696,6 +52716,52 @@ function peObjMouseDown(e, o) {
     tail.style.left = Math.round(left) + 'px';
   }
 
+  /** Portrait only: size/position Cancel/Save to exactly match row 2's
+   * Rotate/Delete group (same left edge as its divider, same right edge as
+   * Delete) - Cancel/Save fill that width evenly (see their CSS), and the
+   * tail's own ::before divider copies .pe-tools-divider's box model, so
+   * the two rows visually line up as one continuous pair of columns. */
+  function peLayoutTailAlignRotateGroupPortrait() {
+    const modal = document.getElementById('pageEditModal');
+    const bar = document.querySelector('#pageEditModal .pe-toolbar');
+    const tail = document.getElementById('peToolbarTail');
+    const hamburger = document.getElementById('peMenuToggleBtn');
+    const actions = document.querySelector('#pageEditModal .pe-tools-actions');
+    if (!modal || !bar || !tail || !hamburger || !actions) return;
+    const coarse = typeof window.matchMedia === 'function'
+      && window.matchMedia('(pointer: coarse)').matches;
+    const portrait = typeof window.matchMedia === 'function'
+      && window.matchMedia('(orientation: portrait)').matches;
+    const rowDivider = actions.previousElementSibling
+      && actions.previousElementSibling.classList.contains('pe-tools-divider')
+      ? actions.previousElementSibling : null;
+    if (!coarse || !portrait || !modal.classList.contains('open')
+        || !rowDivider || actions.offsetParent == null || hamburger.offsetParent == null) {
+      tail.style.left = '';
+      tail.style.width = '';
+      return;
+    }
+    const barRect = bar.getBoundingClientRect();
+    const dividerRect = rowDivider.getBoundingClientRect();
+    const actionsRect = actions.getBoundingClientRect();
+    const hbRect = hamburger.getBoundingClientRect();
+    if (!(actionsRect.width > 0) || !(dividerRect.width > 0)) {
+      tail.style.left = '';
+      tail.style.width = '';
+      return;
+    }
+    const left = dividerRect.left - barRect.left;
+    // Clamp the right edge clear of the hamburger - row 2 has no reason to
+    // reserve room for it (different row, no vertical overlap), so Delete
+    // could in principle extend further right than row 1 can safely copy.
+    const maxRight = hbRect.left - barRect.left - 8;
+    const right = Math.min(actionsRect.right - barRect.left, maxRight);
+    const width = Math.max(0, right - left);
+    tail.style.right = 'auto';
+    tail.style.left = Math.round(left) + 'px';
+    tail.style.width = Math.round(width) + 'px';
+  }
+
   /** Reset any inline positioning left over from an older reachability trick. */
   function peLayoutMenuToggleOverDelete() {
     // This used to re-center the hamburger over Delete's column in
@@ -52767,6 +52833,7 @@ function peObjMouseDown(e, o) {
       peLayoutToolbarEdgeAlign();
       peLayoutMenuToggleOverDelete();
       peLayoutTailCenterLandscape();
+      peLayoutTailAlignRotateGroupPortrait();
       return;
     }
 
@@ -52846,12 +52913,14 @@ function peObjMouseDown(e, o) {
       peLayoutMenuToggleOverDelete();
       peLayoutToolbarEdgeAlign();
       peLayoutTailCenterLandscape();
+      peLayoutTailAlignRotateGroupPortrait();
       return;
     }
     if (lead) lead.style.marginLeft = '';
     peLayoutToolbarEdgeAlign();
     peLayoutMenuToggleOverDelete();
     peLayoutTailCenterLandscape();
+    peLayoutTailAlignRotateGroupPortrait();
 
     const objRect = objBtn.getBoundingClientRect();
     const available = objRect.left - titleRect.right;
@@ -53035,21 +53104,31 @@ function peObjMouseDown(e, o) {
         // #peToolsMain's own squares would throw that alignment off again.
         const sqEls = Array.from(main.querySelectorAll('.pe-btn-square'))
           .filter(el => getComputedStyle(el).display !== 'none');
-        // Portrait: Cancel/Save shrink together with everything else too
-        // (same --pe-tool-sq variable - see their CSS), so their footprint
-        // (tailW, measured above at the still-unshrunk 36px size) has to
-        // join the same overflow/shrink-target count - otherwise the main
-        // squares alone absorb the whole reserve and end up smaller than
-        // Cancel/Save instead of matching them.
-        const tailSqCount = (coarse && portrait) ? 2 : 0;
-        const overflowPx = mainW - avail + (tailSqCount ? tailW : 0);
-        const shrinkTargetCount = sqEls.length + tailSqCount;
+        // Landscape's Cancel/Save are still plain --pe-tool-sq squares, but
+        // peLayoutTailCenterLandscape() repositions them from a live
+        // measurement on every layout pass, so growing/shrinking this
+        // variable can't strand them - no need to fold their width into
+        // this row's own overflow the way portrait briefly did (portrait's
+        // Cancel/Save now fill whatever peLayoutTailAlignRotateGroupPortrait
+        // gives them instead, entirely decoupled from this variable's size).
+        // Portrait only, sizing math alone (never the stage-selection avail
+        // above - reserving there scrambled which stage got picked on wider
+        // phones, see an earlier fix): Delete's right edge needs to stay
+        // clear of the hamburger's fixed corner so
+        // peLayoutTailAlignRotateGroupPortrait() can actually copy row 2's
+        // right edge onto row 1 instead of forever clamping short of it.
+        // #peToolsMain is justify-content:center (see its CSS), so shrinking
+        // its total width only moves the RIGHT edge in by HALF the
+        // reduction - the other half goes to the left margin instead -
+        // hence 2x the actual 52px (hamburger + gap + edge) needed there.
+        const portraitHamburgerReserve = (coarse && portrait) ? 104 : 0;
+        const overflowPx = mainW - avail + portraitHamburgerReserve;
         const defaultSq = 36;
-        if (shrinkTargetCount && overflowPx > 0.5) {
+        if (sqEls.length && overflowPx > 0.5) {
           const minSq = 26;
-          const shrinkPer = Math.ceil(overflowPx / shrinkTargetCount);
+          const shrinkPer = Math.ceil(overflowPx / sqEls.length);
           bar.style.setProperty('--pe-tool-sq', Math.max(minSq, defaultSq - shrinkPer) + 'px');
-        } else if (shrinkTargetCount && overflowPx < -0.5) {
+        } else if (sqEls.length && overflowPx < -0.5) {
           // Leftover room: #peToolsMain's own justify-content:center (see
           // its CSS) just centers the still-36px squares as a group inside
           // the full-width row instead of using the extra space, leaving
@@ -53058,7 +53137,7 @@ function peObjMouseDown(e, o) {
           // well short of comical so a tablet-width portrait view doesn't
           // balloon them.
           const maxSq = 48;
-          const growPer = Math.floor(-overflowPx / shrinkTargetCount);
+          const growPer = Math.floor(-overflowPx / sqEls.length);
           const grown = Math.min(maxSq, defaultSq + growPer);
           if (grown > defaultSq) bar.style.setProperty('--pe-tool-sq', grown + 'px');
         }
