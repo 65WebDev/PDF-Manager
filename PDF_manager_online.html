@@ -5676,12 +5676,9 @@
         padding-right: max(8px, env(safe-area-inset-right, 0px));
       }
       /* Overlay toggle must not steal flex width from tool icons (36×36).
-         Tail gets a local inset so Cancel/Save sit clear of the absolute button. */
-      /* Stage 3: JS aligns tail to Crop/Delete; otherwise leave room for hamburger. */
-      #pageEditModal:not(.pe-menu-collapsed) .pe-toolbar:not(.pe-tb-tools-wrap) .pe-toolbar-tail {
-        padding-right: 40px;
-        box-sizing: border-box;
-      }
+         Cancel/Save are taken out of flow entirely in both orientations
+         (see the portrait/landscape .pe-toolbar-tail rules below), so they
+         no longer need an in-flow reserve to stay clear of it. */
       /* Hide/show editor top menu — same idea as #menuToggleBtn in the preview. */
       #pageEditModal #peMenuToggleBtn {
         display: flex;
@@ -5976,6 +5973,26 @@
         }
         #pageEditModal #peEndActions {
           gap: 8px;
+        }
+      }
+      /* Landscape: Cancel/Save also taken out of the row-1 flex flow, but
+         centered in the gap between Delete (Trash) and the hamburger
+         instead of pinned to a corner - peLayoutTailCenterLandscape()
+         computes and sets `left` at runtime since that gap's size depends
+         on how many tools fit on row 1. No divider here (nothing else sits
+         between Delete and the hamburger to separate them from). The
+         right/left fallback below only matters for the one JS-layout frame
+         before that function first runs. */
+      @media (orientation: landscape) {
+        #pageEditModal .pe-toolbar-tail {
+          position: absolute;
+          top: max(8px, env(safe-area-inset-top, 0px));
+          right: calc(36px + 8px + max(8px, env(safe-area-inset-right, 0px)));
+          width: auto;
+          max-width: none;
+          flex: none;
+          padding: 0;
+          z-index: 40;
         }
       }
       .page.to-delete .quick-actions,
@@ -13469,6 +13486,7 @@
       // Capture the nearest page BEFORE scale changes reflow the layout.
       const anchorPage = findNearestPageToPoint(ptrX, ptrY);
       const anchorIdx = anchorPage ? parseInt(anchorPage.dataset.index, 10) : NaN;
+      const fitWidthTarget = computeFitWidthScale(anchorPage);
       // A repeat gesture only means "zoom in further to max" when it lands
       // on the SAME page fit-width is currently anchored to - the toggle
       // stays on across a rotation of that same page
@@ -13479,8 +13497,23 @@
       // without this check, double-tapping a second, different page while
       // already fit-widthed would zoom the FIRST page in to max instead of
       // fitting the one just tapped.
-      const sameAnchor = fitWidthToggleOn && !Number.isNaN(anchorIdx) && anchorIdx === fitWidthAnchorIdx;
+      // Exception: a different page whose fit-width scale is identical to
+      // the one already applied (same size/orientation as the current
+      // anchor) needs no fresh fit-width step at all - re-applying it would
+      // be a visible no-op, so treat it the same as landing back on the
+      // original anchor and go straight to zooming in to max instead of
+      // requiring a second double-tap to get there.
+      const sameFitWidthScale = fitWidthToggleOn && !fitWidthMaxZoomActive
+        && Math.abs(fitWidthTarget - currentScale) <= 0.25;
+      const sameAnchor = fitWidthToggleOn && !Number.isNaN(anchorIdx)
+        && (anchorIdx === fitWidthAnchorIdx || sameFitWidthScale);
       if (sameAnchor) {
+        // Keep the tracked anchor in sync with the page actually tapped -
+        // matters for the sameFitWidthScale case, where anchorIdx can
+        // differ from the previous fitWidthAnchorIdx (a different but
+        // identically-sized page); rotation re-tracking and future taps
+        // should follow this page from here on, not the one it replaced.
+        fitWidthAnchorIdx = anchorIdx;
         // A repeat tap while zoomed to the max at a point (see below)
         // returns to the fit-width view it came from.
         if (fitWidthMaxZoomActive) {
@@ -13517,7 +13550,7 @@
       fitWidthAnchorIdx = Number.isNaN(anchorIdx) ? null : anchorIdx;
       fitWidthMaxZoomActive = false;
       fitWidthMaxZoomRestoreScale = null;
-      const target = computeFitWidthScale(anchorPage);
+      const target = fitWidthTarget;
       fitWidthToggleOn = true;
       updateFitWidthBtnUI();
       if (Math.abs(target - currentScale) > 0.25) {
@@ -49956,6 +49989,17 @@ function peOnObjSelectTextLayerPointerDown(e) {
   const touchLike = e.pointerType === 'touch' || e.pointerType === 'pen';
   if (!touchLike) return false;
   if (pePinchActive || Date.now() < pePinchBlockObjUntil) return true;
+  // Double-tap-zoom (peToggleDoubleTapZoom, claimed by peBindPointerDown's
+  // stage-level dispatcher) needs a chance at a tap landing on text too -
+  // every other path below ends in a capture-phase stopPropagation (either
+  // here or in shieldPageTextLayerEvents' own caller), which otherwise
+  // meant a double-tap on PDF text or an inline text object never reached
+  // that dispatcher at all. A lone tap is still recorded so a fast second
+  // tap - wherever it lands - has something to match against.
+  if (typeof peLooksLikeFastDoubleTap === 'function' && peLooksLikeFastDoubleTap(e.clientX, e.clientY)) {
+    return true;
+  }
+  if (typeof peRecordSoloTap === 'function') peRecordSoloTap(e.clientX, e.clientY);
   peBindTextSelHandleDragGuards();
   // Adjusting an existing selection via its endpoint handles — do not pan.
   if (peIsEditorPageTextSelection() && peClientNearTextSelHandle(e.clientX, e.clientY)) {
@@ -50002,6 +50046,26 @@ function peObjMouseDown(e, o) {
     e.stopPropagation();
     peCancelTouchObjPending();
     return;
+  }
+  // Double-tap-zoom needs a chance at a tap landing on a placed object too -
+  // this handler is bound directly on each object, ahead of the stage's own
+  // dispatcher in bubble order, so every path below claims the tap for
+  // object select/move/resize instead, which otherwise meant a double-tap
+  // on an object never reached peToggleDoubleTapZoom at all. Only on touch,
+  // and only in Object-select mode - matching where the zoom toggle itself
+  // is enabled (see peToggleDoubleTapZoom). !peTouchObjCommit excludes the
+  // synthetic replay peFlushTouchObjPending makes back into this same
+  // function at pointerup (same coordinates, tens of ms later) to actually
+  // commit a deferred tap - without it, that replay looked like a fast
+  // double-tap against the live pointerdown's own just-recorded solo tap
+  // and silently ate every single-tap select on an object.
+  if (touchLike && !peTouchObjCommit && peState && peState.tool === 'select' && peState.objSelectMode &&
+      typeof peLooksLikeFastDoubleTap === 'function' && peLooksLikeFastDoubleTap(e.clientX, e.clientY)) {
+    return;
+  }
+  if (touchLike && !peTouchObjCommit && peState && peState.tool === 'select' && peState.objSelectMode &&
+      typeof peRecordSoloTap === 'function') {
+    peRecordSoloTap(e.clientX, e.clientY);
   }
   const onHandle = !!(e.target.classList && (
     e.target.classList.contains('pe-text-corner-handle') ||
@@ -51033,7 +51097,25 @@ function peObjMouseDown(e, o) {
     if (peDrawPlacementIgnoresObjects()) peUpdateDrawShiftPassthrough(e.shiftKey);
     if (e.target.closest && e.target.closest('.pe-obj')) {
       const passObj = e.shiftKey && peDrawPlacementIgnoresObjects();
-      if (!passObj) return;
+      if (!passObj) {
+        // Double-tap-zoom must still fire when the tap lands on a placed
+        // object - peObjMouseDown (bound directly on the object, ahead of
+        // this stage-level handler in bubble order) already lets a fast
+        // double-tap bubble through instead of claiming it for object
+        // select/move, but this early return would otherwise swallow it
+        // before the tool==='select' double-tap check further below ever
+        // runs. Only on touch, only in Object-select mode - same gating as
+        // peToggleDoubleTapZoom itself.
+        const touchLikeObj = e.pointerType === 'touch' || e.pointerType === 'pen';
+        if (touchLikeObj && peState.tool === 'select' && peState.objSelectMode &&
+            typeof peLooksLikeFastDoubleTap === 'function' && peLooksLikeFastDoubleTap(e.clientX, e.clientY)) {
+          peLastTapTime = 0;
+          if (peToggleDoubleTapZoom(e.clientX, e.clientY)) {
+            if (e.cancelable) e.preventDefault();
+          }
+        }
+        return;
+      }
     }
     // A click that lands on the PDF text-selection layer (object-select mode
     // only) must start a native text selection, not an object marquee - the
@@ -52462,6 +52544,21 @@ function peObjMouseDown(e, o) {
     const tail = document.getElementById('peToolbarTail');
     if (!bar || !title) return;
 
+    const portrait = typeof window.matchMedia === 'function'
+      && window.matchMedia('(orientation: portrait)').matches;
+    const coarse = typeof window.matchMedia === 'function'
+      && window.matchMedia('(pointer: coarse)').matches;
+    // Coarse pointer (either orientation): the tail (Cancel/Save) is taken
+    // out of the row-1 flex flow entirely — a fixed top-right corner in
+    // portrait, centered between Delete and the hamburger in landscape
+    // (see the coarse-pointer portrait/landscape CSS and
+    // peLayoutTailCenterLandscape()) — not a flex participant sized
+    // between Crop and Delete like it is on desktop. Padding it to those
+    // columns' edges made no sense once it left the flow — it only
+    // widened/shifted the absolutely-positioned box, overlapping
+    // neighboring buttons.
+    const tailOutOfFlow = coarse;
+
     const reset = () => {
       title.style.transform = '';
       if (tail) {
@@ -52492,8 +52589,6 @@ function peObjMouseDown(e, o) {
     const barPadR = parseFloat(barStyles.paddingRight) || 0;
     const cropL = cropRect.left - barRect.left;
     const delR = delRect.right - barRect.left;
-    const portrait = typeof window.matchMedia === 'function'
-      && window.matchMedia('(orientation: portrait)').matches;
     const textBtn = document.getElementById('peToolText');
     const textRect = textBtn?.getBoundingClientRect();
 
@@ -52511,6 +52606,13 @@ function peObjMouseDown(e, o) {
       title.style.transform = dx ? ('translateX(' + dx + 'px)') : '';
     }
 
+    if (tailOutOfFlow) {
+      tail.style.paddingLeft = '';
+      tail.style.paddingRight = '';
+      tail.style.justifyContent = '';
+      return;
+    }
+
     // Tail: scale pill starts at Crop; Save ends at Delete (the pill grows
     // to absorb whatever room is left between them, pushing Cancel/Save
     // flush against Delete's right edge) - the pill/Cancel boundary itself
@@ -52522,6 +52624,42 @@ function peObjMouseDown(e, o) {
     tail.style.gap = '6px';
     tail.style.paddingLeft = padL + 'px';
     tail.style.paddingRight = padR + 'px';
+  }
+
+  /** Coarse+landscape only: center Cancel/Save in the gap between Delete
+   * (Trash) and the hamburger, instead of sitting flush against either. */
+  function peLayoutTailCenterLandscape() {
+    const tail = document.getElementById('peToolbarTail');
+    const del = document.getElementById('peDeleteObj');
+    const hamburger = document.getElementById('peMenuToggleBtn');
+    const bar = document.querySelector('#pageEditModal .pe-toolbar');
+    if (!tail || !del || !hamburger || !bar) return;
+    const coarse = typeof window.matchMedia === 'function'
+      && window.matchMedia('(pointer: coarse)').matches;
+    const landscape = typeof window.matchMedia === 'function'
+      && window.matchMedia('(orientation: landscape)').matches;
+    if (!coarse || !landscape
+        || !document.getElementById('pageEditModal')?.classList.contains('open')
+        || del.offsetParent == null || hamburger.offsetParent == null) {
+      tail.style.left = '';
+      tail.style.right = '';
+      return;
+    }
+    const barRect = bar.getBoundingClientRect();
+    const delRect = del.getBoundingClientRect();
+    const hbRect = hamburger.getBoundingClientRect();
+    if (!(delRect.width > 0) || !(hbRect.width > 0)) {
+      tail.style.left = '';
+      tail.style.right = '';
+      return;
+    }
+    const tailW = tail.getBoundingClientRect().width || tail.offsetWidth;
+    const gapMid = (delRect.right + hbRect.left) / 2;
+    const minLeft = delRect.right - barRect.left + 6;
+    const maxLeft = Math.max(minLeft, hbRect.left - barRect.left - tailW - 6);
+    const left = Math.min(Math.max(gapMid - tailW / 2 - barRect.left, minLeft), maxLeft);
+    tail.style.right = 'auto';
+    tail.style.left = Math.round(left) + 'px';
   }
 
   /** Place ←→ as a tight pair, equally spaced between title and Object-select. */
@@ -52606,6 +52744,7 @@ function peObjMouseDown(e, o) {
       }
       peLayoutToolbarEdgeAlign();
       peLayoutMenuToggleOverDelete();
+      peLayoutTailCenterLandscape();
       return;
     }
 
@@ -52684,11 +52823,13 @@ function peObjMouseDown(e, o) {
       }
       peLayoutMenuToggleOverDelete();
       peLayoutToolbarEdgeAlign();
+      peLayoutTailCenterLandscape();
       return;
     }
     if (lead) lead.style.marginLeft = '';
     peLayoutToolbarEdgeAlign();
     peLayoutMenuToggleOverDelete();
+    peLayoutTailCenterLandscape();
 
     const objRect = objBtn.getBoundingClientRect();
     const available = objRect.left - titleRect.right;
