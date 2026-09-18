@@ -5921,21 +5921,11 @@
       #pageEditModal #peSaveBtn {
         font-size: 0;
         gap: 0;
+        width: var(--pe-tool-sq, 36px);
         height: var(--pe-tool-sq, 36px);
+        flex: none;
         padding: 0;
         justify-content: center;
-      }
-      /* Portrait only: Cancel/Save fill whatever width
-         peLayoutTailAlignRotateGroupPortrait() gives the tail (matching the
-         Rotate/Delete group on row 2) evenly, instead of a fixed square -
-         landscape keeps the plain square size from #peEndActions .pe-btn
-         below. */
-      @media (orientation: portrait) {
-        #pageEditModal #peCancelBtn,
-        #pageEditModal #peSaveBtn {
-          flex: 1 1 0;
-          width: auto;
-        }
       }
       @media (orientation: landscape) {
         #pageEditModal #peCancelBtn,
@@ -5961,15 +5951,17 @@
          hamburger menu toggle, with a divider separating them from the nav
          prev/next pair - instead of sitting on their own row 3 below the
          tools. Absolutely positioned (like the hamburger itself, which is
-         always at a fixed top-right offset), with left/width then set at
-         runtime by peLayoutTailAlignRotateGroupPortrait() to exactly match
-         row 2's Rotate/Delete group (same left edge, same total width) -
-         the `right`/`width:auto` here are only the fallback for the one
-         layout frame before that function first runs. The divider (::before)
-         sits INSIDE that box now (left:2px, not the old -9px outside it),
-         copying .pe-tools-divider's own box model (1px wide, 28px tall,
-         2px margin each side) so it lines up with - and matches the exact
-         size of - the divider before Rotate/Delete on row 2. */
+         always at a fixed top-right offset), with `left` then set at runtime
+         by peLayoutTailAlignRotateGroupPortrait() to row 2's own
+         divider-before-Rotate - the `right` here is only the fallback for
+         the one layout frame before that function first runs.
+         The box reproduces row 2's divider-to-Rotate geometry exactly, so
+         that single `left` lines BOTH rows up: the divider (::before) sits
+         at left:0, i.e. right on the measured position, and the 9px
+         padding after it is row 2's own 1px divider + its 2px right margin
+         + #peToolsMain's 6px gap - which lands Cancel on Rotate-left's
+         column, and (sharing row 2's 6px button gap) Save on
+         Rotate-right's. */
       @media (orientation: portrait) {
         #pageEditModal .pe-toolbar-tail {
           position: absolute;
@@ -5978,14 +5970,14 @@
           width: auto;
           max-width: none;
           flex: none;
-          padding: 0 0 0 5px;
+          padding: 0 0 0 9px;
           box-sizing: border-box;
           z-index: 40;
         }
         #pageEditModal .pe-toolbar-tail::before {
           content: '';
           position: absolute;
-          left: 2px;
+          left: 0;
           top: 50%;
           transform: translateY(-50%);
           width: 1px;
@@ -5994,7 +5986,6 @@
         }
         #pageEditModal #peEndActions {
           gap: 6px;
-          width: 100%;
         }
       }
       /* Landscape: Cancel/Save also taken out of the row-1 flex flow, but
@@ -52752,8 +52743,14 @@ function peObjMouseDown(e, o) {
     const rowDivider = actions.previousElementSibling
       && actions.previousElementSibling.classList.contains('pe-tools-divider')
       ? actions.previousElementSibling : null;
-    if (!modal.classList.contains('open')
-        || !rowDivider || actions.offsetParent == null) {
+    // Only meaningful once the tools have wrapped to a row of their own:
+    // "put Cancel/Save on Rotate's columns" needs Rotate to be on a
+    // DIFFERENT row. On a wide enough portrait viewport everything fits one
+    // row instead, and copying those columns would stack Cancel/Save right
+    // on top of the very buttons they were aligning to.
+    if (!modal.classList.contains('open') || !rowDivider
+        || !bar.classList.contains('pe-tb-tools-wrap')
+        || actions.offsetParent == null) {
       tail.style.left = '';
       tail.style.width = '';
       return;
@@ -52766,53 +52763,56 @@ function peObjMouseDown(e, o) {
       tail.style.width = '';
       return;
     }
-    // No clamp against the hamburger any more: it sits at the far left of
-    // this cluster now, not after the tail, so the tail can mirror row 2's
-    // group exactly - which is the whole point (Cancel/Save land squarely
-    // over Rotate/Rotate/Delete, sharing both edges).
-    const left = dividerRect.left - barRect.left;
-    const right = actionsRect.right - barRect.left;
-    const width = Math.max(0, right - left);
+    // Only `left` is set: Cancel/Save are plain --pe-tool-sq squares now,
+    // and the tail's own padding reproduces row 2's divider-to-Rotate
+    // geometry (see its portrait CSS), so pinning the tail's left edge to
+    // row 2's divider is enough to drop Cancel onto Rotate-left's column
+    // and Save onto Rotate-right's. Width stays auto (content-sized) - an
+    // explicit one would have to be recomputed on every size change, and
+    // the tail no longer needs to span the whole Rotate/Delete group
+    // (the hamburger covers Delete's column itself).
     tail.style.right = 'auto';
-    tail.style.left = Math.round(left) + 'px';
-    tail.style.width = Math.round(width) + 'px';
+    tail.style.left = Math.round(dividerRect.left - barRect.left) + 'px';
+    tail.style.width = '';
   }
 
-  /** Portrait only: the hamburger leads the row-1 cluster, one gap to the
-   * LEFT of the nav pair, rather than sitting in the top-right corner.
-   * That corner belongs to Cancel/Save now, which have to reach row 2's
-   * Delete to stay column-aligned with it; anything parked to their right
-   * would either overlap them or force row 2 to give up width (and with it
-   * icon size) to make room. Row 1's left half is empty anyway - row 2
-   * carries three more buttons than row 1 does. Landscape and desktop keep
-   * the plain fixed-corner CSS position. */
+  /** Portrait only: the hamburger takes Delete's column on row 1, directly
+   * above the Trash button. Cancel/Save are plain squares sitting over
+   * Rotate-left/Rotate-right, so Delete's column is exactly the one slot
+   * row 1 has left over - the three of them then read as one grid with row
+   * 2 rather than as free-floating corner buttons. Landscape and desktop
+   * keep the plain fixed-corner CSS position. */
   function peLayoutMenuTogglePortraitCluster() {
     const modal = document.getElementById('pageEditModal');
     const bar = document.querySelector('#pageEditModal .pe-toolbar');
     const btn = document.getElementById('peMenuToggleBtn');
-    const nav = document.getElementById('pePageNav');
-    if (!modal || !bar || !btn || !nav) return;
+    const actions = document.querySelector('#pageEditModal .pe-tools-actions');
+    if (!modal || !bar || !btn || !actions) return;
     const coarse = typeof window.matchMedia === 'function'
       && window.matchMedia('(pointer: coarse)').matches;
     const portrait = typeof window.matchMedia === 'function'
       && window.matchMedia('(orientation: portrait)').matches;
-    if (!coarse || !portrait || !modal.classList.contains('open') || nav.offsetParent == null) {
+    const squares = Array.from(actions.querySelectorAll('.pe-btn-square'))
+      .filter(el => getComputedStyle(el).display !== 'none');
+    const del = squares[squares.length - 1];
+    // Two-row layout only - see peLayoutTailAlignRotateGroupPortrait().
+    // On a single-row toolbar Delete's column is Delete itself.
+    if (!coarse || !portrait || !modal.classList.contains('open')
+        || !bar.classList.contains('pe-tb-tools-wrap')
+        || !del || actions.offsetParent == null) {
       btn.style.left = '';
       btn.style.right = '';
       return;
     }
     const barRect = bar.getBoundingClientRect();
-    const navRect = nav.getBoundingClientRect();
-    const btnW = btn.offsetWidth;
-    if (!(navRect.width > 0) || !btnW) {
+    const delRect = del.getBoundingClientRect();
+    if (!(delRect.width > 0)) {
       btn.style.left = '';
       btn.style.right = '';
       return;
     }
-    const padL = parseFloat(getComputedStyle(bar).paddingLeft) || 0;
-    const left = navRect.left - barRect.left - PE_PORTRAIT_CLUSTER_GAP - btnW;
     btn.style.right = 'auto';
-    btn.style.left = Math.round(Math.max(padL, left)) + 'px';
+    btn.style.left = Math.round(delRect.left - barRect.left) + 'px';
   }
 
   /** Portrait only: nav (←→) sits right before the divider+tail, clustered
@@ -52828,7 +52828,11 @@ function peObjMouseDown(e, o) {
       && window.matchMedia('(pointer: coarse)').matches;
     const portrait = typeof window.matchMedia === 'function'
       && window.matchMedia('(orientation: portrait)').matches;
+    // Two-row layout only - see peLayoutTailAlignRotateGroupPortrait().
+    // Otherwise the tail isn't on row 2's columns either, and nav keeps
+    // whatever the general placement above gave it.
     if (!coarse || !portrait || !modal.classList.contains('open')
+        || !bar.classList.contains('pe-tb-tools-wrap')
         || bar.classList.contains('pe-tb-navrow') || tail.offsetParent == null) {
       return;
     }
@@ -52836,11 +52840,12 @@ function peObjMouseDown(e, o) {
     const tailRect = tail.getBoundingClientRect();
     const navW = nav.offsetWidth;
     if (!(tailRect.width > 0) || !navW) return;
-    // The divider (tail's own ::before) sits at `left: 2px` relative to
-    // the tail box itself, INSIDE its own left padding - see the
-    // coarse-pointer portrait CSS. Nav ends one cluster gap before that.
-    const dividerLeftOffset = 2;
-    const left = tailRect.left - barRect.left + dividerLeftOffset - PE_PORTRAIT_CLUSTER_GAP - navW;
+    // The tail's own divider (::before) sits at its left edge exactly (see
+    // the coarse-pointer portrait CSS), so the tail's left IS the divider.
+    // Nav ends one cluster gap before it - the same 8px row 2 leaves
+    // between Shapes and its own divider (6px flex gap + the divider's 2px
+    // margin), so both rows break at the same visual rhythm.
+    const left = tailRect.left - barRect.left - PE_PORTRAIT_CLUSTER_GAP - navW;
     nav.style.left = Math.round(Math.max(0, left)) + 'px';
   }
 
@@ -53167,10 +53172,32 @@ function peObjMouseDown(e, o) {
     // Stage 2 uses flex-start, so this padding maps 1:1 to the tools offset.
     const navLeftPad = Math.max(0, navReserveDeficit + 1);
 
+    // Coarse portrait pins BOTH the tail and the hamburger absolutely over
+    // row 1 (see their portrait CSS) rather than keeping the tail inline
+    // and letting it wrap, so neither one's width is ever available to the
+    // tools - both stages below have to subtract them by hand. offsetWidth
+    // for the tail, not tailW: the latter is rebuilt from the tail's
+    // CHILDREN and misses its own padding, which in portrait holds the
+    // divider (9px).
+    const hamburgerW = document.getElementById('peMenuToggleBtn')?.offsetWidth || 36;
+    const tailOverlayW = tail.offsetWidth || tailW;
+
     let nextPad = '';
     if (needTailWrap) {
       const midNoTail = avail - titleW - barGap;
-      const midUsable = midNoTail - navLeftPad;
+      // See tailOverlayW above: the tail never actually wraps to a row of
+      // its own here the way this stage's name implies, so laying the tools
+      // out as if it had put Rotate/Delete underneath Cancel/Save. Scoped
+      // to this tools-wrap decision only, never to `avail` or needTailWrap
+      // above - reserving there is what scrambled stage selection in an
+      // earlier round. All it can do from here is send portrait to its own
+      // tools row, which is precisely what not fitting means.
+      // Doubled because #peToolsMain is justify-content:center: taking D
+      // off its width only walks its RIGHT edge - the one that runs into
+      // the tail - in by D/2, the other half going to the left margin.
+      const portraitOverlayW = (coarse && portrait)
+        ? 2 * (tailOverlayW + hamburgerW + 2 * barGap) : 0;
+      const midUsable = midNoTail - navLeftPad - portraitOverlayW;
       const needToolsWrap = midUsable < toolsW - 0.5
         || (wasToolsWrap && midUsable < toolsW + hyst - 0.5);
       if (needToolsWrap) {
@@ -53248,7 +53275,12 @@ function peObjMouseDown(e, o) {
       const midStart = titleW + barGap;
       const desiredPad = avail / 2 - toolsW / 2 - midStart;
       const minPad = navReserveDeficit;
-      const maxPad = avail - tailW - tailInnerGap - toolsW - midStart;
+      // Portrait's tail isn't inline in this row (see tailOverlayW above) -
+      // it hangs at a fixed offset off the right edge, past the hamburger -
+      // so the tools' right limit is that whole overlay, not tailW.
+      const rightBlockW = (coarse && portrait)
+        ? tailOverlayW + hamburgerW + barGap : tailW;
+      const maxPad = avail - rightBlockW - tailInnerGap - toolsW - midStart;
       const clampedPad = maxPad >= minPad
         ? Math.min(maxPad, Math.max(minPad, desiredPad))
         : minPad; // edge sliver right before stage 2: nav clearance wins
