@@ -15304,15 +15304,20 @@
 
     async function runHQUpgrade(opts) {
       if (!pdfDoc) return;
-      // A page-reorder drag (touch or mouse) needs every free main-thread
-      // cycle for smooth pointermove handling - the render+toDataURL work
-      // below is heavy enough (a full-resolution canvas render and JPEG
-      // encode per visible page) to visibly compete with it, which is
-      // exactly why a drag started right after a zoom change (the zoom's
-      // own scheduleHQUpgrade call, timed 180ms later) could feel jerky
-      // for its first attempt but smooth on a later one once this had
-      // already finished. Defer entirely and retry once the drag ends.
-      if (isDragActive) {
+      // Any live finger contact on the pages area - scrolling through pages,
+      // not just an actual page-reorder drag - needs every free main-thread
+      // cycle for smooth touchmove handling. The render+toDataURL work below
+      // is heavy enough (a full-resolution canvas render and JPEG encode per
+      // visible page) to visibly compete with it, which is exactly why
+      // scrolling right after a zoom change (the zoom's own
+      // scheduleHQUpgrade call, timed 180ms later) could feel jerky the
+      // first time but smooth once repeated, after this had already
+      // finished. pageTouchActive covers the whole touch session from
+      // finger-down (see onPagePointerDown) regardless of whether it turns
+      // into a scroll, a tap, or a drag - isDragActive alone only covers the
+      // (much rarer) long-press-to-reorder case. Defer entirely and retry
+      // once the finger lifts.
+      if (isDragActive || pageTouchActive) {
         scheduleHQUpgrade(opts);
         return;
       }
@@ -15334,7 +15339,7 @@
 
       for (const div of visible) {
         if (token !== hqPdfjsToken) return;
-        if (isDragActive) { scheduleHQUpgrade(opts); return; }
+        if (isDragActive || pageTouchActive) { scheduleHQUpgrade(opts); return; }
         const idx = parseInt(div.dataset.index);
         // Skip pages still showing a CSS rotate (animating OR waiting for raster
         // swap). Writing a baked /Rotate image under a non-zero transform doubles
@@ -52933,16 +52938,7 @@ function peObjMouseDown(e, o) {
     const landscape = typeof window.matchMedia === 'function' && window.matchMedia('(orientation: landscape)').matches;
     const portrait = typeof window.matchMedia === 'function' && window.matchMedia('(orientation: portrait)').matches;
     const hamburgerReserve = (coarse && landscape) ? 40 : 0;
-    // Portrait: Cancel/Save sit in the same fixed top-right corner as the
-    // hamburger there (position:absolute - see the coarse-pointer portrait
-    // CSS) - only the part of that corner which never shrinks (the
-    // hamburger itself, plus its gap and edge margin) is reserved here;
-    // Cancel/Save's own footprint is handled below, in the same per-square
-    // shrink pass as the main toolbar squares (they now share the
-    // --pe-tool-sq variable - see that CSS), not double-reserved at their
-    // full unshrunk size here too.
-    const portraitCornerReserve = (coarse && portrait) ? 52 : 0;
-    const avail = bar.clientWidth - pad - hamburgerReserve - portraitCornerReserve;
+    const avail = bar.clientWidth - pad - hamburgerReserve;
     if (avail <= 0) return;
 
     const minSide = 10;
