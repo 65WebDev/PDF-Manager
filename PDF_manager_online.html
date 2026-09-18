@@ -6176,7 +6176,9 @@
       }
       .page.drag-source {
         opacity: 0.38 !important;
-        border: 2px dashed rgba(0, 123, 255, 0.72) !important;
+        /* border-style stays solid here (not dashed) - see .page::after
+           below for why. */
+        border-color: rgba(0, 123, 255, 0.72) !important;
         box-shadow: inset 0 0 0 1px rgba(0, 123, 255, 0.14) !important;
         background: rgba(0, 123, 255, 0.06) !important;
         transform: none;
@@ -6187,6 +6189,27 @@
            a small transition instead of an abrupt jump. */
         transition: opacity 0.2s ease, box-shadow 0.2s ease,
                     background-color 0.2s ease, border-color 0.2s ease;
+      }
+      /* Fakes an animated solid -> dashed border for the stage 2 -> 3
+         transition above (CSS can't transition border-style itself): an
+         overlay sized to sit exactly on top of .page's real (still solid)
+         border, only ever showing its own dashed ring since it has no
+         fill - fading its opacity in visually "grows" the dashed pattern
+         over the solid one instead of the instant snap a plain border-style
+         change would give. Once fully faded in it opaquely covers the real
+         border, so the end result reads as a normal dashed border. */
+      .page::after {
+        content: '';
+        position: absolute;
+        inset: -2px;
+        border-radius: 10px;
+        border: 2px dashed rgba(0, 123, 255, 0.72);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s ease;
+      }
+      .page.drag-source::after {
+        opacity: 1;
       }
       .touch-drag-ghost {
         opacity: 1 !important;
@@ -7795,19 +7818,11 @@
     // instead of falling back to the orientation-agnostic square-card width
     // the very next time it re-runs.
     let fitWidthAnchorIdx = null;
-    // Whether turning fit-width ON actually zoomed IN (target > the scale it
-    // replaced) vs. zoomed OUT (the user was already zoomed in past fit-
-    // width). Toggling back off only makes sense to "undo" the zoom-in case
-    // (restore the smaller previous scale); toggling off a zoom-OUT would
-    // just zoom back in past fit-width again, which isn't what a second
-    // double-tap/dblclick on an already-fit-width page is asking for - that
-    // case is a no-op instead (see toggleFitWidthScale).
-    let fitWidthWasZoomIn = false;
     // True while a repeat double-tap/dblclick on the fit-width anchor page
-    // has zoomed to the maximum scale at the tapped point instead of being
-    // a no-op (see toggleFitWidthScale's !fitWidthWasZoomIn branch) -
-    // fitWidthMaxZoomRestoreScale is the fit-width scale to return to on the
-    // NEXT repeat tap on that same page.
+    // has zoomed to the maximum scale at the tapped point (every repeat tap
+    // on the anchor does now, see toggleFitWidthScale) - fitWidthMaxZoomRestoreScale
+    // is the fit-width scale to return to on the NEXT repeat tap on that
+    // same page.
     let fitWidthMaxZoomActive = false;
     let fitWidthMaxZoomRestoreScale = null;
     let fitWidthPointer = { x: null, y: null };
@@ -12833,7 +12848,6 @@
       fitWidthToggleOn = false;
       fitWidthSavedScale = null;
       fitWidthAnchorIdx = null;
-      fitWidthWasZoomIn = false;
       fitWidthMaxZoomActive = false;
       fitWidthMaxZoomRestoreScale = null;
       updateFitWidthBtnUI();
@@ -13255,9 +13269,9 @@
       }
       if (typeof pmUpdateVerticalOnlyScrollLock === 'function') pmUpdateVerticalOnlyScrollLock();
       // While a repeat double-tap/dblclick has zoomed to the max at a point
-      // (see toggleFitWidthScale's !fitWidthWasZoomIn branch), fitWidthToggleOn
-      // deliberately stays true (so a further repeat tap can find its way
-      // back to fit-width), but currentScale is intentionally NOT the
+      // (see toggleFitWidthScale), fitWidthToggleOn deliberately stays true
+      // (so a further repeat tap can find its way back to fit-width), but
+      // currentScale is intentionally NOT the
       // fit-width target anymore - re-tracking here would silently snap
       // straight back out of the max-zoom the moment anything else
       // triggers a re-track (a thumbnail decoding, a resize, ...).
@@ -13373,23 +13387,20 @@
       // Capture the nearest page BEFORE scale changes reflow the layout.
       const anchorPage = findNearestPageToPoint(ptrX, ptrY);
       const anchorIdx = anchorPage ? parseInt(anchorPage.dataset.index, 10) : NaN;
-      // A repeat gesture only means "undo" when it lands on the SAME page
-      // fit-width is currently anchored to - the toggle stays on across a
-      // rotation of that same page (pmReapplyFitWidthIfActive's live
-      // re-track), so this is also what makes rotating the anchored page
-      // "keep it fit-widthed" rather than a candidate for undo. Landing on
-      // a DIFFERENT page (any orientation) is a fresh "fit THIS page"
-      // request instead, regardless of whatever fitWidthWasZoomIn was left
-      // at by the previous page - without this check, double-tapping a
-      // second, different page while already fit-widthed either silently
-      // did nothing (if the stale flag said "zoomed out") or undid the
-      // FIRST page's zoom instead of fitting the one just tapped.
+      // A repeat gesture only means "zoom in further to max" when it lands
+      // on the SAME page fit-width is currently anchored to - the toggle
+      // stays on across a rotation of that same page
+      // (pmReapplyFitWidthIfActive's live re-track), so this is also what
+      // makes rotating the anchored page "keep it fit-widthed" rather than a
+      // candidate for the repeat-tap zoom-in. Landing on a DIFFERENT page
+      // (any orientation) is a fresh "fit THIS page" request instead -
+      // without this check, double-tapping a second, different page while
+      // already fit-widthed would zoom the FIRST page in to max instead of
+      // fitting the one just tapped.
       const sameAnchor = fitWidthToggleOn && !Number.isNaN(anchorIdx) && anchorIdx === fitWidthAnchorIdx;
       if (sameAnchor) {
         // A repeat tap while zoomed to the max at a point (see below)
-        // returns to the fit-width view it came from, same as the
-        // fitWidthWasZoomIn undo path just below - just restoring a
-        // different saved scale.
+        // returns to the fit-width view it came from.
         if (fitWidthMaxZoomActive) {
           const restore = fitWidthMaxZoomRestoreScale;
           fitWidthMaxZoomActive = false;
@@ -13407,35 +13418,17 @@
           });
           return;
         }
-        // Fit-width zoomed OUT (the user was already zoomed in past it) -
-        // repeating the same gesture used to be a no-op here ("fit width"
-        // again is where we already are), but there's something more useful
-        // to do with a THIRD tap than nothing: zoom all the way in at the
-        // tapped point instead. A further repeat tap returns to this
-        // fit-width view (the fitWidthMaxZoomActive branch above).
-        if (!fitWidthWasZoomIn) {
-          fitWidthMaxZoomRestoreScale = currentScale;
-          fitWidthMaxZoomActive = true;
-          applyMaxZoomAtPoint(anchorPage, ptrX, ptrY);
-          return;
-        }
-        const restore = fitWidthSavedScale;
-        fitWidthToggleOn = false;
-        fitWidthSavedScale = null;
-        fitWidthAnchorIdx = null;
-        fitWidthWasZoomIn = false;
-        updateFitWidthBtnUI();
-        if (restore != null && Math.abs(restore - currentScale) > 0.25) {
-          applyFitWidthScaleValue(restore);
-        }
-        requestAnimationFrame(() => {
-          let page = null;
-          if (!Number.isNaN(anchorIdx)) {
-            page = pagesContainer.querySelector('.page[data-index="' + anchorIdx + '"]');
-          }
-          if (!page) page = findNearestPageToPoint(ptrX, ptrY);
-          if (page) scrollPageIntoViewTop(page);
-        });
+        // A repeat tap on the fit-width anchor always zooms in further to
+        // the max at the tapped point now - there's no "undo back to
+        // whatever scale it was before the first double-tap" anymore. The
+        // only way back out to fit-width is a further repeat tap once at
+        // max (the branch above), or manually zooming in past fit-width and
+        // double-tapping (the fresh branch below already zooms back OUT to
+        // fit-width in that case, since that's just "set scale to the
+        // fit-width target" regardless of which direction it moves from).
+        fitWidthMaxZoomRestoreScale = currentScale;
+        fitWidthMaxZoomActive = true;
+        applyMaxZoomAtPoint(anchorPage, ptrX, ptrY);
         return;
       }
       fitWidthSavedScale = currentScale;
@@ -13443,7 +13436,6 @@
       fitWidthMaxZoomActive = false;
       fitWidthMaxZoomRestoreScale = null;
       const target = computeFitWidthScale(anchorPage);
-      fitWidthWasZoomIn = target > fitWidthSavedScale + 0.25;
       fitWidthToggleOn = true;
       updateFitWidthBtnUI();
       if (Math.abs(target - currentScale) > 0.25) {
