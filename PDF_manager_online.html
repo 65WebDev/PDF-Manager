@@ -52741,10 +52741,18 @@ function peObjMouseDown(e, o) {
       && window.matchMedia('(pointer: coarse)').matches;
     const portrait = typeof window.matchMedia === 'function'
       && window.matchMedia('(orientation: portrait)').matches;
+    // Landscape/desktop never set tail's left/width here - that's
+    // peLayoutTailCenterLandscape()'s own job, and it runs right before
+    // this function in every call site. Bail without touching tail.style
+    // at all in that case, or this would clobber what that function just
+    // set the instant this runs after it (a real regression once found:
+    // Cancel/Save's tail collapsed back to its landscape CSS corner
+    // position, overlapping the nav prev/next pair).
+    if (!coarse || !portrait) return;
     const rowDivider = actions.previousElementSibling
       && actions.previousElementSibling.classList.contains('pe-tools-divider')
       ? actions.previousElementSibling : null;
-    if (!coarse || !portrait || !modal.classList.contains('open')
+    if (!modal.classList.contains('open')
         || !rowDivider || actions.offsetParent == null) {
       tail.style.left = '';
       tail.style.width = '';
