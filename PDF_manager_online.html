@@ -52696,36 +52696,24 @@ function peObjMouseDown(e, o) {
     tail.style.left = Math.round(left) + 'px';
   }
 
-  /** Place ←→ as a tight pair, equally spaced between title and Object-select. */
+  /** Reset any inline positioning left over from an older reachability trick. */
   function peLayoutMenuToggleOverDelete() {
-    const modal = document.getElementById('pageEditModal');
-    const bar = document.querySelector('#pageEditModal .pe-toolbar');
+    // This used to re-center the hamburger over Delete's column in
+    // portrait's compact stage-3 (a thumb-reach nicety, for when the
+    // hamburger was the only thing living in that top-right corner). Once
+    // Cancel/Save also moved into that same fixed corner (see the
+    // coarse-pointer portrait CSS), the two conflicted: Cancel/Save assume
+    // the hamburger stays put at its default `right` offset, but this
+    // still moved it wherever Delete's column happened to land, so Save
+    // could end up rendered on top of the hamburger instead of beside it.
+    // Cancel/Save sitting right next to the hamburger already gives the
+    // same reachability benefit, so the repositioning is simply retired -
+    // kept as a no-op (rather than deleting the calls) in case anything
+    // still expects a leftover inline style to be cleared here.
     const btn = document.getElementById('peMenuToggleBtn');
-    const del = document.getElementById('peDeleteObj');
-    if (!modal || !bar || !btn || !del) return;
-    const portrait = typeof window.matchMedia === 'function'
-      && window.matchMedia('(orientation: portrait)').matches;
-    const coarse = typeof window.matchMedia === 'function'
-      && window.matchMedia('(pointer: coarse)').matches;
-    // Default CSS (top-right) unless portrait mobile stage-3 wrap.
-    if (!coarse || !portrait || modal.classList.contains('pe-menu-collapsed')
-        || !bar.classList.contains('pe-tb-tools-wrap')
-        || !modal.classList.contains('open')) {
-      btn.style.left = '';
-      btn.style.right = '';
-      return;
-    }
-    const barRect = bar.getBoundingClientRect();
-    const delRect = del.getBoundingClientRect();
-    if (!(delRect.width > 0)) {
-      btn.style.left = '';
-      btn.style.right = '';
-      return;
-    }
-    const btnW = btn.offsetWidth || 36;
-    const left = delRect.left - barRect.left + (delRect.width - btnW) / 2;
-    btn.style.right = 'auto';
-    btn.style.left = Math.max(0, Math.round(left)) + 'px';
+    if (!btn) return;
+    btn.style.left = '';
+    btn.style.right = '';
   }
 
   function peLayoutPageNavButtons() {
