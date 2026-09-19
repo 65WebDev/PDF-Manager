@@ -17622,6 +17622,13 @@
               && selectedPages.has(pageIdx)) {
             pmQuickActionsRequestedIdx = pageIdx;
             updateMobileQuickActions();
+          } else if (selectedPages.size > 1 && selectedPages.has(pageIdx)) {
+            // Holding on a page that is already part of a multi-selection
+            // (a marquee, say) is the start of moving that whole group, so
+            // the selection is left exactly as it is. handlePageClick()
+            // would collapse it to this one page, and stage 2 would then
+            // pick up only that page - which is what "dragging moves just
+            // the one I held" was.
           } else {
             handlePageClick(pageIdx, pendingDiv, { shiftKey: false, ctrlKey: false, metaKey: false });
           }
@@ -17819,7 +17826,11 @@
         requestAnimationFrame(() => {
           // Scrolling is what moves the auto-selection from page to page at
           // high zoom, so it re-evaluates first (it may change which page is
-          // selected, which the mini-tools then follow).
+          // selected, which the mini-tools then follow). Scrolling also ends
+          // any mini-tools a hold asked for: the panel belongs to that one
+          // gesture, and leaving the request standing kept it pinned to the
+          // active page for as long as the mode lasted.
+          if (pmAutoSelectModeOn) pmQuickActionsRequestedIdx = null;
           pmUpdateAutoPageSelection();
           updateMobileQuickActions();
         });
@@ -18618,15 +18629,23 @@
     // follows the scroll. In that mode holding no longer selects (it opens
     // the mini-tools instead, then picks the page up), and the rubber-band
     // marquee is off: there is nothing to rubber-band over.
-    const PM_AUTO_SELECT_COVERAGE = 0.8;
+    // Entering takes a page genuinely filling the screen; STAYING takes far
+    // less. Without that gap the mode switched off the moment a scroll put
+    // two pages on screen at once - the blue page number vanished while the
+    // selection frame stayed, and the mini-tools (suppressed only while the
+    // mode is on) popped back up.
+    const PM_AUTO_SELECT_ENTER = 0.8;
+    const PM_AUTO_SELECT_EXIT = 0.45;
     let pmAutoSelectModeOn = false;
     let pmAutoSelectedIdx = null;
     // Set by the hold gesture to let the mini-tools through for that one
     // page - an auto-selection on its own must never pop them up.
     let pmQuickActionsRequestedIdx = null;
 
-    /** The page covering >= PM_AUTO_SELECT_COVERAGE of the work area, or null. */
-    function pmAutoSelectCandidatePage() {
+    /** The page covering most of the work area, with how much of it it
+     * covers - { page, coverage } - or null when this mode cannot apply at
+     * all (wrong device, no document, editor open, multi-column layout). */
+    function pmBestCoveredPage() {
       if (!isTouchDevice || !pdfDoc || !scrollContainer || !pagesContainer) return null;
       if (document.getElementById('pageEditModal')?.classList.contains('open')) return null;
       // Both halves of the condition: zoomed far enough that pages stack in
@@ -18647,7 +18666,15 @@
         const area = w * h;
         if (area > bestArea) { bestArea = area; best = p; }
       }
-      return (bestArea / viewArea) >= PM_AUTO_SELECT_COVERAGE ? best : null;
+      return best ? { page: best, coverage: bestArea / viewArea } : null;
+    }
+
+    /** Back-compat shim for callers (and tests) that just want the page. */
+    function pmAutoSelectCandidatePage() {
+      const best = pmBestCoveredPage();
+      if (!best) return null;
+      const need = pmAutoSelectModeOn ? PM_AUTO_SELECT_EXIT : PM_AUTO_SELECT_ENTER;
+      return best.coverage >= need ? best.page : null;
     }
 
     /** Tint exactly one page's number with the selection blue (or none). */
@@ -18685,8 +18712,14 @@
       const idx = parseInt(page.dataset.index, 10);
       if (Number.isNaN(idx)) return;
       pmAutoSelectModeOn = true;
+      if (markedForDeletion.has(idx)) {
+        // Cannot be selected, so it must not be tinted either - the tint
+        // means "this is the active page", and disagreeing with the
+        // selection frame is exactly the confusion being fixed here.
+        pmMarkAutoSelectedPage(null);
+        return;
+      }
       pmMarkAutoSelectedPage(page);
-      if (markedForDeletion.has(idx)) return;
       if (pmAutoSelectedIdx === idx && selectedPages.size === 1 && selectedPages.has(idx)) return;
       pmAutoSelectedIdx = idx;
       // A different page scrolled into place - its mini-tools are not
