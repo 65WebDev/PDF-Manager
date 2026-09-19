@@ -5133,8 +5133,6 @@
       justify-content: center;
       cursor: pointer;
       box-shadow: 0 3px 10px rgba(0,0,0,0.3);
-      /*Toned down so they sit over the pages without competing with them -
-        the :disabled rule below still drops further.*/
       opacity: 0.7;
       z-index: 95;
       transition: top 0.15s ease, left 0.15s ease, background 0.15s;
@@ -5143,6 +5141,12 @@
       touch-action: none;
     }
     .pm-page-nav-btn.visible { display: flex; }
+    /*Retired on touch: the page-to-page arrows in the top-left corner sat
+      over the pages and were not wanted there. Desktop keeps them.*/
+    @media (pointer: coarse) {
+      .pm-page-nav-btn,
+      .pm-page-nav-btn.visible { display: none !important; }
+    }
     .pm-page-nav-btn:hover:not(:disabled) { background: #3498db; }
     .pm-page-nav-btn:disabled { opacity: 0.35; cursor: default; pointer-events: none; }
     .pm-page-nav-btn.pm-nav-autoscroll {
@@ -6446,6 +6450,22 @@
         height: 0;
         overflow: visible;       /*so that the floating button is visible*/
         box-shadow: none;
+      }
+      /*Folding away/back is animated over an explicitly measured height
+        (see pmAnimateTopMenuHeight) - auto-to-zero cannot be transitioned.
+        overflow:hidden only while it moves, so the rows do not spill out of
+        the shrinking box.
+        Deliberately NO opacity here. An opacity below 1 makes this element
+        the containing block for position:fixed descendants, which is what
+        the hamburger becomes once .collapsed lands - it would then be laid
+        out against the shrinking menu AND clipped by the overflow above
+        (the button visibly sliding away and vanishing), only to snap to the
+        viewport corner the moment the class came off and opacity went back
+        to 1. Without it the button stays where it is and simply shifts from
+        its in-menu offset to the corner's, which is 2px away.*/
+      .top-menu.pm-menu-animating {
+        overflow: hidden !important;
+        transition: height 0.22s ease, padding 0.22s ease;
       }
       .top-menu.collapsed .app-logo { display: none; }
       .top-menu.collapsed #logoMenuArea { display: none !important; }
@@ -10711,6 +10731,13 @@
       const disabledByLoading = isLoading;
       const noDocument = !pdfDoc;
       const baseDisabled = disabledByLoading || noDocument;
+
+      // Full screen (touch) follows whether a document is open at all:
+      // armed while one is, reset when it closes so the next one asks again.
+      if (isTouchDevice) {
+        if (noDocument) pmResetDocFullscreen();
+        else pmArmDocFullscreen();
+      }
 
       //Pages selected without a deletion mark
       const selectedNonDeleted = [...selectedPages].filter(i => !markedForDeletion.has(i));
@@ -16636,6 +16663,15 @@
       const prevBtn = document.getElementById('pmPagePrevBtn');
       const nextBtn = document.getElementById('pmPageNextBtn');
       if (!prevBtn || !nextBtn) return;
+      // Retired on touch (see their CSS). Bail before the visible-page sweep
+      // below rather than just letting CSS hide them - that sweep runs on
+      // every scroll frame and reads layout for nothing here.
+      if (isTouchDevice) {
+        pmStopPageNavAutoScroll();
+        prevBtn.classList.remove('visible');
+        nextBtn.classList.remove('visible');
+        return;
+      }
       if (!pdfDoc || pdfDoc.getPageCount() <= 1) {
         pmStopPageNavAutoScroll();
         prevBtn.classList.remove('visible');
@@ -17617,7 +17653,7 @@
           // those two, so on a view that has had neither it can still say
           // "auto" while nothing has actually been auto-selected - and this
           // stage would then neither select nor have anything to show.
-          pmUpdateAutoPageSelection();
+          pmUpdateAutoPageSelection(true);
           if (pmAutoSelectModeOn && pmAutoSelectedIdx === pageIdx
               && selectedPages.has(pageIdx)) {
             pmQuickActionsRequestedIdx = pageIdx;
@@ -17833,6 +17869,7 @@
           if (pmAutoSelectModeOn) pmQuickActionsRequestedIdx = null;
           pmUpdateAutoPageSelection();
           updateMobileQuickActions();
+          pmMaybeAutoHideTopMenu();
         });
       }, { passive: true });
 
@@ -18697,11 +18734,26 @@
       notifySelectionChanged();
     }
 
-    /** Re-evaluate the auto-selection. Cheap enough to call on every scroll
-     * frame; does nothing unless the covering page actually changed. */
-    function pmUpdateAutoPageSelection() {
+    // Throttle: this sweeps every page's getBoundingClientRect() AND calls
+    // isPagesSingleColumnLayout(), which forces a synchronous layout pass
+    // (the same cost the double-tap path already goes out of its way to pay
+    // only once per gesture). Running that on every scroll frame competes
+    // with thumbnail rendering on a real phone - enough for previews to
+    // fall behind and sit blank. Eight times a second is plenty to keep the
+    // selection following the scroll.
+    const PM_AUTO_SELECT_MIN_INTERVAL_MS = 120;
+    let pmAutoSelectLastRunAt = 0;
+
+    /** Re-evaluate the auto-selection. Safe to call on every scroll frame -
+     * it rate-limits itself. Pass force for gesture paths that need the
+     * answer right now (the hold's select stage). */
+    function pmUpdateAutoPageSelection(force) {
       if (!isTouchDevice) return;
       if (isDragActive || rubberActive || rubberArmed || pinchActive) return;
+      const now = (typeof performance !== 'undefined' && performance.now)
+        ? performance.now() : Date.now();
+      if (!force && now - pmAutoSelectLastRunAt < PM_AUTO_SELECT_MIN_INTERVAL_MS) return;
+      pmAutoSelectLastRunAt = now;
       const page = pmAutoSelectCandidatePage();
       if (!page) {
         pmAutoSelectModeOn = false;
@@ -20136,6 +20188,68 @@
     function checkHintVisibility() { /*the hint is now on the “?” button*/ }
 
     // Hide/show the top menu (mobile version). The button remains visible.
+    // ---- Top menu auto-hide on scroll (touch) ---------------------------
+    // Scrolling the document down folds the menu away into the floating
+    // hamburger. Bringing it back by hand suspends that for
+    // PM_MENU_AUTOHIDE_REARM_MS - otherwise the very next flick of the
+    // scroll would take it away again, and it would be impossible to use.
+    const PM_MENU_AUTOHIDE_REARM_MS = 15000;
+    const PM_MENU_AUTOHIDE_DOWN_PX = 48;
+    let pmMenuAutoHideArmed = true;
+    let pmMenuAutoHideRearmTimer = null;
+    let pmMenuAutoHideLastTop = 0;
+
+    function pmSuspendMenuAutoHide() {
+      pmMenuAutoHideArmed = false;
+      clearTimeout(pmMenuAutoHideRearmTimer);
+      pmMenuAutoHideRearmTimer = setTimeout(() => {
+        pmMenuAutoHideRearmTimer = null;
+        pmMenuAutoHideArmed = true;
+      }, PM_MENU_AUTOHIDE_REARM_MS);
+    }
+
+    function pmMaybeAutoHideTopMenu() {
+      if (!isTouchDevice || !scrollContainer) return;
+      const top = scrollContainer.scrollTop;
+      const delta = top - pmMenuAutoHideLastTop;
+      // Tracked unconditionally: a delta measured against a stale top from
+      // whenever the last check happened to pass would fire on the sum of
+      // several small scrolls, or on a scroll back up.
+      pmMenuAutoHideLastTop = top;
+      if (!pmMenuAutoHideArmed || !pdfDoc) return;
+      if (delta <= 0 || top < PM_MENU_AUTOHIDE_DOWN_PX) return;
+      if (isDragActive || rubberActive || rubberArmed || pinchActive) return;
+      if (typeof readModeActive !== 'undefined' && readModeActive) return;
+      if (document.getElementById('pageEditModal')?.classList.contains('open')) return;
+      const menu = document.getElementById('topMenu');
+      if (!menu || menu.classList.contains('collapsed')) return;
+      toggleTopMenu();
+    }
+
+    /** Ease the mobile menu between its two heights. The CSS collapse is a
+     * jump from `auto` to 0, which cannot be transitioned, so the from/to
+     * heights are measured around the class change and animated explicitly. */
+    function pmAnimateTopMenuHeight(menu, fromH, toH) {
+      if (!isTouchDevice || !menu) return;
+      if (!(fromH >= 0) || !(toH >= 0) || Math.abs(fromH - toH) < 1) return;
+      menu.style.height = fromH + 'px';
+      menu.classList.add('pm-menu-animating');
+      void menu.offsetHeight;                 // make the start height real
+      menu.style.height = toH + 'px';
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        menu.removeEventListener('transitionend', onEnd);
+        menu.classList.remove('pm-menu-animating');
+        menu.style.height = '';               // hand the height back to CSS
+        if (typeof relayoutTopUI === 'function') relayoutTopUI();
+      };
+      const onEnd = (e) => { if (e.target === menu && e.propertyName === 'height') finish(); };
+      menu.addEventListener('transitionend', onEnd);
+      setTimeout(finish, 500);                // in case transitionend never lands
+    }
+
     function toggleTopMenu() {
       // In reading mode on mobile phones - clicking on menuToggleBtn exits reading mode
       if (!_readModeToggleGuard && readModeActive && isTouchDevice) {
@@ -20144,7 +20258,13 @@
       }
       const menu = document.getElementById('topMenu');
       if (!menu) return;
+      const heightBefore = isTouchDevice ? menu.getBoundingClientRect().height : 0;
       const collapsed = menu.classList.toggle('collapsed');
+      if (isTouchDevice) {
+        pmAnimateTopMenuHeight(menu, heightBefore, menu.getBoundingClientRect().height);
+        // Brought back by hand: leave it alone for a while (see above).
+        if (!collapsed) pmSuspendMenuAutoHide();
+      }
       if (collapsed) {
         const area = document.getElementById('logoMenuArea');
         const logo = document.querySelector('.app-logo');
@@ -20485,6 +20605,45 @@
         const p = exit.call(document);
         if (p && typeof p.catch === 'function') p.catch(function () {});
       } catch (_) {}
+    }
+
+    // ---- Full screen while a document is open (touch) -------------------
+    // A page cannot hide the browser's own top bar (back arrow, title,
+    // share) any other way - the Fullscreen API is the only lever, and it
+    // needs a real user gesture, so this arms one-shot listeners and fires
+    // on whatever the reader does first. Asked once per document: if the
+    // browser refuses, or the reader leaves full screen themselves, it is
+    // not asked again until the next document opens. iOS Safari has no
+    // element fullscreen at all and simply never gets it.
+    // `var`, not `let`: updateUIState() calls pmArmDocFullscreen() and runs
+    // during script init, before this line would have executed - a `let`
+    // would be in its temporal dead zone and throw there.
+    var pmDocFullscreenAsked = false;
+    var pmDocFullscreenArmed = false;
+
+    function pmIsFullscreen() {
+      return !!(document.fullscreenElement || document.webkitFullscreenElement);
+    }
+
+    function pmArmDocFullscreen() {
+      if (!isTouchDevice || pmDocFullscreenAsked || pmDocFullscreenArmed) return;
+      if (pmIsFullscreen()) return;
+      pmDocFullscreenArmed = true;
+      const fire = () => {
+        pmDocFullscreenArmed = false;
+        document.removeEventListener('pointerdown', fire, true);
+        document.removeEventListener('touchend', fire, true);
+        if (!pdfDoc || pmDocFullscreenAsked) return;
+        pmDocFullscreenAsked = true;
+        requestReadModeFullscreen();
+      };
+      document.addEventListener('pointerdown', fire, true);
+      document.addEventListener('touchend', fire, true);
+    }
+
+    function pmResetDocFullscreen() {
+      pmDocFullscreenAsked = false;
+      if (pmDocFullscreenArmed) pmDocFullscreenArmed = false;
     }
 
     async function enterReadMode(anchorPageIdx) {
