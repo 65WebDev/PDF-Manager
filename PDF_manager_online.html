@@ -5133,8 +5133,6 @@
       justify-content: center;
       cursor: pointer;
       box-shadow: 0 3px 10px rgba(0,0,0,0.3);
-      /*Toned down so they sit over the pages without competing with them -
-        the :disabled rule below still drops further.*/
       opacity: 0.7;
       z-index: 95;
       transition: top 0.15s ease, left 0.15s ease, background 0.15s;
@@ -5143,6 +5141,12 @@
       touch-action: none;
     }
     .pm-page-nav-btn.visible { display: flex; }
+    /*Retired on touch: the page-to-page arrows in the top-left corner sat
+      over the pages and were not wanted there. Desktop keeps them.*/
+    @media (pointer: coarse) {
+      .pm-page-nav-btn,
+      .pm-page-nav-btn.visible { display: none !important; }
+    }
     .pm-page-nav-btn:hover:not(:disabled) { background: #3498db; }
     .pm-page-nav-btn:disabled { opacity: 0.35; cursor: default; pointer-events: none; }
     .pm-page-nav-btn.pm-nav-autoscroll {
@@ -6449,14 +6453,20 @@
       }
       /*Folding away/back is animated over an explicitly measured height
         (see pmAnimateTopMenuHeight) - auto-to-zero cannot be transitioned.
-        overflow:hidden only while it moves, so the row does not spill out
-        of the shrinking box; the floating hamburger is position:fixed and
-        this element has no transform, so it is not clipped by it.*/
+        overflow:hidden only while it moves, so the rows do not spill out of
+        the shrinking box.
+        Deliberately NO opacity here. An opacity below 1 makes this element
+        the containing block for position:fixed descendants, which is what
+        the hamburger becomes once .collapsed lands - it would then be laid
+        out against the shrinking menu AND clipped by the overflow above
+        (the button visibly sliding away and vanishing), only to snap to the
+        viewport corner the moment the class came off and opacity went back
+        to 1. Without it the button stays where it is and simply shifts from
+        its in-menu offset to the corner's, which is 2px away.*/
       .top-menu.pm-menu-animating {
         overflow: hidden !important;
-        transition: height 0.22s ease, padding 0.22s ease, opacity 0.22s ease;
+        transition: height 0.22s ease, padding 0.22s ease;
       }
-      .top-menu.collapsed.pm-menu-animating { opacity: 0; }
       .top-menu.collapsed .app-logo { display: none; }
       .top-menu.collapsed #logoMenuArea { display: none !important; }
       .top-menu.collapsed #menuToggleBtn {
@@ -16653,6 +16663,15 @@
       const prevBtn = document.getElementById('pmPagePrevBtn');
       const nextBtn = document.getElementById('pmPageNextBtn');
       if (!prevBtn || !nextBtn) return;
+      // Retired on touch (see their CSS). Bail before the visible-page sweep
+      // below rather than just letting CSS hide them - that sweep runs on
+      // every scroll frame and reads layout for nothing here.
+      if (isTouchDevice) {
+        pmStopPageNavAutoScroll();
+        prevBtn.classList.remove('visible');
+        nextBtn.classList.remove('visible');
+        return;
+      }
       if (!pdfDoc || pdfDoc.getPageCount() <= 1) {
         pmStopPageNavAutoScroll();
         prevBtn.classList.remove('visible');
@@ -17634,7 +17653,7 @@
           // those two, so on a view that has had neither it can still say
           // "auto" while nothing has actually been auto-selected - and this
           // stage would then neither select nor have anything to show.
-          pmUpdateAutoPageSelection();
+          pmUpdateAutoPageSelection(true);
           if (pmAutoSelectModeOn && pmAutoSelectedIdx === pageIdx
               && selectedPages.has(pageIdx)) {
             pmQuickActionsRequestedIdx = pageIdx;
@@ -18715,11 +18734,26 @@
       notifySelectionChanged();
     }
 
-    /** Re-evaluate the auto-selection. Cheap enough to call on every scroll
-     * frame; does nothing unless the covering page actually changed. */
-    function pmUpdateAutoPageSelection() {
+    // Throttle: this sweeps every page's getBoundingClientRect() AND calls
+    // isPagesSingleColumnLayout(), which forces a synchronous layout pass
+    // (the same cost the double-tap path already goes out of its way to pay
+    // only once per gesture). Running that on every scroll frame competes
+    // with thumbnail rendering on a real phone - enough for previews to
+    // fall behind and sit blank. Eight times a second is plenty to keep the
+    // selection following the scroll.
+    const PM_AUTO_SELECT_MIN_INTERVAL_MS = 120;
+    let pmAutoSelectLastRunAt = 0;
+
+    /** Re-evaluate the auto-selection. Safe to call on every scroll frame -
+     * it rate-limits itself. Pass force for gesture paths that need the
+     * answer right now (the hold's select stage). */
+    function pmUpdateAutoPageSelection(force) {
       if (!isTouchDevice) return;
       if (isDragActive || rubberActive || rubberArmed || pinchActive) return;
+      const now = (typeof performance !== 'undefined' && performance.now)
+        ? performance.now() : Date.now();
+      if (!force && now - pmAutoSelectLastRunAt < PM_AUTO_SELECT_MIN_INTERVAL_MS) return;
+      pmAutoSelectLastRunAt = now;
       const page = pmAutoSelectCandidatePage();
       if (!page) {
         pmAutoSelectModeOn = false;
@@ -20159,7 +20193,7 @@
     // hamburger. Bringing it back by hand suspends that for
     // PM_MENU_AUTOHIDE_REARM_MS - otherwise the very next flick of the
     // scroll would take it away again, and it would be impossible to use.
-    const PM_MENU_AUTOHIDE_REARM_MS = 30000;
+    const PM_MENU_AUTOHIDE_REARM_MS = 15000;
     const PM_MENU_AUTOHIDE_DOWN_PX = 48;
     let pmMenuAutoHideArmed = true;
     let pmMenuAutoHideRearmTimer = null;
