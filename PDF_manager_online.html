@@ -4291,6 +4291,11 @@
     }
     body.os-file-dragging .page .quick-actions { display: none !important; }
     .page.selected { border-color: #007bff !important; box-shadow: 0 0 0 4px rgba(0,123,255,0.2); }
+    /* The page that selected itself at high zoom (see
+       pmUpdateAutoPageSelection): its number under the preview takes the
+       same blue as the selection frame, so which page is active reads at a
+       glance even when the frame itself is mostly off screen. */
+    .page.pm-auto-page .page-title { color: #007bff; }
     /* RMB context menu target: subtle white halo showing which page the menu
        applies to. An outline (not border-color/box-shadow) so it doesn't
        fight with .selected's blue ring when both apply at once. */
@@ -6175,6 +6180,22 @@
       .page.page-select-charging.page-select-charge-fill {
         border-color: #007bff !important;
         box-shadow: 0 0 0 4px rgba(0, 123, 255, 0.2) !important;
+      }
+      /*Second half of the same hold: once the page is selected, keeping the
+        finger down charges toward picking it up (PAGE_DRAG_HOLD_MS). Nothing
+        used to say so, so there was no reason to guess that holding on does
+        anything at all. The card lifts - shadow growing, card easing down a
+        touch - so it reads as "about to come off the page" before it
+        actually does. Same charge-then-fill pair as the select stage, so an
+        early release resets it instantly with no transition to unwind.*/
+      .page.page-drag-charging {
+        transition: box-shadow var(--pm-drag-charge-ms, 607ms) linear,
+                    transform var(--pm-drag-charge-ms, 607ms) linear;
+      }
+      .page.page-drag-charging.page-drag-charge-fill {
+        box-shadow: 0 0 0 4px rgba(0, 123, 255, 0.35),
+                    0 10px 22px rgba(0, 0, 0, 0.32) !important;
+        transform: scale(0.955);
       }
       /*Undo/Redo - round buttons under the file name (top right)*/
       #mobileUndoRedoBar.visible,
@@ -8142,9 +8163,12 @@
     const INSERT_IND_EDGE = PAGE_GAP_MAX / 2;          //indentation of the indicator from the edge in the absence of a neighbor
     // Mobile tap pad for the blue insert indicator (reference = 2 pages across).
     // With 3+ pages across, hit shrinks toward INSERT_IND_WIDTH (see getInsertTouchHitX).
-    const INSERT_IND_TOUCH_HIT_X = 28;
-    const INSERT_IND_TOUCH_HIT_Y = 14;
-    const INSERT_IND_TOUCH_HIT_CSS = 52; // ::before total size at the 2-column reference
+    // Cut ~30% from the original 28/14/52: the old pad reached so far into
+    // each page that taps meant for the page itself kept landing on the
+    // insert indicator instead.
+    const INSERT_IND_TOUCH_HIT_X = 20;
+    const INSERT_IND_TOUCH_HIT_Y = 10;
+    const INSERT_IND_TOUCH_HIT_CSS = 36; // ::before total size at the 2-column reference
     // While dragging near the workspace bottom, the pointer often sits in empty
     // padding / auto-scroll zone just below the last row — 12px is too tight.
     const DRAG_INSERT_HIT_SLOP = 56;
@@ -13252,8 +13276,13 @@
     }
 
     /** Zoom to `targetScale` keeping the point (ptrX, ptrY) of anchorPage
-     * under the finger. Pass Infinity for "as far as the slider goes". */
-    function applyZoomScaleAtPoint(anchorPage, ptrX, ptrY, targetScale) {
+     * under the finger. Pass Infinity for "as far as the slider goes".
+     * `opts.centerContentX` - the page's own { left, right } content
+     * fractions - keeps the vertical anchoring on the tapped point but
+     * centres that content band horizontally instead of leaving the view
+     * wherever the anchor happened to put it. */
+    function applyZoomScaleAtPoint(anchorPage, ptrX, ptrY, targetScale, opts) {
+      const centerBounds = opts && opts.centerContentX;
       const r = anchorPage.getBoundingClientRect();
       const lx = Math.max(r.left, Math.min(ptrX, r.right));
       const ly = Math.max(r.top, Math.min(ptrY, r.bottom));
@@ -13274,12 +13303,27 @@
         if (!page) return;
         const pt = getPageAnchorContentPoint(page, fx, fy);
         if (pt) restorePinchViewportPoint(pt, ptrX, ptrY);
+        if (centerBounds) pmCenterPageContentX(page, centerBounds);
       };
       settle();
       requestAnimationFrame(() => {
         settle();
         requestAnimationFrame(settle);
       });
+    }
+
+    /** Put the page's content band (its { left, right } width fractions,
+     * blank margins excluded) in the middle of the work area. Horizontal
+     * only - whatever anchored the vertical position stays untouched. */
+    function pmCenterPageContentX(pageEl, bounds) {
+      if (!pageEl || !bounds || !scrollContainer) return;
+      const view = scrollContainer.getBoundingClientRect();
+      const r = pageEl.getBoundingClientRect();
+      if (!(r.width > 0) || !(view.width > 0)) return;
+      const contentMid = r.left + (bounds.left + bounds.right) / 2 * r.width;
+      const delta = contentMid - (view.left + view.width / 2);
+      if (Math.abs(delta) < 0.5) return;
+      scrollContainer.scrollLeft += delta;
     }
 
     // Blank side margins of a rendered page, as { left, right } fractions of
@@ -13581,16 +13625,22 @@
         // way out to fit-width. Pages with no measurable side margins have
         // no middle step and keep the old fit-width <-> max toggle.
         const contentTarget = pmContentWidthScale(anchorPage, fitWidthTarget);
+        // Landing on the content rung centres that content band horizontally
+        // rather than leaving the view wherever the tapped point pinned it -
+        // the whole point of the rung is that the text block fills the
+        // width, which it only looks like once it is centred. The tapped
+        // point still decides what is on screen vertically.
+        const contentOpts = { centerContentX: pmPageContentXFractions(anchorPage) };
         if (fitWidthMaxZoomActive && contentTarget != null) {
           fitWidthMaxZoomActive = false;
           fitWidthContentZoomActive = true;
-          applyZoomScaleAtPoint(anchorPage, ptrX, ptrY, contentTarget);
+          applyZoomScaleAtPoint(anchorPage, ptrX, ptrY, contentTarget, contentOpts);
           return;
         }
         if (!fitWidthMaxZoomActive && !fitWidthContentZoomActive && contentTarget != null) {
           fitWidthContentZoomActive = true;
           fitWidthMaxZoomRestoreScale = currentScale;
-          applyZoomScaleAtPoint(anchorPage, ptrX, ptrY, contentTarget);
+          applyZoomScaleAtPoint(anchorPage, ptrX, ptrY, contentTarget, contentOpts);
           return;
         }
         // A repeat tap while zoomed to the max at a point (see below)
@@ -17381,9 +17431,10 @@
       // Removing charging + fill together (no lingering transition class) so
       // an aborted charge (e.g. movement turned out to be a scroll) snaps
       // back instantly instead of visibly fading back out.
-      pagesContainer.querySelectorAll('.page.drag-source, .page.page-press-pending, .page.page-select-charging').forEach(p => {
+      pagesContainer.querySelectorAll('.page.drag-source, .page.page-press-pending, .page.page-select-charging, .page.page-drag-charging').forEach(p => {
         p.classList.remove('drag-source', 'page-press-pending', 'page-press-pending-instant',
-          'page-select-charging', 'page-select-charge-fill');
+          'page-select-charging', 'page-select-charge-fill',
+          'page-drag-charging', 'page-drag-charge-fill');
       });
       invalidateDragGeometry();
       dragSourceDiv = null;
@@ -17400,7 +17451,8 @@
     function startPageTouchDrag() {
       if (!dragSourceDiv || pagePointerId === null) return;
       dragSourceDiv.classList.remove('page-press-pending', 'page-press-pending-instant',
-        'page-select-charging', 'page-select-charge-fill');
+        'page-select-charging', 'page-select-charge-fill',
+        'page-drag-charging', 'page-drag-charge-fill');
       pagesContainer.querySelectorAll('.page.page-press-pending').forEach(p => {
         p.classList.remove('page-press-pending', 'page-press-pending-instant');
       });
@@ -17516,8 +17568,12 @@
       // behaviour at EVERY zoom level, including the multi-column overview -
       // one gesture to learn instead of two that swap by zoom. Desktop keeps
       // the plain long-press unless its own layout is single-column.
-      const singleColumnHold = isTouchDevice
-        || (typeof isPagesSingleColumnLayout === 'function' && isPagesSingleColumnLayout());
+      // Multi-select mode is the exception: there the whole point is ticking
+      // pages off quickly, so a plain tap selects (no charge to wait out)
+      // and a hold goes straight to moving the page.
+      const multiSelecting = typeof multiSelectMode !== 'undefined' && multiSelectMode;
+      const singleColumnHold = !multiSelecting && (isTouchDevice
+        || (typeof isPagesSingleColumnLayout === 'function' && isPagesSingleColumnLayout()));
       pageSelectSingleColumnAtDown = singleColumnHold;
       if (singleColumnHold) {
         const pendingDiv = dragSourceDiv;
@@ -17569,6 +17625,17 @@
           } else {
             handlePageClick(pageIdx, pendingDiv, { shiftKey: false, ctrlKey: false, metaKey: false });
           }
+          // Start charging the SECOND half of the hold, so it is visible
+          // that keeping the finger down picks the page up (see the
+          // .page-drag-charging CSS).
+          pendingDiv.style.setProperty('--pm-drag-charge-ms',
+            Math.max(0, PAGE_DRAG_HOLD_MS - PAGE_SELECT_HOLD_MS) + 'ms');
+          pendingDiv.classList.add('page-drag-charging');
+          requestAnimationFrame(() => {
+            if (dragSourceDiv === pendingDiv && pagePointerId === pendingPointerId) {
+              pendingDiv.classList.add('page-drag-charge-fill');
+            }
+          });
           lastPageTapTime = Date.now();
           lastPageTapIdx = pageIdx;
           lastPageTapX = touchLastX;
@@ -17649,7 +17716,8 @@
       // glow, so removing these here causes no visible change.
       if (dragSourceDiv) {
         dragSourceDiv.classList.remove('page-press-pending', 'page-press-pending-instant',
-          'page-select-charging', 'page-select-charge-fill');
+          'page-select-charging', 'page-select-charge-fill',
+          'page-drag-charging', 'page-drag-charge-fill');
       }
       detachPagePointerListeners();
       if (dragSourceDiv) {
@@ -18582,6 +18650,15 @@
       return (bestArea / viewArea) >= PM_AUTO_SELECT_COVERAGE ? best : null;
     }
 
+    /** Tint exactly one page's number with the selection blue (or none). */
+    function pmMarkAutoSelectedPage(pageDiv) {
+      if (!pagesContainer) return;
+      for (const p of pagesContainer.querySelectorAll('.page.pm-auto-page')) {
+        if (p !== pageDiv) p.classList.remove('pm-auto-page');
+      }
+      if (pageDiv) pageDiv.classList.add('pm-auto-page');
+    }
+
     function pmSelectOnlyPage(idx, pageDiv) {
       selectedPages.clear();
       document.querySelectorAll('.page.selected').forEach(p => p.classList.remove('selected'));
@@ -18602,11 +18679,13 @@
       if (!page) {
         pmAutoSelectModeOn = false;
         pmAutoSelectedIdx = null;
+        pmMarkAutoSelectedPage(null);
         return;
       }
       const idx = parseInt(page.dataset.index, 10);
       if (Number.isNaN(idx)) return;
       pmAutoSelectModeOn = true;
+      pmMarkAutoSelectedPage(page);
       if (markedForDeletion.has(idx)) return;
       if (pmAutoSelectedIdx === idx && selectedPages.size === 1 && selectedPages.has(idx)) return;
       pmAutoSelectedIdx = idx;
@@ -18643,11 +18722,13 @@
 
       const idx = [...selectedPages][0];
       if (markedForDeletion.has(idx)) return;
-      // An automatic selection (the page filling the screen at high zoom)
-      // is a selection only - the mini-tools stay away until a hold on that
-      // page explicitly asks for them.
-      if (pmAutoSelectModeOn && pmAutoSelectedIdx === idx
-          && pmQuickActionsRequestedIdx !== idx) return;
+      // While pages select themselves at high zoom, the mini-tools appear
+      // for one reason only: a hold on the page asked for them. Not tied to
+      // pmAutoSelectedIdx - any other route to a selection in this mode
+      // (the nav buttons, an auto-scroll, a stale index after a page was
+      // marked deleted) would otherwise pop the panel up unbidden, which is
+      // exactly what "it still shows while pages switch" looked like.
+      if (pmAutoSelectModeOn && pmQuickActionsRequestedIdx !== idx) return;
 
       const page = pagesContainer.querySelector('.page[data-index="' + idx + '"]');
       if (!page || page.style.display === 'none') return;
@@ -36685,7 +36766,13 @@ async function peNavigateEditorPage(dir) {
 
 /** True when the page is fully visible (max zoom-out / fit) — no pan scroll. */
 function peIsEditorPageFitView() {
-  if (!peState || peState.tool === 'crop') return false;
+  // No crop-tool special case: this answers "is the page shown whole", which
+  // is true in crop mode as much as any other. Treating crop as never-fit
+  // made the double-tap zoom toggle read every crop-mode tap as "already
+  // zoomed in" and so only ever zoom OUT there. The swipe-nav callers that
+  // relied on the old behaviour are gated on peIsPageSwipeNavMode() anyway,
+  // which is select-mode only.
+  if (!peState) return false;
   const sl = document.getElementById('peScaleSlider');
   const minSl = sl ? parseInt(sl.min, 10) : 100;
   const z = peState.zoomSlider != null ? peState.zoomSlider : 100;
@@ -48997,6 +49084,16 @@ function peShowObjCtxMenu(clientX, clientY, overlapObjs) {
 
 function peOnObjContextMenu(e) {
   if (!peState || peState.tool === 'crop') return;
+  // A contextmenu event with no pointer position behind it - some touch
+  // stacks emit one once the element under the finger goes away, e.g. right
+  // after the menu's own "Delete object" removes it - would open the menu
+  // pinned to the top-left corner of the screen, far from anything the user
+  // touched. There is no position to honour, so there is no menu to show.
+  if (!Number.isFinite(e.clientX) || !Number.isFinite(e.clientY)
+      || (e.clientX <= 0 && e.clientY <= 0)) {
+    e.preventDefault();
+    return;
+  }
   // Selected text (or just a placed caret) inside an editable text block →
   // the Copy/Cut/Paste/Delete menu (peCaptureEditorTextSelection returns
   // 'inline' for both cases; peShowTextSelCtxMenu shows only Paste for a caret).
@@ -50059,7 +50156,16 @@ function peFlushTouchObjPending(clientX, clientY, reason) {
     return;
   }
   const objMenu = document.getElementById('peObjCtxMenu');
-  if (reason === 'tap' && objMenu && objMenu.classList.contains('visible')) return;
+  if (reason === 'tap' && objMenu && objMenu.classList.contains('visible')) {
+    // A menu still on screen from an EARLIER gesture must not swallow this
+    // tap - dismiss it and let the tap do its normal work. The case this
+    // guard was written for (a menu the very same long-press just opened,
+    // which a synthesized tap would close again instantly) is already
+    // covered by the peShouldIgnoreCtxMenuOutside() check above, which
+    // returns outright. Without the split, one stray menu left visible ate
+    // every other tap on an object for the rest of the session.
+    peHideObjCtxMenu();
+  }
   // Re-enter peObjMouseDown with defer bypass to actually select / start move.
   peTouchObjCommit = true;
   peTouchObjFlushReason = reason || 'tap';
