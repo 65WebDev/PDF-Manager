@@ -3994,9 +3994,12 @@
       text-align: center;
     }
 
+    /*The floating "Pages: N" badge is retired everywhere - desktop shows the
+      count in .content-header, mobile shows none at all.*/
+    #pageCountBox { display: none !important; }
+
     /*Desktop: page counter in the header (text on the left, without block)*/
     @media (pointer: fine) {
-      #pageCountBox { display: none !important; }
       .content-header:not(.no-doc) {
         display: grid;
         grid-template-columns: 1fr auto 1fr;
@@ -4288,6 +4291,11 @@
     }
     body.os-file-dragging .page .quick-actions { display: none !important; }
     .page.selected { border-color: #007bff !important; box-shadow: 0 0 0 4px rgba(0,123,255,0.2); }
+    /* The page that selected itself at high zoom (see
+       pmUpdateAutoPageSelection): its number under the preview takes the
+       same blue as the selection frame, so which page is active reads at a
+       glance even when the frame itself is mostly off screen. */
+    .page.pm-auto-page .page-title { color: #007bff; }
     /* RMB context menu target: subtle white halo showing which page the menu
        applies to. An outline (not border-color/box-shadow) so it doesn't
        fight with .selected's blue ring when both apply at once. */
@@ -5125,6 +5133,9 @@
       justify-content: center;
       cursor: pointer;
       box-shadow: 0 3px 10px rgba(0,0,0,0.3);
+      /*Toned down so they sit over the pages without competing with them -
+        the :disabled rule below still drops further.*/
+      opacity: 0.7;
       z-index: 95;
       transition: top 0.15s ease, left 0.15s ease, background 0.15s;
       -webkit-user-select: none;
@@ -5676,12 +5687,9 @@
         padding-right: max(8px, env(safe-area-inset-right, 0px));
       }
       /* Overlay toggle must not steal flex width from tool icons (36×36).
-         Tail gets a local inset so Cancel/Save sit clear of the absolute button. */
-      /* Stage 3: JS aligns tail to Crop/Delete; otherwise leave room for hamburger. */
-      #pageEditModal:not(.pe-menu-collapsed) .pe-toolbar:not(.pe-tb-tools-wrap) .pe-toolbar-tail {
-        padding-right: 40px;
-        box-sizing: border-box;
-      }
+         Cancel/Save are taken out of flow entirely in both orientations
+         (see the portrait/landscape .pe-toolbar-tail rules below), so they
+         no longer need an in-flow reserve to stay clear of it. */
       /* Hide/show editor top menu — same idea as #menuToggleBtn in the preview. */
       #pageEditModal #peMenuToggleBtn {
         display: flex;
@@ -5689,9 +5697,11 @@
         top: max(8px, env(safe-area-inset-top, 0px));
         right: max(8px, env(safe-area-inset-right, 0px));
         z-index: 40;
-        /* Match .pe-btn-square so toolbar chrome / icon scale stays unchanged. */
-        width: 36px;
-        height: 36px;
+        /* Shares --pe-tool-sq with every other toolbar square (nav, row 2
+           tools, Cancel/Save) so a size change applies uniformly instead of
+           leaving the hamburger the odd one out. */
+        width: var(--pe-tool-sq, 36px);
+        height: var(--pe-tool-sq, 36px);
         padding: 0;
         border: none;
         border-radius: 8px;
@@ -5886,15 +5896,128 @@
       #pageEditModal.pe-obj-select-mode #peTextLayer.pe-text-active {
         touch-action: manipulation;
       }
-      #pageEditModal .pe-scale {
-        font-size: 14px;
-        gap: 8px;
-        height: 36px;
-        padding: 0 7px 0 10px;
+      /* Shortened mobile editor toolbar: drop the page-number label, the
+         Object-select/Hand mode toggle (Object-select is the only mode now
+         - see peToggleDoubleTapZoom/peStartObjSelectBlankGesture's
+         isTouchDevice branches), and the Scale slider; Cancel/Save become a
+         red X / green check (below). Collapsed to zero size rather than
+         display:none - peLayoutPageNavButtons()'s extensive title/Object-
+         select-relative math reads their getBoundingClientRect() to
+         position the prev/next nav buttons, and display:none would zero out
+         their POSITION too, not just their size, breaking that math instead
+         of just giving it a (now harmless) zero-width reference point. */
+      #pageEditModal .pe-title,
+      #pageEditModal #peToolObjSelect,
+      #pageEditModal #peToolHand {
+        width: 0;
+        min-width: 0;
+        padding: 0;
+        margin: 0;
+        border-width: 0;
+        overflow: hidden;
+        pointer-events: none;
       }
-      #pageEditModal .pe-scale input[type=range] { width: 72px; }
-      #pageEditModal #peEndActions .pe-btn {
-        height: 36px;
+      #pageEditModal .pe-tools-lead .pe-tools-divider {
+        display: none;
+      }
+      #pageEditModal .pe-scale {
+        display: none;
+      }
+      /* Cancel/Save: red X / green check instead of text labels, sized like
+         every other toolbar square (see .pe-btn-square). font-size:0 hides
+         the original text (still present for desktop/i18n) without
+         removing it, and the ::before pseudo-element supplies the icon at
+         its own font-size. */
+      #pageEditModal #peCancelBtn,
+      #pageEditModal #peSaveBtn {
+        font-size: 0;
+        gap: 0;
+        width: var(--pe-tool-sq, 36px);
+        height: var(--pe-tool-sq, 36px);
+        flex: none;
+        padding: 0;
+        justify-content: center;
+      }
+      @media (orientation: landscape) {
+        #pageEditModal #peCancelBtn,
+        #pageEditModal #peSaveBtn {
+          width: var(--pe-tool-sq, 36px);
+        }
+      }
+      #pageEditModal #peCancelBtn::before,
+      #pageEditModal #peSaveBtn::before {
+        font-size: 16px;
+        line-height: 1;
+      }
+      #pageEditModal #peCancelBtn::before { content: '\2715'; }
+      #pageEditModal #peSaveBtn::before { content: '\2713'; }
+      #pageEditModal #peCancelBtn {
+        background: #c0392b;
+        border-color: rgba(255,255,255,.35);
+      }
+      #pageEditModal #peCancelBtn:active:not(:disabled) {
+        background: #e74c3c;
+      }
+      /* Portrait: move Cancel/Save (now icons) onto row 1, left of the
+         hamburger menu toggle, with a divider separating them from the nav
+         prev/next pair - instead of sitting on their own row 3 below the
+         tools. Absolutely positioned (like the hamburger itself, which is
+         always at a fixed top-right offset), with `left` then set at runtime
+         by peLayoutTailAlignRotateGroupPortrait() to row 2's own
+         divider-before-Rotate - the `right` here is only the fallback for
+         the one layout frame before that function first runs.
+         The box reproduces row 2's divider-to-Rotate geometry exactly, so
+         that single `left` lines BOTH rows up: the divider (::before) sits
+         at left:0, i.e. right on the measured position, and the 9px
+         padding after it is row 2's own 1px divider + its 2px right margin
+         + #peToolsMain's 6px gap - which lands Cancel on Rotate-left's
+         column, and (sharing row 2's 6px button gap) Save on
+         Rotate-right's. */
+      @media (orientation: portrait) {
+        #pageEditModal .pe-toolbar-tail {
+          position: absolute;
+          top: max(8px, env(safe-area-inset-top, 0px));
+          right: calc(36px + 8px + max(8px, env(safe-area-inset-right, 0px)));
+          width: auto;
+          max-width: none;
+          flex: none;
+          padding: 0 0 0 9px;
+          box-sizing: border-box;
+          z-index: 40;
+        }
+        #pageEditModal .pe-toolbar-tail::before {
+          content: '';
+          position: absolute;
+          left: 0;
+          top: 50%;
+          transform: translateY(-50%);
+          width: 1px;
+          height: 28px;
+          background: rgba(255,255,255,.28);
+        }
+        #pageEditModal #peEndActions {
+          gap: 6px;
+        }
+      }
+      /* Landscape: Cancel/Save also taken out of the row-1 flex flow, but
+         centered in the gap between Delete (Trash) and the hamburger
+         instead of pinned to a corner - peLayoutTailCenterLandscape()
+         computes and sets `left` at runtime since that gap's size depends
+         on how many tools fit on row 1. No divider here (nothing else sits
+         between Delete and the hamburger to separate them from). The
+         right/left fallback below only matters for the one JS-layout frame
+         before that function first runs. */
+      @media (orientation: landscape) {
+        #pageEditModal .pe-toolbar-tail {
+          position: absolute;
+          top: max(8px, env(safe-area-inset-top, 0px));
+          right: calc(36px + 8px + max(8px, env(safe-area-inset-right, 0px)));
+          width: auto;
+          max-width: none;
+          flex: none;
+          padding: 0;
+          z-index: 40;
+        }
       }
       .page.to-delete .quick-actions,
       .dragging-active .page .quick-actions,
@@ -6058,6 +6181,22 @@
         border-color: #007bff !important;
         box-shadow: 0 0 0 4px rgba(0, 123, 255, 0.2) !important;
       }
+      /*Second half of the same hold: once the page is selected, keeping the
+        finger down charges toward picking it up (PAGE_DRAG_HOLD_MS). Nothing
+        used to say so, so there was no reason to guess that holding on does
+        anything at all. The card lifts - shadow growing, card easing down a
+        touch - so it reads as "about to come off the page" before it
+        actually does. Same charge-then-fill pair as the select stage, so an
+        early release resets it instantly with no transition to unwind.*/
+      .page.page-drag-charging {
+        transition: box-shadow var(--pm-drag-charge-ms, 607ms) linear,
+                    transform var(--pm-drag-charge-ms, 607ms) linear;
+      }
+      .page.page-drag-charging.page-drag-charge-fill {
+        box-shadow: 0 0 0 4px rgba(0, 123, 255, 0.35),
+                    0 10px 22px rgba(0, 0, 0, 0.32) !important;
+        transform: scale(0.955);
+      }
       /*Undo/Redo - round buttons under the file name (top right)*/
       #mobileUndoRedoBar.visible,
       #peMobileUndoRedoBar.visible {
@@ -6176,7 +6315,9 @@
       }
       .page.drag-source {
         opacity: 0.38 !important;
-        border: 2px dashed rgba(0, 123, 255, 0.72) !important;
+        /* border-style stays solid here (not dashed) - see .page::after
+           below for why. */
+        border-color: rgba(0, 123, 255, 0.72) !important;
         box-shadow: inset 0 0 0 1px rgba(0, 123, 255, 0.14) !important;
         background: rgba(0, 123, 255, 0.06) !important;
         transform: none;
@@ -6187,6 +6328,27 @@
            a small transition instead of an abrupt jump. */
         transition: opacity 0.2s ease, box-shadow 0.2s ease,
                     background-color 0.2s ease, border-color 0.2s ease;
+      }
+      /* Fakes an animated solid -> dashed border for the stage 2 -> 3
+         transition above (CSS can't transition border-style itself): an
+         overlay sized to sit exactly on top of .page's real (still solid)
+         border, only ever showing its own dashed ring since it has no
+         fill - fading its opacity in visually "grows" the dashed pattern
+         over the solid one instead of the instant snap a plain border-style
+         change would give. Once fully faded in it opaquely covers the real
+         border, so the end result reads as a normal dashed border. */
+      .page::after {
+        content: '';
+        position: absolute;
+        inset: -2px;
+        border-radius: 10px;
+        border: 2px dashed rgba(0, 123, 255, 0.72);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.2s ease;
+      }
+      .page.drag-source::after {
+        opacity: 1;
       }
       .touch-drag-ghost {
         opacity: 1 !important;
@@ -6299,32 +6461,17 @@
       .top-menu.collapsed ~ .main .pages { margin-top: 18px; }
     }
 
-    /*Portrait orientation: file name in header (before scrolling) - right-aligned*/
+    /*Portrait orientation: the file name is centered in the header. It used
+      to be pushed to the right edge to leave the left side free for the
+      floating “Pages: N” badge - that badge is retired, so the base
+      coarse-pointer rules (centered, max-width 60%) apply unchanged. The
+      one override left keeps a long name clear of the floating menu button
+      in the top-right corner while staying centered: equal clearance on
+      both sides rather than padding on one.*/
     @media (pointer: coarse) and (orientation: portrait) {
-      .content-header:not(.no-doc) {
-        justify-content: flex-end;
-      }
-      .content-header:not(.no-doc) .info {
-        left: auto;
-        right: 0;
-        max-width: 100%;
-        transform: translateY(-50%);
-        text-align: right;
-      }
-      .content-header:not(.menu-hidden):not(.no-doc) .info {
-        padding-left: 112px;   /*space for the “Pages: N” block on the left*/
-        box-sizing: border-box;
-      }
-      .content-header.menu-hidden:not(.no-doc) {
-        justify-content: flex-end;
-      }
       .content-header.menu-hidden:not(.no-doc) .info {
-        left: auto;
-        right: 0;
-        padding-right: 58px;   /*do not go under the floating menu button*/
+        max-width: calc(100% - 116px);
         box-sizing: border-box;
-        transform: translateY(-50%);
-        text-align: right;
       }
     }
 
@@ -7795,20 +7942,16 @@
     // instead of falling back to the orientation-agnostic square-card width
     // the very next time it re-runs.
     let fitWidthAnchorIdx = null;
-    // Whether turning fit-width ON actually zoomed IN (target > the scale it
-    // replaced) vs. zoomed OUT (the user was already zoomed in past fit-
-    // width). Toggling back off only makes sense to "undo" the zoom-in case
-    // (restore the smaller previous scale); toggling off a zoom-OUT would
-    // just zoom back in past fit-width again, which isn't what a second
-    // double-tap/dblclick on an already-fit-width page is asking for - that
-    // case is a no-op instead (see toggleFitWidthScale).
-    let fitWidthWasZoomIn = false;
     // True while a repeat double-tap/dblclick on the fit-width anchor page
-    // has zoomed to the maximum scale at the tapped point instead of being
-    // a no-op (see toggleFitWidthScale's !fitWidthWasZoomIn branch) -
-    // fitWidthMaxZoomRestoreScale is the fit-width scale to return to on the
-    // NEXT repeat tap on that same page.
+    // has zoomed to the maximum scale at the tapped point (every repeat tap
+    // on the anchor does now, see toggleFitWidthScale) - fitWidthMaxZoomRestoreScale
+    // is the fit-width scale to return to on the NEXT repeat tap on that
+    // same page.
     let fitWidthMaxZoomActive = false;
+    // Middle rung of the double-tap ladder: zoomed so the page's CONTENT
+    // (its width minus blank side margins) fills the width, between
+    // fit-page-width and max zoom. See toggleFitWidthScale.
+    let fitWidthContentZoomActive = false;
     let fitWidthMaxZoomRestoreScale = null;
     let fitWidthPointer = { x: null, y: null };
     let pdfjsPreloadTask = null;   //parallel parsing of pdf.js when opening a file
@@ -8020,9 +8163,12 @@
     const INSERT_IND_EDGE = PAGE_GAP_MAX / 2;          //indentation of the indicator from the edge in the absence of a neighbor
     // Mobile tap pad for the blue insert indicator (reference = 2 pages across).
     // With 3+ pages across, hit shrinks toward INSERT_IND_WIDTH (see getInsertTouchHitX).
-    const INSERT_IND_TOUCH_HIT_X = 28;
-    const INSERT_IND_TOUCH_HIT_Y = 14;
-    const INSERT_IND_TOUCH_HIT_CSS = 52; // ::before total size at the 2-column reference
+    // Cut ~30% from the original 28/14/52: the old pad reached so far into
+    // each page that taps meant for the page itself kept landing on the
+    // insert indicator instead.
+    const INSERT_IND_TOUCH_HIT_X = 20;
+    const INSERT_IND_TOUCH_HIT_Y = 10;
+    const INSERT_IND_TOUCH_HIT_CSS = 36; // ::before total size at the 2-column reference
     // While dragging near the workspace bottom, the pointer often sits in empty
     // padding / auto-scroll zone just below the last row — 12px is too tight.
     const DRAG_INSERT_HIT_SLOP = 56;
@@ -10716,32 +10862,13 @@
       box.style.top = (menuBottom + 10 + extra) + 'px';
     }
 
-    //Determines whether the counter block should be visible right now.
+    //The floating "Pages: N" badge is retired on every device (desktop never
+    //showed it; mobile dropped it by request). The count lives in
+    //.content-header on desktop, and mobile shows no count at all.
     function refreshPageCountVisibility() {
       const box = document.getElementById('pageCountBox');
-      if (!isTouchDevice) {
-        refreshDesktopHeaderPageCount();
-        if (box) box.style.display = 'none';
-        return;
-      }
-      if (!box || !pdfDoc) { if (box) box.style.display = 'none'; return; }
-
-      //The menu is collapsed (desktop OR mobile) → the counter block is hidden in any state
-      const menu = document.getElementById('topMenu');
-      const menuCollapsed = menu && menu.classList.contains('collapsed');
-      if (menuCollapsed) { box.style.display = 'none'; return; }
-
-      //Unpinned → visible only at the beginning (scroll at the top)
-      if (!pageCountPinned) {
-        const atTop = scrollContainer.scrollTop <= 4;
-        if (atTop) { positionPageCountBox(); box.style.display = 'block'; }
-        else box.style.display = 'none';
-        return;
-      }
-
-      //Pinned → always visible; recalculate the position to the current state
-      positionPageCountBox();
-      box.style.display = 'block';
+      if (box) box.style.display = 'none';
+      refreshDesktopHeaderPageCount();
     }
 
     //Switching the pinning of the counter block (click/tap on it)
@@ -12833,8 +12960,8 @@
       fitWidthToggleOn = false;
       fitWidthSavedScale = null;
       fitWidthAnchorIdx = null;
-      fitWidthWasZoomIn = false;
       fitWidthMaxZoomActive = false;
+      fitWidthContentZoomActive = false;
       fitWidthMaxZoomRestoreScale = null;
       updateFitWidthBtnUI();
     }
@@ -13145,12 +13272,23 @@
     // needed here on both touch AND desktop since this is a precise point
     // anchor, unlike applyFitWidthScaleValue's generic captureZoomAnchor().
     function applyMaxZoomAtPoint(anchorPage, ptrX, ptrY) {
+      applyZoomScaleAtPoint(anchorPage, ptrX, ptrY, Infinity);
+    }
+
+    /** Zoom to `targetScale` keeping the point (ptrX, ptrY) of anchorPage
+     * under the finger. Pass Infinity for "as far as the slider goes".
+     * `opts.centerContentX` - the page's own { left, right } content
+     * fractions - keeps the vertical anchoring on the tapped point but
+     * centres that content band horizontally instead of leaving the view
+     * wherever the anchor happened to put it. */
+    function applyZoomScaleAtPoint(anchorPage, ptrX, ptrY, targetScale, opts) {
+      const centerBounds = opts && opts.centerContentX;
       const r = anchorPage.getBoundingClientRect();
       const lx = Math.max(r.left, Math.min(ptrX, r.right));
       const ly = Math.max(r.top, Math.min(ptrY, r.bottom));
       const fx = r.width > 0 ? (lx - r.left) / r.width : 0.5;
       const fy = r.height > 0 ? (ly - r.top) / r.height : 0.5;
-      currentScale = clampScale(Infinity);
+      currentScale = clampScale(targetScale);
       scaleUserLocked = true;
       autoScaleEnabled = false;
       pmVerticalMagnetActive = false;
@@ -13165,12 +13303,86 @@
         if (!page) return;
         const pt = getPageAnchorContentPoint(page, fx, fy);
         if (pt) restorePinchViewportPoint(pt, ptrX, ptrY);
+        if (centerBounds) pmCenterPageContentX(page, centerBounds);
       };
       settle();
       requestAnimationFrame(() => {
         settle();
         requestAnimationFrame(settle);
       });
+    }
+
+    /** Put the page's content band (its { left, right } width fractions,
+     * blank margins excluded) in the middle of the work area. Horizontal
+     * only - whatever anchored the vertical position stays untouched. */
+    function pmCenterPageContentX(pageEl, bounds) {
+      if (!pageEl || !bounds || !scrollContainer) return;
+      const view = scrollContainer.getBoundingClientRect();
+      const r = pageEl.getBoundingClientRect();
+      if (!(r.width > 0) || !(view.width > 0)) return;
+      const contentMid = r.left + (bounds.left + bounds.right) / 2 * r.width;
+      const delta = contentMid - (view.left + view.width / 2);
+      if (Math.abs(delta) < 0.5) return;
+      scrollContainer.scrollLeft += delta;
+    }
+
+    // Blank side margins of a rendered page, as { left, right } fractions of
+    // its own width, measured off the page's own preview image: a column
+    // counts as content as soon as one pixel in it is darker than near-white.
+    // Feeds the double-tap ladder's middle step, which zooms to the text
+    // block rather than to the paper it sits on. Cached per image element
+    // (keyed by src, so an HQ re-render re-measures).
+    const PM_CONTENT_SCAN_MAX_W = 320;
+    const PM_CONTENT_INK_LUM = 243;
+    const pmContentBoundsCache = new WeakMap();
+    function pmPageContentXFractions(pageEl) {
+      const img = pageEl
+        && (pageEl.querySelector('.img-wrapper img') || pageEl.querySelector('img'));
+      if (!img || !img.complete || !img.naturalWidth || !img.naturalHeight) return null;
+      const cached = pmContentBoundsCache.get(img);
+      if (cached && cached.src === img.src) return cached.bounds;
+      let bounds = null;
+      try {
+        const w = Math.max(1, Math.min(PM_CONTENT_SCAN_MAX_W, img.naturalWidth));
+        const h = Math.max(1, Math.round(img.naturalHeight * (w / img.naturalWidth)));
+        const c = document.createElement('canvas');
+        c.width = w; c.height = h;
+        const ctx = c.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(img, 0, 0, w, h);
+        const data = ctx.getImageData(0, 0, w, h).data;
+        let first = -1, last = -1;
+        for (let x = 0; x < w; x++) {
+          let ink = false;
+          for (let y = 0; y < h; y++) {
+            const i = (y * w + x) * 4;
+            if (data[i + 3] < 8) continue;
+            const lum = 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+            if (lum < PM_CONTENT_INK_LUM) { ink = true; break; }
+          }
+          if (ink) { if (first < 0) first = x; last = x; }
+        }
+        if (first >= 0 && last >= first) bounds = { left: first / w, right: (last + 1) / w };
+      } catch (_) {
+        bounds = null;   // tainted canvas / no 2d context - just skip the step
+      }
+      pmContentBoundsCache.set(img, { src: img.src, bounds });
+      return bounds;
+    }
+
+    /** Scale for the double-tap ladder's middle step: the page's CONTENT
+     * filling the room fit-width gives the whole page. null when the page
+     * has no side margins worth zooming past, or when the step would land
+     * at (or beyond) max zoom anyway and so would not be a step at all. */
+    function pmContentWidthScale(anchorPage, fitWidthTarget) {
+      if (!anchorPage || !(fitWidthTarget > 0)) return null;
+      const b = pmPageContentXFractions(anchorPage);
+      if (!b) return null;
+      const frac = b.right - b.left;
+      if (!(frac > 0.05) || frac > 0.92) return null;
+      const target = clampScale(fitWidthTarget / frac);
+      if (!(target > fitWidthTarget * 1.05)) return null;
+      if (target >= clampScale(Infinity) * 0.98) return null;
+      return target;
     }
 
     // "Fit page width" should always end up perfectly horizontally centered
@@ -13255,13 +13467,17 @@
       }
       if (typeof pmUpdateVerticalOnlyScrollLock === 'function') pmUpdateVerticalOnlyScrollLock();
       // While a repeat double-tap/dblclick has zoomed to the max at a point
-      // (see toggleFitWidthScale's !fitWidthWasZoomIn branch), fitWidthToggleOn
-      // deliberately stays true (so a further repeat tap can find its way
-      // back to fit-width), but currentScale is intentionally NOT the
+      // (see toggleFitWidthScale), fitWidthToggleOn deliberately stays true
+      // (so a further repeat tap can find its way back to fit-width), but
+      // currentScale is intentionally NOT the
       // fit-width target anymore - re-tracking here would silently snap
       // straight back out of the max-zoom the moment anything else
       // triggers a re-track (a thumbnail decoding, a resize, ...).
-      if (!fitWidthToggleOn || fitWidthMaxZoomActive || typeof computeFitWidthScale !== 'function') return;
+      // The content-width rung of the ladder is the same story: fit-width
+      // stays "on" there too, but currentScale is deliberately past the
+      // fit-width target, so re-tracking would snap straight back out of it.
+      if (!fitWidthToggleOn || fitWidthMaxZoomActive || fitWidthContentZoomActive
+          || typeof computeFitWidthScale !== 'function') return;
       const anchorPage = pmFitWidthAnchorPage();
       const target = computeFitWidthScale(anchorPage);
       if (Math.abs(target - currentScale) > 0.25) {
@@ -13373,26 +13589,66 @@
       // Capture the nearest page BEFORE scale changes reflow the layout.
       const anchorPage = findNearestPageToPoint(ptrX, ptrY);
       const anchorIdx = anchorPage ? parseInt(anchorPage.dataset.index, 10) : NaN;
-      // A repeat gesture only means "undo" when it lands on the SAME page
-      // fit-width is currently anchored to - the toggle stays on across a
-      // rotation of that same page (pmReapplyFitWidthIfActive's live
-      // re-track), so this is also what makes rotating the anchored page
-      // "keep it fit-widthed" rather than a candidate for undo. Landing on
-      // a DIFFERENT page (any orientation) is a fresh "fit THIS page"
-      // request instead, regardless of whatever fitWidthWasZoomIn was left
-      // at by the previous page - without this check, double-tapping a
-      // second, different page while already fit-widthed either silently
-      // did nothing (if the stale flag said "zoomed out") or undid the
-      // FIRST page's zoom instead of fitting the one just tapped.
-      const sameAnchor = fitWidthToggleOn && !Number.isNaN(anchorIdx) && anchorIdx === fitWidthAnchorIdx;
+      const fitWidthTarget = computeFitWidthScale(anchorPage);
+      // A repeat gesture only means "zoom in further to max" when it lands
+      // on the SAME page fit-width is currently anchored to - the toggle
+      // stays on across a rotation of that same page
+      // (pmReapplyFitWidthIfActive's live re-track), so this is also what
+      // makes rotating the anchored page "keep it fit-widthed" rather than a
+      // candidate for the repeat-tap zoom-in. Landing on a DIFFERENT page
+      // (any orientation) is a fresh "fit THIS page" request instead -
+      // without this check, double-tapping a second, different page while
+      // already fit-widthed would zoom the FIRST page in to max instead of
+      // fitting the one just tapped.
+      // Exception: a different page whose fit-width scale is identical to
+      // the one already applied (same size/orientation as the current
+      // anchor) needs no fresh fit-width step at all - re-applying it would
+      // be a visible no-op, so treat it the same as landing back on the
+      // original anchor and go straight to zooming in to max instead of
+      // requiring a second double-tap to get there.
+      const sameFitWidthScale = fitWidthToggleOn && !fitWidthMaxZoomActive
+        && Math.abs(fitWidthTarget - currentScale) <= 0.25;
+      const sameAnchor = fitWidthToggleOn && !Number.isNaN(anchorIdx)
+        && (anchorIdx === fitWidthAnchorIdx || sameFitWidthScale);
       if (sameAnchor) {
+        // Keep the tracked anchor in sync with the page actually tapped -
+        // matters for the sameFitWidthScale case, where anchorIdx can
+        // differ from the previous fitWidthAnchorIdx (a different but
+        // identically-sized page); rotation re-tracking and future taps
+        // should follow this page from here on, not the one it replaced.
+        fitWidthAnchorIdx = anchorIdx;
+        // Ladder: whole page -> fit page width -> page CONTENT width (the
+        // same page minus its blank side margins, zoomed at the tapped
+        // point) -> max zoom at the tapped point. From max, a repeat tap
+        // steps back to the content-width view and the next one returns to
+        // max, alternating between those two rather than dropping all the
+        // way out to fit-width. Pages with no measurable side margins have
+        // no middle step and keep the old fit-width <-> max toggle.
+        const contentTarget = pmContentWidthScale(anchorPage, fitWidthTarget);
+        // Landing on the content rung centres that content band horizontally
+        // rather than leaving the view wherever the tapped point pinned it -
+        // the whole point of the rung is that the text block fills the
+        // width, which it only looks like once it is centred. The tapped
+        // point still decides what is on screen vertically.
+        const contentOpts = { centerContentX: pmPageContentXFractions(anchorPage) };
+        if (fitWidthMaxZoomActive && contentTarget != null) {
+          fitWidthMaxZoomActive = false;
+          fitWidthContentZoomActive = true;
+          applyZoomScaleAtPoint(anchorPage, ptrX, ptrY, contentTarget, contentOpts);
+          return;
+        }
+        if (!fitWidthMaxZoomActive && !fitWidthContentZoomActive && contentTarget != null) {
+          fitWidthContentZoomActive = true;
+          fitWidthMaxZoomRestoreScale = currentScale;
+          applyZoomScaleAtPoint(anchorPage, ptrX, ptrY, contentTarget, contentOpts);
+          return;
+        }
         // A repeat tap while zoomed to the max at a point (see below)
-        // returns to the fit-width view it came from, same as the
-        // fitWidthWasZoomIn undo path just below - just restoring a
-        // different saved scale.
+        // returns to the fit-width view it came from.
         if (fitWidthMaxZoomActive) {
           const restore = fitWidthMaxZoomRestoreScale;
           fitWidthMaxZoomActive = false;
+          fitWidthContentZoomActive = false;
           fitWidthMaxZoomRestoreScale = null;
           if (restore != null && Math.abs(restore - currentScale) > 0.25) {
             applyFitWidthScaleValue(restore);
@@ -13407,43 +13663,29 @@
           });
           return;
         }
-        // Fit-width zoomed OUT (the user was already zoomed in past it) -
-        // repeating the same gesture used to be a no-op here ("fit width"
-        // again is where we already are), but there's something more useful
-        // to do with a THIRD tap than nothing: zoom all the way in at the
-        // tapped point instead. A further repeat tap returns to this
-        // fit-width view (the fitWidthMaxZoomActive branch above).
-        if (!fitWidthWasZoomIn) {
-          fitWidthMaxZoomRestoreScale = currentScale;
-          fitWidthMaxZoomActive = true;
-          applyMaxZoomAtPoint(anchorPage, ptrX, ptrY);
-          return;
-        }
-        const restore = fitWidthSavedScale;
-        fitWidthToggleOn = false;
-        fitWidthSavedScale = null;
-        fitWidthAnchorIdx = null;
-        fitWidthWasZoomIn = false;
-        updateFitWidthBtnUI();
-        if (restore != null && Math.abs(restore - currentScale) > 0.25) {
-          applyFitWidthScaleValue(restore);
-        }
-        requestAnimationFrame(() => {
-          let page = null;
-          if (!Number.isNaN(anchorIdx)) {
-            page = pagesContainer.querySelector('.page[data-index="' + anchorIdx + '"]');
-          }
-          if (!page) page = findNearestPageToPoint(ptrX, ptrY);
-          if (page) scrollPageIntoViewTop(page);
-        });
+        // A repeat tap on the fit-width anchor always zooms in further to
+        // the max at the tapped point now - there's no "undo back to
+        // whatever scale it was before the first double-tap" anymore. The
+        // only way back out to fit-width is a further repeat tap once at
+        // max (the branch above), or manually zooming in past fit-width and
+        // double-tapping (the fresh branch below already zooms back OUT to
+        // fit-width in that case, since that's just "set scale to the
+        // fit-width target" regardless of which direction it moves from).
+        // Keep whatever fit-width scale the ladder started from: stepping
+        // through the content-width view must not make THAT the scale a
+        // later "back out of max" would restore.
+        if (fitWidthMaxZoomRestoreScale == null) fitWidthMaxZoomRestoreScale = currentScale;
+        fitWidthContentZoomActive = false;
+        fitWidthMaxZoomActive = true;
+        applyMaxZoomAtPoint(anchorPage, ptrX, ptrY);
         return;
       }
       fitWidthSavedScale = currentScale;
       fitWidthAnchorIdx = Number.isNaN(anchorIdx) ? null : anchorIdx;
       fitWidthMaxZoomActive = false;
+      fitWidthContentZoomActive = false;
       fitWidthMaxZoomRestoreScale = null;
-      const target = computeFitWidthScale(anchorPage);
-      fitWidthWasZoomIn = target > fitWidthSavedScale + 0.25;
+      const target = fitWidthTarget;
       fitWidthToggleOn = true;
       updateFitWidthBtnUI();
       if (Math.abs(target - currentScale) > 0.25) {
@@ -13998,6 +14240,12 @@
       if (typeof updateMobilePagesRowOverflow === 'function') updateMobilePagesRowOverflow();
       if (typeof updateZoomPanMode === 'function') updateZoomPanMode();
       requestAnimationFrame(updateDesktopPagesAlignment);
+      //A scale change is the other way in and out of the high-zoom mode
+      //where the page filling the screen selects itself (see
+      //pmUpdateAutoPageSelection) - re-evaluate once the new layout is up.
+      if (typeof pmUpdateAutoPageSelection === 'function') {
+        requestAnimationFrame(pmUpdateAutoPageSelection);
+      }
       //Synchronizing the floating reading mode slider
       syncReadModeScaleOverlay();
     }
@@ -15197,6 +15445,23 @@
 
     async function runHQUpgrade(opts) {
       if (!pdfDoc) return;
+      // Any live finger contact on the pages area - scrolling through pages,
+      // not just an actual page-reorder drag - needs every free main-thread
+      // cycle for smooth touchmove handling. The render+toDataURL work below
+      // is heavy enough (a full-resolution canvas render and JPEG encode per
+      // visible page) to visibly compete with it, which is exactly why
+      // scrolling right after a zoom change (the zoom's own
+      // scheduleHQUpgrade call, timed 180ms later) could feel jerky the
+      // first time but smooth once repeated, after this had already
+      // finished. pageTouchActive covers the whole touch session from
+      // finger-down (see onPagePointerDown) regardless of whether it turns
+      // into a scroll, a tap, or a drag - isDragActive alone only covers the
+      // (much rarer) long-press-to-reorder case. Defer entirely and retry
+      // once the finger lifts.
+      if (isDragActive || pageTouchActive) {
+        scheduleHQUpgrade(opts);
+        return;
+      }
       if (typeof whenPdfDocIdle === 'function') await whenPdfDocIdle();
       const token = hqPdfjsToken;
 
@@ -15215,6 +15480,7 @@
 
       for (const div of visible) {
         if (token !== hqPdfjsToken) return;
+        if (isDragActive || pageTouchActive) { scheduleHQUpgrade(opts); return; }
         const idx = parseInt(div.dataset.index);
         // Skip pages still showing a CSS rotate (animating OR waiting for raster
         // swap). Writing a baked /Rotate image under a non-zero transform doubles
@@ -15568,69 +15834,17 @@
     function updateStickyFileBar() {
       const bar = document.getElementById('stickyFileBar');
       if (!bar) return;
-      // Desktop: the floating strip is retired entirely - file name/page
-      // count only ever show in .content-header, at the very top of the
-      // document. (Mobile keeps the sticky bar, handled by the branches
-      // below - isTouchDevice is checked throughout the rest of this file.)
-      if (!isTouchDevice) {
-        bar.classList.remove('visible');
-        bar.removeAttribute('title');
-        applyStickyOffset(false);
-        refreshDesktopHeaderPageCount();
-        if (typeof updateZoomPanHandBadge === 'function') updateZoomPanHandBadge();
-        if (typeof updateUndoRedoUI === 'function') updateUndoRedoUI();
-        return;
-      }
-      const header = document.querySelector('.content-header');
-      const docOpen = !!pdfDoc && infoDiv && infoDiv.style.display !== 'none';
-
-      // There is no document or no title - we do not show the bar
-      if (!docOpen || !header) {
-        bar.classList.remove('visible');
-        bar.removeAttribute('title');
-        applyStickyOffset(false);
-        if (!isTouchDevice) refreshDesktopHeaderPageCount();
-        if (typeof updateZoomPanHandBadge === 'function') updateZoomPanHandBadge();
-        if (typeof updateUndoRedoUI === 'function') updateUndoRedoUI();
-        return;
-      }
-
-      const barTop = stickyBarTop();
-      const infoRect = infoDiv.getBoundingClientRect();
-      const headerRect = header.getBoundingClientRect();
-      const hidden = isTouchDevice
-        ? infoRect.bottom < barTop + 4
-        : headerRect.bottom < barTop + 4;
-
-      if (hidden) {
-        bar.style.top = barTop + 'px';
-        bar.classList.add('visible');
-        applyStickyOffset(true);
-        void bar.offsetWidth;
-        const maxTextW = isTouchDevice ? getStickyBarMaxTextWidth(bar) : 0;
-        const shown = isTouchDevice
-          ? formatFileNameForStickyBar(currentFileName, maxTextW, bar)
-          : formatFileNameForDisplay(currentFileName);
-        const countHtml = isTouchDevice ? '' :
-          '<span class="sticky-page-count" aria-hidden="false">' +
-          '<span class="sticky-page-count-label">' + escapeHtml(t('pages')) + '</span> ' +
-          '<span id="stickyPageCountValue" class="sticky-page-count-value">' +
-          (pdfDoc.getPageCount() - markedForDeletion.size) +
-          '</span></span>';
-        bar.innerHTML = countHtml +
-          '<span class="file-ico">📄</span><span class="bar-text">' +
-          escapeHtml(shown) + '</span>' + dirtyStarHtml();
-        ensureStickyBarMeasurer(bar);
-        bar.title = currentFileName || '';
-      } else {
-        bar.classList.remove('visible');
-        bar.removeAttribute('title');
-        applyStickyOffset(false);
-      }
-      if (!isTouchDevice) refreshDesktopHeaderPageCount();
+      // The floating file-name strip is retired on every device now (it went
+      // first on desktop, then on mobile by request): the file name shows
+      // only in .content-header, at the very top of the document, above the
+      // first page. Kept as a single no-op instead of unpicking the ~20
+      // call sites that poke it on scroll/resize/menu toggle.
+      bar.classList.remove('visible');
+      bar.removeAttribute('title');
+      applyStickyOffset(false);
+      refreshDesktopHeaderPageCount();
       if (typeof updateZoomPanHandBadge === 'function') updateZoomPanHandBadge();
       if (typeof updateUndoRedoUI === 'function') updateUndoRedoUI();
-      applyStickyBarScrollbarGutter(bar);
     }
 
     // Shifts the page counter and content down by the height of the bar when it is visible.
@@ -17217,9 +17431,10 @@
       // Removing charging + fill together (no lingering transition class) so
       // an aborted charge (e.g. movement turned out to be a scroll) snaps
       // back instantly instead of visibly fading back out.
-      pagesContainer.querySelectorAll('.page.drag-source, .page.page-press-pending, .page.page-select-charging').forEach(p => {
+      pagesContainer.querySelectorAll('.page.drag-source, .page.page-press-pending, .page.page-select-charging, .page.page-drag-charging').forEach(p => {
         p.classList.remove('drag-source', 'page-press-pending', 'page-press-pending-instant',
-          'page-select-charging', 'page-select-charge-fill');
+          'page-select-charging', 'page-select-charge-fill',
+          'page-drag-charging', 'page-drag-charge-fill');
       });
       invalidateDragGeometry();
       dragSourceDiv = null;
@@ -17236,7 +17451,8 @@
     function startPageTouchDrag() {
       if (!dragSourceDiv || pagePointerId === null) return;
       dragSourceDiv.classList.remove('page-press-pending', 'page-press-pending-instant',
-        'page-select-charging', 'page-select-charge-fill');
+        'page-select-charging', 'page-select-charge-fill',
+        'page-drag-charging', 'page-drag-charge-fill');
       pagesContainer.querySelectorAll('.page.page-press-pending').forEach(p => {
         p.classList.remove('page-press-pending', 'page-press-pending-instant');
       });
@@ -17347,7 +17563,17 @@
 
       clearTimeout(pageSelectStageTimer);
       pageSelectStageTimer = null;
-      const singleColumnHold = typeof isPagesSingleColumnLayout === 'function' && isPagesSingleColumnLayout();
+      // The staged hold (charge -> select, keep holding -> pick the page up)
+      // used to be a single-column-layout nicety. On touch it is now the
+      // behaviour at EVERY zoom level, including the multi-column overview -
+      // one gesture to learn instead of two that swap by zoom. Desktop keeps
+      // the plain long-press unless its own layout is single-column.
+      // Multi-select mode is the exception: there the whole point is ticking
+      // pages off quickly, so a plain tap selects (no charge to wait out)
+      // and a hold goes straight to moving the page.
+      const multiSelecting = typeof multiSelectMode !== 'undefined' && multiSelectMode;
+      const singleColumnHold = !multiSelecting && (isTouchDevice
+        || (typeof isPagesSingleColumnLayout === 'function' && isPagesSingleColumnLayout()));
       pageSelectSingleColumnAtDown = singleColumnHold;
       if (singleColumnHold) {
         const pendingDiv = dragSourceDiv;
@@ -17383,7 +17609,40 @@
           pageSelectStageFired = true;
           if (navigator.vibrate) navigator.vibrate(8);
           preTapSelectionSnapshot = { selected: new Set(selectedPages), last: lastSelectedIndex };
-          handlePageClick(pageIdx, pendingDiv, { shiftKey: false, ctrlKey: false, metaKey: false });
+          // At high zoom the page is already selected automatically (see
+          // pmUpdateAutoPageSelection) - there is nothing for this stage to
+          // select, so it opens the mini-tools instead. Stage 2 (picking the
+          // page up) is unchanged. Re-evaluated right here rather than
+          // trusted from the last scroll/zoom: the flag is only refreshed by
+          // those two, so on a view that has had neither it can still say
+          // "auto" while nothing has actually been auto-selected - and this
+          // stage would then neither select nor have anything to show.
+          pmUpdateAutoPageSelection();
+          if (pmAutoSelectModeOn && pmAutoSelectedIdx === pageIdx
+              && selectedPages.has(pageIdx)) {
+            pmQuickActionsRequestedIdx = pageIdx;
+            updateMobileQuickActions();
+          } else if (selectedPages.size > 1 && selectedPages.has(pageIdx)) {
+            // Holding on a page that is already part of a multi-selection
+            // (a marquee, say) is the start of moving that whole group, so
+            // the selection is left exactly as it is. handlePageClick()
+            // would collapse it to this one page, and stage 2 would then
+            // pick up only that page - which is what "dragging moves just
+            // the one I held" was.
+          } else {
+            handlePageClick(pageIdx, pendingDiv, { shiftKey: false, ctrlKey: false, metaKey: false });
+          }
+          // Start charging the SECOND half of the hold, so it is visible
+          // that keeping the finger down picks the page up (see the
+          // .page-drag-charging CSS).
+          pendingDiv.style.setProperty('--pm-drag-charge-ms',
+            Math.max(0, PAGE_DRAG_HOLD_MS - PAGE_SELECT_HOLD_MS) + 'ms');
+          pendingDiv.classList.add('page-drag-charging');
+          requestAnimationFrame(() => {
+            if (dragSourceDiv === pendingDiv && pagePointerId === pendingPointerId) {
+              pendingDiv.classList.add('page-drag-charge-fill');
+            }
+          });
           lastPageTapTime = Date.now();
           lastPageTapIdx = pageIdx;
           lastPageTapX = touchLastX;
@@ -17464,7 +17723,8 @@
       // glow, so removing these here causes no visible change.
       if (dragSourceDiv) {
         dragSourceDiv.classList.remove('page-press-pending', 'page-press-pending-instant',
-          'page-select-charging', 'page-select-charge-fill');
+          'page-select-charging', 'page-select-charge-fill',
+          'page-drag-charging', 'page-drag-charge-fill');
       }
       detachPagePointerListeners();
       if (dragSourceDiv) {
@@ -17563,7 +17823,17 @@
         }
       }, { passive: false, capture: true });
       scrollContainer.addEventListener('scroll', () => {
-        requestAnimationFrame(updateMobileQuickActions);
+        requestAnimationFrame(() => {
+          // Scrolling is what moves the auto-selection from page to page at
+          // high zoom, so it re-evaluates first (it may change which page is
+          // selected, which the mini-tools then follow). Scrolling also ends
+          // any mini-tools a hold asked for: the panel belongs to that one
+          // gesture, and leaving the request standing kept it pinned to the
+          // active page for as long as the mode lasted.
+          if (pmAutoSelectModeOn) pmQuickActionsRequestedIdx = null;
+          pmUpdateAutoPageSelection();
+          updateMobileQuickActions();
+        });
       }, { passive: true });
 
       // Manual scroll takeover for a touch whose native handling we
@@ -18015,6 +18285,11 @@
       const dt = now - lastTapTime;
       const dist = Math.hypot(t.clientX - lastTapX, t.clientY - lastTapY);
 
+      // At high zoom the page filling the screen is selected automatically
+      // and there is nothing to rubber-band across, so the marquee is off
+      // (its double-tap is the zoom gesture there instead).
+      if (pmAutoSelectModeOn) { lastTapTime = 0; return; }
+
       if (dt < DOUBLE_TAP_MS && dist < DOUBLE_TAP_DIST) {
         // Double tap - arm the frame selection
         rubberArmed = true;
@@ -18347,6 +18622,113 @@
       return clipTop;
     }
 
+    // ---- Auto page selection at high zoom -------------------------------
+    // Once the zoom is deep enough that a single page covers most of the
+    // work area, "which page am I on" stops being a question worth a hold
+    // gesture - the page filling the screen IS the selection, and it
+    // follows the scroll. In that mode holding no longer selects (it opens
+    // the mini-tools instead, then picks the page up), and the rubber-band
+    // marquee is off: there is nothing to rubber-band over.
+    // Entering takes a page genuinely filling the screen; STAYING takes far
+    // less. Without that gap the mode switched off the moment a scroll put
+    // two pages on screen at once - the blue page number vanished while the
+    // selection frame stayed, and the mini-tools (suppressed only while the
+    // mode is on) popped back up.
+    const PM_AUTO_SELECT_ENTER = 0.8;
+    const PM_AUTO_SELECT_EXIT = 0.45;
+    let pmAutoSelectModeOn = false;
+    let pmAutoSelectedIdx = null;
+    // Set by the hold gesture to let the mini-tools through for that one
+    // page - an auto-selection on its own must never pop them up.
+    let pmQuickActionsRequestedIdx = null;
+
+    /** The page covering most of the work area, with how much of it it
+     * covers - { page, coverage } - or null when this mode cannot apply at
+     * all (wrong device, no document, editor open, multi-column layout). */
+    function pmBestCoveredPage() {
+      if (!isTouchDevice || !pdfDoc || !scrollContainer || !pagesContainer) return null;
+      if (document.getElementById('pageEditModal')?.classList.contains('open')) return null;
+      // Both halves of the condition: zoomed far enough that pages stack in
+      // a single column AND one of them covers most of the work area. The
+      // coverage test alone would also catch a lone page sitting in an
+      // otherwise empty grid.
+      if (typeof isPagesSingleColumnLayout === 'function' && !isPagesSingleColumnLayout()) return null;
+      const view = scrollContainer.getBoundingClientRect();
+      const viewArea = view.width * view.height;
+      if (!(viewArea > 0)) return null;
+      let best = null, bestArea = 0;
+      for (const p of pagesContainer.querySelectorAll('.page')) {
+        if (p.style.display === 'none') continue;
+        const r = p.getBoundingClientRect();
+        const w = Math.min(r.right, view.right) - Math.max(r.left, view.left);
+        const h = Math.min(r.bottom, view.bottom) - Math.max(r.top, view.top);
+        if (!(w > 0) || !(h > 0)) continue;
+        const area = w * h;
+        if (area > bestArea) { bestArea = area; best = p; }
+      }
+      return best ? { page: best, coverage: bestArea / viewArea } : null;
+    }
+
+    /** Back-compat shim for callers (and tests) that just want the page. */
+    function pmAutoSelectCandidatePage() {
+      const best = pmBestCoveredPage();
+      if (!best) return null;
+      const need = pmAutoSelectModeOn ? PM_AUTO_SELECT_EXIT : PM_AUTO_SELECT_ENTER;
+      return best.coverage >= need ? best.page : null;
+    }
+
+    /** Tint exactly one page's number with the selection blue (or none). */
+    function pmMarkAutoSelectedPage(pageDiv) {
+      if (!pagesContainer) return;
+      for (const p of pagesContainer.querySelectorAll('.page.pm-auto-page')) {
+        if (p !== pageDiv) p.classList.remove('pm-auto-page');
+      }
+      if (pageDiv) pageDiv.classList.add('pm-auto-page');
+    }
+
+    function pmSelectOnlyPage(idx, pageDiv) {
+      selectedPages.clear();
+      document.querySelectorAll('.page.selected').forEach(p => p.classList.remove('selected'));
+      selectedPages.add(idx);
+      if (pageDiv) pageDiv.classList.add('selected');
+      lastSelectedIndex = idx;
+      refreshCheckboxes();
+      updateUIState();
+      notifySelectionChanged();
+    }
+
+    /** Re-evaluate the auto-selection. Cheap enough to call on every scroll
+     * frame; does nothing unless the covering page actually changed. */
+    function pmUpdateAutoPageSelection() {
+      if (!isTouchDevice) return;
+      if (isDragActive || rubberActive || rubberArmed || pinchActive) return;
+      const page = pmAutoSelectCandidatePage();
+      if (!page) {
+        pmAutoSelectModeOn = false;
+        pmAutoSelectedIdx = null;
+        pmMarkAutoSelectedPage(null);
+        return;
+      }
+      const idx = parseInt(page.dataset.index, 10);
+      if (Number.isNaN(idx)) return;
+      pmAutoSelectModeOn = true;
+      if (markedForDeletion.has(idx)) {
+        // Cannot be selected, so it must not be tinted either - the tint
+        // means "this is the active page", and disagreeing with the
+        // selection frame is exactly the confusion being fixed here.
+        pmMarkAutoSelectedPage(null);
+        return;
+      }
+      pmMarkAutoSelectedPage(page);
+      if (pmAutoSelectedIdx === idx && selectedPages.size === 1 && selectedPages.has(idx)) return;
+      pmAutoSelectedIdx = idx;
+      // A different page scrolled into place - its mini-tools are not
+      // wanted either until someone holds on it.
+      pmQuickActionsRequestedIdx = null;
+      pmSelectOnlyPage(idx, page);
+      updateMobileQuickActions();
+    }
+
     function isPointInMobileQuickActions(clientX, clientY) {
       if (!isTouchDevice) return false;
       const qa = document.querySelector('.page.mobile-quick-visible .quick-actions');
@@ -18373,6 +18755,13 @@
 
       const idx = [...selectedPages][0];
       if (markedForDeletion.has(idx)) return;
+      // While pages select themselves at high zoom, the mini-tools appear
+      // for one reason only: a hold on the page asked for them. Not tied to
+      // pmAutoSelectedIdx - any other route to a selection in this mode
+      // (the nav buttons, an auto-scroll, a stale index after a page was
+      // marked deleted) would otherwise pop the panel up unbidden, which is
+      // exactly what "it still shows while pages switch" looked like.
+      if (pmAutoSelectModeOn && pmQuickActionsRequestedIdx !== idx) return;
 
       const page = pagesContainer.querySelector('.page[data-index="' + idx + '"]');
       if (!page || page.style.display === 'none') return;
@@ -36410,7 +36799,13 @@ async function peNavigateEditorPage(dir) {
 
 /** True when the page is fully visible (max zoom-out / fit) — no pan scroll. */
 function peIsEditorPageFitView() {
-  if (!peState || peState.tool === 'crop') return false;
+  // No crop-tool special case: this answers "is the page shown whole", which
+  // is true in crop mode as much as any other. Treating crop as never-fit
+  // made the double-tap zoom toggle read every crop-mode tap as "already
+  // zoomed in" and so only ever zoom OUT there. The swipe-nav callers that
+  // relied on the old behaviour are gated on peIsPageSwipeNavMode() anyway,
+  // which is select-mode only.
+  if (!peState) return false;
   const sl = document.getElementById('peScaleSlider');
   const minSl = sl ? parseInt(sl.min, 10) : 100;
   const z = peState.zoomSlider != null ? peState.zoomSlider : 100;
@@ -36450,8 +36845,50 @@ let peLastZoomToggleAt = 0;
 // out, and vice versa). A short cooldown lets the first claim win and makes
 // every later one in the same instant a no-op instead of an undo.
 const PE_ZOOM_TOGGLE_COOLDOWN_MS = 450;
+/** Tools whose tap gesture may be pre-empted by a fast second tap to zoom.
+ * All four leave nothing behind after a tap that does not drag - a
+ * zero-size redact/shape object and a zero-size crop rect are both thrown
+ * away by the drag-end handler - except the text tool's draft box, which
+ * peDiscardDrawForDoubleTapZoom() clears explicitly. */
+const PE_DOUBLE_TAP_ZOOM_TOOLS = ['select', 'crop', 'redact', 'text', 'shape'];
+
+/** True while the editor is inline-editing a still-empty draft block - the
+ * exact state one tap with the text tool leaves behind, and the only one a
+ * second tap may throw away to zoom instead (a double-tap inside text
+ * somebody actually typed keeps its normal caret/word-select meaning). */
+function peEditingEmptyDraftText() {
+  if (!peState || !peState.inlineEditId) return false;
+  if (peState.draftTextId !== peState.inlineEditId) return false;
+  const o = peState.objects.find(x => x.id === peState.inlineEditId);
+  const proxy = document.getElementById('peOskProxy');
+  return !!o && o.type === 'text' && !String(o.text || '').trim()
+    && !String((proxy && proxy.value) || '').trim();
+}
+
+/** Second tap of a double-tap while a draw tool is armed: undo whatever the
+ * first tap started, so the pair reads as a zoom rather than a stray edit. */
+function peDiscardDrawForDoubleTapZoom() {
+  if (!peState) return;
+  if (peState.inlineEditId) {
+    const editing = peState.objects.find(x => x.id === peState.inlineEditId);
+    if (editing && peIsCalloutLike(editing)) peEndCalloutEdit(false);
+    else peEndInlineEdit(false);
+  }
+  pePruneEmptyTextObjects();
+  peCancelActiveDraw();
+}
+
 function peToggleDoubleTapZoom(clientX, clientY) {
-  if (!peState || peState.tool !== 'select' || peState.objSelectMode || peState.inlineEditId) return false;
+  if (!peState || !PE_DOUBLE_TAP_ZOOM_TOOLS.includes(peState.tool)
+      || peState.inlineEditId) return false;
+  // Desktop: Object-select mode still means "double-tap arms a multi-object
+  // marquee, not zoom" (see peStartObjSelectBlankGesture) - switch to Hand
+  // for this toggle there. Mobile has no Hand/Object-select toggle anymore
+  // (Object-select is the only mode - see the coarse-pointer CSS collapsing
+  // #peToolHand/#peToolObjSelect) and its marquee gesture is disabled in
+  // favor of this zoom toggle instead (same functions, gated the same way).
+  const touch = typeof isTouchDevice !== 'undefined' && isTouchDevice;
+  if (peState.objSelectMode && !touch) return false;
   const now = Date.now();
   if (now - peLastZoomToggleAt < PE_ZOOM_TOGGLE_COOLDOWN_MS) return true;
   const sl = document.getElementById('peScaleSlider');
@@ -42486,6 +42923,25 @@ function peOnOskProxyPointerDown(e) {
     ? peState.objects.find(x => x.id === peMobileEditActive.id && x.type === 'text')
     : null);
   if (!o || peState.inlineEditId !== o.id) return;
+
+  // Double-tap zoom with the text tool armed: the first tap creates a draft
+  // block and parks this proxy right over the point that was tapped, so the
+  // second tap lands here instead of on the stage. Let it through - but only
+  // while the block is the still-empty draft that same first tap created, so
+  // a double-tap inside text someone has actually typed keeps its normal
+  // (caret/word-select) meaning.
+  if (e.pointerType !== 'mouse'
+      && typeof peLooksLikeFastDoubleTap === 'function'
+      && peLooksLikeFastDoubleTap(e.clientX, e.clientY)
+      && peEditingEmptyDraftText()) {
+    peLastTapTime = 0;
+    peDiscardDrawForDoubleTapZoom();
+    if (peToggleDoubleTapZoom(e.clientX, e.clientY)) {
+      if (e.cancelable) e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+  }
 
   // Rotate / corner handles sit under the proxy's AABB — forward the gesture.
   const under = peElementUnderOskProxy(e.clientX, e.clientY);
@@ -48661,6 +49117,16 @@ function peShowObjCtxMenu(clientX, clientY, overlapObjs) {
 
 function peOnObjContextMenu(e) {
   if (!peState || peState.tool === 'crop') return;
+  // A contextmenu event with no pointer position behind it - some touch
+  // stacks emit one once the element under the finger goes away, e.g. right
+  // after the menu's own "Delete object" removes it - would open the menu
+  // pinned to the top-left corner of the screen, far from anything the user
+  // touched. There is no position to honour, so there is no menu to show.
+  if (!Number.isFinite(e.clientX) || !Number.isFinite(e.clientY)
+      || (e.clientX <= 0 && e.clientY <= 0)) {
+    e.preventDefault();
+    return;
+  }
   // Selected text (or just a placed caret) inside an editable text block →
   // the Copy/Cut/Paste/Delete menu (peCaptureEditorTextSelection returns
   // 'inline' for both cases; peShowTextSelCtxMenu shows only Paste for a caret).
@@ -49723,7 +50189,16 @@ function peFlushTouchObjPending(clientX, clientY, reason) {
     return;
   }
   const objMenu = document.getElementById('peObjCtxMenu');
-  if (reason === 'tap' && objMenu && objMenu.classList.contains('visible')) return;
+  if (reason === 'tap' && objMenu && objMenu.classList.contains('visible')) {
+    // A menu still on screen from an EARLIER gesture must not swallow this
+    // tap - dismiss it and let the tap do its normal work. The case this
+    // guard was written for (a menu the very same long-press just opened,
+    // which a synthesized tap would close again instantly) is already
+    // covered by the peShouldIgnoreCtxMenuOutside() check above, which
+    // returns outright. Without the split, one stray menu left visible ate
+    // every other tap on an object for the rest of the session.
+    peHideObjCtxMenu();
+  }
   // Re-enter peObjMouseDown with defer bypass to actually select / start move.
   peTouchObjCommit = true;
   peTouchObjFlushReason = reason || 'tap';
@@ -49786,6 +50261,10 @@ function peBeginObjSelectMarquee(e) {
 function peTryStartObjSelectMarqueeFromTouch(e) {
   if (!peState || !peState.objSelectMode) return false;
   if (!(e.pointerType === 'touch' || e.pointerType === 'pen')) return false;
+  // Mobile has no Hand/Object-select toggle (Object-select is the only
+  // mode there) and double-tap is the zoom-in/out gesture instead - see
+  // peToggleDoubleTapZoom, which now handles objSelectMode on touch too.
+  if (typeof isTouchDevice !== 'undefined' && isTouchDevice) return false;
   if (pePinchActive || Date.now() < pePinchBlockObjUntil) return false;
   if (!peRegisterObjSelectTap(e.clientX, e.clientY)) return false;
   peBeginObjSelectMarquee(e);
@@ -49797,7 +50276,10 @@ function peStartObjSelectBlankGesture(e, opts) {
   // forcePan: finger moved on the text layer — pan only; do not treat as dbl-tap
   // (the pointerdown already registered the first tap).
   const forcePan = !!(opts && opts.forcePan);
-  const isDbl = forcePan ? false : peRegisterObjSelectTap(e.clientX, e.clientY);
+  // Mobile: double-tap is the zoom gesture now (peToggleDoubleTapZoom
+  // already claims it before this runs) - never arm a marquee from here.
+  const marqueeDisabled = typeof isTouchDevice !== 'undefined' && isTouchDevice;
+  const isDbl = (forcePan || marqueeDisabled) ? false : peRegisterObjSelectTap(e.clientX, e.clientY);
   if (isDbl) {
     peBeginObjSelectMarquee(e);
   } else {
@@ -49867,6 +50349,17 @@ function peOnObjSelectTextLayerPointerDown(e) {
   const touchLike = e.pointerType === 'touch' || e.pointerType === 'pen';
   if (!touchLike) return false;
   if (pePinchActive || Date.now() < pePinchBlockObjUntil) return true;
+  // Double-tap-zoom (peToggleDoubleTapZoom, claimed by peBindPointerDown's
+  // stage-level dispatcher) needs a chance at a tap landing on text too -
+  // every other path below ends in a capture-phase stopPropagation (either
+  // here or in shieldPageTextLayerEvents' own caller), which otherwise
+  // meant a double-tap on PDF text or an inline text object never reached
+  // that dispatcher at all. A lone tap is still recorded so a fast second
+  // tap - wherever it lands - has something to match against.
+  if (typeof peLooksLikeFastDoubleTap === 'function' && peLooksLikeFastDoubleTap(e.clientX, e.clientY)) {
+    return true;
+  }
+  if (typeof peRecordSoloTap === 'function') peRecordSoloTap(e.clientX, e.clientY);
   peBindTextSelHandleDragGuards();
   // Adjusting an existing selection via its endpoint handles — do not pan.
   if (peIsEditorPageTextSelection() && peClientNearTextSelHandle(e.clientX, e.clientY)) {
@@ -49913,6 +50406,45 @@ function peObjMouseDown(e, o) {
     e.stopPropagation();
     peCancelTouchObjPending();
     return;
+  }
+  // Double-tap-zoom needs a chance at a tap landing on a placed object too -
+  // this handler is bound directly on each object, ahead of the stage's own
+  // dispatcher in bubble order, so every path below claims the tap for
+  // object select/move/resize instead, which otherwise meant a double-tap
+  // on an object never reached peToggleDoubleTapZoom at all. Only on touch,
+  // and only in Object-select mode - matching where the zoom toggle itself
+  // is enabled (see peToggleDoubleTapZoom). !peTouchObjCommit excludes the
+  // synthetic replay peFlushTouchObjPending makes back into this same
+  // function at pointerup (same coordinates, tens of ms later) to actually
+  // commit a deferred tap - without it, that replay looked like a fast
+  // double-tap against the live pointerdown's own just-recorded solo tap
+  // and silently ate every single-tap select on an object.
+  if (touchLike && !peTouchObjCommit && peState && peState.tool === 'select' && peState.objSelectMode &&
+      typeof peLooksLikeFastDoubleTap === 'function' && peLooksLikeFastDoubleTap(e.clientX, e.clientY)) {
+    return;
+  }
+  // Same idea with a DRAW tool armed, except the stage never gets a second
+  // chance there: the first tap of the pair may itself have put an object
+  // under the finger (the text tool creates a draft block and opens its
+  // editor right where you tapped), so the second tap lands on that object
+  // and every branch below would claim it. Claim the zoom here instead.
+  if (touchLike && !peTouchObjCommit && peState
+      && typeof PE_DOUBLE_TAP_ZOOM_TOOLS !== 'undefined'
+      && PE_DOUBLE_TAP_ZOOM_TOOLS.includes(peState.tool) && peState.tool !== 'select'
+      && (!peState.inlineEditId || peEditingEmptyDraftText())
+      && typeof peLooksLikeFastDoubleTap === 'function'
+      && peLooksLikeFastDoubleTap(e.clientX, e.clientY)) {
+    peLastTapTime = 0;
+    peDiscardDrawForDoubleTapZoom();
+    if (peToggleDoubleTapZoom(e.clientX, e.clientY)) {
+      if (e.cancelable) e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+  }
+  if (touchLike && !peTouchObjCommit && peState && peState.tool === 'select' && peState.objSelectMode &&
+      typeof peRecordSoloTap === 'function') {
+    peRecordSoloTap(e.clientX, e.clientY);
   }
   const onHandle = !!(e.target.classList && (
     e.target.classList.contains('pe-text-corner-handle') ||
@@ -50130,6 +50662,26 @@ function peObjMouseDown(e, o) {
     const resolved = peResolveOverlapPointerTarget(o, e.clientX, e.clientY);
     o = resolved.obj;
     overlapCycleIds = resolved.cycleIds;
+  }
+  // A repeat single tap on the object that is already selected clears the
+  // selection instead of re-selecting what is already selected. This has to
+  // sit ahead of the per-type branches below, since each of those selects
+  // and returns on its own. Deliberately narrow: only a committed touch TAP
+  // (a hold opens the context menu, a drag moves the object - neither
+  // arrives here with reason 'tap'), only in select mode (the text tool's
+  // tap opens the editor instead), never on a resize/rotate handle, never
+  // additive, not while editing text, and not when 2+ stacked objects make
+  // the tap a cycle through the stack instead.
+  if (peTouchObjCommit && peTouchObjFlushReason === 'tap'
+      && peState.tool === 'select' && peState.sel === o
+      && !onHandle && !e.shiftKey && !overlapCycleIds
+      && !peState.inlineEditId && !peIsMultiSelection()
+      && !peIsPageTextMarkup(o)) {
+    if (e.cancelable) e.preventDefault();
+    e.stopPropagation();
+    peHideObjCtxMenu();
+    peSelect(null);
+    return;
   }
   // Text block corner anchor - always resize, regardless
   // current tool/state (including active text input); checking
@@ -50636,6 +51188,22 @@ function peObjMouseDown(e, o) {
       return (w && w.clientHeight) ? w.clientHeight : window.innerHeight;
     }
 
+    // Which vertical fifth-quarters of the work area a touch started in -
+    // 'top'/'bottom' (each the outer 25%) are the only zones that can arm a
+    // page-switch swipe; the central 50% ('middle') never does, so dragging
+    // around in the middle of a fully-visible page (panning objects,
+    // reading, ...) can't accidentally flip to another page.
+    function zoneForY(clientY) {
+      const w = document.getElementById('peStageWrap');
+      if (!w) return 'middle';
+      const r = w.getBoundingClientRect();
+      if (r.height <= 0) return 'middle';
+      const rel = (clientY - r.top) / r.height;
+      if (rel <= 0.25) return 'top';
+      if (rel >= 0.75) return 'bottom';
+      return 'middle';
+    }
+
     function onStart(e) {
       if (typeof isTouchDevice === 'undefined' || !isTouchDevice) return;
       if (!peState || pePageSwipeBusy || pePinchActive) return;
@@ -50648,6 +51216,7 @@ function peObjMouseDown(e, o) {
         id: t.identifier,
         x0: t.clientX,
         y0: t.clientY,
+        zone: zoneForY(t.clientY),
         dir: 0,
         active: false,
         progress: 0
@@ -50685,6 +51254,14 @@ function peObjMouseDown(e, o) {
         }
         // dy > 0 = finger down = previous; dy < 0 = finger up = next
         const dir = dy > 0 ? -1 : 1;
+        // Only the matching edge zone arms each direction - bottom 25% for
+        // swipe-up/next, top 25% for swipe-down/previous (see zoneForY) -
+        // and the central 50% never arms either, regardless of direction.
+        const allowedZone = dir === 1 ? 'bottom' : 'top';
+        if (pePageSwipe.zone !== allowedZone) {
+          pePageSwipeCancel();
+          return;
+        }
         if (peFindNeighborEditablePage(peState.idx, dir) < 0) {
           pePageSwipeCancel();
           return;
@@ -50919,18 +51496,72 @@ function peObjMouseDown(e, o) {
     if (peDrawPlacementIgnoresObjects()) peUpdateDrawShiftPassthrough(e.shiftKey);
     if (e.target.closest && e.target.closest('.pe-obj')) {
       const passObj = e.shiftKey && peDrawPlacementIgnoresObjects();
-      if (!passObj) return;
+      if (!passObj) {
+        // Double-tap-zoom must still fire when the tap lands on a placed
+        // object - peObjMouseDown (bound directly on the object, ahead of
+        // this stage-level handler in bubble order) already lets a fast
+        // double-tap bubble through instead of claiming it for object
+        // select/move, but this early return would otherwise swallow it
+        // before the tool==='select' double-tap check further below ever
+        // runs. Only on touch, only in Object-select mode - same gating as
+        // peToggleDoubleTapZoom itself.
+        const touchLikeObj = e.pointerType === 'touch' || e.pointerType === 'pen';
+        if (touchLikeObj && peState.tool === 'select' && peState.objSelectMode &&
+            typeof peLooksLikeFastDoubleTap === 'function' && peLooksLikeFastDoubleTap(e.clientX, e.clientY)) {
+          peLastTapTime = 0;
+          if (peToggleDoubleTapZoom(e.clientX, e.clientY)) {
+            if (e.cancelable) e.preventDefault();
+          }
+        }
+        return;
+      }
     }
     // A click that lands on the PDF text-selection layer (object-select mode
     // only) must start a native text selection, not an object marquee - the
     // shield on #peTextLayer already stops this event from bubbling here in
     // the normal case, but that relies on capture-phase propagation timing;
     // checking the target directly here is unambiguous regardless of that.
-    if (e.target.closest && e.target.closest('#peTextLayer')) return;
+    if (e.target.closest && e.target.closest('#peTextLayer')) {
+      // Double-tap-zoom must still fire when the tap lands on PDF text -
+      // peOnObjSelectTextLayerPointerDown (the capture-phase shield on
+      // #peTextLayer) already lets a fast double-tap bubble through instead
+      // of claiming it for text selection, but this early return would
+      // otherwise swallow it before the tool==='select' double-tap check
+      // further below ever runs - same fix as the .pe-obj case just above.
+      const touchLikeText = e.pointerType === 'touch' || e.pointerType === 'pen';
+      if (touchLikeText && peState.tool === 'select' && peState.objSelectMode &&
+          typeof peLooksLikeFastDoubleTap === 'function' && peLooksLikeFastDoubleTap(e.clientX, e.clientY)) {
+        peLastTapTime = 0;
+        if (peToggleDoubleTapZoom(e.clientX, e.clientY)) {
+          if (e.cancelable) e.preventDefault();
+        }
+      }
+      return;
+    }
 
     const tool = peState.tool;
     const isDrawTool = tool === 'shape' || tool === 'text' || tool === 'redact' || tool === 'crop';
     const touchLike = e.pointerType === 'touch' || e.pointerType === 'pen';
+    // Double-tap zoom works with a draw tool armed too, not just in select
+    // mode: the tools keep tap-to-draw, but a fast SECOND tap is a zoom.
+    // Must run before the per-tool branches below, which start their drag
+    // (or, for text, create a draft box) on the very pointerdown.
+    if (touchLike && isDrawTool) {
+      const fastDbl = peLooksLikeFastDoubleTap(e.clientX, e.clientY);
+      // Never while a block with real content is being edited - that
+      // double-tap means caret/word-select, and claiming it would throw
+      // away typing. Only a still-empty draft may be discarded.
+      if (fastDbl && (!peState.inlineEditId || peEditingEmptyDraftText())) {
+        peLastTapTime = 0;
+        peDiscardDrawForDoubleTapZoom();
+        if (peToggleDoubleTapZoom(e.clientX, e.clientY)) {
+          if (e.cancelable) e.preventDefault();
+          return;
+        }
+      } else if (!fastDbl) {
+        peRecordSoloTap(e.clientX, e.clientY);
+      }
+    }
     // Text create must NOT preventDefault — iOS/Android only keep the keyboard
     // if focus stays inside the same user-gesture without a cancelled touch.
     const mayCreateText = tool === 'text';
@@ -52348,6 +52979,21 @@ function peObjMouseDown(e, o) {
     const tail = document.getElementById('peToolbarTail');
     if (!bar || !title) return;
 
+    const portrait = typeof window.matchMedia === 'function'
+      && window.matchMedia('(orientation: portrait)').matches;
+    const coarse = typeof window.matchMedia === 'function'
+      && window.matchMedia('(pointer: coarse)').matches;
+    // Coarse pointer (either orientation): the tail (Cancel/Save) is taken
+    // out of the row-1 flex flow entirely — a fixed top-right corner in
+    // portrait, centered between Delete and the hamburger in landscape
+    // (see the coarse-pointer portrait/landscape CSS and
+    // peLayoutTailCenterLandscape()) — not a flex participant sized
+    // between Crop and Delete like it is on desktop. Padding it to those
+    // columns' edges made no sense once it left the flow — it only
+    // widened/shifted the absolutely-positioned box, overlapping
+    // neighboring buttons.
+    const tailOutOfFlow = coarse;
+
     const reset = () => {
       title.style.transform = '';
       if (tail) {
@@ -52378,8 +53024,6 @@ function peObjMouseDown(e, o) {
     const barPadR = parseFloat(barStyles.paddingRight) || 0;
     const cropL = cropRect.left - barRect.left;
     const delR = delRect.right - barRect.left;
-    const portrait = typeof window.matchMedia === 'function'
-      && window.matchMedia('(orientation: portrait)').matches;
     const textBtn = document.getElementById('peToolText');
     const textRect = textBtn?.getBoundingClientRect();
 
@@ -52397,6 +53041,13 @@ function peObjMouseDown(e, o) {
       title.style.transform = dx ? ('translateX(' + dx + 'px)') : '';
     }
 
+    if (tailOutOfFlow) {
+      tail.style.paddingLeft = '';
+      tail.style.paddingRight = '';
+      tail.style.justifyContent = '';
+      return;
+    }
+
     // Tail: scale pill starts at Crop; Save ends at Delete (the pill grows
     // to absorb whatever room is left between them, pushing Cancel/Save
     // flush against Delete's right edge) - the pill/Cancel boundary itself
@@ -52410,36 +53061,200 @@ function peObjMouseDown(e, o) {
     tail.style.paddingRight = padR + 'px';
   }
 
-  /** Place ←→ as a tight pair, equally spaced between title and Object-select. */
-  function peLayoutMenuToggleOverDelete() {
-    const modal = document.getElementById('pageEditModal');
-    const bar = document.querySelector('#pageEditModal .pe-toolbar');
-    const btn = document.getElementById('peMenuToggleBtn');
+  /** Coarse+landscape only: center Cancel/Save in the gap between Delete
+   * (Trash) and the hamburger, instead of sitting flush against either. */
+  function peLayoutTailCenterLandscape() {
+    const tail = document.getElementById('peToolbarTail');
     const del = document.getElementById('peDeleteObj');
-    if (!modal || !bar || !btn || !del) return;
-    const portrait = typeof window.matchMedia === 'function'
-      && window.matchMedia('(orientation: portrait)').matches;
+    const hamburger = document.getElementById('peMenuToggleBtn');
+    const bar = document.querySelector('#pageEditModal .pe-toolbar');
+    if (!tail || !del || !hamburger || !bar) return;
     const coarse = typeof window.matchMedia === 'function'
       && window.matchMedia('(pointer: coarse)').matches;
-    // Default CSS (top-right) unless portrait mobile stage-3 wrap.
-    if (!coarse || !portrait || modal.classList.contains('pe-menu-collapsed')
-        || !bar.classList.contains('pe-tb-tools-wrap')
-        || !modal.classList.contains('open')) {
-      btn.style.left = '';
-      btn.style.right = '';
+    const landscape = typeof window.matchMedia === 'function'
+      && window.matchMedia('(orientation: landscape)').matches;
+    if (!coarse || !landscape
+        || !document.getElementById('pageEditModal')?.classList.contains('open')
+        || del.offsetParent == null || hamburger.offsetParent == null) {
+      tail.style.left = '';
+      tail.style.right = '';
       return;
     }
     const barRect = bar.getBoundingClientRect();
     const delRect = del.getBoundingClientRect();
-    if (!(delRect.width > 0)) {
-      btn.style.left = '';
-      btn.style.right = '';
+    const hbRect = hamburger.getBoundingClientRect();
+    if (!(delRect.width > 0) || !(hbRect.width > 0)) {
+      tail.style.left = '';
+      tail.style.right = '';
       return;
     }
-    const btnW = btn.offsetWidth || 36;
-    const left = delRect.left - barRect.left + (delRect.width - btnW) / 2;
+    const tailW = tail.getBoundingClientRect().width || tail.offsetWidth;
+    const gapMid = (delRect.right + hbRect.left) / 2;
+    const minLeft = delRect.right - barRect.left + 6;
+    const maxLeft = Math.max(minLeft, hbRect.left - barRect.left - tailW - 6);
+    const left = Math.min(Math.max(gapMid - tailW / 2 - barRect.left, minLeft), maxLeft);
+    tail.style.right = 'auto';
+    tail.style.left = Math.round(left) + 'px';
+  }
+
+  // Shared "cluster gap" for portrait row 1: the space between the
+  // nav/divider+tail/hamburger group's own pieces - distinct from row 2's
+  // 6px icon-to-icon gap, matching the existing edge-margin convention
+  // (max(8px, safe-area)) already used all over this toolbar.
+  const PE_PORTRAIT_CLUSTER_GAP = 8;
+
+  /** Portrait only: size/position Cancel/Save to exactly match row 2's
+   * Rotate/Delete group (same left edge as its divider, same right edge as
+   * Delete) - Cancel/Save fill that width evenly (see their CSS), and the
+   * tail's own ::before divider copies .pe-tools-divider's box model, so
+   * the two rows visually line up as one continuous pair of columns.
+   * Nav and the hamburger then cluster around this (see the two functions
+   * below) instead of sitting pinned to the far edges of the row. */
+  function peLayoutTailAlignRotateGroupPortrait() {
+    const modal = document.getElementById('pageEditModal');
+    const bar = document.querySelector('#pageEditModal .pe-toolbar');
+    const tail = document.getElementById('peToolbarTail');
+    const actions = document.querySelector('#pageEditModal .pe-tools-actions');
+    if (!modal || !bar || !tail || !actions) return;
+    const coarse = typeof window.matchMedia === 'function'
+      && window.matchMedia('(pointer: coarse)').matches;
+    const portrait = typeof window.matchMedia === 'function'
+      && window.matchMedia('(orientation: portrait)').matches;
+    // Landscape/desktop never set tail's left/width here - that's
+    // peLayoutTailCenterLandscape()'s own job, and it runs right before
+    // this function in every call site. Bail without touching tail.style
+    // at all in that case, or this would clobber what that function just
+    // set the instant this runs after it (a real regression once found:
+    // Cancel/Save's tail collapsed back to its landscape CSS corner
+    // position, overlapping the nav prev/next pair).
+    if (!coarse || !portrait) return;
+    const rowDivider = actions.previousElementSibling
+      && actions.previousElementSibling.classList.contains('pe-tools-divider')
+      ? actions.previousElementSibling : null;
+    // Only meaningful once the tools have wrapped to a row of their own:
+    // "put Cancel/Save on Rotate's columns" needs Rotate to be on a
+    // DIFFERENT row. On a wide enough portrait viewport everything fits one
+    // row instead, and copying those columns would stack Cancel/Save right
+    // on top of the very buttons they were aligning to.
+    if (!modal.classList.contains('open') || !rowDivider
+        || !bar.classList.contains('pe-tb-tools-wrap')
+        || actions.offsetParent == null) {
+      tail.style.left = '';
+      tail.style.width = '';
+      return;
+    }
+    const barRect = bar.getBoundingClientRect();
+    const dividerRect = rowDivider.getBoundingClientRect();
+    const actionsRect = actions.getBoundingClientRect();
+    if (!(actionsRect.width > 0) || !(dividerRect.width > 0)) {
+      tail.style.left = '';
+      tail.style.width = '';
+      return;
+    }
+    // Only `left` is set: Cancel/Save are plain --pe-tool-sq squares now,
+    // and the tail's own padding reproduces row 2's divider-to-Rotate
+    // geometry (see its portrait CSS), so pinning the tail's left edge to
+    // row 2's divider is enough to drop Cancel onto Rotate-left's column
+    // and Save onto Rotate-right's. Width stays auto (content-sized) - an
+    // explicit one would have to be recomputed on every size change, and
+    // the tail no longer needs to span the whole Rotate/Delete group
+    // (the hamburger covers Delete's column itself).
+    tail.style.right = 'auto';
+    tail.style.left = Math.round(dividerRect.left - barRect.left) + 'px';
+    tail.style.width = '';
+  }
+
+  /** Portrait only: the hamburger takes Delete's column on row 1, directly
+   * above the Trash button. Cancel/Save are plain squares sitting over
+   * Rotate-left/Rotate-right, so Delete's column is exactly the one slot
+   * row 1 has left over - the three of them then read as one grid with row
+   * 2 rather than as free-floating corner buttons. Landscape and desktop
+   * keep the plain fixed-corner CSS position. */
+  function peLayoutMenuTogglePortraitCluster() {
+    const modal = document.getElementById('pageEditModal');
+    const bar = document.querySelector('#pageEditModal .pe-toolbar');
+    const btn = document.getElementById('peMenuToggleBtn');
+    const actions = document.querySelector('#pageEditModal .pe-tools-actions');
+    const save = document.getElementById('peSaveBtn');
+    if (!modal || !bar || !btn || !actions || !save) return;
+    const coarse = typeof window.matchMedia === 'function'
+      && window.matchMedia('(pointer: coarse)').matches;
+    const portrait = typeof window.matchMedia === 'function'
+      && window.matchMedia('(orientation: portrait)').matches;
+    const squares = Array.from(actions.querySelectorAll('.pe-btn-square'))
+      .filter(el => getComputedStyle(el).display !== 'none');
+    const del = squares[squares.length - 1];
+    // Two-row layout only - see peLayoutTailAlignRotateGroupPortrait().
+    // On a single-row toolbar Delete's column is Delete itself.
+    if (!coarse || !portrait || !modal.classList.contains('open')
+        || !bar.classList.contains('pe-tb-tools-wrap')
+        || !del || actions.offsetParent == null) {
+      btn.style.left = '';
+      btn.style.right = '';
+      btn.style.top = '';
+      return;
+    }
+    const barRect = bar.getBoundingClientRect();
+    const delRect = del.getBoundingClientRect();
+    const saveRect = save.getBoundingClientRect();
+    if (!(delRect.width > 0) || !(saveRect.height > 0)) {
+      btn.style.left = '';
+      btn.style.right = '';
+      btn.style.top = '';
+      return;
+    }
     btn.style.right = 'auto';
-    btn.style.left = Math.max(0, Math.round(left)) + 'px';
+    btn.style.left = Math.round(delRect.left - barRect.left) + 'px';
+    // Top comes off Save rather than the CSS corner offset the hamburger
+    // uses everywhere else: Cancel/Save are centered inside the tail, which
+    // is taller than one square, so the fixed 8px corner left the hamburger
+    // sitting a couple of pixels above the row it belongs to.
+    btn.style.top = Math.round(saveRect.top - barRect.top) + 'px';
+  }
+
+  /** Portrait only: nav (←→) sits right before the divider+tail, clustered
+   * with the rest of row 1 instead of wherever the (desktop-oriented)
+   * title/Object-select centering math above happens to leave it. */
+  function peLayoutNavBeforeTailPortrait() {
+    const modal = document.getElementById('pageEditModal');
+    const bar = document.querySelector('#pageEditModal .pe-toolbar');
+    const nav = document.getElementById('pePageNav');
+    const tail = document.getElementById('peToolbarTail');
+    if (!modal || !bar || !nav || !tail) return;
+    const coarse = typeof window.matchMedia === 'function'
+      && window.matchMedia('(pointer: coarse)').matches;
+    const portrait = typeof window.matchMedia === 'function'
+      && window.matchMedia('(orientation: portrait)').matches;
+    // Two-row layout only - see peLayoutTailAlignRotateGroupPortrait().
+    // Otherwise the tail isn't on row 2's columns either, and nav keeps
+    // whatever the general placement above gave it.
+    if (!coarse || !portrait || !modal.classList.contains('open')
+        || !bar.classList.contains('pe-tb-tools-wrap')
+        || bar.classList.contains('pe-tb-navrow') || tail.offsetParent == null) {
+      return;
+    }
+    const barRect = bar.getBoundingClientRect();
+    const tailRect = tail.getBoundingClientRect();
+    const navW = nav.offsetWidth;
+    if (!(tailRect.width > 0) || !navW) return;
+    // The tail's own divider (::before) sits at its left edge exactly (see
+    // the coarse-pointer portrait CSS), so the tail's left IS the divider.
+    // Nav ends one cluster gap before it - the same 8px row 2 leaves
+    // between Shapes and its own divider (6px flex gap + the divider's 2px
+    // margin), so both rows break at the same visual rhythm.
+    const left = tailRect.left - barRect.left - PE_PORTRAIT_CLUSTER_GAP - navW;
+    nav.style.left = Math.round(Math.max(0, left)) + 'px';
+  }
+
+  /** Portrait row 1 is one cluster laid out right-to-left, and the order
+   * matters: the tail is measured off row 2, nav is placed against the
+   * tail, the hamburger against nav. Call sites go through this wrapper so
+   * none of them can get that order wrong - two separate regressions in
+   * this toolbar came from exactly that. */
+  function peLayoutPortraitRow1Cluster() {
+    peLayoutTailAlignRotateGroupPortrait();
+    peLayoutNavBeforeTailPortrait();
+    peLayoutMenuTogglePortraitCluster();
   }
 
   function peLayoutPageNavButtons() {
@@ -52491,7 +53306,8 @@ function peObjMouseDown(e, o) {
         }
       }
       peLayoutToolbarEdgeAlign();
-      peLayoutMenuToggleOverDelete();
+      peLayoutTailCenterLandscape();
+      peLayoutPortraitRow1Cluster();
       return;
     }
 
@@ -52568,13 +53384,18 @@ function peObjMouseDown(e, o) {
           lead.style.marginLeft = Math.max(0, leadDesiredLeft - leadNaturalLeft) + 'px';
         }
       }
-      peLayoutMenuToggleOverDelete();
       peLayoutToolbarEdgeAlign();
+      peLayoutTailCenterLandscape();
+      peLayoutPortraitRow1Cluster();
       return;
     }
     if (lead) lead.style.marginLeft = '';
     peLayoutToolbarEdgeAlign();
-    peLayoutMenuToggleOverDelete();
+    peLayoutTailCenterLandscape();
+    // peLayoutPortraitRow1Cluster() runs at the END of this function
+    // instead of here - the legacy title/Object-select nav placement below
+    // still has to run in every case (it also drives lead's own
+    // marginLeft), and would otherwise clobber the cluster's nav position.
 
     const objRect = objBtn.getBoundingClientRect();
     const available = objRect.left - titleRect.right;
@@ -52592,6 +53413,12 @@ function peObjMouseDown(e, o) {
     } else {
       nav.style.left = minLeft + 'px';
     }
+    // The above targets desktop's title/Object-select layout and has no
+    // idea the portrait cluster (tail/nav/hamburger) even exists - it
+    // happened to run after the portrait override further up and clobber it
+    // every time this branch (stage 1/2, not tools-wrap) fired. Give the
+    // cluster the final word here for coarse+portrait.
+    peLayoutPortraitRow1Cluster();
   }
 
   /** Intrinsic width of a nowrap flex row (ignores stretched width:100% in stage 2/3). */
@@ -52605,7 +53432,11 @@ function peObjMouseDown(e, o) {
       if (cs.position === 'fixed' || cs.position === 'absolute') continue;
       const cw = child.offsetWidth || child.scrollWidth;
       if (cw <= 0) continue;
-      total += cw;
+      // Horizontal margins count toward the row's real width too -
+      // .pe-tools-divider carries `margin: 0 2px`, so leaving them out
+      // under-measured every row holding one by 4px, and the fit math
+      // downstream sized row 2's squares just past its own padding.
+      total += cw + (parseFloat(cs.marginLeft) || 0) + (parseFloat(cs.marginRight) || 0);
       visible++;
     }
     return total + gap * Math.max(0, visible - 1);
@@ -52639,7 +53470,17 @@ function peObjMouseDown(e, o) {
     const styles = getComputedStyle(bar);
     const pad = (parseFloat(styles.paddingLeft) || 0) + (parseFloat(styles.paddingRight) || 0);
     const barGap = parseFloat(styles.columnGap) || parseFloat(styles.gap) || 8;
-    const avail = bar.clientWidth - pad;
+    // Landscape-only: touch phones have a fixed hamburger menu button
+    // anchored top-right that the flex layout below never reserves room for
+    // on its own, so the last tool button could sit right underneath it.
+    // Reserving its width up front here (rather than only within the
+    // pe-tb-navrow branch below) means the plain single-row layout also
+    // respects it, instead of only the navrow escape hatch doing so.
+    const coarse = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+    const landscape = typeof window.matchMedia === 'function' && window.matchMedia('(orientation: landscape)').matches;
+    const portrait = typeof window.matchMedia === 'function' && window.matchMedia('(orientation: portrait)').matches;
+    const hamburgerReserve = (coarse && landscape) ? 40 : 0;
+    const avail = bar.clientWidth - pad - hamburgerReserve;
     if (avail <= 0) return;
 
     const minSide = 10;
@@ -52647,7 +53488,12 @@ function peObjMouseDown(e, o) {
     const toolsGap = 6;
     const tailInnerGap = 16;
     const hyst = barGap + 12;
-    const titleW = title.scrollWidth;
+    // getBoundingClientRect(), not scrollWidth - the mobile-only CSS that
+    // collapses the title to width:0 (see the coarse-pointer editor rules)
+    // doesn't shrink its intrinsic content width, so scrollWidth would keep
+    // reporting the un-collapsed "Page N" width and overstate how much
+    // space the (now invisible) title actually still occupies.
+    const titleW = title.getBoundingClientRect().width;
     const navW = (prev?.offsetWidth || 32) + (next?.offsetWidth || 32) + navInner;
     const leadW = peFlexContentWidth(lead, toolsGap);
     const mainW = peFlexContentWidth(main, toolsGap);
@@ -52655,46 +53501,48 @@ function peObjMouseDown(e, o) {
     // Intrinsic tail width (not the stretched 100% row width in stage 2/3).
     const tailW = peFlexContentWidth(tail, tailInnerGap) || tail.scrollWidth;
 
-    // Landscape-only alternate to stage 2/3 (see .pe-tb-navrow CSS): touch
-    // phones have a fixed hamburger menu button anchored top-right that this
-    // width budget otherwise never reserves for at all, so Delete could
-    // collide with it right at the stage-1/2 boundary without ever
-    // escalating to a full tools-wrap. Freeing the nav's own row-1
-    // reservation entirely (it moves to its own row under the title instead
-    // - see peLayoutPageNavButtons) buys back exactly that width, dodging
-    // the collision without adding stage 3's extra row.
-    const coarse = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
-    const landscape = typeof window.matchMedia === 'function' && window.matchMedia('(orientation: landscape)').matches;
+    // Landscape-only alternate to stage 2/3 (see .pe-tb-navrow CSS): parks
+    // nav on its own row directly under the title so the main row doesn't
+    // need to reserve room for it beside the title. With the mobile-only
+    // simplified toolbar (title/Object-select/Hand/Scale all collapsed or
+    // hidden - see the coarse-pointer editor CSS) everything now usually
+    // fits as one plain row even with the hamburger's width reserved above,
+    // so this is skipped whenever a plain single row (nav included, inline)
+    // already fits - nav would otherwise sit on a separate band, visibly
+    // offset from the rest of the toolbar for no reason.
     if (coarse && landscape) {
-      const hamburgerReserve = 40;
-      const navRowAvail = avail - hamburgerReserve;
       const wasNavRow = bar.classList.contains('pe-tb-navrow');
-      // Tools actually start after whichever is wider, the title or the nav
-      // pair parked under it (peLayoutPageNavButtons pads .pe-tb-mid by that
-      // same difference when nav is the wider one) - using titleW alone here
-      // let the tools row claim width nav's own footprint still needed,
-      // pushing Delete past navRowAvail without this ever registering as a
-      // wrap trigger.
-      const toolsRowW = Math.max(titleW, navW) + barGap + toolsW;
-      const fitsToolsOnly = toolsRowW <= navRowAvail - 0.5
-        || (wasNavRow && toolsRowW <= navRowAvail + hyst - 0.5);
-      if (fitsToolsOnly) {
-        bar.classList.add('pe-tb-navrow');
-        bar.classList.remove('pe-tb-tools-wrap');
-        mid.style.paddingLeft = '';
-        const fullRowW = toolsRowW + barGap + tailW;
-        const wasTailWrapAlready = bar.classList.contains('pe-tb-tail-wrap');
-        const fitsTailToo = fullRowW <= navRowAvail - 0.5
-          || (wasTailWrapAlready && fullRowW <= navRowAvail + hyst - 0.5);
-        if (fitsTailToo) {
-          bar.classList.remove('pe-tb-tail-wrap');
-          tail.classList.remove('wrapped');
-        } else {
-          bar.classList.add('pe-tb-tail-wrap');
-          tail.classList.add('wrapped');
+      const simpleRowW = navW + barGap + toolsW + barGap + tailW;
+      const simpleRowFits = simpleRowW <= avail - 0.5
+        || (wasNavRow && simpleRowW <= avail + hyst - 0.5);
+      if (!simpleRowFits) {
+        // Tools actually start after whichever is wider, the title or the
+        // nav pair parked under it (peLayoutPageNavButtons pads .pe-tb-mid
+        // by that same difference when nav is the wider one) - using
+        // titleW alone here let the tools row claim width nav's own
+        // footprint still needed, pushing Delete past avail without this
+        // ever registering as a wrap trigger.
+        const toolsRowW = Math.max(titleW, navW) + barGap + toolsW;
+        const fitsToolsOnly = toolsRowW <= avail - 0.5
+          || (wasNavRow && toolsRowW <= avail + hyst - 0.5);
+        if (fitsToolsOnly) {
+          bar.classList.add('pe-tb-navrow');
+          bar.classList.remove('pe-tb-tools-wrap');
+          mid.style.paddingLeft = '';
+          const fullRowW = toolsRowW + barGap + tailW;
+          const wasTailWrapAlready = bar.classList.contains('pe-tb-tail-wrap');
+          const fitsTailToo = fullRowW <= avail - 0.5
+            || (wasTailWrapAlready && fullRowW <= avail + hyst - 0.5);
+          if (fitsTailToo) {
+            bar.classList.remove('pe-tb-tail-wrap');
+            tail.classList.remove('wrapped');
+          } else {
+            bar.classList.add('pe-tb-tail-wrap');
+            tail.classList.add('wrapped');
+          }
+          requestAnimationFrame(() => peLayoutPageNavButtons());
+          return;
         }
-        requestAnimationFrame(() => peLayoutPageNavButtons());
-        return;
       }
     }
     bar.classList.remove('pe-tb-navrow');
@@ -52721,10 +53569,32 @@ function peObjMouseDown(e, o) {
     // Stage 2 uses flex-start, so this padding maps 1:1 to the tools offset.
     const navLeftPad = Math.max(0, navReserveDeficit + 1);
 
+    // Coarse portrait pins BOTH the tail and the hamburger absolutely over
+    // row 1 (see their portrait CSS) rather than keeping the tail inline
+    // and letting it wrap, so neither one's width is ever available to the
+    // tools - both stages below have to subtract them by hand. offsetWidth
+    // for the tail, not tailW: the latter is rebuilt from the tail's
+    // CHILDREN and misses its own padding, which in portrait holds the
+    // divider (9px).
+    const hamburgerW = document.getElementById('peMenuToggleBtn')?.offsetWidth || 36;
+    const tailOverlayW = tail.offsetWidth || tailW;
+
     let nextPad = '';
     if (needTailWrap) {
       const midNoTail = avail - titleW - barGap;
-      const midUsable = midNoTail - navLeftPad;
+      // See tailOverlayW above: the tail never actually wraps to a row of
+      // its own here the way this stage's name implies, so laying the tools
+      // out as if it had put Rotate/Delete underneath Cancel/Save. Scoped
+      // to this tools-wrap decision only, never to `avail` or needTailWrap
+      // above - reserving there is what scrambled stage selection in an
+      // earlier round. All it can do from here is send portrait to its own
+      // tools row, which is precisely what not fitting means.
+      // Doubled because #peToolsMain is justify-content:center: taking D
+      // off its width only walks its RIGHT edge - the one that runs into
+      // the tail - in by D/2, the other half going to the left margin.
+      const portraitOverlayW = (coarse && portrait)
+        ? 2 * (tailOverlayW + hamburgerW + 2 * barGap) : 0;
+      const midUsable = midNoTail - navLeftPad - portraitOverlayW;
       const needToolsWrap = midUsable < toolsW - 0.5
         || (wasToolsWrap && midUsable < toolsW + hyst - 0.5);
       if (needToolsWrap) {
@@ -52741,12 +53611,47 @@ function peObjMouseDown(e, o) {
         // #peToolsMain's own squares would throw that alignment off again.
         const sqEls = Array.from(main.querySelectorAll('.pe-btn-square'))
           .filter(el => getComputedStyle(el).display !== 'none');
-        const overflowPx = mainW - avail;
+        // Landscape's Cancel/Save are still plain --pe-tool-sq squares, but
+        // peLayoutTailCenterLandscape() repositions them from a live
+        // measurement on every layout pass, so growing/shrinking this
+        // variable can't strand them - no need to fold their width into
+        // this row's own overflow the way portrait briefly did (portrait's
+        // Cancel/Save now fill whatever peLayoutTailAlignRotateGroupPortrait
+        // gives them instead, entirely decoupled from this variable's size).
+        // Portrait used to additionally reserve room here for the
+        // hamburger's old top-right corner spot, so row 1's Cancel/Save
+        // could mirror Delete's right edge without running into it. The
+        // hamburger now sits at the far LEFT of row 1's cluster instead
+        // (see peLayoutMenuTogglePortraitCluster), in space row 1 has to
+        // spare, so row 2 no longer owes it anything and gets the full
+        // width back - worth ~6px per square on a 360px phone, which is
+        // the difference between hitting the 26px floor and not.
+        const defaultSq = 36;
+        // mainW was measured at whatever --pe-tool-sq is applied right now,
+        // but the shrink/grow below is expressed as an offset from
+        // defaultSq - so normalize the measurement to that same baseline
+        // first. Without this the two disagree whenever a previous pass
+        // already resized the squares, and the result only converges by
+        // re-running on the next layout pass, landing a pixel or two off
+        // (row 2 overflowing its own padding at some widths).
+        const curSq = parseFloat(getComputedStyle(bar).getPropertyValue('--pe-tool-sq')) || defaultSq;
+        const overflowPx = mainW + sqEls.length * (defaultSq - curSq) - avail;
         if (sqEls.length && overflowPx > 0.5) {
-          const defaultSq = 36;
           const minSq = 26;
           const shrinkPer = Math.ceil(overflowPx / sqEls.length);
           bar.style.setProperty('--pe-tool-sq', Math.max(minSq, defaultSq - shrinkPer) + 'px');
+        } else if (sqEls.length && overflowPx < -0.5) {
+          // Leftover room: #peToolsMain's own justify-content:center (see
+          // its CSS) just centers the still-36px squares as a group inside
+          // the full-width row instead of using the extra space, leaving
+          // equal dead margins on both sides on a wide-enough phone. Grow
+          // every square (mirroring the shrink above) to fill it, capped
+          // well short of comical so a tablet-width portrait view doesn't
+          // balloon them.
+          const maxSq = 48;
+          const growPer = Math.floor(-overflowPx / sqEls.length);
+          const grown = Math.min(maxSq, defaultSq + growPer);
+          if (grown > defaultSq) bar.style.setProperty('--pe-tool-sq', grown + 'px');
         }
       } else {
         bar.classList.add('pe-tb-tail-wrap');
@@ -52767,7 +53672,12 @@ function peObjMouseDown(e, o) {
       const midStart = titleW + barGap;
       const desiredPad = avail / 2 - toolsW / 2 - midStart;
       const minPad = navReserveDeficit;
-      const maxPad = avail - tailW - tailInnerGap - toolsW - midStart;
+      // Portrait's tail isn't inline in this row (see tailOverlayW above) -
+      // it hangs at a fixed offset off the right edge, past the hamburger -
+      // so the tools' right limit is that whole overlay, not tailW.
+      const rightBlockW = (coarse && portrait)
+        ? tailOverlayW + hamburgerW + barGap : tailW;
+      const maxPad = avail - rightBlockW - tailInnerGap - toolsW - midStart;
       const clampedPad = maxPad >= minPad
         ? Math.min(maxPad, Math.max(minPad, desiredPad))
         : minPad; // edge sliver right before stage 2: nav clearance wins
