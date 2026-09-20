@@ -20208,6 +20208,35 @@
       }, PM_MENU_AUTOHIDE_REARM_MS);
     }
 
+    /** Using any control in the open top menu means the user is working up
+     * here, so the suspension starts over - otherwise the delay could run out
+     * mid-task and the next flick of the scroll would fold the menu away.
+     * The two menu-toggle buttons are left to toggleTopMenu(), which must not
+     * re-arm a menu the user has just chosen to hide. */
+    function pmNoteTopMenuInteraction(e) {
+      if (!isTouchDevice) return;
+      const menu = document.getElementById('topMenu');
+      if (!menu || menu.classList.contains('collapsed')) return;
+      const el = (e.target instanceof Element)
+        ? e.target.closest('button, a, input, select, textarea, label, [role="button"]')
+        : null;
+      if (!el || !menu.contains(el)) return;
+      if (el.id === 'menuToggleBtn' || el.id === 'desktopMenuToggleBtn') return;
+      pmSuspendMenuAutoHide();
+    }
+
+    {
+      const pmTopMenuEl = document.getElementById('topMenu');
+      if (pmTopMenuEl) {
+        // Capture phase: a handler that stops propagation must not be able to
+        // hide the tap from us. `input`/`change` too, because a slider drag or
+        // a select may never produce a click of its own.
+        pmTopMenuEl.addEventListener('click', pmNoteTopMenuInteraction, true);
+        pmTopMenuEl.addEventListener('input', pmNoteTopMenuInteraction, true);
+        pmTopMenuEl.addEventListener('change', pmNoteTopMenuInteraction, true);
+      }
+    }
+
     function pmMaybeAutoHideTopMenu() {
       if (!isTouchDevice || !scrollContainer) return;
       const top = scrollContainer.scrollTop;
