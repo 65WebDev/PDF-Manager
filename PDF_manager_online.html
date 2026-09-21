@@ -8469,6 +8469,7 @@
         aboutNetworkCdn: 'Библиотеки подгружаются из CDN при первом запуске. Офлайн-версия содержит их прямо в файле, без обращений к сети.',
         aboutAiAuthorship: 'Значительная часть кода написана с использованием искусственного интеллекта по техническому заданию и под контролем разработчика.',
         aboutDeveloper: 'Разработчик: <b>Евгений Кутьин</b>.',
+        aboutRepository: 'Исходный код:',
         aboutClose: 'Закрыть', aboutShaComputing: 'SHA-256: считаю…',
         aboutShaUnavailable: 'SHA-256: недоступно в этом контексте',
         aboutUpdateFail: 'Не удалось проверить обновления (нет доступа к списку версий).',
@@ -8862,6 +8863,7 @@
         aboutNetworkCdn: 'Libraries load from CDN on first launch. The offline version embeds them in the file with no network access.',
         aboutAiAuthorship: 'A significant portion of the code was written using artificial intelligence based on a technical specification and under developer supervision.',
         aboutDeveloper: 'Developer: <b>Evgeniy Kutin</b>.',
+        aboutRepository: 'Source code:',
         aboutClose: 'Close', aboutShaComputing: 'SHA-256: computing…',
         aboutShaUnavailable: 'SHA-256: unavailable in this context',
         aboutUpdateFail: 'Could not check for updates (no access to version list).',
@@ -9255,6 +9257,7 @@
         aboutNetworkCdn: 'Las bibliotecas se cargan desde CDN en el primer inicio. La versión sin conexión las incluye en el archivo, sin acceso a la red.',
         aboutAiAuthorship: 'Una parte significativa del código fue escrita con inteligencia artificial siguiendo una especificación técnica y bajo la supervisión del desarrollador.',
         aboutDeveloper: 'Desarrollador: <b>Evgeniy Kutin</b>.',
+        aboutRepository: 'Código fuente:',
         aboutClose: 'Cerrar', aboutShaComputing: 'SHA-256: calculando…',
         aboutShaUnavailable: 'SHA-256: no disponible en este contexto',
         aboutUpdateFail: 'No se pudo comprobar si hay actualizaciones (sin acceso a la lista de versiones).',
@@ -9678,6 +9681,7 @@
         aboutNetworkCdn: '首次启动时库从 CDN 加载。离线版本已将其内嵌于文件中，无需联网。',
         aboutAiAuthorship: '相当一部分代码是根据技术规格、在开发者监督下使用人工智能编写的。',
         aboutDeveloper: '开发者：<b>Evgeniy Kutin</b>。',
+        aboutRepository: '源代码：',
         aboutClose: '关闭',
         aboutShaComputing: 'SHA-256：计算中…',
         aboutShaUnavailable: 'SHA-256：在当前环境下不可用',
@@ -27033,6 +27037,13 @@
     // Set only in the Tauri UI copy (scripts/prepare-tauri-ui.mjs).
     const PDF_MANAGER_WINDOWS_VERSION = '';
 
+    // Repository shown in the "About" box. Its own constant so the
+    // Russian-only offline build can drop the line with a single exact-match
+    // edit, whatever the modal's markup looks like by then - an empty string
+    // leaves the line out (see scripts/build-offline-ru.mjs).
+    const PDF_MANAGER_REPO_URL = 'https://github.com/65WebDev/PDF-Manager';
+    const PDF_MANAGER_REPO_LABEL = 'github.com/65WebDev/PDF-Manager';
+
     // Stable URLs for the About update check. Prefer the public GitHub Pages
     // mirror — private release assets return 404 in the browser without auth,
     // and GitHub session cookies are not sent for <script> from file://.
@@ -27306,6 +27317,11 @@
         .map(([name, ver]) => `${escapeHtml(name)} ${escapeHtml(ver)}`)
         .join(' &nbsp;·&nbsp; ');
       const aboutKind = isDesktop ? t('aboutDesktop') : t('aboutWeb');
+      const repoLineHtml = PDF_MANAGER_REPO_URL
+        ? `<p style="margin:6px 0 0; font-size:12px; color:#555;">${escapeHtml(t('aboutRepository'))}
+             <a href="${escapeHtml(PDF_MANAGER_REPO_URL)}" target="_blank" rel="noopener noreferrer"
+                style="color:#2f7bd6;">${escapeHtml(PDF_MANAGER_REPO_LABEL)}</a></p>`
+        : '';
       const updateLineHtml = isOfflineHtml
         ? ''
         : `<p id="aboutUpdateLine" style="display:none; margin:0 0 8px; padding:8px 10px; border-radius:8px;
@@ -27324,6 +27340,7 @@
           <p style="margin:0 0 6px;">${networkLine}</p>
           <p style="margin:0 0 6px;">${t('aboutAiAuthorship')}</p>
           <p style="margin:0;">${t('aboutDeveloper')}</p>
+          ${repoLineHtml}
           <p id="aboutHashLine" style="margin:4px 0 0; color:#999; font-size:10.5px; word-break:break-all;">${escapeHtml(t('aboutShaComputing'))}</p>
         </div>
         <div style="display:flex; justify-content:center; margin-top:14px;">

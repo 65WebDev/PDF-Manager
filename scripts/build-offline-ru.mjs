@@ -309,6 +309,20 @@ function forceRuntimeLocaleRu(html) {
   return replaceOnce(html, search, replace, 'pmDetectLocale');
 }
 
+/**
+ * Drops the repository link from the "About" box. Every other build of the
+ * editor carries it; this one deliberately does not, so the constant that
+ * feeds the line is blanked rather than the markup being hunted for.
+ */
+function removeRepoLink(html) {
+  return replaceOnce(
+    html,
+    "    const PDF_MANAGER_REPO_URL = 'https://github.com/65WebDev/PDF-Manager';",
+    "    const PDF_MANAGER_REPO_URL = '';",
+    'About repository link'
+  );
+}
+
 async function main() {
   console.log('Reading', inputPath);
   let html = readFileSync(inputPath, 'utf8');
@@ -321,6 +335,7 @@ async function main() {
   html = reflowMobileLandscapePopupSlots(html);
   html = forcePreBootLocaleRu(html);
   html = forceRuntimeLocaleRu(html);
+  html = removeRepoLink(html);
 
   writeFileSync(outputPath, html, 'utf8');
   const sizeMb = (Buffer.byteLength(html, 'utf8') / (1024 * 1024)).toFixed(2);
