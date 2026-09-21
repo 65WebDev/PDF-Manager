@@ -24307,6 +24307,23 @@
         const mr = menuEl.getBoundingClientRect();
         if (clientY >= mr.top && clientY <= mr.bottom && clientX >= mr.left && clientX <= mr.right) return true;
       }
+      // The menu-toggle button is position:fixed and goes on floating over
+      // the pages after the menu has folded away - and .top-menu's own box is
+      // zero-height by then, so the test above cannot see it. Without this the
+      // button sits inside the band just above page 1 that means "insert
+      // before the first page", and pointing at it drew the blue bar across
+      // the top of that page.
+      for (const id of ['menuToggleBtn', 'desktopMenuToggleBtn']) {
+        const btn = document.getElementById(id);
+        if (!btn) continue;
+        const cs = getComputedStyle(btn);
+        if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') continue;
+        const r = btn.getBoundingClientRect();
+        if (!r.width || !r.height) continue;
+        const pad = 6;
+        if (clientX >= r.left - pad && clientX <= r.right + pad
+            && clientY >= r.top - pad && clientY <= r.bottom + pad) return true;
+      }
       const stickyBar = document.getElementById('stickyFileBar');
       if (stickyBar && stickyBar.classList.contains('visible')) {
         const sr = stickyBar.getBoundingClientRect();
@@ -24631,9 +24648,27 @@
         && clientY >= r.top - pad && clientY <= r.bottom + pad;
     }
 
+    // A touch has no hover. What a tap leaves behind is a compatibility mouse
+    // event at wherever the finger was - and if that was the floating
+    // hamburger, or anywhere else in the band just above page 1, it pops the
+    // insertion indicator up there. The touch path has its own, deliberate
+    // entry point (computeInsertAt), so hover is for real pointing devices
+    // only. A touchscreen laptop still gets it: the test is per event, not
+    // per device.
+    let pmLastTouchAt = 0;
+    const PM_TOUCH_MOUSE_COMPAT_MS = 800;
+    document.addEventListener('touchstart', () => { pmLastTouchAt = Date.now(); },
+      { capture: true, passive: true });
+    function pmIsTouchCompatMouseEvent(e) {
+      if (e && e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) return true;
+      // Safari has no sourceCapabilities: fall back to "a finger was just here".
+      return (Date.now() - pmLastTouchAt) < PM_TOUCH_MOUSE_COMPAT_MS;
+    }
+
     // Global mousemove for insertion indicator (selection mode)
     document.addEventListener('mousemove', (e) => {
       if (insertMenuOpen) return; // while the menu is open, we do not recalculate
+      if (pmIsTouchCompatMouseEvent(e)) return;
       if (isPointOverLogoMenu(e.clientX, e.clientY)) {
         clearHoverInsert();
         return;
