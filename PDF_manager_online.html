@@ -36278,6 +36278,33 @@ let peTextClickSeq = { id: null, t: 0 };
 let peInlineEditStartedAt = 0;
 let peZoomFullRenderTimer = null;
 let peZoomRenderGen = 0;
+// The editor's stage canvas covers the WHOLE page at the current zoom, so
+// its pixel count grows with the square of the zoom: an A4 page at 200% on a
+// device-pixel-ratio-3 phone comes to ~40 MP - 160 MB of bitmap - and pdf.js
+// draws it on the main thread. Measured on a page built out of transparency
+// groups and shadings, that one render took 28 seconds. The raster is capped
+// instead, by a hard pixel ceiling and by what this page is measured to cost
+// (hqRasterCostPerMp, shared with the grid): the canvas keeps its CSS size,
+// so the only thing that gives way is sharpness.
+const PE_STAGE_RASTER_MAX_MP = 8;
+const PE_STAGE_BUDGET_MS = 900;
+// Once the zooming has stopped, one more pass with room to spend takes the
+// stage as sharp as it can afford. It is abortable like the first, but it
+// still blocks while it runs, so it is not open-ended either.
+const PE_STAGE_BUDGET_IDLE_MS = 1800;
+const PE_STAGE_SHARPEN_DELAY_MS = 700;
+let peStageRenderTask = null;
+let peStageSharpenTimer = null;
+// Set when a sharpening pass was dropped because a finger landed on the
+// stage, so it can be picked up again once the hand is off.
+let peStageSharpenDeferred = false;
+/** Abort the stage raster being drawn right now, if any. */
+function peCancelStageRender() {
+  if (!peStageRenderTask) return;
+  const task = peStageRenderTask;
+  peStageRenderTask = null;
+  try { task.cancel(); } catch (_) { /* already finished */ }
+}
 let peSliderDragging = false;
 let peSliderLockedAnchor = null;
 let peSizeDragHistoryActive = false;
@@ -36525,11 +36552,30 @@ function peSyncScaleSliderUi(syncSlider = true) {
 function peCancelZoomRender() {
   clearTimeout(peZoomFullRenderTimer);
   peZoomFullRenderTimer = null;
+  clearTimeout(peStageSharpenTimer);
+  peStageSharpenTimer = null;
+  peStageSharpenDeferred = false;
+  peCancelStageRender();
   peZoomRenderGen++;
+}
+
+/** Queue the sharpening pass that a touch interrupted, or a zoom asked for. */
+function peQueueStageSharpen(delay) {
+  clearTimeout(peStageSharpenTimer);
+  peStageSharpenTimer = setTimeout(() => {
+    peStageSharpenTimer = null;
+    if (peState) peRenderStagePdf({ budgetMs: PE_STAGE_BUDGET_IDLE_MS });
+  }, delay);
 }
 
 function peScheduleFullRender(delay = 140) {
   clearTimeout(peZoomFullRenderTimer);
+  // The zoom moved: a raster still being drawn for the old one, and any
+  // sharpening pass queued for it, are both work nobody is waiting for.
+  clearTimeout(peStageSharpenTimer);
+  peStageSharpenTimer = null;
+  peStageSharpenDeferred = false;
+  peCancelStageRender();
   peZoomFullRenderTimer = setTimeout(() => {
     peZoomFullRenderTimer = null;
     if (peState) peRenderStagePdf();
@@ -36638,39 +36684,102 @@ function peApplyLiveZoomMul(zoomMul, anchorX, anchorY) {
   peSyncScaleSliderUi(true);
 }
 
-async function peRenderStagePdf() {
-  const prepared = await pePrepareStagePdfBitmap();
+async function peRenderStagePdf(opts) {
+  const prepared = await pePrepareStagePdfBitmap(opts);
   if (!prepared) return;
   peCommitStagePdfBitmap(prepared);
   await peFinalizeStagePdfCommit(prepared.gen);
+  peScheduleStageSharpen(prepared);
+}
+
+/**
+ * A raster that had to come out below the stage's own resolution gets one
+ * more go, once the zooming has stopped, with the larger budget. Only one -
+ * whatever that pass affords is what the page keeps until the zoom moves.
+ */
+function peScheduleStageSharpen(prepared) {
+  clearTimeout(peStageSharpenTimer);
+  peStageSharpenTimer = null;
+  peStageSharpenDeferred = false;
+  if (!prepared || !prepared.cappedBelowStage) return;
+  if (prepared.budgetMs >= PE_STAGE_BUDGET_IDLE_MS) return;
+  // Only when the extra time would actually buy pixels. On a fast device the
+  // raster stops at PE_STAGE_RASTER_MAX_MP, not at the budget, and a second
+  // pass would redraw exactly the same thing.
+  const costPerMp = (typeof hqRasterCostPerMp !== 'undefined' && peState)
+    ? hqRasterCostPerMp.get(peState.idx) : null;
+  const idleAllowedMp = Math.min(PE_STAGE_RASTER_MAX_MP,
+    costPerMp > 0 ? (PE_STAGE_BUDGET_IDLE_MS / costPerMp) : Infinity);
+  if (!(idleAllowedMp > prepared.rasterMp * 1.3)) return;
+  peQueueStageSharpen(PE_STAGE_SHARPEN_DELAY_MS);
 }
 
 /**
  * Render the current peState page into an offscreen bitmap without touching
  * the visible #peStage/#peCanvas. Used for seamless rotate swaps.
  */
-async function pePrepareStagePdfBitmap() {
+async function pePrepareStagePdfBitmap(opts) {
   const st = peState;
   if (!st) return null;
+  // Whatever is being drawn now is for a zoom level nobody is looking at any
+  // more - stop it rather than letting it finish and be thrown away.
+  peCancelStageRender();
   peUpdateStageMetrics();
   const gen = ++peZoomRenderGen;
   const finalR = peFinalRotation();
   const dpr = window.devicePixelRatio || 1;
   const cssW = Math.round(st.viewport.width);
   const cssH = Math.round(st.viewport.height);
-  const bw = Math.round(cssW * dpr);
-  const bh = Math.round(cssH * dpr);
-  const renderVp = st.page.getViewport({ scale: st.scale * dpr, rotation: finalR });
+  const budgetMs = (opts && opts.budgetMs > 0) ? opts.budgetMs : PE_STAGE_BUDGET_MS;
+  const stageBw = Math.round(cssW * dpr);
+  const stageBh = Math.round(cssH * dpr);
+  let bw = stageBw;
+  let bh = stageBh;
+  // See PE_STAGE_RASTER_MAX_MP: a page-sized canvas at a high zoom is both
+  // enormous and, on a page pdf.js finds expensive, slow enough to lock the
+  // editor up. Ask for as many pixels as the ceiling and this page's
+  // measured cost allow, and let the canvas upscale the rest.
+  const wantedMp = (stageBw * stageBh) / 1e6;
+  const costPerMp = (typeof hqRasterCostPerMp !== 'undefined')
+    ? hqRasterCostPerMp.get(st.idx) : null;
+  const allowedMp = Math.min(PE_STAGE_RASTER_MAX_MP,
+    costPerMp > 0 ? (budgetMs / costPerMp) : Infinity);
+  if (wantedMp > allowedMp) {
+    const shrink = Math.sqrt(allowedMp / wantedMp);
+    bw = Math.max(1, Math.round(stageBw * shrink));
+    bh = Math.max(1, Math.round(stageBh * shrink));
+  }
+  const renderVp = st.page.getViewport({ scale: st.scale * (bw / cssW), rotation: finalR });
   const off = document.createElement('canvas');
   off.width = bw;
   off.height = bh;
-  await st.page.render({
+  const rasterStartedAt = performance.now();
+  const task = st.page.render({
     canvasContext: off.getContext('2d'),
     viewport: renderVp,
     annotationMode: 0
-  }).promise;
+  });
+  peStageRenderTask = task;
+  try {
+    await task.promise;
+  } catch (err) {
+    // Superseded by a newer zoom, or the editor closed. The stage keeps the
+    // bitmap it has; the render that replaced this one will commit.
+    if (err && err.name === 'RenderingCancelledException') return null;
+    throw err;
+  } finally {
+    if (peStageRenderTask === task) peStageRenderTask = null;
+  }
   if (!peState || gen !== peZoomRenderGen) return null;
-  return { gen, off, cssW, cssH, bw, bh };
+  // Same page, same content as the grid's copy - one shared measurement.
+  if (typeof hqNoteRasterCost === 'function') {
+    hqNoteRasterCost(st.idx, performance.now() - rasterStartedAt, bw, bh);
+  }
+  return {
+    gen, off, cssW, cssH, bw, bh, budgetMs,
+    rasterMp: (bw * bh) / 1e6,
+    cappedBelowStage: bw < stageBw * 0.97,
+  };
 }
 
 /**
@@ -52850,6 +52959,31 @@ function peObjMouseDown(e, o) {
   // pointerdown so touch closes menus (mousedown alone is too late / missing).
   if (window.PointerEvent) document.addEventListener('pointerdown', peCloseFloatingMenusOnOutside, true);
   else document.addEventListener('mousedown', peCloseFloatingMenusOnOutside, true);
+
+  // A finger on the editor stage must not have to wait out a raster that is
+  // still being drawn (see PE_STAGE_RASTER_MAX_MP): drop it, and pick the
+  // sharpening up again once the hand is off.
+  document.addEventListener('pointerdown', (e) => {
+    if (!peState) return;
+    const wrap = document.getElementById('peStageWrap');
+    if (!wrap || !(e.target instanceof Node) || !wrap.contains(e.target)) return;
+    if (peStageSharpenTimer) {
+      clearTimeout(peStageSharpenTimer);
+      peStageSharpenTimer = null;
+      peStageSharpenDeferred = true;
+    }
+    if (peStageRenderTask) {
+      peCancelStageRender();
+      peStageSharpenDeferred = true;
+    }
+  }, true);
+  const peResumeStageSharpen = () => {
+    if (!peStageSharpenDeferred || !peState) return;
+    peStageSharpenDeferred = false;
+    peQueueStageSharpen(PE_STAGE_SHARPEN_DELAY_MS);
+  };
+  document.addEventListener('pointerup', peResumeStageSharpen, true);
+  document.addEventListener('pointercancel', peResumeStageSharpen, true);
 
   // Stash selection on pointerdown: toolbar mousedown used to dismiss redact
   // before click, so trash appeared to do nothing on mobile.
