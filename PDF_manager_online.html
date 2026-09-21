@@ -32143,6 +32143,51 @@
 // (the state of pmTabs, tabBarEl, etc. is declared at the beginning of the script)
 // ============================================================
 
+// How a document is being LOOKED at, beyond its plain zoom percentage: the
+// fit-width ladder (button / double-click, its anchor page, the content-width
+// and max-zoom rungs) and the two zoom magnets. All of it lives in globals
+// that describe the document on screen, so a tab has to carry its own copy -
+// otherwise zooming one document to its maximum leaves fit-width switched on,
+// and the next tab shown gets fit-width re-applied to it, losing the scale
+// and position it was left at.
+function pmDefaultZoomView() {
+  return {
+    fitWidthOn: false, fitWidthSavedScale: null, fitWidthAnchorIdx: null,
+    maxZoomActive: false, contentZoomActive: false, maxZoomRestoreScale: null,
+    pointer: { x: null, y: null },
+    verticalMagnet: false, landscapeMagnet: false,
+  };
+}
+
+function pmReadZoomView() {
+  return {
+    fitWidthOn: fitWidthToggleOn,
+    fitWidthSavedScale: fitWidthSavedScale,
+    fitWidthAnchorIdx: fitWidthAnchorIdx,
+    maxZoomActive: fitWidthMaxZoomActive,
+    contentZoomActive: fitWidthContentZoomActive,
+    maxZoomRestoreScale: fitWidthMaxZoomRestoreScale,
+    pointer: { x: fitWidthPointer ? fitWidthPointer.x : null,
+               y: fitWidthPointer ? fitWidthPointer.y : null },
+    verticalMagnet: pmVerticalMagnetActive,
+    landscapeMagnet: pmLandscapeMagnetActive,
+  };
+}
+
+function pmWriteZoomView(view) {
+  const z = view || pmDefaultZoomView();
+  fitWidthToggleOn = !!z.fitWidthOn;
+  fitWidthSavedScale = (z.fitWidthSavedScale != null) ? z.fitWidthSavedScale : null;
+  fitWidthAnchorIdx = (z.fitWidthAnchorIdx != null) ? z.fitWidthAnchorIdx : null;
+  fitWidthMaxZoomActive = !!z.maxZoomActive;
+  fitWidthContentZoomActive = !!z.contentZoomActive;
+  fitWidthMaxZoomRestoreScale = (z.maxZoomRestoreScale != null) ? z.maxZoomRestoreScale : null;
+  fitWidthPointer = { x: z.pointer ? z.pointer.x : null, y: z.pointer ? z.pointer.y : null };
+  pmVerticalMagnetActive = !!z.verticalMagnet;
+  pmLandscapeMagnetActive = !!z.landscapeMagnet;
+  if (typeof updateFitWidthBtnUI === 'function') updateFitWidthBtnUI();
+}
+
 function pmNewSession() {
   return {
     id: ++pmSeq,
@@ -32150,7 +32195,7 @@ function pmNewSession() {
     dirty: false, docHistory: [], docHistoryIndex: -1,
     scale: 100, autoScale: true, scaleLocked: false, mobileMin: 70,
     mode: 'select', multiSel: false, deletedHidden: true, scrollTop: 0,
-    selected: [], lastSel: null
+    selected: [], lastSel: null, zoomView: pmDefaultZoomView()
   };
 }
 
@@ -32174,6 +32219,7 @@ function pmCaptureActive() {
   t.deletedHidden = deletedPagesHidden; t.scrollTop = scrollContainer.scrollTop;
   t.selected = [...selectedPages];
   t.lastSel = lastSelectedIndex;
+  t.zoomView = pmReadZoomView();
 }
 
 // Expands the session to a global state and redraws the editor
@@ -32195,6 +32241,11 @@ async function pmActivate(id, skipCapture, keepSelection) {
   documentDirty = t.dirty; docHistory = t.docHistory; docHistoryIndex = t.docHistoryIndex;
   currentScale = t.scale; autoScaleEnabled = t.autoScale; scaleUserLocked = t.scaleLocked;
   mobileMinScale = t.mobileMin; deletedPagesHidden = t.deletedHidden;
+  // Before the snapshot is restored: rebuilding the pages runs applyScale()
+  // and updateUIState(), both of which act on the fit-width state, and it
+  // has to be THIS tab's by then rather than the one left behind by the tab
+  // being switched away from.
+  pmWriteZoomView(t.zoomView);
 
   historyPushSuspended = true;
   pdfDoc = null;  // We guarantee a complete rebuild (not a quick comparison)
@@ -32239,6 +32290,9 @@ async function pmActivate(id, skipCapture, keepSelection) {
 }
 
 function pmResetGlobalsEmpty() {
+  // A tab opening on a fresh document starts from a plain view - it must not
+  // inherit the fit-width ladder of whatever was on screen a moment ago.
+  pmWriteZoomView(null);
   pdfDoc = null; originalFileBytes = null; documentDirty = false;
   selectedPages.clear(); markedForDeletion.clear(); lastSelectedIndex = null;
   docHistory = []; docHistoryIndex = -1;
