@@ -5133,8 +5133,6 @@
       justify-content: center;
       cursor: pointer;
       box-shadow: 0 3px 10px rgba(0,0,0,0.3);
-      /*Toned down so they sit over the pages without competing with them -
-        the :disabled rule below still drops further.*/
       opacity: 0.7;
       z-index: 95;
       transition: top 0.15s ease, left 0.15s ease, background 0.15s;
@@ -5143,6 +5141,12 @@
       touch-action: none;
     }
     .pm-page-nav-btn.visible { display: flex; }
+    /*Retired on touch: the page-to-page arrows in the top-left corner sat
+      over the pages and were not wanted there. Desktop keeps them.*/
+    @media (pointer: coarse) {
+      .pm-page-nav-btn,
+      .pm-page-nav-btn.visible { display: none !important; }
+    }
     .pm-page-nav-btn:hover:not(:disabled) { background: #3498db; }
     .pm-page-nav-btn:disabled { opacity: 0.35; cursor: default; pointer-events: none; }
     .pm-page-nav-btn.pm-nav-autoscroll {
@@ -6446,6 +6450,22 @@
         height: 0;
         overflow: visible;       /*so that the floating button is visible*/
         box-shadow: none;
+      }
+      /*Folding away/back is animated over an explicitly measured height
+        (see pmAnimateTopMenuHeight) - auto-to-zero cannot be transitioned.
+        overflow:hidden only while it moves, so the rows do not spill out of
+        the shrinking box.
+        Deliberately NO opacity here. An opacity below 1 makes this element
+        the containing block for position:fixed descendants, which is what
+        the hamburger becomes once .collapsed lands - it would then be laid
+        out against the shrinking menu AND clipped by the overflow above
+        (the button visibly sliding away and vanishing), only to snap to the
+        viewport corner the moment the class came off and opacity went back
+        to 1. Without it the button stays where it is and simply shifts from
+        its in-menu offset to the corner's, which is 2px away.*/
+      .top-menu.pm-menu-animating {
+        overflow: hidden !important;
+        transition: height 0.22s ease, padding 0.22s ease;
       }
       .top-menu.collapsed .app-logo { display: none; }
       .top-menu.collapsed #logoMenuArea { display: none !important; }
@@ -8150,6 +8170,71 @@
     // membership in hqUpgraded - is what decides whether a visible page
     // needs re-rendering. Cleared everywhere hqUpgraded itself is cleared.
     let hqRenderedScale = new Map();
+    // pdf.js rasterises on the main thread, and pages are not equally
+    // expensive: a page of text costs a few hundred ms per megapixel, one
+    // built out of transparency groups and shadings can cost seven times
+    // that, so the same "render it at scale 3" that is instant for one
+    // document freezes the UI for seconds on another. Rather than guess from
+    // the document, every raster is timed:
+    //   hqRasterCostPerMp - idx -> ms per megapixel, measured
+    //   hqRasterScaleCap  - idx -> { scale, budgetMs } a pass at that scale
+    //                       already overran budgetMs, so do not go past it
+    //                       again unless a later pass is allowed more time
+    // Both are cleared wherever hqRenderedScale is.
+    let hqRasterCostPerMp = new Map();
+    let hqRasterScaleCap = new Map();
+    // How far a single pass may raise a page's raster scale. Expensive pages
+    // are approached in steps so the first one lands quickly and each step
+    // re-measures the cost, instead of one jump that blocks for seconds.
+    const HQ_RASTER_STEP_UP = 1.6;
+    // What one pass may cost. The user is waiting on the first one, so it
+    // stays short. A follow-up runs after the zooming has stopped and is
+    // abortable (see hqCancelActiveRender), so it can afford to take the page
+    // the rest of the way: if the user does come back, the first touch stops
+    // it rather than queueing behind it.
+    const HQ_RASTER_BUDGET_MS = 550;
+    const HQ_RASTER_BUDGET_IDLE_MS = 4000;
+    // A pass is a full render plus a JPEG encode on the main thread, so it has
+    // to be worth sitting through - a few per cent sharper is not.
+    const HQ_RASTER_MIN_GAIN = 1.2;
+    /**
+     * The raster scale a pass with `budgetMs` to spend may ask for: what the
+     * zoom wants, what the page's measured cost allows in that time, and what
+     * an earlier overrun already ruled out, whichever is smallest.
+     */
+    function hqRasterTargetScale(idx, wantedScale, fromScale, mpAtScale1, budgetMs) {
+      const cap = hqRasterScaleCap.get(idx);
+      const ceiling = (cap && cap.budgetMs >= budgetMs)
+        ? Math.min(wantedScale, cap.scale) : wantedScale;
+      const costPerMp = hqRasterCostPerMp.get(idx);
+      // Nothing measured for this page yet: take one step rather than leaping
+      // the whole way, and let that step's own timing size the next one.
+      if (!(costPerMp > 0)) return Math.min(ceiling, fromScale * HQ_RASTER_STEP_UP);
+      const affordable = Math.sqrt((budgetMs / costPerMp) / mpAtScale1);
+      return Math.min(ceiling, Math.max(affordable, THUMBNAIL_SCALE));
+    }
+    // The pdf.js render task currently drawing an HQ raster, if any. Holding
+    // it is what lets a follow-up pass be generous with its time: however
+    // long that raster would have taken, the first touch aborts it instead of
+    // making the user wait it out.
+    let hqActiveRenderTask = null;
+    function hqCancelActiveRender() {
+      if (!hqActiveRenderTask) return;
+      const task = hqActiveRenderTask;
+      hqActiveRenderTask = null;
+      try { task.cancel(); } catch (_) { /* already finished */ }
+    }
+    /** Time a raster and remember what that page costs per megapixel. */
+    function hqNoteRasterCost(idx, ms, pixelW, pixelH) {
+      if (idx == null || !(ms >= 0)) return;
+      const mp = (pixelW * pixelH) / 1e6;
+      if (!(mp > 0)) return;
+      hqRasterCostPerMp.set(idx, ms / mp);
+    }
+    function hqClearRasterCostModel() {
+      hqRasterCostPerMp.clear();
+      hqRasterScaleCap.clear();
+    }
     let hqScheduleTimer = null;
     let pageTextLayerTimer = null;
     let pageTextLayerToken = 0;
@@ -10712,6 +10797,13 @@
       const noDocument = !pdfDoc;
       const baseDisabled = disabledByLoading || noDocument;
 
+      // Full screen (touch) follows whether a document is open at all:
+      // armed while one is, reset when it closes so the next one asks again.
+      if (isTouchDevice) {
+        if (noDocument) pmResetDocFullscreen();
+        else pmArmDocFullscreen();
+      }
+
       //Pages selected without a deletion mark
       const selectedNonDeleted = [...selectedPages].filter(i => !markedForDeletion.has(i));
       deleteBtn.disabled = baseDisabled || selectedNonDeleted.length === 0;
@@ -12473,6 +12565,10 @@
                 // needing a fresh pass instead of trusting a stale scale.
                 hqRenderedScale.delete(i);
                 hqUpgraded.delete(i);
+                // The page's content may have changed with the step, so its
+                // measured raster cost and ceiling no longer describe it.
+                hqRasterCostPerMp.delete(i);
+                hqRasterScaleCap.delete(i);
               });
               snap.pendingIdx = [];
             } catch (e) { /*show the placeholder from the previous step*/ }
@@ -14468,6 +14564,7 @@
       pdfDocKnownBytesDoc = null;
       hqUpgraded.clear();
       hqRenderedScale.clear();
+      hqClearRasterCostModel();
       gridClearPdfPageImagesCache();
       if (typeof invalidatePageTextLayers === 'function') invalidatePageTextLayers();
       if (typeof pmLinksClearPageCache === 'function') pmLinksClearPageCache();
@@ -14482,6 +14579,7 @@
       pdfDocKnownBytesDoc = null;
       hqUpgraded.clear();
       hqRenderedScale.clear();
+      hqClearRasterCostModel();
       gridClearPdfPageImagesCache();
       if (typeof pmLinksClearPageCache === 'function') pmLinksClearPageCache();
     }
@@ -15440,7 +15538,16 @@
       // runHQUpgrade itself decides per-page whether a re-render is
       // actually needed (see its own comment), so there is nothing left to
       // gate here.
-      hqScheduleTimer = setTimeout(() => runHQUpgrade({ force }), force ? 60 : 180);
+      // An escalation pass is one runHQUpgrade scheduled for itself, to carry
+      // an expensive page further than one pass was allowed to (see
+      // HQ_RASTER_BUDGET_IDLE_MS). It waits longer, so the UI gets a breath
+      // between two heavy rasters, and a fresh zoom cancels it like any other.
+      const escalate = !!(opts && opts.escalate);
+      // A fresh pass means the zoom moved, so a raster still being drawn for
+      // the old one is work nobody is waiting for any more.
+      if (!escalate) hqCancelActiveRender();
+      hqScheduleTimer = setTimeout(() => runHQUpgrade({ force, escalate }),
+        force ? 60 : (escalate ? 600 : 180));
     }
 
     async function runHQUpgrade(opts) {
@@ -15478,6 +15585,11 @@
       const doc = await getHQPdfjsDoc(token);
       if (!doc || token !== hqPdfjsToken) return;
 
+      const escalating = !!(opts && opts.escalate);
+      // Set by any page that was rasterised below what its zoom level asks
+      // for, so a follow-up pass can carry it the rest of the way.
+      let escalateAfter = false;
+
       for (const div of visible) {
         if (token !== hqPdfjsToken) return;
         if (isDragActive || pageTouchActive) { scheduleHQUpgrade(opts); return; }
@@ -15513,19 +15625,39 @@
           // Never below the base thumbnail: the card already shows a raster at
           // THUMBNAIL_SCALE, so a smaller "upgrade" would swap a sharp image
           // for a blurrier one.
-          const neededScale = Math.min(
+          const wantedScale = Math.min(
             HQ_RENDER_SCALE_MAX,
             Math.max(THUMBNAIL_SCALE, displayMatched * HQ_RENDER_HEADROOM)
           );
           const cachedScale = hqRenderedScale.get(idx);
           // Small tolerance so a fractional zoom tick during a smooth drag
           // doesn't re-render every already-good-enough page on screen.
-          if (cachedScale != null && cachedScale >= neededScale * 0.97) continue;
+          if (cachedScale != null && cachedScale >= wantedScale * 0.97) continue;
           // Page still showing its base thumbnail and the display does not
           // out-resolve it: skip the HQ pass entirely rather than re-rendering
           // the same resolution. At ordinary zoom this is every visible page,
           // so no HQ render/encode happens at all until the user zooms in.
-          if (cachedScale == null && neededScale <= THUMBNAIL_SCALE * 1.03) continue;
+          if (cachedScale == null && wantedScale <= THUMBNAIL_SCALE * 1.03) continue;
+          // How big a raster this pass may ask for. For an ordinary page the
+          // measured cost leaves room for the whole thing at once and this
+          // resolves to wantedScale, exactly as before. For a page that
+          // rasterises slowly it buys as much resolution as fits the budget,
+          // and the pass's own timing sizes the next one.
+          const budgetMs = escalating ? HQ_RASTER_BUDGET_IDLE_MS : HQ_RASTER_BUDGET_MS;
+          const fromScale = cachedScale != null ? cachedScale : THUMBNAIL_SCALE;
+          const mpAtScale1 = (vp1.width * vp1.height) / 1e6;
+          const neededScale = hqRasterTargetScale(idx, wantedScale, fromScale, mpAtScale1, budgetMs);
+          if (neededScale < fromScale * HQ_RASTER_MIN_GAIN) {
+            // Not worth a pass at this budget. If a follow-up pass, which is
+            // allowed more time, could make a real difference, ask for one
+            // rather than leaving the page softer than its zoom calls for.
+            if (!escalating
+                && hqRasterTargetScale(idx, wantedScale, fromScale, mpAtScale1, HQ_RASTER_BUDGET_IDLE_MS)
+                     >= fromScale * HQ_RASTER_MIN_GAIN) {
+              escalateAfter = true;
+            }
+            continue;
+          }
           const viewport = page.getViewport({ scale: neededScale, rotation: effectiveRotation });
           const canvas = document.createElement('canvas');
           canvas.width = viewport.width; canvas.height = viewport.height;
@@ -15533,7 +15665,23 @@
           // without it, weak/integrated GPUs pay a slow GPU->CPU transfer
           // here regardless of CPU speed (see renderPageImageInto).
           const hqCtx = canvas.getContext('2d', { willReadFrequently: true });
-          await page.render({ canvasContext: hqCtx, viewport }).promise;
+          const rasterStartedAt = performance.now();
+          const renderTask = page.render({ canvasContext: hqCtx, viewport });
+          hqActiveRenderTask = renderTask;
+          try {
+            await renderTask.promise;
+          } catch (err) {
+            // Cancelled because the user touched the pages, or because a new
+            // zoom made this raster the wrong size. Nothing is recorded, so
+            // the page keeps the raster it had and the next pass starts over.
+            if (err && err.name === 'RenderingCancelledException') {
+              scheduleHQUpgrade({ escalate: escalating });
+              return;
+            }
+            throw err;
+          } finally {
+            if (hqActiveRenderTask === renderTask) hqActiveRenderTask = null;
+          }
           if (token !== hqPdfjsToken) return;
           if (typeof peCompositeEditorObjectsOnCanvas === 'function') {
             await peCompositeEditorObjectsOnCanvas(hqCtx, idx, viewport.width, viewport.height);
@@ -15544,6 +15692,21 @@
           // retries against the settled document instead of racing this one.
           if (token !== hqPdfjsToken || pdfDocCriticalWriterActive) return;
           img.src = canvas.toDataURL('image/jpeg', 0.92);
+          // Everything from the render through the JPEG encode is main-thread
+          // work the user is sitting through, so that whole span is what the
+          // budget is measured against.
+          const rasterMs = performance.now() - rasterStartedAt;
+          hqNoteRasterCost(idx, rasterMs, viewport.width, viewport.height);
+          // Too expensive at this size: do not go past it again unless a
+          // later pass is allowed more time than this one had.
+          if (rasterMs > budgetMs) hqRasterScaleCap.set(idx, { scale: neededScale, budgetMs });
+          // Now that this page's cost is known first-hand, ask whether a
+          // follow-up pass would still buy anything worth having.
+          if (neededScale < wantedScale * 0.97
+              && hqRasterTargetScale(idx, wantedScale, neededScale, mpAtScale1, HQ_RASTER_BUDGET_IDLE_MS)
+                   >= neededScale * HQ_RASTER_MIN_GAIN) {
+            escalateAfter = true;
+          }
           hqUpgraded.add(idx);
           hqRenderedScale.set(idx, neededScale);
           if (typeof schedulePageTextLayerBuild === 'function') schedulePageTextLayerBuild();
@@ -15553,6 +15716,7 @@
           console.error('HQ render error for page', idx, e);
         }
       }
+      if (escalateAfter) scheduleHQUpgrade({ escalate: true });
     }
 
     // Dynamic cascade when narrowing the window (desktop):
@@ -16636,6 +16800,15 @@
       const prevBtn = document.getElementById('pmPagePrevBtn');
       const nextBtn = document.getElementById('pmPageNextBtn');
       if (!prevBtn || !nextBtn) return;
+      // Retired on touch (see their CSS). Bail before the visible-page sweep
+      // below rather than just letting CSS hide them - that sweep runs on
+      // every scroll frame and reads layout for nothing here.
+      if (isTouchDevice) {
+        pmStopPageNavAutoScroll();
+        prevBtn.classList.remove('visible');
+        nextBtn.classList.remove('visible');
+        return;
+      }
       if (!pdfDoc || pdfDoc.getPageCount() <= 1) {
         pmStopPageNavAutoScroll();
         prevBtn.classList.remove('visible');
@@ -17535,6 +17708,9 @@
       pageSelectStageFired = false;
       suppressPageTap = false;
       pageTouchActive = true;
+      // A finger is down: whatever heavy raster is being drawn right now has
+      // to get out of the way of the scroll/tap that is starting.
+      if (typeof hqCancelActiveRender === 'function') hqCancelActiveRender();
       pageTouchScrollX = scrollContainer.scrollLeft;
       pageTouchScrollY = scrollContainer.scrollTop;
 
@@ -17617,7 +17793,7 @@
           // those two, so on a view that has had neither it can still say
           // "auto" while nothing has actually been auto-selected - and this
           // stage would then neither select nor have anything to show.
-          pmUpdateAutoPageSelection();
+          pmUpdateAutoPageSelection(true);
           if (pmAutoSelectModeOn && pmAutoSelectedIdx === pageIdx
               && selectedPages.has(pageIdx)) {
             pmQuickActionsRequestedIdx = pageIdx;
@@ -17833,6 +18009,7 @@
           if (pmAutoSelectModeOn) pmQuickActionsRequestedIdx = null;
           pmUpdateAutoPageSelection();
           updateMobileQuickActions();
+          pmMaybeAutoHideTopMenu();
         });
       }, { passive: true });
 
@@ -18697,11 +18874,26 @@
       notifySelectionChanged();
     }
 
-    /** Re-evaluate the auto-selection. Cheap enough to call on every scroll
-     * frame; does nothing unless the covering page actually changed. */
-    function pmUpdateAutoPageSelection() {
+    // Throttle: this sweeps every page's getBoundingClientRect() AND calls
+    // isPagesSingleColumnLayout(), which forces a synchronous layout pass
+    // (the same cost the double-tap path already goes out of its way to pay
+    // only once per gesture). Running that on every scroll frame competes
+    // with thumbnail rendering on a real phone - enough for previews to
+    // fall behind and sit blank. Eight times a second is plenty to keep the
+    // selection following the scroll.
+    const PM_AUTO_SELECT_MIN_INTERVAL_MS = 120;
+    let pmAutoSelectLastRunAt = 0;
+
+    /** Re-evaluate the auto-selection. Safe to call on every scroll frame -
+     * it rate-limits itself. Pass force for gesture paths that need the
+     * answer right now (the hold's select stage). */
+    function pmUpdateAutoPageSelection(force) {
       if (!isTouchDevice) return;
       if (isDragActive || rubberActive || rubberArmed || pinchActive) return;
+      const now = (typeof performance !== 'undefined' && performance.now)
+        ? performance.now() : Date.now();
+      if (!force && now - pmAutoSelectLastRunAt < PM_AUTO_SELECT_MIN_INTERVAL_MS) return;
+      pmAutoSelectLastRunAt = now;
       const page = pmAutoSelectCandidatePage();
       if (!page) {
         pmAutoSelectModeOn = false;
@@ -20136,6 +20328,97 @@
     function checkHintVisibility() { /*the hint is now on the “?” button*/ }
 
     // Hide/show the top menu (mobile version). The button remains visible.
+    // ---- Top menu auto-hide on scroll (touch) ---------------------------
+    // Scrolling the document down folds the menu away into the floating
+    // hamburger. Bringing it back by hand suspends that for
+    // PM_MENU_AUTOHIDE_REARM_MS - otherwise the very next flick of the
+    // scroll would take it away again, and it would be impossible to use.
+    const PM_MENU_AUTOHIDE_REARM_MS = 15000;
+    const PM_MENU_AUTOHIDE_DOWN_PX = 48;
+    let pmMenuAutoHideArmed = true;
+    let pmMenuAutoHideRearmTimer = null;
+    let pmMenuAutoHideLastTop = 0;
+
+    function pmSuspendMenuAutoHide() {
+      pmMenuAutoHideArmed = false;
+      clearTimeout(pmMenuAutoHideRearmTimer);
+      pmMenuAutoHideRearmTimer = setTimeout(() => {
+        pmMenuAutoHideRearmTimer = null;
+        pmMenuAutoHideArmed = true;
+      }, PM_MENU_AUTOHIDE_REARM_MS);
+    }
+
+    /** Using any control in the open top menu means the user is working up
+     * here, so the suspension starts over - otherwise the delay could run out
+     * mid-task and the next flick of the scroll would fold the menu away.
+     * The two menu-toggle buttons are left to toggleTopMenu(), which must not
+     * re-arm a menu the user has just chosen to hide. */
+    function pmNoteTopMenuInteraction(e) {
+      if (!isTouchDevice) return;
+      const menu = document.getElementById('topMenu');
+      if (!menu || menu.classList.contains('collapsed')) return;
+      const el = (e.target instanceof Element)
+        ? e.target.closest('button, a, input, select, textarea, label, [role="button"]')
+        : null;
+      if (!el || !menu.contains(el)) return;
+      if (el.id === 'menuToggleBtn' || el.id === 'desktopMenuToggleBtn') return;
+      pmSuspendMenuAutoHide();
+    }
+
+    {
+      const pmTopMenuEl = document.getElementById('topMenu');
+      if (pmTopMenuEl) {
+        // Capture phase: a handler that stops propagation must not be able to
+        // hide the tap from us. `input`/`change` too, because a slider drag or
+        // a select may never produce a click of its own.
+        pmTopMenuEl.addEventListener('click', pmNoteTopMenuInteraction, true);
+        pmTopMenuEl.addEventListener('input', pmNoteTopMenuInteraction, true);
+        pmTopMenuEl.addEventListener('change', pmNoteTopMenuInteraction, true);
+      }
+    }
+
+    function pmMaybeAutoHideTopMenu() {
+      if (!isTouchDevice || !scrollContainer) return;
+      const top = scrollContainer.scrollTop;
+      const delta = top - pmMenuAutoHideLastTop;
+      // Tracked unconditionally: a delta measured against a stale top from
+      // whenever the last check happened to pass would fire on the sum of
+      // several small scrolls, or on a scroll back up.
+      pmMenuAutoHideLastTop = top;
+      if (!pmMenuAutoHideArmed || !pdfDoc) return;
+      if (delta <= 0 || top < PM_MENU_AUTOHIDE_DOWN_PX) return;
+      if (isDragActive || rubberActive || rubberArmed || pinchActive) return;
+      if (typeof readModeActive !== 'undefined' && readModeActive) return;
+      if (document.getElementById('pageEditModal')?.classList.contains('open')) return;
+      const menu = document.getElementById('topMenu');
+      if (!menu || menu.classList.contains('collapsed')) return;
+      toggleTopMenu();
+    }
+
+    /** Ease the mobile menu between its two heights. The CSS collapse is a
+     * jump from `auto` to 0, which cannot be transitioned, so the from/to
+     * heights are measured around the class change and animated explicitly. */
+    function pmAnimateTopMenuHeight(menu, fromH, toH) {
+      if (!isTouchDevice || !menu) return;
+      if (!(fromH >= 0) || !(toH >= 0) || Math.abs(fromH - toH) < 1) return;
+      menu.style.height = fromH + 'px';
+      menu.classList.add('pm-menu-animating');
+      void menu.offsetHeight;                 // make the start height real
+      menu.style.height = toH + 'px';
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        menu.removeEventListener('transitionend', onEnd);
+        menu.classList.remove('pm-menu-animating');
+        menu.style.height = '';               // hand the height back to CSS
+        if (typeof relayoutTopUI === 'function') relayoutTopUI();
+      };
+      const onEnd = (e) => { if (e.target === menu && e.propertyName === 'height') finish(); };
+      menu.addEventListener('transitionend', onEnd);
+      setTimeout(finish, 500);                // in case transitionend never lands
+    }
+
     function toggleTopMenu() {
       // In reading mode on mobile phones - clicking on menuToggleBtn exits reading mode
       if (!_readModeToggleGuard && readModeActive && isTouchDevice) {
@@ -20144,7 +20427,13 @@
       }
       const menu = document.getElementById('topMenu');
       if (!menu) return;
+      const heightBefore = isTouchDevice ? menu.getBoundingClientRect().height : 0;
       const collapsed = menu.classList.toggle('collapsed');
+      if (isTouchDevice) {
+        pmAnimateTopMenuHeight(menu, heightBefore, menu.getBoundingClientRect().height);
+        // Brought back by hand: leave it alone for a while (see above).
+        if (!collapsed) pmSuspendMenuAutoHide();
+      }
       if (collapsed) {
         const area = document.getElementById('logoMenuArea');
         const logo = document.querySelector('.app-logo');
@@ -20485,6 +20774,45 @@
         const p = exit.call(document);
         if (p && typeof p.catch === 'function') p.catch(function () {});
       } catch (_) {}
+    }
+
+    // ---- Full screen while a document is open (touch) -------------------
+    // A page cannot hide the browser's own top bar (back arrow, title,
+    // share) any other way - the Fullscreen API is the only lever, and it
+    // needs a real user gesture, so this arms one-shot listeners and fires
+    // on whatever the reader does first. Asked once per document: if the
+    // browser refuses, or the reader leaves full screen themselves, it is
+    // not asked again until the next document opens. iOS Safari has no
+    // element fullscreen at all and simply never gets it.
+    // `var`, not `let`: updateUIState() calls pmArmDocFullscreen() and runs
+    // during script init, before this line would have executed - a `let`
+    // would be in its temporal dead zone and throw there.
+    var pmDocFullscreenAsked = false;
+    var pmDocFullscreenArmed = false;
+
+    function pmIsFullscreen() {
+      return !!(document.fullscreenElement || document.webkitFullscreenElement);
+    }
+
+    function pmArmDocFullscreen() {
+      if (!isTouchDevice || pmDocFullscreenAsked || pmDocFullscreenArmed) return;
+      if (pmIsFullscreen()) return;
+      pmDocFullscreenArmed = true;
+      const fire = () => {
+        pmDocFullscreenArmed = false;
+        document.removeEventListener('pointerdown', fire, true);
+        document.removeEventListener('touchend', fire, true);
+        if (!pdfDoc || pmDocFullscreenAsked) return;
+        pmDocFullscreenAsked = true;
+        requestReadModeFullscreen();
+      };
+      document.addEventListener('pointerdown', fire, true);
+      document.addEventListener('touchend', fire, true);
+    }
+
+    function pmResetDocFullscreen() {
+      pmDocFullscreenAsked = false;
+      if (pmDocFullscreenArmed) pmDocFullscreenArmed = false;
     }
 
     async function enterReadMode(anchorPageIdx) {
@@ -21593,7 +21921,17 @@
       // weak/integrated GPUs (independent of CPU speed). true forces a
       // CPU-backed buffer, trading GPU compositing for consistent readback.
       const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: true });
+      const rasterStartedAt = performance.now();
       await page.render({ canvasContext: ctx, viewport, annotationMode: 0 }).promise;
+      // This render happens for every page as the document is shown, long
+      // before anyone zooms - which makes it the free sample that tells
+      // runHQUpgrade how expensive this page is, so the very FIRST upgrade
+      // is already sized to the page instead of discovering the cost by
+      // freezing on it. (See hqRasterCostPerMp.)
+      if (pdfPageIndex != null && typeof hqNoteRasterCost === 'function') {
+        hqNoteRasterCost(pdfPageIndex, performance.now() - rasterStartedAt,
+          viewport.width, viewport.height);
+      }
       if (isLoadingCancelled || operationId !== activeOperationId) return false;
       if (pdfPageIndex != null && typeof peCompositeEditorObjectsOnCanvas === 'function') {
         await peCompositeEditorObjectsOnCanvas(ctx, pdfPageIndex, viewport.width, viewport.height);
@@ -23969,6 +24307,23 @@
         const mr = menuEl.getBoundingClientRect();
         if (clientY >= mr.top && clientY <= mr.bottom && clientX >= mr.left && clientX <= mr.right) return true;
       }
+      // The menu-toggle button is position:fixed and goes on floating over
+      // the pages after the menu has folded away - and .top-menu's own box is
+      // zero-height by then, so the test above cannot see it. Without this the
+      // button sits inside the band just above page 1 that means "insert
+      // before the first page", and pointing at it drew the blue bar across
+      // the top of that page.
+      for (const id of ['menuToggleBtn', 'desktopMenuToggleBtn']) {
+        const btn = document.getElementById(id);
+        if (!btn) continue;
+        const cs = getComputedStyle(btn);
+        if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') continue;
+        const r = btn.getBoundingClientRect();
+        if (!r.width || !r.height) continue;
+        const pad = 6;
+        if (clientX >= r.left - pad && clientX <= r.right + pad
+            && clientY >= r.top - pad && clientY <= r.bottom + pad) return true;
+      }
       const stickyBar = document.getElementById('stickyFileBar');
       if (stickyBar && stickyBar.classList.contains('visible')) {
         const sr = stickyBar.getBoundingClientRect();
@@ -24293,9 +24648,27 @@
         && clientY >= r.top - pad && clientY <= r.bottom + pad;
     }
 
+    // A touch has no hover. What a tap leaves behind is a compatibility mouse
+    // event at wherever the finger was - and if that was the floating
+    // hamburger, or anywhere else in the band just above page 1, it pops the
+    // insertion indicator up there. The touch path has its own, deliberate
+    // entry point (computeInsertAt), so hover is for real pointing devices
+    // only. A touchscreen laptop still gets it: the test is per event, not
+    // per device.
+    let pmLastTouchAt = 0;
+    const PM_TOUCH_MOUSE_COMPAT_MS = 800;
+    document.addEventListener('touchstart', () => { pmLastTouchAt = Date.now(); },
+      { capture: true, passive: true });
+    function pmIsTouchCompatMouseEvent(e) {
+      if (e && e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) return true;
+      // Safari has no sourceCapabilities: fall back to "a finger was just here".
+      return (Date.now() - pmLastTouchAt) < PM_TOUCH_MOUSE_COMPAT_MS;
+    }
+
     // Global mousemove for insertion indicator (selection mode)
     document.addEventListener('mousemove', (e) => {
       if (insertMenuOpen) return; // while the menu is open, we do not recalculate
+      if (pmIsTouchCompatMouseEvent(e)) return;
       if (isPointOverLogoMenu(e.clientX, e.clientY)) {
         clearHoverInsert();
         return;
@@ -35940,6 +36313,33 @@ let peTextClickSeq = { id: null, t: 0 };
 let peInlineEditStartedAt = 0;
 let peZoomFullRenderTimer = null;
 let peZoomRenderGen = 0;
+// The editor's stage canvas covers the WHOLE page at the current zoom, so
+// its pixel count grows with the square of the zoom: an A4 page at 200% on a
+// device-pixel-ratio-3 phone comes to ~40 MP - 160 MB of bitmap - and pdf.js
+// draws it on the main thread. Measured on a page built out of transparency
+// groups and shadings, that one render took 28 seconds. The raster is capped
+// instead, by a hard pixel ceiling and by what this page is measured to cost
+// (hqRasterCostPerMp, shared with the grid): the canvas keeps its CSS size,
+// so the only thing that gives way is sharpness.
+const PE_STAGE_RASTER_MAX_MP = 8;
+const PE_STAGE_BUDGET_MS = 900;
+// Once the zooming has stopped, one more pass with room to spend takes the
+// stage as sharp as it can afford. It is abortable like the first, but it
+// still blocks while it runs, so it is not open-ended either.
+const PE_STAGE_BUDGET_IDLE_MS = 1800;
+const PE_STAGE_SHARPEN_DELAY_MS = 700;
+let peStageRenderTask = null;
+let peStageSharpenTimer = null;
+// Set when a sharpening pass was dropped because a finger landed on the
+// stage, so it can be picked up again once the hand is off.
+let peStageSharpenDeferred = false;
+/** Abort the stage raster being drawn right now, if any. */
+function peCancelStageRender() {
+  if (!peStageRenderTask) return;
+  const task = peStageRenderTask;
+  peStageRenderTask = null;
+  try { task.cancel(); } catch (_) { /* already finished */ }
+}
 let peSliderDragging = false;
 let peSliderLockedAnchor = null;
 let peSizeDragHistoryActive = false;
@@ -36187,11 +36587,30 @@ function peSyncScaleSliderUi(syncSlider = true) {
 function peCancelZoomRender() {
   clearTimeout(peZoomFullRenderTimer);
   peZoomFullRenderTimer = null;
+  clearTimeout(peStageSharpenTimer);
+  peStageSharpenTimer = null;
+  peStageSharpenDeferred = false;
+  peCancelStageRender();
   peZoomRenderGen++;
+}
+
+/** Queue the sharpening pass that a touch interrupted, or a zoom asked for. */
+function peQueueStageSharpen(delay) {
+  clearTimeout(peStageSharpenTimer);
+  peStageSharpenTimer = setTimeout(() => {
+    peStageSharpenTimer = null;
+    if (peState) peRenderStagePdf({ budgetMs: PE_STAGE_BUDGET_IDLE_MS });
+  }, delay);
 }
 
 function peScheduleFullRender(delay = 140) {
   clearTimeout(peZoomFullRenderTimer);
+  // The zoom moved: a raster still being drawn for the old one, and any
+  // sharpening pass queued for it, are both work nobody is waiting for.
+  clearTimeout(peStageSharpenTimer);
+  peStageSharpenTimer = null;
+  peStageSharpenDeferred = false;
+  peCancelStageRender();
   peZoomFullRenderTimer = setTimeout(() => {
     peZoomFullRenderTimer = null;
     if (peState) peRenderStagePdf();
@@ -36300,39 +36719,102 @@ function peApplyLiveZoomMul(zoomMul, anchorX, anchorY) {
   peSyncScaleSliderUi(true);
 }
 
-async function peRenderStagePdf() {
-  const prepared = await pePrepareStagePdfBitmap();
+async function peRenderStagePdf(opts) {
+  const prepared = await pePrepareStagePdfBitmap(opts);
   if (!prepared) return;
   peCommitStagePdfBitmap(prepared);
   await peFinalizeStagePdfCommit(prepared.gen);
+  peScheduleStageSharpen(prepared);
+}
+
+/**
+ * A raster that had to come out below the stage's own resolution gets one
+ * more go, once the zooming has stopped, with the larger budget. Only one -
+ * whatever that pass affords is what the page keeps until the zoom moves.
+ */
+function peScheduleStageSharpen(prepared) {
+  clearTimeout(peStageSharpenTimer);
+  peStageSharpenTimer = null;
+  peStageSharpenDeferred = false;
+  if (!prepared || !prepared.cappedBelowStage) return;
+  if (prepared.budgetMs >= PE_STAGE_BUDGET_IDLE_MS) return;
+  // Only when the extra time would actually buy pixels. On a fast device the
+  // raster stops at PE_STAGE_RASTER_MAX_MP, not at the budget, and a second
+  // pass would redraw exactly the same thing.
+  const costPerMp = (typeof hqRasterCostPerMp !== 'undefined' && peState)
+    ? hqRasterCostPerMp.get(peState.idx) : null;
+  const idleAllowedMp = Math.min(PE_STAGE_RASTER_MAX_MP,
+    costPerMp > 0 ? (PE_STAGE_BUDGET_IDLE_MS / costPerMp) : Infinity);
+  if (!(idleAllowedMp > prepared.rasterMp * 1.3)) return;
+  peQueueStageSharpen(PE_STAGE_SHARPEN_DELAY_MS);
 }
 
 /**
  * Render the current peState page into an offscreen bitmap without touching
  * the visible #peStage/#peCanvas. Used for seamless rotate swaps.
  */
-async function pePrepareStagePdfBitmap() {
+async function pePrepareStagePdfBitmap(opts) {
   const st = peState;
   if (!st) return null;
+  // Whatever is being drawn now is for a zoom level nobody is looking at any
+  // more - stop it rather than letting it finish and be thrown away.
+  peCancelStageRender();
   peUpdateStageMetrics();
   const gen = ++peZoomRenderGen;
   const finalR = peFinalRotation();
   const dpr = window.devicePixelRatio || 1;
   const cssW = Math.round(st.viewport.width);
   const cssH = Math.round(st.viewport.height);
-  const bw = Math.round(cssW * dpr);
-  const bh = Math.round(cssH * dpr);
-  const renderVp = st.page.getViewport({ scale: st.scale * dpr, rotation: finalR });
+  const budgetMs = (opts && opts.budgetMs > 0) ? opts.budgetMs : PE_STAGE_BUDGET_MS;
+  const stageBw = Math.round(cssW * dpr);
+  const stageBh = Math.round(cssH * dpr);
+  let bw = stageBw;
+  let bh = stageBh;
+  // See PE_STAGE_RASTER_MAX_MP: a page-sized canvas at a high zoom is both
+  // enormous and, on a page pdf.js finds expensive, slow enough to lock the
+  // editor up. Ask for as many pixels as the ceiling and this page's
+  // measured cost allow, and let the canvas upscale the rest.
+  const wantedMp = (stageBw * stageBh) / 1e6;
+  const costPerMp = (typeof hqRasterCostPerMp !== 'undefined')
+    ? hqRasterCostPerMp.get(st.idx) : null;
+  const allowedMp = Math.min(PE_STAGE_RASTER_MAX_MP,
+    costPerMp > 0 ? (budgetMs / costPerMp) : Infinity);
+  if (wantedMp > allowedMp) {
+    const shrink = Math.sqrt(allowedMp / wantedMp);
+    bw = Math.max(1, Math.round(stageBw * shrink));
+    bh = Math.max(1, Math.round(stageBh * shrink));
+  }
+  const renderVp = st.page.getViewport({ scale: st.scale * (bw / cssW), rotation: finalR });
   const off = document.createElement('canvas');
   off.width = bw;
   off.height = bh;
-  await st.page.render({
+  const rasterStartedAt = performance.now();
+  const task = st.page.render({
     canvasContext: off.getContext('2d'),
     viewport: renderVp,
     annotationMode: 0
-  }).promise;
+  });
+  peStageRenderTask = task;
+  try {
+    await task.promise;
+  } catch (err) {
+    // Superseded by a newer zoom, or the editor closed. The stage keeps the
+    // bitmap it has; the render that replaced this one will commit.
+    if (err && err.name === 'RenderingCancelledException') return null;
+    throw err;
+  } finally {
+    if (peStageRenderTask === task) peStageRenderTask = null;
+  }
   if (!peState || gen !== peZoomRenderGen) return null;
-  return { gen, off, cssW, cssH, bw, bh };
+  // Same page, same content as the grid's copy - one shared measurement.
+  if (typeof hqNoteRasterCost === 'function') {
+    hqNoteRasterCost(st.idx, performance.now() - rasterStartedAt, bw, bh);
+  }
+  return {
+    gen, off, cssW, cssH, bw, bh, budgetMs,
+    rasterMp: (bw * bh) / 1e6,
+    cappedBelowStage: bw < stageBw * 0.97,
+  };
 }
 
 /**
@@ -39392,6 +39874,7 @@ function editSelectedPage() {
       if (typeof hqPdfjsToken === 'number') hqPdfjsToken++;
       if (typeof hqUpgraded !== 'undefined' && hqUpgraded && hqUpgraded.clear) hqUpgraded.clear();
       if (typeof hqRenderedScale !== 'undefined' && hqRenderedScale && hqRenderedScale.clear) hqRenderedScale.clear();
+      if (typeof hqClearRasterCostModel === 'function') hqClearRasterCostModel();
 
       await applyMarkupBytesToPreview(pageIdx, bytesBeforeReload);
 
@@ -39468,6 +39951,7 @@ function editSelectedPage() {
       if (typeof hqPdfjsToken === 'number') hqPdfjsToken++;
       if (typeof hqUpgraded !== 'undefined' && hqUpgraded && hqUpgraded.clear) hqUpgraded.clear();
       if (typeof hqRenderedScale !== 'undefined' && hqRenderedScale && hqRenderedScale.clear) hqRenderedScale.clear();
+      if (typeof hqClearRasterCostModel === 'function') hqClearRasterCostModel();
 
       await applyMarkupBytesToPreview(pageIdx, bytes);
 
@@ -39555,6 +40039,7 @@ function editSelectedPage() {
       if (typeof hqPdfjsToken === 'number') hqPdfjsToken++;
       if (typeof hqUpgraded !== 'undefined' && hqUpgraded && hqUpgraded.clear) hqUpgraded.clear();
       if (typeof hqRenderedScale !== 'undefined' && hqRenderedScale && hqRenderedScale.clear) hqRenderedScale.clear();
+      if (typeof hqClearRasterCostModel === 'function') hqClearRasterCostModel();
 
       await applyMarkupBytesToPreview(pageIdx, bytesBeforeReload);
 
@@ -52509,6 +52994,31 @@ function peObjMouseDown(e, o) {
   // pointerdown so touch closes menus (mousedown alone is too late / missing).
   if (window.PointerEvent) document.addEventListener('pointerdown', peCloseFloatingMenusOnOutside, true);
   else document.addEventListener('mousedown', peCloseFloatingMenusOnOutside, true);
+
+  // A finger on the editor stage must not have to wait out a raster that is
+  // still being drawn (see PE_STAGE_RASTER_MAX_MP): drop it, and pick the
+  // sharpening up again once the hand is off.
+  document.addEventListener('pointerdown', (e) => {
+    if (!peState) return;
+    const wrap = document.getElementById('peStageWrap');
+    if (!wrap || !(e.target instanceof Node) || !wrap.contains(e.target)) return;
+    if (peStageSharpenTimer) {
+      clearTimeout(peStageSharpenTimer);
+      peStageSharpenTimer = null;
+      peStageSharpenDeferred = true;
+    }
+    if (peStageRenderTask) {
+      peCancelStageRender();
+      peStageSharpenDeferred = true;
+    }
+  }, true);
+  const peResumeStageSharpen = () => {
+    if (!peStageSharpenDeferred || !peState) return;
+    peStageSharpenDeferred = false;
+    peQueueStageSharpen(PE_STAGE_SHARPEN_DELAY_MS);
+  };
+  document.addEventListener('pointerup', peResumeStageSharpen, true);
+  document.addEventListener('pointercancel', peResumeStageSharpen, true);
 
   // Stash selection on pointerdown: toolbar mousedown used to dismiss redact
   // before click, so trash appeared to do nothing on mobile.
