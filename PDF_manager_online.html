@@ -8170,6 +8170,71 @@
     // membership in hqUpgraded - is what decides whether a visible page
     // needs re-rendering. Cleared everywhere hqUpgraded itself is cleared.
     let hqRenderedScale = new Map();
+    // pdf.js rasterises on the main thread, and pages are not equally
+    // expensive: a page of text costs a few hundred ms per megapixel, one
+    // built out of transparency groups and shadings can cost seven times
+    // that, so the same "render it at scale 3" that is instant for one
+    // document freezes the UI for seconds on another. Rather than guess from
+    // the document, every raster is timed:
+    //   hqRasterCostPerMp - idx -> ms per megapixel, measured
+    //   hqRasterScaleCap  - idx -> { scale, budgetMs } a pass at that scale
+    //                       already overran budgetMs, so do not go past it
+    //                       again unless a later pass is allowed more time
+    // Both are cleared wherever hqRenderedScale is.
+    let hqRasterCostPerMp = new Map();
+    let hqRasterScaleCap = new Map();
+    // How far a single pass may raise a page's raster scale. Expensive pages
+    // are approached in steps so the first one lands quickly and each step
+    // re-measures the cost, instead of one jump that blocks for seconds.
+    const HQ_RASTER_STEP_UP = 1.6;
+    // What one pass may cost. The user is waiting on the first one, so it
+    // stays short. A follow-up runs after the zooming has stopped and is
+    // abortable (see hqCancelActiveRender), so it can afford to take the page
+    // the rest of the way: if the user does come back, the first touch stops
+    // it rather than queueing behind it.
+    const HQ_RASTER_BUDGET_MS = 550;
+    const HQ_RASTER_BUDGET_IDLE_MS = 4000;
+    // A pass is a full render plus a JPEG encode on the main thread, so it has
+    // to be worth sitting through - a few per cent sharper is not.
+    const HQ_RASTER_MIN_GAIN = 1.2;
+    /**
+     * The raster scale a pass with `budgetMs` to spend may ask for: what the
+     * zoom wants, what the page's measured cost allows in that time, and what
+     * an earlier overrun already ruled out, whichever is smallest.
+     */
+    function hqRasterTargetScale(idx, wantedScale, fromScale, mpAtScale1, budgetMs) {
+      const cap = hqRasterScaleCap.get(idx);
+      const ceiling = (cap && cap.budgetMs >= budgetMs)
+        ? Math.min(wantedScale, cap.scale) : wantedScale;
+      const costPerMp = hqRasterCostPerMp.get(idx);
+      // Nothing measured for this page yet: take one step rather than leaping
+      // the whole way, and let that step's own timing size the next one.
+      if (!(costPerMp > 0)) return Math.min(ceiling, fromScale * HQ_RASTER_STEP_UP);
+      const affordable = Math.sqrt((budgetMs / costPerMp) / mpAtScale1);
+      return Math.min(ceiling, Math.max(affordable, THUMBNAIL_SCALE));
+    }
+    // The pdf.js render task currently drawing an HQ raster, if any. Holding
+    // it is what lets a follow-up pass be generous with its time: however
+    // long that raster would have taken, the first touch aborts it instead of
+    // making the user wait it out.
+    let hqActiveRenderTask = null;
+    function hqCancelActiveRender() {
+      if (!hqActiveRenderTask) return;
+      const task = hqActiveRenderTask;
+      hqActiveRenderTask = null;
+      try { task.cancel(); } catch (_) { /* already finished */ }
+    }
+    /** Time a raster and remember what that page costs per megapixel. */
+    function hqNoteRasterCost(idx, ms, pixelW, pixelH) {
+      if (idx == null || !(ms >= 0)) return;
+      const mp = (pixelW * pixelH) / 1e6;
+      if (!(mp > 0)) return;
+      hqRasterCostPerMp.set(idx, ms / mp);
+    }
+    function hqClearRasterCostModel() {
+      hqRasterCostPerMp.clear();
+      hqRasterScaleCap.clear();
+    }
     let hqScheduleTimer = null;
     let pageTextLayerTimer = null;
     let pageTextLayerToken = 0;
@@ -12500,6 +12565,10 @@
                 // needing a fresh pass instead of trusting a stale scale.
                 hqRenderedScale.delete(i);
                 hqUpgraded.delete(i);
+                // The page's content may have changed with the step, so its
+                // measured raster cost and ceiling no longer describe it.
+                hqRasterCostPerMp.delete(i);
+                hqRasterScaleCap.delete(i);
               });
               snap.pendingIdx = [];
             } catch (e) { /*show the placeholder from the previous step*/ }
@@ -14495,6 +14564,7 @@
       pdfDocKnownBytesDoc = null;
       hqUpgraded.clear();
       hqRenderedScale.clear();
+      hqClearRasterCostModel();
       gridClearPdfPageImagesCache();
       if (typeof invalidatePageTextLayers === 'function') invalidatePageTextLayers();
       if (typeof pmLinksClearPageCache === 'function') pmLinksClearPageCache();
@@ -14509,6 +14579,7 @@
       pdfDocKnownBytesDoc = null;
       hqUpgraded.clear();
       hqRenderedScale.clear();
+      hqClearRasterCostModel();
       gridClearPdfPageImagesCache();
       if (typeof pmLinksClearPageCache === 'function') pmLinksClearPageCache();
     }
@@ -15467,7 +15538,16 @@
       // runHQUpgrade itself decides per-page whether a re-render is
       // actually needed (see its own comment), so there is nothing left to
       // gate here.
-      hqScheduleTimer = setTimeout(() => runHQUpgrade({ force }), force ? 60 : 180);
+      // An escalation pass is one runHQUpgrade scheduled for itself, to carry
+      // an expensive page further than one pass was allowed to (see
+      // HQ_RASTER_BUDGET_IDLE_MS). It waits longer, so the UI gets a breath
+      // between two heavy rasters, and a fresh zoom cancels it like any other.
+      const escalate = !!(opts && opts.escalate);
+      // A fresh pass means the zoom moved, so a raster still being drawn for
+      // the old one is work nobody is waiting for any more.
+      if (!escalate) hqCancelActiveRender();
+      hqScheduleTimer = setTimeout(() => runHQUpgrade({ force, escalate }),
+        force ? 60 : (escalate ? 600 : 180));
     }
 
     async function runHQUpgrade(opts) {
@@ -15505,6 +15585,11 @@
       const doc = await getHQPdfjsDoc(token);
       if (!doc || token !== hqPdfjsToken) return;
 
+      const escalating = !!(opts && opts.escalate);
+      // Set by any page that was rasterised below what its zoom level asks
+      // for, so a follow-up pass can carry it the rest of the way.
+      let escalateAfter = false;
+
       for (const div of visible) {
         if (token !== hqPdfjsToken) return;
         if (isDragActive || pageTouchActive) { scheduleHQUpgrade(opts); return; }
@@ -15540,19 +15625,39 @@
           // Never below the base thumbnail: the card already shows a raster at
           // THUMBNAIL_SCALE, so a smaller "upgrade" would swap a sharp image
           // for a blurrier one.
-          const neededScale = Math.min(
+          const wantedScale = Math.min(
             HQ_RENDER_SCALE_MAX,
             Math.max(THUMBNAIL_SCALE, displayMatched * HQ_RENDER_HEADROOM)
           );
           const cachedScale = hqRenderedScale.get(idx);
           // Small tolerance so a fractional zoom tick during a smooth drag
           // doesn't re-render every already-good-enough page on screen.
-          if (cachedScale != null && cachedScale >= neededScale * 0.97) continue;
+          if (cachedScale != null && cachedScale >= wantedScale * 0.97) continue;
           // Page still showing its base thumbnail and the display does not
           // out-resolve it: skip the HQ pass entirely rather than re-rendering
           // the same resolution. At ordinary zoom this is every visible page,
           // so no HQ render/encode happens at all until the user zooms in.
-          if (cachedScale == null && neededScale <= THUMBNAIL_SCALE * 1.03) continue;
+          if (cachedScale == null && wantedScale <= THUMBNAIL_SCALE * 1.03) continue;
+          // How big a raster this pass may ask for. For an ordinary page the
+          // measured cost leaves room for the whole thing at once and this
+          // resolves to wantedScale, exactly as before. For a page that
+          // rasterises slowly it buys as much resolution as fits the budget,
+          // and the pass's own timing sizes the next one.
+          const budgetMs = escalating ? HQ_RASTER_BUDGET_IDLE_MS : HQ_RASTER_BUDGET_MS;
+          const fromScale = cachedScale != null ? cachedScale : THUMBNAIL_SCALE;
+          const mpAtScale1 = (vp1.width * vp1.height) / 1e6;
+          const neededScale = hqRasterTargetScale(idx, wantedScale, fromScale, mpAtScale1, budgetMs);
+          if (neededScale < fromScale * HQ_RASTER_MIN_GAIN) {
+            // Not worth a pass at this budget. If a follow-up pass, which is
+            // allowed more time, could make a real difference, ask for one
+            // rather than leaving the page softer than its zoom calls for.
+            if (!escalating
+                && hqRasterTargetScale(idx, wantedScale, fromScale, mpAtScale1, HQ_RASTER_BUDGET_IDLE_MS)
+                     >= fromScale * HQ_RASTER_MIN_GAIN) {
+              escalateAfter = true;
+            }
+            continue;
+          }
           const viewport = page.getViewport({ scale: neededScale, rotation: effectiveRotation });
           const canvas = document.createElement('canvas');
           canvas.width = viewport.width; canvas.height = viewport.height;
@@ -15560,7 +15665,23 @@
           // without it, weak/integrated GPUs pay a slow GPU->CPU transfer
           // here regardless of CPU speed (see renderPageImageInto).
           const hqCtx = canvas.getContext('2d', { willReadFrequently: true });
-          await page.render({ canvasContext: hqCtx, viewport }).promise;
+          const rasterStartedAt = performance.now();
+          const renderTask = page.render({ canvasContext: hqCtx, viewport });
+          hqActiveRenderTask = renderTask;
+          try {
+            await renderTask.promise;
+          } catch (err) {
+            // Cancelled because the user touched the pages, or because a new
+            // zoom made this raster the wrong size. Nothing is recorded, so
+            // the page keeps the raster it had and the next pass starts over.
+            if (err && err.name === 'RenderingCancelledException') {
+              scheduleHQUpgrade({ escalate: escalating });
+              return;
+            }
+            throw err;
+          } finally {
+            if (hqActiveRenderTask === renderTask) hqActiveRenderTask = null;
+          }
           if (token !== hqPdfjsToken) return;
           if (typeof peCompositeEditorObjectsOnCanvas === 'function') {
             await peCompositeEditorObjectsOnCanvas(hqCtx, idx, viewport.width, viewport.height);
@@ -15571,6 +15692,21 @@
           // retries against the settled document instead of racing this one.
           if (token !== hqPdfjsToken || pdfDocCriticalWriterActive) return;
           img.src = canvas.toDataURL('image/jpeg', 0.92);
+          // Everything from the render through the JPEG encode is main-thread
+          // work the user is sitting through, so that whole span is what the
+          // budget is measured against.
+          const rasterMs = performance.now() - rasterStartedAt;
+          hqNoteRasterCost(idx, rasterMs, viewport.width, viewport.height);
+          // Too expensive at this size: do not go past it again unless a
+          // later pass is allowed more time than this one had.
+          if (rasterMs > budgetMs) hqRasterScaleCap.set(idx, { scale: neededScale, budgetMs });
+          // Now that this page's cost is known first-hand, ask whether a
+          // follow-up pass would still buy anything worth having.
+          if (neededScale < wantedScale * 0.97
+              && hqRasterTargetScale(idx, wantedScale, neededScale, mpAtScale1, HQ_RASTER_BUDGET_IDLE_MS)
+                   >= neededScale * HQ_RASTER_MIN_GAIN) {
+            escalateAfter = true;
+          }
           hqUpgraded.add(idx);
           hqRenderedScale.set(idx, neededScale);
           if (typeof schedulePageTextLayerBuild === 'function') schedulePageTextLayerBuild();
@@ -15580,6 +15716,7 @@
           console.error('HQ render error for page', idx, e);
         }
       }
+      if (escalateAfter) scheduleHQUpgrade({ escalate: true });
     }
 
     // Dynamic cascade when narrowing the window (desktop):
@@ -17571,6 +17708,9 @@
       pageSelectStageFired = false;
       suppressPageTap = false;
       pageTouchActive = true;
+      // A finger is down: whatever heavy raster is being drawn right now has
+      // to get out of the way of the scroll/tap that is starting.
+      if (typeof hqCancelActiveRender === 'function') hqCancelActiveRender();
       pageTouchScrollX = scrollContainer.scrollLeft;
       pageTouchScrollY = scrollContainer.scrollTop;
 
@@ -21781,7 +21921,17 @@
       // weak/integrated GPUs (independent of CPU speed). true forces a
       // CPU-backed buffer, trading GPU compositing for consistent readback.
       const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: true });
+      const rasterStartedAt = performance.now();
       await page.render({ canvasContext: ctx, viewport, annotationMode: 0 }).promise;
+      // This render happens for every page as the document is shown, long
+      // before anyone zooms - which makes it the free sample that tells
+      // runHQUpgrade how expensive this page is, so the very FIRST upgrade
+      // is already sized to the page instead of discovering the cost by
+      // freezing on it. (See hqRasterCostPerMp.)
+      if (pdfPageIndex != null && typeof hqNoteRasterCost === 'function') {
+        hqNoteRasterCost(pdfPageIndex, performance.now() - rasterStartedAt,
+          viewport.width, viewport.height);
+      }
       if (isLoadingCancelled || operationId !== activeOperationId) return false;
       if (pdfPageIndex != null && typeof peCompositeEditorObjectsOnCanvas === 'function') {
         await peCompositeEditorObjectsOnCanvas(ctx, pdfPageIndex, viewport.width, viewport.height);
@@ -39580,6 +39730,7 @@ function editSelectedPage() {
       if (typeof hqPdfjsToken === 'number') hqPdfjsToken++;
       if (typeof hqUpgraded !== 'undefined' && hqUpgraded && hqUpgraded.clear) hqUpgraded.clear();
       if (typeof hqRenderedScale !== 'undefined' && hqRenderedScale && hqRenderedScale.clear) hqRenderedScale.clear();
+      if (typeof hqClearRasterCostModel === 'function') hqClearRasterCostModel();
 
       await applyMarkupBytesToPreview(pageIdx, bytesBeforeReload);
 
@@ -39656,6 +39807,7 @@ function editSelectedPage() {
       if (typeof hqPdfjsToken === 'number') hqPdfjsToken++;
       if (typeof hqUpgraded !== 'undefined' && hqUpgraded && hqUpgraded.clear) hqUpgraded.clear();
       if (typeof hqRenderedScale !== 'undefined' && hqRenderedScale && hqRenderedScale.clear) hqRenderedScale.clear();
+      if (typeof hqClearRasterCostModel === 'function') hqClearRasterCostModel();
 
       await applyMarkupBytesToPreview(pageIdx, bytes);
 
@@ -39743,6 +39895,7 @@ function editSelectedPage() {
       if (typeof hqPdfjsToken === 'number') hqPdfjsToken++;
       if (typeof hqUpgraded !== 'undefined' && hqUpgraded && hqUpgraded.clear) hqUpgraded.clear();
       if (typeof hqRenderedScale !== 'undefined' && hqRenderedScale && hqRenderedScale.clear) hqRenderedScale.clear();
+      if (typeof hqClearRasterCostModel === 'function') hqClearRasterCostModel();
 
       await applyMarkupBytesToPreview(pageIdx, bytesBeforeReload);
 
