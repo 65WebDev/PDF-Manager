@@ -10315,6 +10315,45 @@
     // sharpness there, so a higher cap here would only multiply canvas
     // memory/render cost per thumbnail for imperceptible extra gain.
     const PM_THUMBNAIL_DPR = Math.min(window.devicePixelRatio || 1, 2);
+
+    // ---- Lite mode: big documents on weak devices ------------------------
+    // Opening a document renders a thumbnail for every page in the
+    // background, at up to twice the pixel density. On a slow, low-memory
+    // machine a 300-page book keeps the CPU (and a phone's battery) busy for
+    // minutes doing that. There, and only for big documents:
+    //   - thumbnails are rasterized at 1x density (the visible pages still
+    //     get sharpened by the HQ pass when the display asks for it), and
+    //   - the background fill covers the PM_LITE_PREFETCH_RADIUS pages around
+    //     where the user is, following them as they scroll, instead of the
+    //     whole document. A page scrolled to far away is rendered when it
+    //     comes into view, a moment later than it otherwise would.
+    // localStorage 'pmLiteMode' = 'on' / 'off' overrides the detection.
+    const PM_LITE_MIN_PAGES = 150;
+    const PM_LITE_PREFETCH_RADIUS = 50;
+    let pmLiteActive = false;
+    const pmLiteNearPages = new Set();   // pages the thumbnail observer sees near the viewport
+    let pmLiteRecenterTimer = null;
+    function pmIsWeakDevice() {
+      const mem = navigator.deviceMemory;          // GB, Chromium only, capped at 8
+      const cores = navigator.hardwareConcurrency;
+      return (typeof mem === 'number' && mem > 0 && mem <= 4) ||
+        (typeof cores === 'number' && cores > 0 && cores <= 4);
+    }
+    function pmLiteModeFor(numPages) {
+      let forced = null;
+      try { forced = localStorage.getItem('pmLiteMode'); } catch (_) {}
+      if (forced === 'on') return true;
+      if (forced === 'off') return false;
+      return numPages >= PM_LITE_MIN_PAGES && pmIsWeakDevice();
+    }
+    // Follows the document on screen, not pmLiteActive: switching back to a
+    // tab whose thumbnails are all drawn sets up no pipeline, so the flag can
+    // still describe the tab before it, and a page re-rendered after an edit
+    // must match the density of its neighbours.
+    function pmThumbDpr() {
+      const n = pdfDoc && typeof pdfDoc.getPageCount === 'function' ? pdfDoc.getPageCount() : 0;
+      return pmLiteModeFor(n) ? 1 : PM_THUMBNAIL_DPR;
+    }
     const LAZY_THUMB_CONCURRENCY = 6;
     // How many thumbnails the loading overlay waits for before handing the
     // editor over. Was 4: on a scanned book each one is a full-page image
@@ -12663,15 +12702,7 @@
         }
       });
 
-      lazyThumbObserver = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-          if (!entry.isIntersecting) return;
-          const div = entry.target;
-          const idx = parseInt(div.dataset.index, 10);
-          if (Number.isNaN(idx)) return;
-          scheduleLazyThumbnailLoad(idx, operationId, 'high');
-        });
-      }, { root: scrollContainer, rootMargin: LAZY_THUMB_ROOT_MARGIN, threshold: 0.01 });
+      lazyThumbObserver = pmCreateLazyThumbObserver(operationId, lazyThumbNumPages);
 
       pagesContainer.querySelectorAll('.page').forEach(div => {
         const idx = parseInt(div.dataset.index, 10);
@@ -21395,6 +21426,8 @@
 
     function destroyLazyThumbnailPipeline() {
       lazyThumbToken++;
+      pmLiteActive = false;
+      clearTimeout(pmLiteRecenterTimer);
       if (lazyThumbObserver) {
         lazyThumbObserver.disconnect();
         lazyThumbObserver = null;
@@ -21499,8 +21532,51 @@
     }
 
     function startLazyThumbnailBackgroundPrefetch(operationId, numPages) {
+      if (pmLiteActive) { pmLiteRecenterPrefetch(operationId); return; }
       for (let idx = 0; idx < numPages; idx++) {
         scheduleLazyThumbnailLoad(idx, operationId, 'low');
+      }
+    }
+
+    // The thumbnail pipeline's IntersectionObserver: pages coming into view
+    // (with LAZY_THUMB_ROOT_MARGIN of lead) render at high priority, and in
+    // lite mode it also tells the background fill where the user is.
+    function pmCreateLazyThumbObserver(operationId, numPages) {
+      pmLiteActive = pmLiteModeFor(numPages);
+      pmLiteNearPages.clear();
+      return new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          const div = entry.target;
+          const idx = parseInt(div.dataset.index, 10);
+          if (Number.isNaN(idx)) return;
+          if (!entry.isIntersecting) { pmLiteNearPages.delete(idx); return; }
+          pmLiteNearPages.add(idx);
+          scheduleLazyThumbnailLoad(idx, operationId, 'high');
+        });
+        if (pmLiteActive) {
+          clearTimeout(pmLiteRecenterTimer);
+          pmLiteRecenterTimer = setTimeout(() => pmLiteRecenterPrefetch(operationId), 250);
+        }
+      }, { root: scrollContainer, rootMargin: LAZY_THUMB_ROOT_MARGIN, threshold: 0.01 });
+    }
+
+    // Lite mode: centre the background fill on the pages near the viewport
+    // (as the observer reports them - no card is measured), drop queued work
+    // that is now far away, and queue what is near, nearest first.
+    function pmLiteRecenterPrefetch(operationId) {
+      if (!pmLiteActive || activeOperationId !== operationId || !lazyThumbNumPages) return;
+      let center = 0;
+      if (pmLiteNearPages.size) {
+        let sum = 0;
+        pmLiteNearPages.forEach(i => { sum += i; });
+        center = Math.round(sum / pmLiteNearPages.size);
+      }
+      const lo = Math.max(0, center - PM_LITE_PREFETCH_RADIUS);
+      const hi = Math.min(lazyThumbNumPages - 1, center + PM_LITE_PREFETCH_RADIUS);
+      lazyThumbQueueLow = lazyThumbQueueLow.filter(j => j.idx >= lo && j.idx <= hi);
+      for (let d = 0; d <= PM_LITE_PREFETCH_RADIUS; d++) {
+        if (center + d <= hi) scheduleLazyThumbnailLoad(center + d, operationId, 'low');
+        if (d && center - d >= lo) scheduleLazyThumbnailLoad(center - d, operationId, 'low');
       }
     }
 
@@ -21573,15 +21649,7 @@
       }
       pagesContainer.appendChild(frag);
 
-      lazyThumbObserver = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-          if (!entry.isIntersecting) return;
-          const div = entry.target;
-          const idx = parseInt(div.dataset.index, 10);
-          if (Number.isNaN(idx)) return;
-          scheduleLazyThumbnailLoad(idx, operationId, 'high');
-        });
-      }, { root: scrollContainer, rootMargin: LAZY_THUMB_ROOT_MARGIN, threshold: 0.01 });
+      lazyThumbObserver = pmCreateLazyThumbObserver(operationId, lazyThumbNumPages);
 
       pagesContainer.querySelectorAll('.page').forEach(div => lazyThumbObserver.observe(div));
       if (fastOpen) {
@@ -22122,7 +22190,7 @@
       // - everything below keys off viewport.width/height, so this is the
       // only place the DPR bump needs to happen for the whole canvas to
       // come out sharper on HiDPI displays.
-      const viewport = page.getViewport({ scale: renderScale * PM_THUMBNAIL_DPR, rotation: effectiveRotation });
+      const viewport = page.getViewport({ scale: renderScale * pmThumbDpr(), rotation: effectiveRotation });
       if (pdfPageIndex != null && typeof peSetPageNormSize === 'function') {
         const vp1 = page.getViewport({ scale: 1, rotation: effectiveRotation });
         peSetPageNormSize(pdfPageIndex, effectiveRotation, { W: vp1.width, H: vp1.height });
