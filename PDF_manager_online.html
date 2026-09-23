@@ -7879,20 +7879,160 @@
     // measuring an already-open pdf.js document), so pdfjsLibReal is
     // guaranteed set by the time any of them are actually read.
     var pdfjsLibReal = null;
+
+    // pdf.js starts its worker as a MODULE worker from a blob: URL - its CDN
+    // wrapper in this file, the inlined bundle in the offline build. Chromium
+    // refuses exactly that when the page itself was opened from file://,
+    // which is how a single-file editor is mostly used; pdf.js then quietly
+    // falls back to a "fake worker" and runs everything the worker would -
+    // parsing, image decoding, every page's operator list - on the main
+    // thread, where it competes with the UI. On a big document that is most
+    // of the time spent opening it. A CLASSIC worker has no such
+    // restriction, and the pdf.js worker bundle needs only two textual edits
+    // to run as one. So: test whether module blob workers actually start
+    // here (no guessing from the protocol), and only if they do not, hand
+    // pdf.js a classic worker as its port. Any failure along the way leaves
+    // pdf.js exactly as it was.
+    var pmPdfjsWorkerMode = 'pending';   // 'module' | 'classic' | 'fallback'
+    // The one PDFWorker wrapped around that classic worker, passed to every
+    // getDocument() call as `worker` (see the pdfjsLib stub below). Passed
+    // explicitly rather than through GlobalWorkerOptions.workerPort on
+    // purpose: with workerPort, pdf.js makes each document's loading task the
+    // owner of the shared PDFWorker, and destroying ANY document - which this
+    // file does for every temporary one (exports, the page editor, history
+    // renders...) - tears it down for all the others. An explicitly passed
+    // worker is never destroyed with a document.
+    var pmPdfjsSharedWorker = null;
+    function pmModuleBlobWorkersStart() {
+      return new Promise(function (resolve) {
+        var url = null, w = null, done = false, timer = null;
+        function fin(ok) {
+          if (done) return;
+          done = true;
+          clearTimeout(timer);
+          try { if (w) w.terminate(); } catch (_) {}
+          try { if (url) URL.revokeObjectURL(url); } catch (_) {}
+          resolve(ok);
+        }
+        try {
+          url = URL.createObjectURL(new Blob(['postMessage(1)'], { type: 'text/javascript' }));
+          w = new Worker(url, { type: 'module' });
+        } catch (_) { fin(false); return; }
+        w.onmessage = function () { fin(true); };
+        w.onerror = function () { fin(false); };
+        timer = setTimeout(function () { fin(false); }, 3000);
+      });
+    }
+    function pmStartClassicPdfjsWorker(mod) {
+      var src = mod.GlobalWorkerOptions.workerSrc;
+      return fetch(src)
+        .then(function (r) {
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          return r.text();
+        })
+        .then(function (code) {
+          var classic = code
+            // Only the OpenJPEG glue reads it, to locate its wasm relative to
+            // the script - inside a try, and pdf.js passes that URL itself.
+            .replace(/import\.meta\.url/g, 'self.location.href')
+            // The bundle's single export; the worker sets itself up from a
+            // static block that only checks it is running in a worker. (A
+            // trailing source-map comment, should a build add one, is fine.)
+            .replace(/export\s*\{[^}]*\}\s*;?(\s*\/\/[^\n]*)?\s*$/, '');
+          var url = URL.createObjectURL(new Blob([classic], { type: 'text/javascript' }));
+          return new Promise(function (resolve) {
+            var worker = null, done = false, timer = null;
+            function fin(ok) {
+              if (done) return;
+              done = true;
+              clearTimeout(timer);
+              if (worker) {
+                worker.removeEventListener('message', onMsg);
+                worker.removeEventListener('error', onErr);
+              }
+              if (ok) {
+                try {
+                  pmPdfjsSharedWorker = mod.PDFWorker.create({ port: worker });
+                } catch (_) {
+                  ok = false;
+                }
+              }
+              if (!ok && worker) { try { worker.terminate(); } catch (_) {} }
+              resolve(ok);
+            }
+            // The worker announces itself with pdf.js's own handshake.
+            function onMsg(e) {
+              var d = e && e.data;
+              if (d && d.sourceName === 'worker' && d.action === 'ready') fin(true);
+            }
+            function onErr() { fin(false); }
+            try { worker = new Worker(url); } catch (_) { fin(false); return; }
+            worker.addEventListener('message', onMsg);
+            worker.addEventListener('error', onErr);
+            timer = setTimeout(function () { fin(false); }, 10000);
+          });
+        })
+        .catch(function () { return false; });
+    }
+
     var pdfjsLibReadyPromise = import('https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.149/build/pdf.min.mjs')
       .then(function (mod) {
         mod.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.149/build/pdf.worker.min.mjs';
-        pdfjsLibReal = mod;
-        return mod;
+        // pdfjsLibReal stays unset until the worker is decided, so no
+        // document can be opened before it and end up on the fallback.
+        return pmModuleBlobWorkersStart()
+          .then(function (moduleOk) {
+            if (moduleOk) return 'module';
+            return pmStartClassicPdfjsWorker(mod).then(function (ok) { return ok ? 'classic' : 'fallback'; });
+          })
+          .catch(function () { return 'fallback'; })
+          .then(function (mode) {
+            pmPdfjsWorkerMode = mode;
+            pdfjsLibReal = mod;
+            // The pdf.js module assigns globalThis.pdfjsLib itself when it
+            // loads, replacing the stub below - so from here on every
+            // pdfjsLib.getDocument() call in this file goes straight to
+            // pdf.js, not through the stub. Route those through the shared
+            // worker as well.
+            var lib = globalThis.pdfjsLib;
+            if (pmPdfjsSharedWorker && lib && lib !== pdfjsLibStub && typeof lib.getDocument === 'function') {
+              var realGetDocument = lib.getDocument;
+              lib.getDocument = function () {
+                return realGetDocument.apply(this, pmWithSharedPdfjsWorker(arguments));
+              };
+            }
+            return mod;
+          });
       });
-    var pdfjsLib = {
+    // Every document goes to the shared classic worker when there is one
+    // (see pmPdfjsSharedWorker) - unless a caller brought its own.
+    function pmWithSharedPdfjsWorker(args) {
+      var src = args[0];
+      if (!pmPdfjsSharedWorker || !src || typeof src !== 'object' || src.worker ||
+          ArrayBuffer.isView(src) || src instanceof ArrayBuffer) {
+        return args;
+      }
+      var withWorker = Object.assign({}, src, { worker: pmPdfjsSharedWorker });
+      return [withWorker].concat(Array.prototype.slice.call(args, 1));
+    }
+    var pdfjsLibStub;
+    var pdfjsLib = pdfjsLibStub = {
       getDocument: function () {
         var args = arguments;
-        if (pdfjsLibReal) return pdfjsLibReal.getDocument.apply(pdfjsLibReal, args);
+        if (pdfjsLibReal) return pdfjsLibReal.getDocument.apply(pdfjsLibReal, pmWithSharedPdfjsWorker(args));
+        // pdf.js is still loading: hand back a task that can already be
+        // destroyed, like the real one (loadPDF drops an early start this way).
+        var realTask = null, destroyed = false;
         return {
           promise: pdfjsLibReadyPromise.then(function (mod) {
-            return mod.getDocument.apply(mod, args).promise;
+            if (destroyed) throw new Error('Loading task destroyed before pdf.js was ready');
+            realTask = mod.getDocument.apply(mod, pmWithSharedPdfjsWorker(args));
+            return realTask.promise;
           }),
+          destroy: function () {
+            destroyed = true;
+            return realTask ? realTask.destroy() : Promise.resolve();
+          },
         };
       },
       get Util() { return pdfjsLibReal ? pdfjsLibReal.Util : undefined; },
@@ -14497,15 +14637,21 @@
         .filter(p => p.style.display !== 'none');
     }
 
+    function pagesShareRow(a, b) {
+      return Math.abs((a.top + a.bottom) / 2 - (b.top + b.bottom) / 2) <= a.height * 0.5;
+    }
+
     function groupVisiblePagesIntoRows(pages) {
       if (!pages.length) return [];
       const rows = [[pages[0]]];
+      // Each card measured once - it used to be measured again as the
+      // left-hand side of the next comparison.
+      let a = pages[0].getBoundingClientRect();
       for (let i = 1; i < pages.length; i++) {
-        const a = pages[i - 1].getBoundingClientRect();
         const b = pages[i].getBoundingClientRect();
-        const sameRow = Math.abs((a.top + a.bottom) / 2 - (b.top + b.bottom) / 2) <= a.height * 0.5;
-        if (sameRow) rows[rows.length - 1].push(pages[i]);
+        if (pagesShareRow(a, b)) rows[rows.length - 1].push(pages[i]);
         else rows.push([pages[i]]);
+        a = b;
       }
       return rows;
     }
@@ -14519,9 +14665,23 @@
       // Prefer geometry over visible-page count: a lone page on a wide desktop
       // still has room for a neighbor, so it is NOT a single-column layout.
       if (avail > 0 && cardRowWidth(currentScale, 2) > avail + 1) return true;
-      const pages = getVisiblePages();
-      if (pages.length <= 1) return false;
-      return groupVisiblePagesIntoRows(pages).every(row => row.length === 1);
+      // Same answer as groupVisiblePagesIntoRows(getVisiblePages()).every(row
+      // => row.length === 1), but walking the cards in place and stopping at
+      // the first two neighbours that share a row. On a grid that is the very
+      // first pair. The full version collected and measured every card in
+      // the document - and this runs from scroll handlers and after each
+      // thumbnail lands, from several places, so on a 300-page file it was
+      // quadratic.
+      let prev = null;
+      let count = 0;
+      for (const p of pagesContainer.children) {
+        if (!p.classList.contains('page') || p.style.display === 'none') continue;
+        const cur = p.getBoundingClientRect();
+        count++;
+        if (prev && pagesShareRow(prev, cur)) return false;
+        prev = cur;
+      }
+      return count > 1;
     }
 
     // Legacy name kept for call sites; same layout test on mobile and desktop.
@@ -20273,20 +20433,34 @@
         if (isLoadingCancelled) { historyPushSuspended = false; return; }
 
         // Password-protected PDFs: preparePdfBytes prompts for the password when needed.
+        let earlyPdfjsTask = null;
         if (!isOffice && !isImage && !isEmail) {
+          // Two libraries parse every file: pdf-lib (for editing) right here
+          // in preparePdfBytes, and pdf.js (for the page images) in its
+          // worker. Start pdf.js first so the two run side by side instead of
+          // one after the other - on a big file each is seconds on its own.
+          // If the file turns out to need a password, preparePdfBytes hands
+          // back different (decrypted) bytes and this early start is dropped.
+          earlyPdfjsTask = openPdfjsForThumbs(pdfBytes);
+          earlyPdfjsTask.promise.catch(() => {});   // a locked file rejects here; handled below
           const prepared = await preparePdfBytes(pdfBytes, file.name);
           if (prepared === null) {
+            try { earlyPdfjsTask.destroy(); } catch (_) {}
             historyPushSuspended = false;
             hideLoading();
             wasCreatingNewDocument = false;
             return;
+          }
+          if (prepared !== pdfBytes) {
+            try { earlyPdfjsTask.destroy(); } catch (_) {}
+            earlyPdfjsTask = null;
           }
           pdfBytes = prepared;
         }
 
         originalFileBytes = pdfBytes;
         const initialHistoryBytes = pdfBytes.slice();
-        pdfjsPreloadTask = openPdfjsForThumbs(pdfBytes);
+        pdfjsPreloadTask = earlyPdfjsTask || openPdfjsForThumbs(pdfBytes);
         pdfDoc = preparedPdfLibDoc || await PDFLib.PDFDocument.load(pdfBytes);
         preparedPdfLibDoc = null;
         invalidateHQ();
@@ -21158,6 +21332,15 @@
         } else {
           pdfjsDoc = await openPdfjsForThumbs(originalFileBytes).promise;
         }
+        // The page images and the high-quality renders / text, link and form
+        // layers all want the same pdf.js document here: pdfDoc was parsed
+        // from these very bytes and nothing has been edited yet. Share it.
+        // Otherwise the first HQ or layer request after opening made
+        // getHQPdfjsDoc() re-serialize the WHOLE document with pdfDoc.save()
+        // and parse the result a second time - seconds of main-thread work
+        // and another full copy of the file, on a big one. The first real
+        // edit calls invalidateHQ(), which drops this like any HQ document.
+        if (!hqPdfjsDoc && !hqPdfjsDocInFlight) hqPdfjsDoc = pdfjsDoc;
 
         showLoading(t('loadingPagesProgress', { cur: 0, total: numPages }));
 
