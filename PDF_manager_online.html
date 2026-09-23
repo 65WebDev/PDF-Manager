@@ -7992,41 +7992,61 @@
             // The pdf.js module assigns globalThis.pdfjsLib itself when it
             // loads, replacing the stub below - so from here on every
             // pdfjsLib.getDocument() call in this file goes straight to
-            // pdf.js, not through the stub. Route those through the shared
-            // worker as well.
+            // pdf.js, not through the stub. Route those through the same
+            // argument preparation (shared worker, protected bytes).
             var lib = globalThis.pdfjsLib;
-            if (pmPdfjsSharedWorker && lib && lib !== pdfjsLibStub && typeof lib.getDocument === 'function') {
+            if (lib && lib !== pdfjsLibStub && typeof lib.getDocument === 'function') {
               var realGetDocument = lib.getDocument;
               lib.getDocument = function () {
-                return realGetDocument.apply(this, pmWithSharedPdfjsWorker(arguments));
+                return realGetDocument.apply(this, pmPrepareGetDocumentArgs(arguments));
               };
             }
             return mod;
           });
       });
-    // Every document goes to the shared classic worker when there is one
-    // (see pmPdfjsSharedWorker) - unless a caller brought its own.
-    function pmWithSharedPdfjsWorker(args) {
+    // pdf.js takes ownership of the bytes it is given: getDocument() transfers
+    // their ArrayBuffer to its worker, which empties it on this side. Bytes the
+    // editor keeps using - the file as opened, which pdf-lib parsed in place
+    // and which is also the first history step - are registered here, and a
+    // getDocument() handed any of them gets a copy instead. That one guard is
+    // what lets the open path share a single copy of the file between
+    // pdf-lib, originalFileBytes and history, rather than slicing off two
+    // defensive 100 MB copies of a big file up front.
+    var pmProtectedPdfBuffers = (typeof WeakSet === 'function') ? new WeakSet() : null;
+    function pmProtectPdfBytes(bytes) {
+      if (pmProtectedPdfBuffers && bytes && bytes.buffer) pmProtectedPdfBuffers.add(bytes.buffer);
+      return bytes;
+    }
+    function pmIsProtectedPdfBytes(bytes) {
+      return !!(pmProtectedPdfBuffers && bytes && ArrayBuffer.isView(bytes) &&
+        pmProtectedPdfBuffers.has(bytes.buffer));
+    }
+    // Every getDocument() call: protected bytes get copied, and every document
+    // goes to the shared classic worker when there is one (see
+    // pmPdfjsSharedWorker) - unless a caller brought its own.
+    function pmPrepareGetDocumentArgs(args) {
       var src = args[0];
-      if (!pmPdfjsSharedWorker || !src || typeof src !== 'object' || src.worker ||
-          ArrayBuffer.isView(src) || src instanceof ArrayBuffer) {
-        return args;
-      }
-      var withWorker = Object.assign({}, src, { worker: pmPdfjsSharedWorker });
-      return [withWorker].concat(Array.prototype.slice.call(args, 1));
+      var rest = Array.prototype.slice.call(args, 1);
+      if (src && (ArrayBuffer.isView(src) || src instanceof ArrayBuffer)) src = { data: src };
+      if (!src || typeof src !== 'object') return args;
+      var out = src;
+      if (pmIsProtectedPdfBytes(src.data)) out = Object.assign({}, out, { data: src.data.slice() });
+      if (pmPdfjsSharedWorker && !out.worker) out = Object.assign({}, out, { worker: pmPdfjsSharedWorker });
+      if (out === args[0]) return args;
+      return [out].concat(rest);
     }
     var pdfjsLibStub;
     var pdfjsLib = pdfjsLibStub = {
       getDocument: function () {
         var args = arguments;
-        if (pdfjsLibReal) return pdfjsLibReal.getDocument.apply(pdfjsLibReal, pmWithSharedPdfjsWorker(args));
+        if (pdfjsLibReal) return pdfjsLibReal.getDocument.apply(pdfjsLibReal, pmPrepareGetDocumentArgs(args));
         // pdf.js is still loading: hand back a task that can already be
         // destroyed, like the real one (loadPDF drops an early start this way).
         var realTask = null, destroyed = false;
         return {
           promise: pdfjsLibReadyPromise.then(function (mod) {
             if (destroyed) throw new Error('Loading task destroyed before pdf.js was ready');
-            realTask = mod.getDocument.apply(mod, pmWithSharedPdfjsWorker(args));
+            realTask = mod.getDocument.apply(mod, pmPrepareGetDocumentArgs(args));
             return realTask.promise;
           }),
           destroy: function () {
@@ -10296,7 +10316,12 @@
     // memory/render cost per thumbnail for imperceptible extra gain.
     const PM_THUMBNAIL_DPR = Math.min(window.devicePixelRatio || 1, 2);
     const LAZY_THUMB_CONCURRENCY = 6;
-    const LAZY_THUMB_INITIAL_WAIT = 4;
+    // How many thumbnails the loading overlay waits for before handing the
+    // editor over. Was 4: on a scanned book each one is a full-page image
+    // decode, so the user waited on four of them; the rest were going to
+    // fill in on their own anyway. The first page is enough to show the
+    // document is there.
+    const LAZY_THUMB_INITIAL_WAIT = 1;
     const LAZY_THUMB_INITIAL_MARGIN = 120;
     const LAZY_THUMB_ROOT_MARGIN = '500px';
     const JPEG_ESTIMATE_FULL_MAX_PAGES = 20;
@@ -20458,8 +20483,14 @@
           pdfBytes = prepared;
         }
 
+        // One copy of the file serves pdf-lib (which parsed it in place),
+        // originalFileBytes and the first history step; pdf.js only ever gets
+        // copies of it (see pmProtectPdfBytes). Slicing it again for history,
+        // as this used to, cost a full copy of the file - on a 100 MB scan
+        // about half a second on a slow CPU, plus the memory.
+        pmProtectPdfBytes(pdfBytes);
         originalFileBytes = pdfBytes;
-        const initialHistoryBytes = pdfBytes.slice();
+        const initialHistoryBytes = pdfBytes;
         pdfjsPreloadTask = earlyPdfjsTask || openPdfjsForThumbs(pdfBytes);
         pdfDoc = preparedPdfLibDoc || await PDFLib.PDFDocument.load(pdfBytes);
         preparedPdfLibDoc = null;
@@ -28484,7 +28515,10 @@
       const label = fileName ? `«${fileName}»: ` : '';
       let working = bytes;
       try {
-        const d = await PDFLib.PDFDocument.load(working.slice());
+        // Parsed in place, not from a copy: pdf-lib keeps views into these
+        // bytes, and protecting them (pmProtectPdfBytes) is what keeps pdf.js
+        // from ever emptying them - a copy per open cost as much as the file.
+        const d = await PDFLib.PDFDocument.load(pmProtectPdfBytes(working));
         d.getPageCount();
         preparedPdfLibDoc = d;
         return working;
@@ -28510,7 +28544,7 @@
       if (!working) return null;
 
       try {
-        const d = await PDFLib.PDFDocument.load(working.slice());
+        const d = await PDFLib.PDFDocument.load(pmProtectPdfBytes(working));
         d.getPageCount();
         preparedPdfLibDoc = d;
         return working;
