@@ -10922,11 +10922,26 @@
     document.addEventListener('dragend', stopAutoScroll);
     document.addEventListener('drop', stopAutoScroll);
 
+    // The overlay's X only means something while a file is being opened or
+    // merged in - the two operations cancelLoading() knows how to roll back
+    // (wasCreatingNewDocument / preMergePageCount, set by their callers
+    // before the overlay goes up). Anything else - applying a page edit,
+    // redacting, rendering - keeps running whatever the X does, and pressing
+    // it used to tear the page list down underneath that work.
+    function pmLoadingIsCancelable() {
+      return !!wasCreatingNewDocument || preMergePageCount != null;
+    }
+    function pmSyncLoadingCancelButton() {
+      const btn = loadingOverlay.querySelector('.close-btn');
+      if (btn) btn.style.display = pmLoadingIsCancelable() ? '' : 'none';
+    }
+
     function showLoading(text) {
       if (text == null || text === '') text = t('loadingPages');
       isLoading = true;
       //wasCreatingNewDocument is set explicitly in calling functions
       loadingText.textContent = text;
+      pmSyncLoadingCancelButton();
       loadingOverlay.style.display = 'flex';
       updateUIState();
     }
@@ -10965,11 +10980,13 @@
       updateUIState();
       pmDeferredLoadingTimer = setTimeout(() => {
         pmDeferredLoadingTimer = null;
+        pmSyncLoadingCancelButton();
         if (isLoading) loadingOverlay.style.display = 'flex';
       }, delayMs);
     }
 
     async function cancelLoading() {
+      if (!pmLoadingIsCancelable()) return;   // see pmLoadingIsCancelable
       isLoadingCancelled = true;
       activeOperationId++; //invalidate all pending tasks from the previous operation
       //Stop the download and clear the state
@@ -20593,6 +20610,11 @@
             typeof pmBookmarksLoadAndRender === 'function') {
           pmBookmarksLoadAndRender();
         }
+        // Open and done: nothing left for the overlay's X to roll back. Left
+        // set, it made the X of any LATER long operation - a page edit
+        // being applied - "cancel opening this file": the document, its
+        // history and every page were dropped.
+        wasCreatingNewDocument = false;
 
       } catch (e) {
         console.error(e);
@@ -29481,6 +29503,10 @@
         if (wasCreatingNewDocument) historyPushSuspended = false;
       } finally {
         hideLoading();
+        // Merged (or failed): nothing left for the overlay's X to roll back
+        // (see pmLoadingIsCancelable).
+        wasCreatingNewDocument = false;
+        preMergePageCount = null;
       }
     }
 
