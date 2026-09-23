@@ -5049,6 +5049,39 @@
     }
 
     /*=== BLOCKED AT LOAD ===*/
+    /*Page-loading progress strip: top-right of the workspace, under the
+      document name at the top of the document and pinned under the menu
+      once that scrolls away (placed by pmLoadBarPlace). Fixed rather than
+      sticky, so it stays in view when a zoomed document scrolls sideways.*/
+    #pmLoadBar {
+      position: fixed;
+      top: 0; left: 0;
+      width: 120px;
+      height: 4px;
+      border-radius: 2px;
+      background: rgba(52, 152, 219, 0.2);
+      overflow: hidden;
+      z-index: 115;
+      pointer-events: none;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.3s ease, visibility 0s linear 0.3s;
+    }
+    #pmLoadBar.visible {
+      opacity: 1;
+      visibility: visible;
+      transition: opacity 0.2s ease;
+    }
+    #pmLoadBarFill {
+      height: 100%;
+      width: 0;
+      background: #3498db;
+      border-radius: 2px;
+      transition: width 0.25s ease;
+    }
+    html[data-theme="dark"] #pmLoadBar { background: rgba(255, 255, 255, 0.14); }
+    html[data-theme="dark"] #pmLoadBarFill { background: #4aa3e0; }
+
     #loadingOverlay {
       position: fixed;
       top: 0; left: 0; right: 0; bottom: 0;
@@ -7722,6 +7755,8 @@
     <pre class="pm-dd-live" id="pmDragDebugLive">ожидание перетаскивания…</pre>
     <pre class="pm-dd-log" id="pmDragDebugLog"></pre>
   </div>
+
+  <div id="pmLoadBar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-hidden="true"><div id="pmLoadBarFill"></div></div>
 
   <div class="main" id="scrollContainer">
     <div class="content-header">
@@ -12895,6 +12930,7 @@
         infoDiv.style.display = 'none';
       }
       updateHeaderLayout();
+      if (typeof pmLoadBarSchedule === 'function') pmLoadBarSchedule();
     }
 
     //Header Control:
@@ -21441,6 +21477,7 @@
       lazyThumbActiveCount = 0;
       lazyThumbPendingIdle = 0;
       lazyThumbLowActiveCount = 0;
+      pmLoadBarSchedule();
     }
 
     function lazyThumbQueueHas(idx) {
@@ -21466,11 +21503,13 @@
       lazyThumbLoading.add(job.idx);
       lazyThumbActiveCount++;
       if (isLow) lazyThumbLowActiveCount++;
+      pmLoadBarSchedule();
       loadLazyThumbnail(job.idx, job.operationId).finally(() => {
         lazyThumbLoading.delete(job.idx);
         lazyThumbActiveCount--;
         if (isLow) lazyThumbLowActiveCount--;
         pumpLazyThumbnailQueue();
+        pmLoadBarSchedule();
       });
     }
 
@@ -21529,6 +21568,7 @@
         lazyThumbQueueLow.push({ idx, operationId });
       }
       pumpLazyThumbnailQueue();
+      pmLoadBarSchedule();
     }
 
     function startLazyThumbnailBackgroundPrefetch(operationId, numPages) {
@@ -21577,6 +21617,145 @@
       for (let d = 0; d <= PM_LITE_PREFETCH_RADIUS; d++) {
         if (center + d <= hi) scheduleLazyThumbnailLoad(center + d, operationId, 'low');
         if (d && center - d >= lo) scheduleLazyThumbnailLoad(center - d, operationId, 'low');
+      }
+      pmLoadBarSchedule();
+    }
+
+    // ---- Page-loading progress strip (#pmLoadBar) ------------------------
+    // Shown while the thumbnail pipeline still has pages to draw for the
+    // document on screen, gone once it has none. "None left" rather than
+    // "every page drawn": a page that fails to render is not retried until
+    // it scrolls into view again, and lite mode deliberately leaves far
+    // pages for later - either would otherwise keep the strip up forever.
+    // In lite mode a scroll into undrawn pages brings it back for that
+    // stretch, which is real loading the user is waiting on.
+    let pmLoadBarRaf = 0;
+    let pmLoadBarHideTimer = null;
+    let pmLoadBarShown = false;
+    let pmLoadBarBase = 0;        // pages already drawn when the strip appeared
+    let pmLoadBarShownFrac = 0;   // never moves backwards while shown
+    let pmLoadBarShowTimer = null;
+    // Work that finishes within this long (an undo re-drawing a short
+    // document, a few pages scrolled into view) does not flash the strip.
+    const PM_LOAD_BAR_SHOW_DELAY = 400;
+    function pmLoadBarOutstanding() {
+      if (!pdfDoc || !lazyThumbNumPages || isLoadingCancelled) return 0;
+      const pending = new Set(lazyThumbLoading);
+      const add = (j) => {
+        if (j.operationId === activeOperationId && !lazyThumbLoaded.has(j.idx)) pending.add(j.idx);
+      };
+      lazyThumbQueueHigh.forEach(add);
+      lazyThumbQueueLow.forEach(add);
+      return pending.size;
+    }
+    function pmLoadBarSchedule() {
+      if (pmLoadBarRaf) return;
+      pmLoadBarRaf = requestAnimationFrame(() => { pmLoadBarRaf = 0; pmLoadBarUpdate(); });
+    }
+    function pmLoadBarUpdate() {
+      const bar = document.getElementById('pmLoadBar');
+      const fill = document.getElementById('pmLoadBarFill');
+      if (!bar || !fill) return;
+      const left = pmLoadBarOutstanding();
+      const done = lazyThumbLoaded.size;
+      if (left > 0) {
+        clearTimeout(pmLoadBarHideTimer);
+        pmLoadBarHideTimer = null;
+        if (!pmLoadBarShown) {
+          if (!pmLoadBarShowTimer) pmLoadBarShowTimer = setTimeout(pmLoadBarReveal, PM_LOAD_BAR_SHOW_DELAY);
+          return;
+        }
+        const drawn = Math.max(0, done - pmLoadBarBase);
+        const total = pmLiteActive ? drawn + left : Math.max(1, lazyThumbNumPages - pmLoadBarBase);
+        pmLoadBarShownFrac = Math.max(pmLoadBarShownFrac, Math.min(1, drawn / total));
+        fill.style.width = (pmLoadBarShownFrac * 100).toFixed(1) + '%';
+        bar.setAttribute('aria-valuenow', String(Math.round(pmLoadBarShownFrac * 100)));
+        bar.title = t('loadingPagesProgress', { cur: done, total: lazyThumbNumPages });
+        pmLoadBarPlace();
+      } else if (pmLoadBarShown && !pmLoadBarHideTimer) {
+        // Nothing left: let the strip reach the end, then fade it out. The
+        // pause also rides out the brief gap between the first visible
+        // pages and the background fill being queued, so it does not blink.
+        if (pdfDoc && lazyThumbNumPages) fill.style.width = '100%';
+        pmLoadBarHideTimer = setTimeout(() => {
+          pmLoadBarHideTimer = null;
+          if (pmLoadBarOutstanding() > 0) { pmLoadBarUpdate(); return; }
+          pmLoadBarShown = false;
+          bar.classList.remove('visible');
+        }, pdfDoc && lazyThumbNumPages ? 600 : 0);
+      }
+    }
+    function pmLoadBarReveal() {
+      pmLoadBarShowTimer = null;
+      const bar = document.getElementById('pmLoadBar');
+      const fill = document.getElementById('pmLoadBarFill');
+      if (!bar || !fill || pmLoadBarShown || pmLoadBarOutstanding() === 0) return;
+      pmLoadBarShown = true;
+      // The whole document from the start when it is being loaded in full;
+      // just the stretch being filled in when it is not.
+      pmLoadBarBase = pmLiteActive ? lazyThumbLoaded.size : 0;
+      pmLoadBarShownFrac = 0;
+      fill.style.transition = 'none';
+      fill.style.width = '0%';
+      void fill.offsetWidth;
+      fill.style.transition = '';
+      bar.classList.add('visible');
+      pmLoadBarUpdate();
+    }
+    // Top-right corner of the workspace: under the document name while the
+    // top of the document is on screen, and under the menu (or, with the
+    // menu tucked away on a phone, under its floating button) after that.
+    function pmLoadBarPlace() {
+      if (!pmLoadBarShown) return;
+      const bar = document.getElementById('pmLoadBar');
+      if (!bar || !scrollContainer) return;
+      const sc = scrollContainer.getBoundingClientRect();
+      const GAP = 6;
+      const w = bar.offsetWidth || 120;
+      let right = sc.left + scrollContainer.clientLeft + scrollContainer.clientWidth - 12;
+      // The phone's scroll rail floats over the right edge of the workspace.
+      const rail = document.getElementById('mobileScrollRail');
+      if (rail && getComputedStyle(rail).display !== 'none') {
+        const r = rail.getBoundingClientRect();
+        if (r.width && r.left < right + 12) right = Math.min(right, r.left - 6);
+      }
+      let top = sc.top + GAP;
+      const header = document.querySelector('.content-header');
+      const nameBox = (infoDiv && infoDiv.style.display !== 'none') ? infoDiv : header;
+      if (nameBox) {
+        // Just under the name: the gap down to the first row of pages is
+        // only a few pixels on a desktop.
+        const r = nameBox.getBoundingClientRect();
+        if (r.height) top = Math.max(top, r.bottom + 2);
+      }
+      // Buttons that float over the top-right corner of the workspace (the
+      // menu button once the menu is tucked away, the reading-mode zoom).
+      ['menuToggleBtn', 'desktopMenuToggleBtn', 'readModeScaleOverlay'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el || getComputedStyle(el).position !== 'fixed') return;
+        const r = el.getBoundingClientRect();
+        if (r.width && r.height && r.left < right && r.right > right - w && r.top < top + 4 + GAP && r.bottom + GAP > top) {
+          top = r.bottom + GAP;
+        }
+      });
+      bar.style.transform = 'translate(' + Math.round(right - w) + 'px,' + Math.round(top) + 'px)';
+    }
+    scrollContainer.addEventListener('scroll', () => { if (pmLoadBarShown) pmLoadBarPlace(); }, { passive: true });
+    window.addEventListener('resize', () => { if (pmLoadBarShown) pmLoadBarPlace(); });
+    if (typeof ResizeObserver === 'function') {
+      // The menu collapsing/expanding resizes the workspace without a scroll.
+      new ResizeObserver(() => { if (pmLoadBarShown) pmLoadBarPlace(); }).observe(scrollContainer);
+    }
+    {
+      // ...and on a phone the menu button starts or stops floating over the
+      // corner, with a short height animation in between.
+      const menu = document.getElementById('topMenu');
+      if (menu && typeof MutationObserver === 'function') {
+        new MutationObserver(() => {
+          if (!pmLoadBarShown) return;
+          requestAnimationFrame(pmLoadBarPlace);
+          setTimeout(pmLoadBarPlace, 260);
+        }).observe(menu, { attributes: true, attributeFilter: ['class'] });
       }
     }
 
