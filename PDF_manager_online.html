@@ -13918,6 +13918,10 @@
       if (typeof syncScrollLockFromContainer === 'function') syncScrollLockFromContainer();
     }
 
+    // Where a desktop double-click at fit-width zooms back out to, when
+    // fit-width was entered from a smaller view (see toggleFitWidthScale).
+    const PM_DESKTOP_DBLCLICK_OUT_SCALE = 100;
+
     function toggleFitWidthScale(opts) {
       if (isLoading || !pdfDoc) return;
       opts = opts || {};
@@ -13982,7 +13986,10 @@
         // max, alternating between those two rather than dropping all the
         // way out to fit-width. Pages with no measurable side margins have
         // no middle step and keep the old fit-width <-> max toggle.
-        const contentTarget = pmContentWidthScale(anchorPage, fitWidthTarget);
+        // That ladder is the phone's. A desktop double-click has no middle
+        // step and goes by where fit-width was entered from - see
+        // PM_DESKTOP_DBLCLICK_OUT_SCALE below.
+        const contentTarget = isTouchDevice ? pmContentWidthScale(anchorPage, fitWidthTarget) : null;
         // Landing on the content rung centres that content band horizontally
         // rather than leaving the view wherever the tapped point pinned it -
         // the whole point of the rung is that the text block fills the
@@ -14021,14 +14028,26 @@
           });
           return;
         }
-        // A repeat tap on the fit-width anchor always zooms in further to
-        // the max at the tapped point now - there's no "undo back to
-        // whatever scale it was before the first double-tap" anymore. The
+        // On a phone, a repeat tap on the fit-width anchor always zooms in
+        // further to the max at the tapped point - there's no "undo back to
+        // whatever scale it was before the first double-tap" there. The
         // only way back out to fit-width is a further repeat tap once at
         // max (the branch above), or manually zooming in past fit-width and
         // double-tapping (the fresh branch below already zooms back OUT to
         // fit-width in that case, since that's just "set scale to the
         // fit-width target" regardless of which direction it moves from).
+        // Desktop, at fit-width that was entered from a view no bigger than
+        // it (100%, or anything short of the page's width): the repeat
+        // double-click is a way back out, to 100% - not a further zoom in.
+        // Only fit-width entered from a BIGGER view goes on to max:
+        //   <= fit width -> dblclick -> fit width -> dblclick -> 100%
+        //    > fit width -> dblclick -> fit width -> dblclick -> max
+        if (!isTouchDevice && fitWidthSavedScale != null
+            && fitWidthSavedScale <= fitWidthTarget + 0.25) {
+          clearFitWidthToggle();
+          applyZoomScaleAtPoint(anchorPage, ptrX, ptrY, PM_DESKTOP_DBLCLICK_OUT_SCALE);
+          return;
+        }
         // Keep whatever fit-width scale the ladder started from: stepping
         // through the content-width view must not make THAT the scale a
         // later "back out of max" would restore.
