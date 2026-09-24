@@ -5049,6 +5049,39 @@
     }
 
     /*=== BLOCKED AT LOAD ===*/
+    /*Page-loading progress strip: top-right of the workspace, under the
+      document name at the top of the document and pinned under the menu
+      once that scrolls away (placed by pmLoadBarPlace). Fixed rather than
+      sticky, so it stays in view when a zoomed document scrolls sideways.*/
+    #pmLoadBar {
+      position: fixed;
+      top: 0; left: 0;
+      width: 120px;
+      height: 4px;
+      border-radius: 2px;
+      background: rgba(52, 152, 219, 0.2);
+      overflow: hidden;
+      z-index: 115;
+      pointer-events: none;
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.3s ease, visibility 0s linear 0.3s;
+    }
+    #pmLoadBar.visible {
+      opacity: 1;
+      visibility: visible;
+      transition: opacity 0.2s ease;
+    }
+    #pmLoadBarFill {
+      height: 100%;
+      width: 0;
+      background: #3498db;
+      border-radius: 2px;
+      transition: width 0.25s ease;
+    }
+    html[data-theme="dark"] #pmLoadBar { background: rgba(255, 255, 255, 0.14); }
+    html[data-theme="dark"] #pmLoadBarFill { background: #4aa3e0; }
+
     #loadingOverlay {
       position: fixed;
       top: 0; left: 0; right: 0; bottom: 0;
@@ -7723,6 +7756,8 @@
     <pre class="pm-dd-log" id="pmDragDebugLog"></pre>
   </div>
 
+  <div id="pmLoadBar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-hidden="true"><div id="pmLoadBarFill"></div></div>
+
   <div class="main" id="scrollContainer">
     <div class="content-header">
       <div id="headerPageCount" class="header-page-count" style="display:none;" aria-hidden="true">
@@ -7993,7 +8028,7 @@
             // loads, replacing the stub below - so from here on every
             // pdfjsLib.getDocument() call in this file goes straight to
             // pdf.js, not through the stub. Route those through the same
-            // argument preparation (shared worker, protected bytes).
+            // argument preparation (shared worker, a copy of the bytes).
             var lib = globalThis.pdfjsLib;
             if (lib && lib !== pdfjsLibStub && typeof lib.getDocument === 'function') {
               var realGetDocument = lib.getDocument;
@@ -8005,32 +8040,31 @@
           });
       });
     // pdf.js takes ownership of the bytes it is given: getDocument() transfers
-    // their ArrayBuffer to its worker, which empties it on this side. Bytes the
-    // editor keeps using - the file as opened, which pdf-lib parsed in place
-    // and which is also the first history step - are registered here, and a
-    // getDocument() handed any of them gets a copy instead. That one guard is
-    // what lets the open path share a single copy of the file between
-    // pdf-lib, originalFileBytes and history, rather than slicing off two
-    // defensive 100 MB copies of a big file up front.
-    var pmProtectedPdfBuffers = (typeof WeakSet === 'function') ? new WeakSet() : null;
-    function pmProtectPdfBytes(bytes) {
-      if (pmProtectedPdfBuffers && bytes && bytes.buffer) pmProtectedPdfBuffers.add(bytes.buffer);
-      return bytes;
+    // their ArrayBuffer to its worker, which empties it on this side. The
+    // editor hands it bytes it keeps using all over the place - the file as
+    // opened (which pdf-lib parsed in place), history steps, the cached
+    // bytes of the live document - and one of them emptied that way turned
+    // into "InvalidPDFException" on the next render, or into a document with
+    // no pages on the next undo. So pdf.js always gets a copy of its own: the
+    // copy is what goes to the worker, which needs one anyway, and the
+    // caller's bytes stay intact.
+    function pmOwnPdfBytesCopy(data) {
+      if (ArrayBuffer.isView(data)) return new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice();
+      if (data instanceof ArrayBuffer) return new Uint8Array(data).slice();
+      return data;
     }
-    function pmIsProtectedPdfBytes(bytes) {
-      return !!(pmProtectedPdfBuffers && bytes && ArrayBuffer.isView(bytes) &&
-        pmProtectedPdfBuffers.has(bytes.buffer));
-    }
-    // Every getDocument() call: protected bytes get copied, and every document
-    // goes to the shared classic worker when there is one (see
-    // pmPdfjsSharedWorker) - unless a caller brought its own.
+    // Every getDocument() call: the bytes get copied, and every document goes
+    // to the shared classic worker when there is one (see pmPdfjsSharedWorker)
+    // - unless a caller brought its own.
     function pmPrepareGetDocumentArgs(args) {
       var src = args[0];
       var rest = Array.prototype.slice.call(args, 1);
       if (src && (ArrayBuffer.isView(src) || src instanceof ArrayBuffer)) src = { data: src };
       if (!src || typeof src !== 'object') return args;
       var out = src;
-      if (pmIsProtectedPdfBytes(src.data)) out = Object.assign({}, out, { data: src.data.slice() });
+      if (src.data && (ArrayBuffer.isView(src.data) || src.data instanceof ArrayBuffer)) {
+        out = Object.assign({}, out, { data: pmOwnPdfBytesCopy(src.data) });
+      }
       if (pmPdfjsSharedWorker && !out.worker) out = Object.assign({}, out, { worker: pmPdfjsSharedWorker });
       if (out === args[0]) return args;
       return [out].concat(rest);
@@ -10888,11 +10922,26 @@
     document.addEventListener('dragend', stopAutoScroll);
     document.addEventListener('drop', stopAutoScroll);
 
+    // The overlay's X only means something while a file is being opened or
+    // merged in - the two operations cancelLoading() knows how to roll back
+    // (wasCreatingNewDocument / preMergePageCount, set by their callers
+    // before the overlay goes up). Anything else - applying a page edit,
+    // redacting, rendering - keeps running whatever the X does, and pressing
+    // it used to tear the page list down underneath that work.
+    function pmLoadingIsCancelable() {
+      return !!wasCreatingNewDocument || preMergePageCount != null;
+    }
+    function pmSyncLoadingCancelButton() {
+      const btn = loadingOverlay.querySelector('.close-btn');
+      if (btn) btn.style.display = pmLoadingIsCancelable() ? '' : 'none';
+    }
+
     function showLoading(text) {
       if (text == null || text === '') text = t('loadingPages');
       isLoading = true;
       //wasCreatingNewDocument is set explicitly in calling functions
       loadingText.textContent = text;
+      pmSyncLoadingCancelButton();
       loadingOverlay.style.display = 'flex';
       updateUIState();
     }
@@ -10931,11 +10980,13 @@
       updateUIState();
       pmDeferredLoadingTimer = setTimeout(() => {
         pmDeferredLoadingTimer = null;
+        pmSyncLoadingCancelButton();
         if (isLoading) loadingOverlay.style.display = 'flex';
       }, delayMs);
     }
 
     async function cancelLoading() {
+      if (!pmLoadingIsCancelable()) return;   // see pmLoadingIsCancelable
       isLoadingCancelled = true;
       activeOperationId++; //invalidate all pending tasks from the previous operation
       //Stop the download and clear the state
@@ -12194,8 +12245,18 @@
       return false;
     }
 
+    // While the page editor is open, its edits (a redact marks the document
+    // dirty) are not document-history steps yet: Save turns the session into
+    // those, dropping anything pushed meanwhile. Pushing anyway only cost a
+    // whole-document save per edit - and that save, running in the background
+    // on the very document the editor keeps drawing on, could write out a
+    // half-updated file.
+    function pmPageEditorOpen() {
+      try { return !!peState; } catch (_) { return false; }
+    }
+
     function scheduleHistoryPush() {
-      if (historyPushSuspended || undoRedoBusy || !pdfDoc) { historyChangeHint = null; return; }
+      if (historyPushSuspended || undoRedoBusy || !pdfDoc || pmPageEditorOpen()) { historyChangeHint = null; return; }
       flushSelectionHistorySync();
       //Step-by-step branch for turns: we fix the bytes of the document IMMEDIATELY (at the moment
       //operation) without waiting for the animation to finish. Otherwise, quick turns in a row
@@ -12474,7 +12535,7 @@
     }
 
     async function commitHistoryPush() {
-      if (historyPushSuspended || undoRedoBusy || !pdfDoc) return;
+      if (historyPushSuspended || undoRedoBusy || !pdfDoc || pmPageEditorOpen()) return;
       //We wait until the rotation/updating of the thumbnails is completed - otherwise it will be taken into the snapshot
       //an intermediate frame (old picture) will appear, and the step will be “broken”.
       if (isHistoryCaptureBusy()) {
@@ -12895,6 +12956,7 @@
         infoDiv.style.display = 'none';
       }
       updateHeaderLayout();
+      if (typeof pmLoadBarSchedule === 'function') pmLoadBarSchedule();
     }
 
     //Header Control:
@@ -13856,6 +13918,10 @@
       if (typeof syncScrollLockFromContainer === 'function') syncScrollLockFromContainer();
     }
 
+    // Where a desktop double-click at fit-width zooms back out to, when
+    // fit-width was entered from a smaller view (see toggleFitWidthScale).
+    const PM_DESKTOP_DBLCLICK_OUT_SCALE = 100;
+
     function toggleFitWidthScale(opts) {
       if (isLoading || !pdfDoc) return;
       opts = opts || {};
@@ -13920,7 +13986,10 @@
         // max, alternating between those two rather than dropping all the
         // way out to fit-width. Pages with no measurable side margins have
         // no middle step and keep the old fit-width <-> max toggle.
-        const contentTarget = pmContentWidthScale(anchorPage, fitWidthTarget);
+        // That ladder is the phone's. A desktop double-click has no middle
+        // step and goes by where fit-width was entered from - see
+        // PM_DESKTOP_DBLCLICK_OUT_SCALE below.
+        const contentTarget = isTouchDevice ? pmContentWidthScale(anchorPage, fitWidthTarget) : null;
         // Landing on the content rung centres that content band horizontally
         // rather than leaving the view wherever the tapped point pinned it -
         // the whole point of the rung is that the text block fills the
@@ -13959,14 +14028,26 @@
           });
           return;
         }
-        // A repeat tap on the fit-width anchor always zooms in further to
-        // the max at the tapped point now - there's no "undo back to
-        // whatever scale it was before the first double-tap" anymore. The
+        // On a phone, a repeat tap on the fit-width anchor always zooms in
+        // further to the max at the tapped point - there's no "undo back to
+        // whatever scale it was before the first double-tap" there. The
         // only way back out to fit-width is a further repeat tap once at
         // max (the branch above), or manually zooming in past fit-width and
         // double-tapping (the fresh branch below already zooms back OUT to
         // fit-width in that case, since that's just "set scale to the
         // fit-width target" regardless of which direction it moves from).
+        // Desktop, at fit-width that was entered from a view no bigger than
+        // it (100%, or anything short of the page's width): the repeat
+        // double-click is a way back out, to 100% - not a further zoom in.
+        // Only fit-width entered from a BIGGER view goes on to max:
+        //   <= fit width -> dblclick -> fit width -> dblclick -> 100%
+        //    > fit width -> dblclick -> fit width -> dblclick -> max
+        if (!isTouchDevice && fitWidthSavedScale != null
+            && fitWidthSavedScale <= fitWidthTarget + 0.25) {
+          clearFitWidthToggle();
+          applyZoomScaleAtPoint(anchorPage, ptrX, ptrY, PM_DESKTOP_DBLCLICK_OUT_SCALE);
+          return;
+        }
         // Keep whatever fit-width scale the ladder started from: stepping
         // through the content-width view must not make THAT the scale a
         // later "back out of max" would restore.
@@ -20516,10 +20597,9 @@
 
         // One copy of the file serves pdf-lib (which parsed it in place),
         // originalFileBytes and the first history step; pdf.js only ever gets
-        // copies of it (see pmProtectPdfBytes). Slicing it again for history,
+        // copies of it (see pmOwnPdfBytesCopy). Slicing it again for history,
         // as this used to, cost a full copy of the file - on a 100 MB scan
         // about half a second on a slow CPU, plus the memory.
-        pmProtectPdfBytes(pdfBytes);
         originalFileBytes = pdfBytes;
         const initialHistoryBytes = pdfBytes;
         pdfjsPreloadTask = earlyPdfjsTask || openPdfjsForThumbs(pdfBytes);
@@ -20549,6 +20629,11 @@
             typeof pmBookmarksLoadAndRender === 'function') {
           pmBookmarksLoadAndRender();
         }
+        // Open and done: nothing left for the overlay's X to roll back. Left
+        // set, it made the X of any LATER long operation - a page edit
+        // being applied - "cancel opening this file": the document, its
+        // history and every page were dropped.
+        wasCreatingNewDocument = false;
 
       } catch (e) {
         console.error(e);
@@ -21441,6 +21526,7 @@
       lazyThumbActiveCount = 0;
       lazyThumbPendingIdle = 0;
       lazyThumbLowActiveCount = 0;
+      pmLoadBarSchedule();
     }
 
     function lazyThumbQueueHas(idx) {
@@ -21466,11 +21552,13 @@
       lazyThumbLoading.add(job.idx);
       lazyThumbActiveCount++;
       if (isLow) lazyThumbLowActiveCount++;
+      pmLoadBarSchedule();
       loadLazyThumbnail(job.idx, job.operationId).finally(() => {
         lazyThumbLoading.delete(job.idx);
         lazyThumbActiveCount--;
         if (isLow) lazyThumbLowActiveCount--;
         pumpLazyThumbnailQueue();
+        pmLoadBarSchedule();
       });
     }
 
@@ -21529,6 +21617,7 @@
         lazyThumbQueueLow.push({ idx, operationId });
       }
       pumpLazyThumbnailQueue();
+      pmLoadBarSchedule();
     }
 
     function startLazyThumbnailBackgroundPrefetch(operationId, numPages) {
@@ -21577,6 +21666,145 @@
       for (let d = 0; d <= PM_LITE_PREFETCH_RADIUS; d++) {
         if (center + d <= hi) scheduleLazyThumbnailLoad(center + d, operationId, 'low');
         if (d && center - d >= lo) scheduleLazyThumbnailLoad(center - d, operationId, 'low');
+      }
+      pmLoadBarSchedule();
+    }
+
+    // ---- Page-loading progress strip (#pmLoadBar) ------------------------
+    // Shown while the thumbnail pipeline still has pages to draw for the
+    // document on screen, gone once it has none. "None left" rather than
+    // "every page drawn": a page that fails to render is not retried until
+    // it scrolls into view again, and lite mode deliberately leaves far
+    // pages for later - either would otherwise keep the strip up forever.
+    // In lite mode a scroll into undrawn pages brings it back for that
+    // stretch, which is real loading the user is waiting on.
+    let pmLoadBarRaf = 0;
+    let pmLoadBarHideTimer = null;
+    let pmLoadBarShown = false;
+    let pmLoadBarBase = 0;        // pages already drawn when the strip appeared
+    let pmLoadBarShownFrac = 0;   // never moves backwards while shown
+    let pmLoadBarShowTimer = null;
+    // Work that finishes within this long (an undo re-drawing a short
+    // document, a few pages scrolled into view) does not flash the strip.
+    const PM_LOAD_BAR_SHOW_DELAY = 400;
+    function pmLoadBarOutstanding() {
+      if (!pdfDoc || !lazyThumbNumPages || isLoadingCancelled) return 0;
+      const pending = new Set(lazyThumbLoading);
+      const add = (j) => {
+        if (j.operationId === activeOperationId && !lazyThumbLoaded.has(j.idx)) pending.add(j.idx);
+      };
+      lazyThumbQueueHigh.forEach(add);
+      lazyThumbQueueLow.forEach(add);
+      return pending.size;
+    }
+    function pmLoadBarSchedule() {
+      if (pmLoadBarRaf) return;
+      pmLoadBarRaf = requestAnimationFrame(() => { pmLoadBarRaf = 0; pmLoadBarUpdate(); });
+    }
+    function pmLoadBarUpdate() {
+      const bar = document.getElementById('pmLoadBar');
+      const fill = document.getElementById('pmLoadBarFill');
+      if (!bar || !fill) return;
+      const left = pmLoadBarOutstanding();
+      const done = lazyThumbLoaded.size;
+      if (left > 0) {
+        clearTimeout(pmLoadBarHideTimer);
+        pmLoadBarHideTimer = null;
+        if (!pmLoadBarShown) {
+          if (!pmLoadBarShowTimer) pmLoadBarShowTimer = setTimeout(pmLoadBarReveal, PM_LOAD_BAR_SHOW_DELAY);
+          return;
+        }
+        const drawn = Math.max(0, done - pmLoadBarBase);
+        const total = pmLiteActive ? drawn + left : Math.max(1, lazyThumbNumPages - pmLoadBarBase);
+        pmLoadBarShownFrac = Math.max(pmLoadBarShownFrac, Math.min(1, drawn / total));
+        fill.style.width = (pmLoadBarShownFrac * 100).toFixed(1) + '%';
+        bar.setAttribute('aria-valuenow', String(Math.round(pmLoadBarShownFrac * 100)));
+        bar.title = t('loadingPagesProgress', { cur: done, total: lazyThumbNumPages });
+        pmLoadBarPlace();
+      } else if (pmLoadBarShown && !pmLoadBarHideTimer) {
+        // Nothing left: let the strip reach the end, then fade it out. The
+        // pause also rides out the brief gap between the first visible
+        // pages and the background fill being queued, so it does not blink.
+        if (pdfDoc && lazyThumbNumPages) fill.style.width = '100%';
+        pmLoadBarHideTimer = setTimeout(() => {
+          pmLoadBarHideTimer = null;
+          if (pmLoadBarOutstanding() > 0) { pmLoadBarUpdate(); return; }
+          pmLoadBarShown = false;
+          bar.classList.remove('visible');
+        }, pdfDoc && lazyThumbNumPages ? 600 : 0);
+      }
+    }
+    function pmLoadBarReveal() {
+      pmLoadBarShowTimer = null;
+      const bar = document.getElementById('pmLoadBar');
+      const fill = document.getElementById('pmLoadBarFill');
+      if (!bar || !fill || pmLoadBarShown || pmLoadBarOutstanding() === 0) return;
+      pmLoadBarShown = true;
+      // The whole document from the start when it is being loaded in full;
+      // just the stretch being filled in when it is not.
+      pmLoadBarBase = pmLiteActive ? lazyThumbLoaded.size : 0;
+      pmLoadBarShownFrac = 0;
+      fill.style.transition = 'none';
+      fill.style.width = '0%';
+      void fill.offsetWidth;
+      fill.style.transition = '';
+      bar.classList.add('visible');
+      pmLoadBarUpdate();
+    }
+    // Top-right corner of the workspace: under the document name while the
+    // top of the document is on screen, and under the menu (or, with the
+    // menu tucked away on a phone, under its floating button) after that.
+    function pmLoadBarPlace() {
+      if (!pmLoadBarShown) return;
+      const bar = document.getElementById('pmLoadBar');
+      if (!bar || !scrollContainer) return;
+      const sc = scrollContainer.getBoundingClientRect();
+      const GAP = 6;
+      const w = bar.offsetWidth || 120;
+      let right = sc.left + scrollContainer.clientLeft + scrollContainer.clientWidth - 12;
+      // The phone's scroll rail floats over the right edge of the workspace.
+      const rail = document.getElementById('mobileScrollRail');
+      if (rail && getComputedStyle(rail).display !== 'none') {
+        const r = rail.getBoundingClientRect();
+        if (r.width && r.left < right + 12) right = Math.min(right, r.left - 6);
+      }
+      let top = sc.top + GAP;
+      const header = document.querySelector('.content-header');
+      const nameBox = (infoDiv && infoDiv.style.display !== 'none') ? infoDiv : header;
+      if (nameBox) {
+        // Just under the name: the gap down to the first row of pages is
+        // only a few pixels on a desktop.
+        const r = nameBox.getBoundingClientRect();
+        if (r.height) top = Math.max(top, r.bottom + 2);
+      }
+      // Buttons that float over the top-right corner of the workspace (the
+      // menu button once the menu is tucked away, the reading-mode zoom).
+      ['menuToggleBtn', 'desktopMenuToggleBtn', 'readModeScaleOverlay'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el || getComputedStyle(el).position !== 'fixed') return;
+        const r = el.getBoundingClientRect();
+        if (r.width && r.height && r.left < right && r.right > right - w && r.top < top + 4 + GAP && r.bottom + GAP > top) {
+          top = r.bottom + GAP;
+        }
+      });
+      bar.style.transform = 'translate(' + Math.round(right - w) + 'px,' + Math.round(top) + 'px)';
+    }
+    scrollContainer.addEventListener('scroll', () => { if (pmLoadBarShown) pmLoadBarPlace(); }, { passive: true });
+    window.addEventListener('resize', () => { if (pmLoadBarShown) pmLoadBarPlace(); });
+    if (typeof ResizeObserver === 'function') {
+      // The menu collapsing/expanding resizes the workspace without a scroll.
+      new ResizeObserver(() => { if (pmLoadBarShown) pmLoadBarPlace(); }).observe(scrollContainer);
+    }
+    {
+      // ...and on a phone the menu button starts or stops floating over the
+      // corner, with a short height animation in between.
+      const menu = document.getElementById('topMenu');
+      if (menu && typeof MutationObserver === 'function') {
+        new MutationObserver(() => {
+          if (!pmLoadBarShown) return;
+          requestAnimationFrame(pmLoadBarPlace);
+          setTimeout(pmLoadBarPlace, 260);
+        }).observe(menu, { attributes: true, attributeFilter: ['class'] });
       }
     }
 
@@ -28584,9 +28812,9 @@
       let working = bytes;
       try {
         // Parsed in place, not from a copy: pdf-lib keeps views into these
-        // bytes, and protecting them (pmProtectPdfBytes) is what keeps pdf.js
-        // from ever emptying them - a copy per open cost as much as the file.
-        const d = await PDFLib.PDFDocument.load(pmProtectPdfBytes(working));
+        // bytes, and pdf.js only ever gets copies of them (pmOwnPdfBytesCopy)
+        // - a copy per open cost as much as the file.
+        const d = await PDFLib.PDFDocument.load(working);
         d.getPageCount();
         preparedPdfLibDoc = d;
         return working;
@@ -28612,7 +28840,7 @@
       if (!working) return null;
 
       try {
-        const d = await PDFLib.PDFDocument.load(pmProtectPdfBytes(working));
+        const d = await PDFLib.PDFDocument.load(working);
         d.getPageCount();
         preparedPdfLibDoc = d;
         return working;
@@ -29294,6 +29522,10 @@
         if (wasCreatingNewDocument) historyPushSuspended = false;
       } finally {
         hideLoading();
+        // Merged (or failed): nothing left for the overlay's X to roll back
+        // (see pmLoadingIsCancelable).
+        wasCreatingNewDocument = false;
+        preMergePageCount = null;
       }
     }
 
@@ -38110,16 +38342,11 @@ async function peExitCropMode() {
       const b = peState.cropCancelBox;
       page.setCropBox(b.x, b.y, b.w, b.h);
 
-      const bytes = new Uint8Array(await pdfDoc.save());
-      const doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
-      const newPage = await doc.getPage(idx + 1);
-      try { peState.doc.destroy(); } catch (_) {}
-      peState.doc = doc;
-      peState.page = newPage;
+      await peLoadEditorPageFromLiveDoc();
 
       const div = pagesContainer.querySelector('.page[data-index="' + idx + '"]');
       const im = div ? div.querySelector('img') : null;
-      if (div && im) await renderPageImageInto(div, im, doc, idx + 1, idx, THUMBNAIL_SCALE);
+      if (div && im) await renderPageImageInto(div, im, peState.doc, 1, idx, THUMBNAIL_SCALE);
 
       peState.cropApplied = false;
       peState.cropCancelBox = null;
@@ -38413,12 +38640,7 @@ async function peCropConfirm() {
     peRemapPageRedactBookkeepingForCrop(page, oldCb, c, idx);
     setDocumentDirty(true);
 
-    const bytes = new Uint8Array(await pdfDoc.save());
-    const doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
-    const newPage = await doc.getPage(idx + 1);
-    try { peState.doc.destroy(); } catch (_) {}
-    peState.doc = doc;
-    peState.page = newPage;
+    await peLoadEditorPageFromLiveDoc();
     peState.cropPdf = null;
     peRedrawCrop();
 
@@ -38445,18 +38667,23 @@ async function peCropConfirm() {
   }
 }
 
-async function peReloadEditorPageFromPdfDoc() {
+// The page being edited, as pdf.js sees it in the live document - from a
+// copy of just that page (peSinglePageDoc) rather than a save and re-parse
+// of the whole file, which is what every redact, crop and undo in the editor
+// used to cost on a big document.
+async function peLoadEditorPageFromLiveDoc() {
   if (!peState || !pdfDoc) return;
-  const idx = peState.idx;
-  // pdf-lib content drawn AFTER save() is often dropped on the next save.
-  // Always reload the live document from the bytes we just wrote.
-  const bytes = peClonePdfBytes(await pdfDoc.save());
-  pdfDoc = await PDFLib.PDFDocument.load(peClonePdfBytes(bytes));
-  const doc = await pdfjsLib.getDocument({ data: peClonePdfBytes(bytes) }).promise;
-  const newPage = await doc.getPage(idx + 1);
+  const one = await peSinglePageDoc(pdfDoc, peState.idx);
+  const doc = await pdfjsLib.getDocument({ data: await one.save() }).promise;
+  const newPage = await doc.getPage(1);
   try { peState.doc.destroy(); } catch (_) {}
   peState.doc = doc;
   peState.page = newPage;
+}
+
+async function peReloadEditorPageFromPdfDoc() {
+  if (!peState || !pdfDoc) return;
+  await peLoadEditorPageFromLiveDoc();
   await peRenderStage();
 }
 
@@ -38470,14 +38697,17 @@ async function peRedactConfirm(o, opts) {
   if (!(target.w > 0.005 && target.h > 0.005)) return;
 
   peState.__redactConfirmBusy = true;
+  let ownsWriter = false;
   try {
     if (!skipLoading) showLoading(t('loadingRedactingInfo'));
     document.getElementById('peRedactConfirmBtn')?.blur();
+    ownsWriter = await peClaimLivePdfDocWriter();
 
-    // Snapshot for undo, then reload pdfDoc — save() leaves the in-memory
-    // doc stale, and a later drawRectangle would not show up (2nd+ redacts).
-    const bytesBefore = peClonePdfBytes(await pdfDoc.save());
-    pdfDoc = await PDFLib.PDFDocument.load(peClonePdfBytes(bytesBefore));
+    // Snapshot for undo. The live doc is drawn on as it is - a save used to
+    // leave it unable to take new drawing, so it was re-loaded from these
+    // bytes first; pePaintBlackRedactRect now starts a fresh content stream
+    // instead (peFreshContentStream), which on a big file saves a full parse.
+    const bytesBefore = await pdfDoc.save();
     peCommitEditorHistory(true);
     const undo = peState.undoStack || [];
     if (undo.length) {
@@ -38506,8 +38736,7 @@ async function peRedactConfirm(o, opts) {
     await peReloadEditorPageFromPdfDoc();
     if (typeof invalidatePageTextLayers === 'function') invalidatePageTextLayers();
 
-    const bytesAfter = peClonePdfBytes(await pdfDoc.save());
-    pdfDoc = await PDFLib.PDFDocument.load(peClonePdfBytes(bytesAfter));
+    const bytesAfter = await pdfDoc.save();
     peCommitEditorHistory(true);
     const undo2 = peState.undoStack || [];
     if (undo2.length) {
@@ -38531,7 +38760,8 @@ async function peRedactConfirm(o, opts) {
     console.error(err);
     alert(t('alertRedactAreaError') + ': ' + (err.message || err));
   } finally {
-    peState.__redactConfirmBusy = false;
+    if (ownsWriter) pdfDocCriticalWriterActive = false;
+    if (peState) peState.__redactConfirmBusy = false;
     if (!skipLoading) hideLoading();
   }
 }
@@ -38551,11 +38781,13 @@ async function peRedactNormalizedRegionsImmediate(regions, opts) {
   if (!ready.length) return false;
 
   peState.__redactConfirmBusy = true;
+  let ownsWriter = false;
   try {
     showLoading(opts.loadingMsg || t('loadingRedactingText'));
+    ownsWriter = await peClaimLivePdfDocWriter();
 
-    const bytesBefore = peClonePdfBytes(await pdfDoc.save());
-    pdfDoc = await PDFLib.PDFDocument.load(peClonePdfBytes(bytesBefore));
+    // Undo snapshot; the live doc takes the covers as it is (see peRedactConfirm).
+    const bytesBefore = await pdfDoc.save();
     peCommitEditorHistory(true);
     const undo = peState.undoStack || [];
     if (undo.length) {
@@ -38576,8 +38808,7 @@ async function peRedactNormalizedRegionsImmediate(regions, opts) {
     await peReloadEditorPageFromPdfDoc();
     if (typeof invalidatePageTextLayers === 'function') invalidatePageTextLayers();
 
-    const bytesAfter = peClonePdfBytes(await pdfDoc.save());
-    pdfDoc = await PDFLib.PDFDocument.load(peClonePdfBytes(bytesAfter));
+    const bytesAfter = await pdfDoc.save();
     peCommitEditorHistory(true);
     const undo2 = peState.undoStack || [];
     if (undo2.length) {
@@ -38596,7 +38827,8 @@ async function peRedactNormalizedRegionsImmediate(regions, opts) {
     alert(t('alertRedactTextError') + ': ' + (err.message || err));
     return false;
   } finally {
-    peState.__redactConfirmBusy = false;
+    if (ownsWriter) pdfDocCriticalWriterActive = false;
+    if (peState) peState.__redactConfirmBusy = false;
     hideLoading();
   }
 }
@@ -40622,8 +40854,14 @@ async function openPageEditor(idx, restoreSelection) {
   try {
     peSavePageSelectionForRestore(restoreSelection);
     showLoading(t('loadingOpenEditor'));
-    // We commit uncommitted edits to edit the current state
-    await commitHistoryPushForce();
+    // We commit uncommitted edits to edit the current state. With none
+    // waiting (no push scheduled or in flight), the history tip already IS
+    // the current state - forcing a commit anyway re-saved the whole document
+    // (seconds on a big file) only to push an equivalent step.
+    await historyCommitChain;
+    if (historyPushTimer || !(docHistoryIndex >= 0 && docHistory[docHistoryIndex])) {
+      await commitHistoryPushForce();
+    }
     let bytes = (docHistoryIndex >= 0 && docHistory[docHistoryIndex])
       ? docHistory[docHistoryIndex].pdfBytes : null;
     if (!bytes) bytes = new Uint8Array(await pdfDoc.save());
@@ -40791,13 +41029,9 @@ async function peRestoreEditorSnapshot(snap, isUndo) {
   try {
     if (snap.pdfBytes && pdfDoc) {
       try {
-        pdfDoc = await PDFLib.PDFDocument.load(snap.pdfBytes.slice());
-        const idx = peState.idx;
-        const doc = await pdfjsLib.getDocument({ data: snap.pdfBytes.slice() }).promise;
-        const newPage = await doc.getPage(idx + 1);
-        try { peState.doc.destroy(); } catch (_) {}
-        peState.doc = doc;
-        peState.page = newPage;
+        // Parsed in place: snapshot bytes are never written to.
+        pdfDoc = await PDFLib.PDFDocument.load(snap.pdfBytes);
+        await peLoadEditorPageFromLiveDoc();
       } catch (err) {
         console.warn('peRestoreEditorSnapshot: pdfBytes restore failed', err);
       }
@@ -40807,12 +41041,7 @@ async function peRestoreEditorSnapshot(snap, isUndo) {
       const curBox = { x: cur.x, y: cur.y, w: cur.width, h: cur.height };
       if (!peCropBoxesEqual(curBox, snap.pageCropBox)) {
         page.setCropBox(snap.pageCropBox.x, snap.pageCropBox.y, snap.pageCropBox.w, snap.pageCropBox.h);
-        const bytes = new Uint8Array(await pdfDoc.save());
-        const doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
-        const newPage = await doc.getPage(peState.idx + 1);
-        try { peState.doc.destroy(); } catch (_) {}
-        peState.doc = doc;
-        peState.page = newPage;
+        await peLoadEditorPageFromLiveDoc();
       }
     }
 
@@ -57723,6 +57952,29 @@ function peCopyImageCatalogEntries(srcDoc, destDoc) {
 // objects - it just captures whatever the page already looks like - which is
 // what makes it usable at export time, long after the shapes that triggered
 // it were baked and their metadata discarded.
+// A document holding just one page of `doc`. Everything that rewrites or
+// re-renders a single page on its own - scrubbing text under a redact box,
+// checking the result, falling back to a raster - used to save and re-parse
+// the WHOLE document for it, several times per page: on a 300-page scan that
+// was 100 MB per round trip, and a single "erase text" + Save ran for minutes
+// on a slow machine. pdf-lib's page copy brings the page's own resources and
+// flattens the inherited ones (Resources/MediaBox/CropBox/Rotate); the
+// optional-content setup lives in the catalog, so it is carried over too, or
+// layers hidden in the document would show up in a rasterized page.
+async function peSinglePageDoc(doc, pageIdx) {
+  const one = await PDFLib.PDFDocument.create();
+  const [p] = await one.copyPages(doc, [pageIdx]);
+  one.addPage(p);
+  try {
+    const key = PDFLib.PDFName.of('OCProperties');
+    const ocp = doc.catalog.get(key);
+    if (ocp && PDFLib.PDFObjectCopier) {
+      one.catalog.set(key, PDFLib.PDFObjectCopier.for(doc.context, one.context).copy(ocp));
+    }
+  } catch (_) {}
+  return one;
+}
+
 async function peRasterizePageInDoc(srcDoc, pageIdx) {
   const bytes = peClonePdfBytes(await srcDoc.save());
   const pj = await pdfjsLib.getDocument({ data: peClonePdfBytes(bytes) }).promise;
@@ -57762,6 +58014,30 @@ async function peRasterizePageInDoc(srcDoc, pageIdx) {
   }
 }
 
+// pdf-lib caches a page's content stream once the document has been saved:
+// anything drawn onto that stream afterwards silently never reaches the next
+// save. A fresh stream (appended to the page's /Contents) is always written
+// out, which is what lets the editor draw onto the live document without
+// first re-loading the whole file from its own freshly saved bytes.
+function peFreshContentStream(page) {
+  page.contentStream = undefined;
+  page.contentStreamRef = undefined;
+}
+
+// The editor draws covers straight onto the live pdfDoc (it used to swap in
+// a freshly loaded copy first, which kept it out of the way of background
+// saves of the old one). A save of the live doc still running from before -
+// HQ render, history - would write out a half-drawn page, so wait those out
+// and hold new ones back (whenPdfDocIdle) until the edit is done. Returns
+// whether this call took the writer role, for the matching release.
+async function peClaimLivePdfDocWriter() {
+  if (pdfDocCriticalWriterActive) return false;   // already inside Save
+  if (typeof whenPdfDocIdle === 'function') await whenPdfDocIdle();
+  await pdfDocSaveChain;
+  pdfDocCriticalWriterActive = true;
+  return true;
+}
+
 // Paint a solid redact rect in visual/normalized coords onto a page.
 // Does NOT scrub text here — export/save runs peApplyPendingRedactRasterization
 // (regional first, full-page JPEG only as fallback).
@@ -57785,6 +58061,7 @@ function pePaintBlackRedactRect(doc, pageIdx, region, fillColor, rotOverride) {
   const localX = full.x + minX * full.w;
   const localY = full.y + (1 - maxY) * full.h;
   const anchor = peRotatePointAround(localX, localY, full.x, full.y, rot);
+  peFreshContentStream(page);
   page.drawRectangle({
     x: anchor.x,
     y: anchor.y,
@@ -57820,8 +58097,11 @@ async function peApplyPendingRedactRasterization(doc) {
   for (let k = 0; k < indices.length; k++) {
     const idx = indices[k];
     let rebuilt = null;
+    // The page on its own (see peSinglePageDoc), so the per-page rewrite and
+    // verification below never serialize the rest of the document.
+    const one = await peSinglePageDoc(doc, idx);
     try {
-      rebuilt = await peBuildRegionalRedactedPage(doc, idx);
+      rebuilt = await peBuildRegionalRedactedPage(one, 0);
     } catch (err) {
       console.warn('peApplyPendingRedactRasterization: regional path failed', err);
       peLastRegionalFallbackReason = 'exception: ' + (err && err.message || err);
@@ -57829,9 +58109,9 @@ async function peApplyPendingRedactRasterization(doc) {
     }
     if (!rebuilt) {
       fallbackInfo.push('p' + (idx + 1) + ': ' + (peLastRegionalFallbackReason || 'unknown'));
-      rebuilt = await peRasterizePageInDoc(doc, idx);
+      rebuilt = await peRasterizePageInDoc(one, 0);
     }
-    const [replacement] = await doc.copyPages(rebuilt, [idx]);
+    const [replacement] = await doc.copyPages(rebuilt, [0]);
     doc.removePage(idx);
     doc.insertPage(idx, replacement);
     try {
@@ -60450,9 +60730,9 @@ async function peRemovePageTextInVisualRegion(doc, pageIdx, rectsOrMinX, minY, m
 // Legacy aliases — kept for compatibility, now routed through the regional
 // redact path used at save/export.
 async function peScrubPageRedactedRegions(doc, pageIdx) {
-  const rebuilt = await peBuildRegionalRedactedPage(doc, pageIdx);
+  const rebuilt = await peBuildRegionalRedactedPage(await peSinglePageDoc(doc, pageIdx), 0);
   if (!rebuilt) return false;
-  const [replacement] = await doc.copyPages(rebuilt, [pageIdx]);
+  const [replacement] = await doc.copyPages(rebuilt, [0]);
   doc.removePage(pageIdx);
   doc.insertPage(pageIdx, replacement);
   return true;
@@ -60632,6 +60912,39 @@ async function peAddHighlightCommentAnnots(page, o) {
   await peAddHighlightCommentAnnotsOnDoc(pdfDoc, page, o, vp);
 }
 
+// See collapseHistory in pageEditSave: above this many bytes of whole-document
+// saves, the page-editing session goes into history as a single step.
+const PE_SAVE_EXPAND_BUDGET_BYTES = 48 * 1024 * 1024;
+
+// Big-document Save: the live document already holds everything the session
+// did (redact covers drawn on it, rotation/crop/objects applied just above),
+// so it is saved ONCE and that becomes the single new history step, on top of
+// the step the editor was opened at. Pending redact covers are baked in here
+// on the live document first, one page at a time (peSinglePageDoc).
+async function peSaveLivePageEditAsOneStep(idx, persistObjs) {
+  const openIdx = peState && peState.histIndexAtOpen != null ? peState.histIndexAtOpen : docHistoryIndex;
+  if (openIdx >= 0 && openIdx < docHistory.length) {
+    docHistory = docHistory.slice(0, openIdx + 1);
+    docHistoryIndex = openIdx;
+  }
+  historyPushSuspended = true;
+  clearTimeout(historyPushTimer);
+  historyChangeHint = null;
+  try {
+    if (typeof peApplyPendingRedactRasterization === 'function'
+        && typeof pePageShouldFullRasterForRedact === 'function'
+        && pePageShouldFullRasterForRedact(pdfDoc.getPage(idx), idx)) {
+      pdfDoc = await peApplyPendingRedactRasterization(pdfDoc) || pdfDoc;
+      peSavePageEditorObjects(idx, persistObjs);
+    }
+    const bytes = new Uint8Array(await pdfDoc.save({ useObjectStreams: false }));
+    pePushPageEditHistoryBytes(bytes, idx, { deferThumbFill: true, skipEqualCheck: true });
+    return bytes;
+  } finally {
+    historyPushSuspended = false;
+  }
+}
+
 async function pageEditSave(options) {
   if (!peState || !pdfDoc) return;
   const openIdx = (options && typeof options.openIdx === 'number') ? options.openIdx : null;
@@ -60653,9 +60966,21 @@ async function pageEditSave(options) {
   }
   const idx = peState.idx;
   const baseRot = peState.baseRot;
-  const baselineBytes = peState.baselinePdfBytes
-    ? peState.baselinePdfBytes.slice()
-    : new Uint8Array(await pdfDoc.save());
+  // Expanding the editor's steps into document history (one Ctrl+Z per
+  // step) re-saves the whole document once per step, and keeps a full copy
+  // of it per step as well. Fine on an ordinary file; on a big one - a
+  // 300-page, 100 MB scan - an "erase text" + Save became a dozen 100 MB
+  // saves and re-parses and half a gigabyte of history, which on a slow,
+  // low-memory machine never seemed to finish. Past this budget the whole
+  // editing session goes into history as ONE step from the live document:
+  // one save, and Ctrl+Z after Save reverts the page as it was before the
+  // editor opened (the per-step undo inside the editor is unaffected).
+  const collapseHistory = !!peState.baselinePdfBytes &&
+    peState.baselinePdfBytes.length * Math.max(1, (peState.undoStack || []).length) > PE_SAVE_EXPAND_BUDGET_BYTES;
+  const baselineBytes = collapseHistory ? null
+    : peState.baselinePdfBytes
+      ? peState.baselinePdfBytes.slice()
+      : new Uint8Array(await pdfDoc.save());
   // Guards pdfDoc against a concurrent background thumbnail fill
   // (fillPendingSnapshots) reassigning it mid-flight - see the comment on
   // pdfDocCriticalWriterActive's declaration. Wait out any ALREADY in-flight
@@ -60663,6 +60988,9 @@ async function pageEditSave(options) {
   // when IT started, so one finishing after we've made our own changes here
   // would silently revert them.
   if (typeof whenPdfDocIdle === 'function') await whenPdfDocIdle();
+  // ...and any live-doc save already under way (HQ render, history): the
+  // big-document path below changes the live document itself.
+  await pdfDocSaveChain;
   pdfDocCriticalWriterActive = true;
   try {
     showLoading(openIdx != null ? t('loadingSavingAndNavigating') : t('loadingApplyingEdits'));
@@ -60708,85 +61036,90 @@ async function pageEditSave(options) {
     }
     peSavePageEditorObjects(idx, persistObjs);
 
-    // Snapshot the live page AFTER confirm/rotate/crop/meta. Expand rebuilds
-    // history from baseline + undo snaps and can leave the tip on pre-paint
-    // bytes — the editor still showed the black plate, so Save looked like
-    // “preview flashes then loses the redact”. These bytes are authoritative.
-    const contentMutated = !!(peState.pdfContentMutated || peState.cropApplied);
-    let authoritativeBytes = null;
-    if (contentMutated) {
-      authoritativeBytes = (typeof peClonePdfBytes === 'function')
-        ? peClonePdfBytes(await pdfDoc.save({ useObjectStreams: false }))
-        : new Uint8Array(await pdfDoc.save({ useObjectStreams: false }));
-    }
-
-    // Ensure the last editor snap reflects final objects + live crop/rotation.
-    peCommitEditorHistory(true);
-    const undoForExpand = (peState.undoStack || []).slice();
-    // Prefer the just-committed stack; fall back to pre-finalize copy.
-    const stack = undoForExpand.length ? undoForExpand : undoStack;
-
-    // Expand in-editor undo queue into document history (one Ctrl+Z per edit).
-    historyPushSuspended = true;
-    clearTimeout(historyPushTimer);
-    historyChangeHint = null;
-    const lastBytes = await peExpandPageEditHistoryIntoDoc(idx, baseRot, baselineBytes, stack);
-    historyPushSuspended = false;
-
-    let bytes = lastBytes || new Uint8Array(await pdfDoc.save({ useObjectStreams: false }));
-    if (authoritativeBytes) {
-      bytes = authoritativeBytes;
-    }
-
-    // Bake pending redact markers into the live page now (same path as
-    // export/print). Keeps the cover in the page stream so HQ / history-thumb
-    // fills cannot resurrect a pre-redact raster.
-    try {
-      pdfDoc = await PDFLib.PDFDocument.load(
-        (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
-      );
-      peSavePageEditorObjects(idx, persistObjs);
-      if (typeof peApplyPendingRedactRasterization === 'function'
-          && typeof pePageShouldFullRasterForRedact === 'function'
-          && pePageShouldFullRasterForRedact(pdfDoc.getPage(idx), idx)) {
-        let work = await PDFLib.PDFDocument.load(
-          (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
-        );
-        work = await peApplyPendingRedactRasterization(work) || work;
-        bytes = (typeof peClonePdfBytes === 'function')
-          ? peClonePdfBytes(await work.save({ useObjectStreams: false }))
-          : new Uint8Array(await work.save({ useObjectStreams: false }));
-        pdfDoc = await PDFLib.PDFDocument.load(
-          (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
-        );
-        peSavePageEditorObjects(idx, persistObjs);
-        // The metadata write above only touched the in-memory pdfDoc - bytes
-        // still holds the pre-write serialization from `work.save()` a few
-        // lines up. Every downstream consumer (originalFileBytes, the
-        // doc-history tip, and the pdf.js doc used for the grid thumbnail
-        // below) reads `bytes`, not pdfDoc, so without this the last fix-up
-        // write would silently never reach any of them.
-        bytes = (typeof peClonePdfBytes === 'function')
+    let bytes;
+    if (collapseHistory) {
+      bytes = await peSaveLivePageEditAsOneStep(idx, persistObjs);
+    } else {
+      // Snapshot the live page AFTER confirm/rotate/crop/meta. Expand rebuilds
+      // history from baseline + undo snaps and can leave the tip on pre-paint
+      // bytes — the editor still showed the black plate, so Save looked like
+      // “preview flashes then loses the redact”. These bytes are authoritative.
+      const contentMutated = !!(peState.pdfContentMutated || peState.cropApplied);
+      let authoritativeBytes = null;
+      if (contentMutated) {
+        authoritativeBytes = (typeof peClonePdfBytes === 'function')
           ? peClonePdfBytes(await pdfDoc.save({ useObjectStreams: false }))
           : new Uint8Array(await pdfDoc.save({ useObjectStreams: false }));
       }
-      // No pending redact raster: `bytes` already carries this page's final
-      // editor metadata (peApplyEditorHistorySnapToDoc, called for the last
-      // history step inside peExpandPageEditHistoryIntoDoc, wrote the same
-      // persistObjs into the very doc that produced these bytes/
-      // authoritativeBytes). The peSavePageEditorObjects call above just
-      // re-applies that identical metadata onto the freshly reloaded pdfDoc
-      // in memory - re-serializing the whole document again here reproduced
-      // functionally identical bytes at the cost of a second full-document
-      // save, which is what made Save take tens of seconds to minutes on
-      // large (hundreds-of-pages) documents.
-    } catch (err) {
-      console.warn('pageEditSave: post-expand content restamp failed', err);
+
+      // Ensure the last editor snap reflects final objects + live crop/rotation.
+      peCommitEditorHistory(true);
+      const undoForExpand = (peState.undoStack || []).slice();
+      // Prefer the just-committed stack; fall back to pre-finalize copy.
+      const stack = undoForExpand.length ? undoForExpand : undoStack;
+
+      // Expand in-editor undo queue into document history (one Ctrl+Z per edit).
+      historyPushSuspended = true;
+      clearTimeout(historyPushTimer);
+      historyChangeHint = null;
+      const lastBytes = await peExpandPageEditHistoryIntoDoc(idx, baseRot, baselineBytes, stack);
+      historyPushSuspended = false;
+
+      bytes = lastBytes || new Uint8Array(await pdfDoc.save({ useObjectStreams: false }));
+      if (authoritativeBytes) {
+        bytes = authoritativeBytes;
+      }
+
+      // Bake pending redact markers into the live page now (same path as
+      // export/print). Keeps the cover in the page stream so HQ / history-thumb
+      // fills cannot resurrect a pre-redact raster.
       try {
         pdfDoc = await PDFLib.PDFDocument.load(
           (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
         );
-      } catch (_) {}
+        peSavePageEditorObjects(idx, persistObjs);
+        if (typeof peApplyPendingRedactRasterization === 'function'
+            && typeof pePageShouldFullRasterForRedact === 'function'
+            && pePageShouldFullRasterForRedact(pdfDoc.getPage(idx), idx)) {
+          let work = await PDFLib.PDFDocument.load(
+            (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
+          );
+          work = await peApplyPendingRedactRasterization(work) || work;
+          bytes = (typeof peClonePdfBytes === 'function')
+            ? peClonePdfBytes(await work.save({ useObjectStreams: false }))
+            : new Uint8Array(await work.save({ useObjectStreams: false }));
+          pdfDoc = await PDFLib.PDFDocument.load(
+            (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
+          );
+          peSavePageEditorObjects(idx, persistObjs);
+          // The metadata write above only touched the in-memory pdfDoc - bytes
+          // still holds the pre-write serialization from `work.save()` a few
+          // lines up. Every downstream consumer (originalFileBytes, the
+          // doc-history tip, and the pdf.js doc used for the grid thumbnail
+          // below) reads `bytes`, not pdfDoc, so without this the last fix-up
+          // write would silently never reach any of them.
+          bytes = (typeof peClonePdfBytes === 'function')
+            ? peClonePdfBytes(await pdfDoc.save({ useObjectStreams: false }))
+            : new Uint8Array(await pdfDoc.save({ useObjectStreams: false }));
+        }
+        // No pending redact raster: `bytes` already carries this page's final
+        // editor metadata (peApplyEditorHistorySnapToDoc, called for the last
+        // history step inside peExpandPageEditHistoryIntoDoc, wrote the same
+        // persistObjs into the very doc that produced these bytes/
+        // authoritativeBytes). The peSavePageEditorObjects call above just
+        // re-applies that identical metadata onto the freshly reloaded pdfDoc
+        // in memory - re-serializing the whole document again here reproduced
+        // functionally identical bytes at the cost of a second full-document
+        // save, which is what made Save take tens of seconds to minutes on
+        // large (hundreds-of-pages) documents.
+      } catch (err) {
+        console.warn('pageEditSave: post-expand content restamp failed', err);
+        try {
+          pdfDoc = await PDFLib.PDFDocument.load(
+            (typeof peClonePdfBytes === 'function') ? peClonePdfBytes(bytes) : bytes.slice()
+          );
+        } catch (_) {}
+      }
     }
 
     if (typeof originalFileBytes !== 'undefined') originalFileBytes = bytes;
@@ -60800,18 +61133,23 @@ async function pageEditSave(options) {
 
     // Update the thumbnail of the edited page (also patches the history tip
     // via patchHistoryPending — intermediate undo thumbs fill in background).
-    const pj = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+    // pdfDoc holds exactly `bytes` here; the page is drawn from a copy of
+    // just that page (peSinglePageDoc) - parsing all of `bytes` for it took
+    // about ten seconds of a Save on a 100 MB scan with a slow CPU.
+    const pj = await pdfjsLib.getDocument({ data: await (await peSinglePageDoc(pdfDoc, idx)).save() }).promise;
     const div = pagesContainer.querySelector('.page[data-index="' + idx + '"]');
     const im = div ? div.querySelector('img') : null;
     if (div && im) {
-      await renderPageImageInto(div, im, pj, idx + 1, idx, THUMBNAIL_SCALE);
-      // Seed HQ cache from the same bytes so a later upgrade cannot redraw
-      // from a borrowed intermediate history snapshot without the redact.
+      await renderPageImageInto(div, im, pj, 1, idx, THUMBNAIL_SCALE);
+      // Seed the HQ raster of this page from the same content so a later
+      // upgrade cannot redraw it from a borrowed intermediate history
+      // snapshot without the redact. (The HQ document for the other pages is
+      // rebuilt from the live pdfDoc once borrows are over - getHQPdfjsDoc.)
       if (typeof currentScale !== 'undefined' && typeof HQ_SCALE_THRESHOLD !== 'undefined'
           && currentScale >= HQ_SCALE_THRESHOLD
           && typeof HQ_RENDER_SCALE !== 'undefined') {
         try {
-          const page = await pj.getPage(idx + 1);
+          const page = await pj.getPage(1);
           const effectiveRotation = typeof page.rotate === 'number' ? page.rotate : 0;
           const viewport = page.getViewport({ scale: HQ_RENDER_SCALE, rotation: effectiveRotation });
           const canvas = document.createElement('canvas');
@@ -60825,7 +61163,6 @@ async function pageEditSave(options) {
               seedCtx, idx, viewport.width, viewport.height);
           }
           im.src = canvas.toDataURL('image/jpeg', 0.92);
-          if (typeof hqPdfjsDoc !== 'undefined') hqPdfjsDoc = pj;
           if (typeof hqUpgraded !== 'undefined' && hqUpgraded) hqUpgraded.add(idx);
         } catch (err) {
           console.warn('pageEditSave: HQ seed failed', err);
@@ -60841,10 +61178,7 @@ async function pageEditSave(options) {
         }
       }
     }
-    // If HQ seeded hqPdfjsDoc = pj, do not destroy; otherwise release.
-    if (!(typeof hqPdfjsDoc !== 'undefined' && hqPdfjsDoc === pj)) {
-      try { pj.destroy && pj.destroy(); } catch (_) {}
-    }
+    try { pj.destroy && pj.destroy(); } catch (_) {}
     if (typeof scheduleSnapshotFill === 'function') scheduleSnapshotFill();
 
     syncDirtyFromHistory();
@@ -60852,6 +61186,10 @@ async function pageEditSave(options) {
     updateUIState();
     if (typeof updateInfo === 'function') updateInfo();
     await pageEditClose(true);
+    // The document is written; stop holding other writers off - otherwise the
+    // wait below waited on this very flag, a fixed 4 s (200 x 20 ms) added to
+    // every Save.
+    pdfDocCriticalWriterActive = false;
     // Wait out any in-flight history-thumb pdfDoc borrow before HQ save().
     if (typeof whenPdfDocIdle === 'function') await whenPdfDocIdle();
     // Restore sharp preview at the current zoom (invalidateHQ cleared HQ cache).
