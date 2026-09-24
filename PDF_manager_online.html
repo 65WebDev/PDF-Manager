@@ -62597,8 +62597,12 @@ function pmWmRunDialog() {
     function frameFor(idx) {
       try { return pmWmPageFrame(pdfDoc.getPage(idx)); } catch (_) { return null; }
     }
+    // The box's own size (not clientWidth/Height, which lose the scrollbar
+    // once one shows), less its 12px padding and a pixel of slack so the
+    // fitted page never spills over by a rounding fraction.
     function fitCssPerPt(fr) {
-      const w = Math.max(80, pvBox.clientWidth - 24), h = Math.max(80, pvBox.clientHeight - 24);
+      const b = pvBox.getBoundingClientRect();
+      const w = Math.max(80, b.width - 25), h = Math.max(80, b.height - 25);
       return Math.min(w / fr.W, h / fr.H);
     }
     // Canvas pixels per pt for the page at the current zoom (capped in area).
@@ -62614,8 +62618,11 @@ function pmWmRunDialog() {
       if (!fr) return null;
       const css = fitCssPerPt(fr) * zoom;
       const k = wantedPxPerPt(fr);
-      pv.style.width = Math.round(fr.W * css) + 'px';
-      pv.style.height = Math.round(fr.H * css) + 'px';
+      pv.style.width = Math.floor(fr.W * css) + 'px';
+      pv.style.height = Math.floor(fr.H * css) + 'px';
+      // Scrollbars only once zoomed in: at the fitted size there is nothing
+      // to scroll to.
+      pvBox.style.overflow = zoom > 1.001 ? 'auto' : 'hidden';
       const w = Math.max(1, Math.round(fr.W * k)), h = Math.max(1, Math.round(fr.H * k));
       if (pv.width !== w || pv.height !== h) { pv.width = w; pv.height = h; }
       return fr;
