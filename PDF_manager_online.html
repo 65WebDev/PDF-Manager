@@ -950,6 +950,7 @@
     .pm-wm-label { width: 100px; flex: none; color: #555; }
     .pm-wm-label2 { width: 170px; flex: none; color: #555; }
     .pm-wm-sub { padding-left: 107px; }
+    .pm-wm-controls input[type=range]:disabled { opacity: 0.5; }
     .pm-wm-sub.pm-wm-tile-opt { padding-left: 24px; }
     .pm-wm-off { opacity: 0.45; }
     .pm-wm-controls input[type=text],
@@ -963,7 +964,28 @@
     .pm-wm-controls select:focus { border-color: #3498db; }
     #pmWmText { flex: 1; min-width: 0; }
     #pmWmFont { flex: 1; min-width: 0; }
-    .pm-wm-controls input[type=number] { width: 66px; }
+    /*Number field with its own arrows (the native spinner is hidden - it is
+       painted as a dark system block that ignores the dialog's colours).*/
+    .pm-wm-num {
+      display: inline-flex; align-items: stretch; height: 30px; box-sizing: border-box;
+      border: 1px solid #bbb; border-radius: 6px; background: #fff; overflow: hidden;
+    }
+    .pm-wm-num:focus-within { border-color: #3498db; }
+    .pm-wm-controls .pm-wm-num input[type=number] {
+      width: 50px; border: none; border-radius: 0; padding: 0 4px 0 8px; background: transparent;
+      -moz-appearance: textfield; appearance: textfield;
+    }
+    .pm-wm-num input::-webkit-outer-spin-button,
+    .pm-wm-num input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .pm-wm-spin { display: flex; flex-direction: column; width: 18px; border-left: 1px solid #ddd; }
+    .pm-wm-spin button {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      padding: 0; border: none; background: transparent; color: #6b7785; cursor: pointer;
+    }
+    .pm-wm-spin button + button { border-top: 1px solid #ddd; }
+    .pm-wm-spin button:hover:not(:disabled) { background: #eaf3fb; color: #3498db; }
+    .pm-wm-spin button:disabled { cursor: default; }
+    .pm-wm-num:has(input:disabled) { opacity: 0.6; }
     .pm-wm-controls input[type=range] { flex: 1; min-width: 70px; accent-color: #3498db; }
     .pm-wm-controls input[type=color] { width: 34px; height: 28px; padding: 0 2px; border: 1px solid #bbb; border-radius: 6px; background: #fff; cursor: pointer; }
     .pm-wm-unit { color: #777; min-width: 14px; }
@@ -980,15 +1002,6 @@
       border: 2px solid #fff; box-shadow: 0 0 0 1px #bbb;
     }
     .pm-wm-swatch.active { box-shadow: 0 0 0 2px #3498db; }
-    .pm-wm-grid { display: grid; grid-template-columns: repeat(3, 24px); gap: 4px; }
-    .pm-wm-grid button {
-      width: 24px; height: 24px; padding: 0; cursor: pointer;
-      border: 1px solid #bbb; border-radius: 4px; background: #f2f4f6;
-    }
-    .pm-wm-grid button:hover:not(:disabled) { border-color: #3498db; }
-    .pm-wm-grid button.active { background: #3498db; border-color: #3498db; }
-    .pm-wm-grid button:disabled { opacity: 0.4; cursor: default; }
-    .pm-wm-hint { flex: 1; min-width: 120px; color: #888; font-size: 12px; line-height: 1.35; }
     .pm-wm-check { cursor: pointer; }
     .pm-wm-check input { margin: 0; accent-color: #3498db; }
     .pm-wm-pages { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 0; }
@@ -996,13 +1009,20 @@
     .pm-wm-pages input[type=radio] { margin: 0; accent-color: #3498db; }
     #pmWmRange { flex: 1; min-width: 0; }
     .pm-wm-preview-col { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+    .pm-wm-zoom { display: flex; align-items: center; gap: 6px; width: 440px; max-width: 100%; }
+    .pm-wm-zoom input[type=range] { flex: 1; min-width: 60px; accent-color: #3498db; }
+    .pm-wm-zoom .pm-wm-val { width: 44px; }
+    /*Scroll box: the page sits centred while it fits and scrolls once zoomed
+       past it (margin:auto on the grid item - centring that stays scrollable).*/
     .pm-wm-preview {
-      width: 440px; height: 520px; max-height: calc(100vh - 190px);
+      width: 440px; height: 520px; max-height: calc(100vh - 230px);
       background: rgba(120,130,145,0.14); border-radius: 8px;
-      display: flex; align-items: center; justify-content: center; overflow: hidden;
+      display: grid; overflow: auto; padding: 12px; box-sizing: border-box;
+      scrollbar-width: thin; overscroll-behavior: contain;
     }
-    .pm-wm-preview canvas { box-shadow: 0 2px 10px rgba(0,0,0,0.25); background: #fff; touch-action: none; }
+    .pm-wm-preview canvas { margin: auto; display: block; box-shadow: 0 2px 10px rgba(0,0,0,0.25); background: #fff; touch-action: none; }
     .pm-wm-preview canvas.draggable { cursor: move; }
+    .pm-wm-preview.panning, .pm-wm-preview.panning canvas { cursor: grabbing; }
     .pm-wm-nav { display: flex; align-items: center; gap: 10px; color: #555; }
     .pm-wm-error { min-height: 18px; color: #cc3d40; font-size: 13px; }
     .pm-wm-actions { display: flex; gap: 12px; justify-content: flex-end; }
@@ -1013,8 +1033,43 @@
     @media (max-width: 900px) {
       .pm-wm-body { flex-direction: column; overflow-y: auto; }
       .pm-wm-controls { width: auto; overflow: visible; }
-      .pm-wm-preview { width: 100%; height: 320px; }
+      .pm-wm-preview, .pm-wm-zoom { width: 100%; }
+      .pm-wm-preview { height: 320px; }
     }
+    /*Dark theme: .pm-modal-box turns all text light, so every light surface
+       of the dialog gets a dark one to stay readable.*/
+    html[data-theme="dark"] .pm-wm-box .pm-wm-controls input[type=text],
+    html[data-theme="dark"] .pm-wm-box .pm-wm-controls select,
+    html[data-theme="dark"] .pm-wm-box .pm-wm-num,
+    html[data-theme="dark"] .pm-wm-box input[type=color] {
+      background: #1c2128 !important; border-color: #4a5058 !important;
+    }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-controls select option { background: #1c2128; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-num:focus-within,
+    html[data-theme="dark"] .pm-wm-box .pm-wm-controls input[type=text]:focus,
+    html[data-theme="dark"] .pm-wm-box .pm-wm-controls select:focus { border-color: #3498db !important; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-spin,
+    html[data-theme="dark"] .pm-wm-box .pm-wm-spin button + button { border-color: #4a5058; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-spin button { color: #9aa4ae !important; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-spin button svg { color: inherit !important; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-spin button:hover:not(:disabled) { background: #2c3440; color: #5dade2 !important; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-tbtn,
+    html[data-theme="dark"] .pm-wm-box .pm-wm-cancel {
+      background: #333a44; border-color: #4a5058;
+    }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-tbtn:hover:not(:disabled),
+    html[data-theme="dark"] .pm-wm-box .pm-wm-cancel:hover { background: #3d4550; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-tbtn.active { background: #3498db; border-color: #3498db; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-label,
+    html[data-theme="dark"] .pm-wm-box .pm-wm-label2,
+    html[data-theme="dark"] .pm-wm-box .pm-wm-unit,
+    html[data-theme="dark"] .pm-wm-box .pm-wm-val,
+    html[data-theme="dark"] .pm-wm-box .pm-wm-nav span { color: #b8c0c8 !important; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-error { color: #ff7b7e !important; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-swatch { border-color: #262b33; box-shadow: 0 0 0 1px #5a6572; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-swatch.active { box-shadow: 0 0 0 2px #3498db; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-preview { background: rgba(255,255,255,0.05); }
+    html[data-theme="dark"] .pm-wm-box #pmWmRange::placeholder { color: #7d8791 !important; }
 
     /*Wrapper for cart button + visibility button for marked pages*/
     .delete-wrapper { position: relative; display: inline-flex; }
@@ -8885,8 +8940,8 @@
         tabRename: 'Переименовать', tabRenameTitle: 'Переименовать документ',
         watermarkTitle: 'Водяной знак', watermarkDefaultText: 'КОНФИДЕНЦИАЛЬНО',
         wmText: 'Текст', wmFont: 'Шрифт', wmBold: 'Жирный', wmItalic: 'Курсив', wmColor: 'Цвет',
-        wmSize: 'Размер', wmTransparency: 'Прозрачность', wmRotation: 'Поворот', wmPosition: 'Расположение',
-        wmDragHint: 'или перетащите знак мышью на предпросмотре',
+        wmSize: 'Размер', wmTransparency: 'Прозрачность', wmRotation: 'Поворот',
+        wmZoomHint: 'Alt + колесико мыши - изменение масштаба',
         wmTile: 'Замостить', wmGapX: 'Интервал по горизонтали', wmGapY: 'Интервал по вертикали',
         wmBrick: 'Смещать ряды в шахматном порядке',
         wmPages: 'Страницы', wmPagesAll: 'Все ({n})', wmPagesSelected: 'Выделенные ({n})', wmPagesRange: 'Диапазон',
@@ -9294,8 +9349,8 @@
         tabRename: 'Rename', tabRenameTitle: 'Rename document',
         watermarkTitle: 'Watermark', watermarkDefaultText: 'CONFIDENTIAL',
         wmText: 'Text', wmFont: 'Font', wmBold: 'Bold', wmItalic: 'Italic', wmColor: 'Color',
-        wmSize: 'Size', wmTransparency: 'Transparency', wmRotation: 'Rotation', wmPosition: 'Position',
-        wmDragHint: 'or drag the mark with the mouse in the preview',
+        wmSize: 'Size', wmTransparency: 'Transparency', wmRotation: 'Rotation',
+        wmZoomHint: 'Alt + mouse wheel - zoom',
         wmTile: 'Tile', wmGapX: 'Horizontal spacing', wmGapY: 'Vertical spacing',
         wmBrick: 'Offset alternate rows',
         wmPages: 'Pages', wmPagesAll: 'All ({n})', wmPagesSelected: 'Selected ({n})', wmPagesRange: 'Range',
@@ -9703,8 +9758,8 @@
         tabRename: 'Cambiar nombre', tabRenameTitle: 'Cambiar el nombre del documento',
         watermarkTitle: 'Marca de agua', watermarkDefaultText: 'CONFIDENCIAL',
         wmText: 'Texto', wmFont: 'Fuente', wmBold: 'Negrita', wmItalic: 'Cursiva', wmColor: 'Color',
-        wmSize: 'Tamaño', wmTransparency: 'Transparencia', wmRotation: 'Rotación', wmPosition: 'Posición',
-        wmDragHint: 'o arrastre la marca con el ratón en la vista previa',
+        wmSize: 'Tamaño', wmTransparency: 'Transparencia', wmRotation: 'Rotación',
+        wmZoomHint: 'Alt + rueda del ratón - cambiar el zoom',
         wmTile: 'Mosaico', wmGapX: 'Espaciado horizontal', wmGapY: 'Espaciado vertical',
         wmBrick: 'Desplazar filas alternas',
         wmPages: 'Páginas', wmPagesAll: 'Todas ({n})', wmPagesSelected: 'Seleccionadas ({n})', wmPagesRange: 'Rango',
@@ -10162,8 +10217,8 @@
         tabRename: '重命名',
         watermarkTitle: '水印', watermarkDefaultText: '机密',
         wmText: '文本', wmFont: '字体', wmBold: '粗体', wmItalic: '斜体', wmColor: '颜色',
-        wmSize: '大小', wmTransparency: '透明度', wmRotation: '旋转', wmPosition: '位置',
-        wmDragHint: '或在预览中用鼠标拖动水印',
+        wmSize: '大小', wmTransparency: '透明度', wmRotation: '旋转',
+        wmZoomHint: 'Alt + 鼠标滚轮 - 缩放',
         wmTile: '平铺', wmGapX: '水平间距', wmGapY: '垂直间距',
         wmBrick: '交错排列行',
         wmPages: '页面', wmPagesAll: '全部 ({n})', wmPagesSelected: '所选 ({n})', wmPagesRange: '范围',
@@ -12671,7 +12726,15 @@
     //we collect from the previous step + redrawing only the changed pages according to
     //bytes of EXACTLY this step - therefore each step is visually correct, and UNDO
     //does not require re-downloading.
-    async function commitHistoryStep(savePromise, marked, hint) {
+    // opts.lazyPages: the changed pages get no picture in this step at all
+    // instead of a "pending" one. Pending pages are drawn in the background
+    // right away, all in one go and holding the live pdfDoc for as long as
+    // that takes - fine for the few pages a rotate touches, but a change to
+    // every page of a big document (a watermark) meant hundreds of renders
+    // with the document tied up the whole time. Picture-less pages are drawn
+    // like any not yet seen page instead: when they come into view after an
+    // undo/redo returns to this step.
+    async function commitHistoryStep(savePromise, marked, hint, opts) {
       if (historyPushSuspended || undoRedoBusy || !pdfDoc) return;
       let pdfBytes;
       try { pdfBytes = await savePromise; } catch (e) { return; }
@@ -12693,8 +12756,12 @@
       if (cur && cur.pages && cur.pages.length) {
         pages = cur.pages.map(p => ({ src: p.src, rotated: p.rotated }));
         pendingIdx = [];
+        const lazy = !!(opts && opts.lazyPages);
         hint.forEach(i => {
-          if (pages[i]) {
+          if (!pages[i]) return;
+          if (lazy) {
+            pages[i] = { src: '', rotated: pages[i].rotated };
+          } else {
             pages[i] = { src: pages[i].src, rotated: pages[i].rotated, pending: true };
             pendingIdx.push(i);
           }
@@ -17845,6 +17912,8 @@
     window.addEventListener('keyup', (e) => {
       if (isTouchDevice || !pdfDoc) return;
       if (e.key !== 'Alt' && e.code !== 'AltLeft' && e.code !== 'AltRight') return;
+      // A dialog is up: focus stays in it (the page behind cannot take keys).
+      if (document.querySelector('.modal-overlay-active')) return;
       // Changing the keyboard layout (usually Alt+Shift) also releases Alt - do not select it
       // input fields (for example, the search bar) have focus, otherwise the layout loses focus.
       const tag = (e.target.tagName || '').toLowerCase();
@@ -61870,7 +61939,7 @@ const PM_WM_FONT_CANDIDATES = [
   'Lucida Console', 'Comic Sans MS', 'DejaVu Sans', 'DejaVu Serif', 'Liberation Sans',
   'Liberation Serif', 'Noto Sans', 'Noto Serif', 'Ubuntu', 'PT Sans', 'PT Serif'
 ];
-const PM_WM_SWATCHES = ['#808080', '#e74c3c', '#2980b9', '#000000'];
+const PM_WM_SWATCHES = ['#808080', '#000000', '#e74c3c', '#2980b9'];
 // Raster density of the embedded text image: 300 dpi keeps the edges clean
 // in print and when zoomed in, while a mostly transparent PNG stays small.
 const PM_WM_PX_PER_PT = 300 / 72;
@@ -61889,7 +61958,7 @@ function pmWmDefaults() {
     size: 48,
     opacity: 30,
     angle: 45,
-    pos: { mode: 'grid', gx: 1, gy: 1 },
+    pos: { fx: 0.5, fy: 0.5 },
     tile: false,
     gapX: 60,
     gapY: 60,
@@ -61918,12 +61987,9 @@ function pmWmSanitize(s) {
   out.gapY = pmWmClampNum(out.gapY, 0, 2000, d.gapY);
   out.tile = !!out.tile;
   out.brick = !!out.brick;
+  // Centre of the mark as a share of the page's width / height.
   const p = out.pos || {};
-  if (p.mode === 'free') {
-    out.pos = { mode: 'free', fx: pmWmClampNum(p.fx, 0, 1, 0.5), fy: pmWmClampNum(p.fy, 0, 1, 0.5) };
-  } else {
-    out.pos = { mode: 'grid', gx: Math.round(pmWmClampNum(p.gx, 0, 2, 1)), gy: Math.round(pmWmClampNum(p.gy, 0, 2, 1)) };
-  }
+  out.pos = { fx: pmWmClampNum(p.fx, 0, 1, 0.5), fy: pmWmClampNum(p.fy, 0, 1, 0.5) };
   return out;
 }
 
@@ -62046,17 +62112,7 @@ function pmWmPlacements(W, H, iw, ih, s) {
     }
     return out;
   }
-  if (s.pos.mode === 'free') return [{ cx: s.pos.fx * W, cy: s.pos.fy * H }];
-  // 9-point grid: the rotated bounding box sits against the chosen edges
-  // with a 5% margin (centred on an axis it does not fit along).
-  const bw = Math.abs(iw * cos) + Math.abs(ih * sin);
-  const bh = Math.abs(iw * sin) + Math.abs(ih * cos);
-  const m = Math.min(W, H) * 0.05;
-  const place = (g, L, b) => {
-    if (g === 1 || b + 2 * m > L) return L / 2;
-    return g === 0 ? m + b / 2 : L - m - b / 2;
-  };
-  return [{ cx: place(s.pos.gx, W, bw), cy: place(s.pos.gy, H, bh) }];
+  return [{ cx: s.pos.fx * W, cy: s.pos.fy * H }];
 }
 
 // The page as seen: its visual size, plus what peOverlayPlacement needs to
@@ -62116,19 +62172,21 @@ async function pmWmCanvasToPngBytes(canvas) {
   return new Uint8Array(await blob.arrayBuffer());
 }
 
-// Page image for the preview: just that page, copied out and rendered.
-async function pmWmRenderPagePreview(idx, maxW, maxH) {
+// Page image for the preview, `pxPerPt` canvas pixels per pt of the page.
+// The live document's own pdf.js copy is used when there is one (a page of
+// an already parsed document renders at once); otherwise just that page is
+// copied out and rendered.
+async function pmWmRenderPagePreview(idx, pxPerPt) {
   if (typeof whenPdfDocIdle === 'function') await whenPdfDocIdle();
   if (!pdfDoc) return null;
-  const single = await peSinglePageDoc(pdfDoc, idx);
-  const pj = await pdfjsLib.getDocument({ data: await single.save() }).promise;
-  try {
-    const page = await pj.getPage(1);
+  let pj = null, own = false;
+  if (typeof hqPdfjsDoc !== 'undefined' && hqPdfjsDoc && hqPdfjsDoc.numPages === pdfDoc.getPageCount()) {
+    pj = hqPdfjsDoc;
+  }
+  const render = async (doc, pageNo) => {
+    const page = await doc.getPage(pageNo);
     const rot = typeof page.rotate === 'number' ? page.rotate : 0;
-    const vp1 = page.getViewport({ scale: 1, rotation: rot });
-    const scale = Math.min(maxW / vp1.width, maxH / vp1.height);
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const vp = page.getViewport({ scale: scale * dpr, rotation: rot });
+    const vp = page.getViewport({ scale: pxPerPt, rotation: rot });
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(1, Math.round(vp.width));
     canvas.height = Math.max(1, Math.round(vp.height));
@@ -62139,9 +62197,18 @@ async function pmWmRenderPagePreview(idx, maxW, maxH) {
     if (typeof peCompositeEditorObjectsOnCanvas === 'function') {
       try { await peCompositeEditorObjectsOnCanvas(ctx, idx, canvas.width, canvas.height); } catch (_) {}
     }
-    return { canvas, cssW: vp1.width * scale, cssH: vp1.height * scale };
+    return canvas;
+  };
+  if (pj) {
+    try { return await render(pj, idx + 1); } catch (_) { /* dropped meanwhile - copy the page out */ }
+  }
+  const single = await peSinglePageDoc(pdfDoc, idx);
+  pj = await pdfjsLib.getDocument({ data: await single.save() }).promise;
+  own = true;
+  try {
+    return await render(pj, 1);
   } finally {
-    try { pj.destroy(); } catch (_) {}
+    if (own) { try { pj.destroy(); } catch (_) {} }
   }
 }
 
@@ -62230,7 +62297,7 @@ async function pmWmApply(s, indices) {
   const marked = [...markedForDeletion].sort((x, y) => x - y);
   const historyBytes = bytes.slice();
   historyCommitChain = historyCommitChain
-    .then(() => commitHistoryStep(Promise.resolve(historyBytes), marked, indices))
+    .then(() => commitHistoryStep(Promise.resolve(historyBytes), marked, indices, { lazyPages: true }))
     .catch(e => console.warn('history commit error', e));
   documentDirty = true;
   if (typeof updateInfo === 'function') updateInfo();
@@ -62251,6 +62318,20 @@ async function openWatermarkDialog() {
   }
 }
 
+// Number field with its own up/down arrows (the native spinner is hidden:
+// it is drawn by the system as a dark block that does not follow the theme).
+function pmWmNumField(id, min, max, step) {
+  const up = '<svg viewBox="0 0 10 6" width="9" height="6" aria-hidden="true"><path d="M1 5l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const down = '<svg viewBox="0 0 10 6" width="9" height="6" aria-hidden="true"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  return `<span class="pm-wm-num"><input type="number" id="${id}" min="${min}" max="${max}" step="${step}">` +
+    `<span class="pm-wm-spin"><button type="button" tabindex="-1" data-dir="1">${up}</button>` +
+    `<button type="button" tabindex="-1" data-dir="-1">${down}</button></span></span>`;
+}
+
+const PM_WM_ZOOM_MAX = 5;
+// Canvas pixels the preview may use for the page at high zoom.
+const PM_WM_PREVIEW_MAX_PX = 16e6;
+
 function pmWmRunDialog() {
   return new Promise((resolve) => {
     const s = pmWmLoadSettings();
@@ -62260,10 +62341,16 @@ function pmWmRunDialog() {
     let rangeText = '';
     let previewPos = 0;
     let previewIdx = -1;
-    let previewData = null;       // { canvas, cssW, cssH } of previewIdx
+    let previewData = null;       // { canvas, pxPerPt } - page raster of previewIdx
     let previewToken = 0;
-    let textCache = null;         // { key, r } - rendered text at preview density
-    let drag = null;
+    const rasterCache = new Map(); // page index -> { canvas, pxPerPt }
+    let textCache = null;          // { key, r } - watermark text at preview density
+    let zoom = 1;
+    let drag = null;               // left button: moving the mark
+    let pan = null;                // right button: moving the view
+    let pointerInPreview = false;
+    let altGuard = false;
+    let rerenderTimer = null;
     let busy = false;
 
     const overlay = document.createElement('div');
@@ -62272,10 +62359,6 @@ function pmWmRunDialog() {
     box.className = 'pm-modal-box pm-wm-box';
     box.setAttribute('role', 'dialog');
     const esc = escapeHtml;
-    const gridCells = [];
-    for (let gy = 0; gy < 3; gy++) {
-      for (let gx = 0; gx < 3; gx++) gridCells.push(`<button type="button" data-gx="${gx}" data-gy="${gy}"></button>`);
-    }
     box.innerHTML = `
       <div class="pm-wm-title">${esc(t('watermarkTitle'))}</div>
       <div class="pm-wm-body">
@@ -62287,13 +62370,13 @@ function pmWmRunDialog() {
             <button type="button" class="pm-wm-tbtn" id="pmWmBold" title="${esc(t('wmBold'))}"><b>B</b></button>
             <button type="button" class="pm-wm-tbtn" id="pmWmItalic" title="${esc(t('wmItalic'))}"><i>I</i></button>
           </div>
+          <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('wmSize'))}</span>
+            <input type="range" id="pmWmSizeRange" min="8" max="200" step="1">
+            ${pmWmNumField('pmWmSize', 4, 400, 1)}<span class="pm-wm-unit">pt</span>
+          </div>
           <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('wmColor'))}</span>
             <input type="color" id="pmWmColor">
             ${PM_WM_SWATCHES.map(c => `<button type="button" class="pm-wm-swatch" data-color="${c}" style="background:${c}" title="${c}"></button>`).join('')}
-          </div>
-          <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('wmSize'))}</span>
-            <input type="range" id="pmWmSizeRange" min="8" max="200" step="1">
-            <input type="number" id="pmWmSize" min="4" max="400" step="1"><span class="pm-wm-unit">pt</span>
           </div>
           <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('wmTransparency'))}</span>
             <input type="range" id="pmWmTransp" min="0" max="99" step="1">
@@ -62306,17 +62389,13 @@ function pmWmRunDialog() {
           </div>
           <div class="pm-wm-row pm-wm-sub">
             <input type="range" id="pmWmAngleRange" min="-180" max="180" step="1">
-            <input type="number" id="pmWmAngle" min="-180" max="180" step="1"><span class="pm-wm-unit">°</span>
-          </div>
-          <div class="pm-wm-row pm-wm-row-top"><span class="pm-wm-label">${esc(t('wmPosition'))}</span>
-            <div class="pm-wm-grid" id="pmWmGrid">${gridCells.join('')}</div>
-            <span class="pm-wm-hint" id="pmWmDragHint">${esc(t('wmDragHint'))}</span>
+            ${pmWmNumField('pmWmAngle', -180, 180, 1)}<span class="pm-wm-unit">°</span>
           </div>
           <label class="pm-wm-row pm-wm-check"><input type="checkbox" id="pmWmTile"> <b>${esc(t('wmTile'))}</b></label>
           <div class="pm-wm-row pm-wm-sub pm-wm-tile-opt"><span class="pm-wm-label2">${esc(t('wmGapX'))}</span>
-            <input type="number" id="pmWmGapX" min="0" max="2000" step="5"><span class="pm-wm-unit">pt</span></div>
+            ${pmWmNumField('pmWmGapX', 0, 2000, 5)}<span class="pm-wm-unit">pt</span></div>
           <div class="pm-wm-row pm-wm-sub pm-wm-tile-opt"><span class="pm-wm-label2">${esc(t('wmGapY'))}</span>
-            <input type="number" id="pmWmGapY" min="0" max="2000" step="5"><span class="pm-wm-unit">pt</span></div>
+            ${pmWmNumField('pmWmGapY', 0, 2000, 5)}<span class="pm-wm-unit">pt</span></div>
           <label class="pm-wm-row pm-wm-sub pm-wm-tile-opt pm-wm-check"><input type="checkbox" id="pmWmBrick"> ${esc(t('wmBrick'))}</label>
           <div class="pm-wm-row pm-wm-row-top"><span class="pm-wm-label">${esc(t('wmPages'))}</span>
             <div class="pm-wm-pages">
@@ -62328,6 +62407,12 @@ function pmWmRunDialog() {
           </div>
         </div>
         <div class="pm-wm-preview-col">
+          <div class="pm-wm-zoom" title="${esc(t('wmZoomHint'))}">
+            <button type="button" class="pm-wm-tbtn" id="pmWmZoomOut">−</button>
+            <input type="range" id="pmWmZoom" min="100" max="${PM_WM_ZOOM_MAX * 100}" step="10" value="100">
+            <button type="button" class="pm-wm-tbtn" id="pmWmZoomIn">+</button>
+            <span class="pm-wm-val" id="pmWmZoomVal">100%</span>
+          </div>
           <div class="pm-wm-preview" id="pmWmPreviewBox"><canvas id="pmWmPreview"></canvas></div>
           <div class="pm-wm-nav">
             <button type="button" class="pm-wm-tbtn" id="pmWmPrev">◀</button>
@@ -62352,6 +62437,7 @@ function pmWmRunDialog() {
     const tileChk = $('pmWmTile'), gapXIn = $('pmWmGapX'), gapYIn = $('pmWmGapY'), brickChk = $('pmWmBrick');
     const rangeIn = $('pmWmRange'), errEl = $('pmWmError');
     const pv = $('pmWmPreview'), pvBox = $('pmWmPreviewBox');
+    const zoomRange = $('pmWmZoom'), zoomVal = $('pmWmZoomVal');
     const navLabel = $('pmWmNavLabel'), prevBtn = $('pmWmPrev'), nextBtn = $('pmWmNext');
 
     // ---- page targets ------------------------------------------------
@@ -62363,14 +62449,32 @@ function pmWmRunDialog() {
       return list.filter(i => !markedForDeletion.has(i));
     }
 
-    // ---- preview -------------------------------------------------------
-    function previewSize() {
-      const r = pvBox.getBoundingClientRect();
-      return { w: Math.max(80, r.width - 24), h: Math.max(80, r.height - 24) };
-    }
-
+    // ---- preview geometry: fit the page into the box, times the zoom ------
     function frameFor(idx) {
       try { return pmWmPageFrame(pdfDoc.getPage(idx)); } catch (_) { return null; }
+    }
+    function fitCssPerPt(fr) {
+      const w = Math.max(80, pvBox.clientWidth - 24), h = Math.max(80, pvBox.clientHeight - 24);
+      return Math.min(w / fr.W, h / fr.H);
+    }
+    // Canvas pixels per pt for the page at the current zoom (capped in area).
+    function wantedPxPerPt(fr) {
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      let k = fitCssPerPt(fr) * zoom * dpr;
+      const area = fr.W * fr.H * k * k;
+      if (area > PM_WM_PREVIEW_MAX_PX) k *= Math.sqrt(PM_WM_PREVIEW_MAX_PX / area);
+      return k;
+    }
+    function layoutCanvas() {
+      const fr = frameFor(previewIdx);
+      if (!fr) return null;
+      const css = fitCssPerPt(fr) * zoom;
+      const k = wantedPxPerPt(fr);
+      pv.style.width = Math.round(fr.W * css) + 'px';
+      pv.style.height = Math.round(fr.H * css) + 'px';
+      const w = Math.max(1, Math.round(fr.W * k)), h = Math.max(1, Math.round(fr.H * k));
+      if (pv.width !== w || pv.height !== h) { pv.width = w; pv.height = h; }
+      return fr;
     }
 
     function textAtPreview(k) {
@@ -62381,14 +62485,14 @@ function pmWmRunDialog() {
 
     function draw() {
       const ctx = pv.getContext('2d');
-      if (!previewData) {
-        ctx.clearRect(0, 0, pv.width, pv.height);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      const fr = previewIdx >= 0 ? frameFor(previewIdx) : null;
+      if (!previewData || !fr) {
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, pv.width, pv.height);
         return;
       }
-      const fr = frameFor(previewIdx);
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.drawImage(previewData.canvas, 0, 0, pv.width, pv.height);
-      if (!fr) return;
       const scale = pv.width / fr.W;              // canvas px per pt
       const r = textAtPreview(Math.max(0.5, scale));
       if (!r) return;
@@ -62404,32 +62508,109 @@ function pmWmRunDialog() {
       ctx.restore();
     }
 
-    async function loadPreviewPage() {
+    function cacheRaster(idx, data) {
+      rasterCache.delete(idx);
+      rasterCache.set(idx, data);
+      while (rasterCache.size > 8) rasterCache.delete(rasterCache.keys().next().value);
+    }
+    function cachedRaster(idx, k) {
+      const c = rasterCache.get(idx);
+      return (c && c.pxPerPt >= k * 0.9) ? c : null;
+    }
+
+    // Sharp raster of the shown page for the current zoom. Until it is
+    // there the preview keeps drawing whatever raster it has, stretched.
+    async function ensureRaster() {
+      const idx = previewIdx;
+      const fr = idx >= 0 ? frameFor(idx) : null;
+      if (!fr) return;
+      const k = wantedPxPerPt(fr);
+      const hit = cachedRaster(idx, k);
+      if (hit) { previewData = hit; draw(); return; }
+      const token = ++previewToken;
+      let canvas = null;
+      try { canvas = await pmWmRenderPagePreview(idx, k); } catch (e) { console.warn('watermark preview', e); }
+      if (!overlay.isConnected || !canvas) return;
+      const data = { canvas, pxPerPt: k };
+      cacheRaster(idx, data);
+      if (token !== previewToken || idx !== previewIdx) return;
+      previewData = data;
+      draw();
+      prefetchNext(idx);
+    }
+
+    // The next target page, at the plain fit size, so ▶ shows it at once.
+    let prefetching = false;
+    async function prefetchNext(idx) {
       const targets = targetIndices();
-      navLabel.textContent = targets.length
-        ? t('wmPreviewPage', { n: targets[Math.min(previewPos, targets.length - 1)] + 1, total: pageCount })
-        : '—';
+      const next = targets[targets.indexOf(idx) + 1];
+      if (next == null || prefetching) return;
+      const fr = frameFor(next);
+      if (!fr) return;
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const k = fitCssPerPt(fr) * dpr;
+      if (cachedRaster(next, k)) return;
+      prefetching = true;
+      try {
+        const canvas = await pmWmRenderPagePreview(next, k);
+        if (canvas && overlay.isConnected && !rasterCache.has(next)) cacheRaster(next, { canvas, pxPerPt: k });
+      } catch (_) {
+      } finally { prefetching = false; }
+    }
+
+    function loadPreviewPage() {
+      const targets = targetIndices();
+      if (previewPos > targets.length - 1) previewPos = Math.max(0, targets.length - 1);
+      const idx = targets.length ? targets[previewPos] : -1;
+      navLabel.textContent = idx >= 0 ? t('wmPreviewPage', { n: idx + 1, total: pageCount }) : '—';
       prevBtn.disabled = previewPos <= 0 || !targets.length;
       nextBtn.disabled = previewPos >= targets.length - 1 || !targets.length;
-      const idx = targets.length ? targets[Math.min(previewPos, targets.length - 1)] : -1;
-      if (idx === previewIdx && previewData) { draw(); return; }
-      previewIdx = idx;
-      previewData = null;
-      if (idx < 0) { draw(); return; }
-      const token = ++previewToken;
-      const sz = previewSize();
-      let data = null;
-      try { data = await pmWmRenderPagePreview(idx, sz.w, sz.h); } catch (e) { console.warn('watermark preview', e); }
-      if (token !== previewToken || !overlay.isConnected) return;
-      previewData = data;
-      if (data) {
-        pv.width = data.canvas.width;
-        pv.height = data.canvas.height;
-        pv.style.width = Math.round(data.cssW) + 'px';
-        pv.style.height = Math.round(data.cssH) + 'px';
+      if (idx !== previewIdx) {
+        previewIdx = idx;
+        // Any raster of this page (even a blurry one) beats an empty sheet.
+        previewData = idx >= 0 ? (rasterCache.get(idx) || null) : null;
+        pvBox.scrollLeft = 0;
+        pvBox.scrollTop = 0;
       }
+      layoutCanvas();
       draw();
+      ensureRaster();
     }
+
+    // ---- zoom (Alt + wheel over the preview, or the slider) ----------------
+    function setZoom(z, clientX, clientY) {
+      z = Math.min(PM_WM_ZOOM_MAX, Math.max(1, z));
+      if (Math.abs(z - zoom) < 1e-3) return;
+      const r0 = pv.getBoundingClientRect();
+      if (clientX == null) {
+        const b = pvBox.getBoundingClientRect();
+        clientX = b.left + b.width / 2;
+        clientY = b.top + b.height / 2;
+      }
+      // Keep the point under the cursor where it is.
+      const fx = r0.width ? (clientX - r0.left) / r0.width : 0.5;
+      const fy = r0.height ? (clientY - r0.top) / r0.height : 0.5;
+      zoom = z;
+      zoomRange.value = String(Math.round(zoom * 100));
+      zoomVal.textContent = Math.round(zoom * 100) + '%';
+      layoutCanvas();
+      const r1 = pv.getBoundingClientRect();
+      pvBox.scrollLeft += (r1.left + fx * r1.width) - clientX;
+      pvBox.scrollTop += (r1.top + fy * r1.height) - clientY;
+      draw();
+      clearTimeout(rerenderTimer);
+      rerenderTimer = setTimeout(ensureRaster, 180);
+    }
+    zoomRange.addEventListener('input', () => setZoom(Number(zoomRange.value) / 100));
+    $('pmWmZoomIn').addEventListener('click', () => setZoom(zoom * 1.25));
+    $('pmWmZoomOut').addEventListener('click', () => setZoom(zoom / 1.25));
+    pvBox.addEventListener('wheel', (e) => {
+      if (!e.altKey) return;              // plain wheel scrolls the zoomed page
+      e.preventDefault();
+      setZoom(zoom * Math.exp(-e.deltaY * 0.0015), e.clientX, e.clientY);
+    }, { passive: false });
+    pvBox.addEventListener('pointerenter', () => { pointerInPreview = true; });
+    pvBox.addEventListener('pointerleave', () => { pointerInPreview = false; });
 
     // ---- controls <-> settings -----------------------------------------
     function syncControls() {
@@ -62444,15 +62625,9 @@ function pmWmRunDialog() {
       angleRange.value = String(s.angle);
       if (document.activeElement !== angleIn) angleIn.value = String(s.angle);
       box.querySelectorAll('[data-angle]').forEach(b => b.classList.toggle('active', Number(b.dataset.angle) === s.angle));
-      box.querySelectorAll('#pmWmGrid button').forEach(b => {
-        b.disabled = s.tile;
-        b.classList.toggle('active', !s.tile && s.pos.mode === 'grid' &&
-          Number(b.dataset.gx) === s.pos.gx && Number(b.dataset.gy) === s.pos.gy);
-      });
-      $('pmWmDragHint').style.visibility = s.tile ? 'hidden' : '';
       tileChk.checked = s.tile;
       box.querySelectorAll('.pm-wm-tile-opt').forEach(el => el.classList.toggle('pm-wm-off', !s.tile));
-      gapXIn.disabled = gapYIn.disabled = brickChk.disabled = !s.tile;
+      box.querySelectorAll('.pm-wm-tile-opt input, .pm-wm-tile-opt button').forEach(el => { el.disabled = !s.tile; });
       if (document.activeElement !== gapXIn) gapXIn.value = String(s.gapX);
       if (document.activeElement !== gapYIn) gapYIn.value = String(s.gapY);
       brickChk.checked = s.brick;
@@ -62465,6 +62640,41 @@ function pmWmRunDialog() {
       draw();
     }
 
+    // A number field: typing applies while in range, leaving the field clamps.
+    function bindNumber(el, lo, hi, get, set) {
+      el.addEventListener('input', () => {
+        const v = Number(el.value);
+        if (el.value !== '' && Number.isFinite(v) && v >= lo && v <= hi) { set(v); changed(); }
+      });
+      el.addEventListener('change', () => { set(pmWmClampNum(el.value, lo, hi, get())); el.value = String(get()); changed(); });
+    }
+    // Own arrows: a click steps once, holding repeats.
+    box.querySelectorAll('.pm-wm-num').forEach(wrap => {
+      const input = wrap.querySelector('input');
+      wrap.querySelectorAll('.pm-wm-spin button').forEach(btn => {
+        let hold = null;
+        const stepOnce = () => {
+          if (input.disabled) return;
+          if (btn.dataset.dir === '1') input.stepUp(); else input.stepDown();
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        };
+        const stop = () => {
+          if (!hold) return;
+          clearTimeout(hold.t); clearInterval(hold.i); hold = null;
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        };
+        btn.addEventListener('pointerdown', (e) => {
+          if (e.button !== 0 || input.disabled) return;
+          e.preventDefault();
+          stepOnce();
+          hold = { t: setTimeout(() => { if (hold) hold.i = setInterval(stepOnce, 60); }, 400), i: null };
+        });
+        btn.addEventListener('pointerup', stop);
+        btn.addEventListener('pointerleave', stop);
+        btn.addEventListener('pointercancel', stop);
+      });
+    });
+
     textIn.value = s.text;
     textIn.addEventListener('input', () => { s.text = textIn.value; errEl.textContent = ''; draw(); });
     fontSel.addEventListener('change', () => { s.font = fontSel.value; changed(); });
@@ -62473,33 +62683,14 @@ function pmWmRunDialog() {
     colorIn.addEventListener('input', () => { s.color = colorIn.value; changed(); });
     box.querySelectorAll('.pm-wm-swatch').forEach(b => b.addEventListener('click', () => { s.color = b.dataset.color; changed(); }));
     sizeRange.addEventListener('input', () => { s.size = Number(sizeRange.value); sizeIn.value = sizeRange.value; changed(); });
-    sizeIn.addEventListener('input', () => {
-      const v = Number(sizeIn.value);
-      if (Number.isFinite(v) && v >= 4 && v <= 400) { s.size = v; changed(); }
-    });
-    sizeIn.addEventListener('change', () => { s.size = pmWmClampNum(sizeIn.value, 4, 400, s.size); sizeIn.value = String(s.size); changed(); });
+    bindNumber(sizeIn, 4, 400, () => s.size, v => { s.size = v; });
     transpRange.addEventListener('input', () => { s.opacity = 100 - Number(transpRange.value); changed(); });
     box.querySelectorAll('[data-angle]').forEach(b => b.addEventListener('click', () => { s.angle = Number(b.dataset.angle); angleIn.value = String(s.angle); changed(); }));
     angleRange.addEventListener('input', () => { s.angle = Number(angleRange.value); angleIn.value = angleRange.value; changed(); });
-    angleIn.addEventListener('input', () => {
-      const v = Number(angleIn.value);
-      if (Number.isFinite(v) && v >= -180 && v <= 180) { s.angle = v; changed(); }
-    });
-    angleIn.addEventListener('change', () => { s.angle = pmWmClampNum(angleIn.value, -180, 180, s.angle); angleIn.value = String(s.angle); changed(); });
-    box.querySelectorAll('#pmWmGrid button').forEach(b => b.addEventListener('click', () => {
-      s.pos = { mode: 'grid', gx: Number(b.dataset.gx), gy: Number(b.dataset.gy) };
-      changed();
-    }));
+    bindNumber(angleIn, -180, 180, () => s.angle, v => { s.angle = v; });
     tileChk.addEventListener('change', () => { s.tile = tileChk.checked; changed(); });
-    const gapInput = (el, key) => {
-      el.addEventListener('input', () => {
-        const v = Number(el.value);
-        if (Number.isFinite(v) && v >= 0 && v <= 2000) { s[key] = v; changed(); }
-      });
-      el.addEventListener('change', () => { s[key] = pmWmClampNum(el.value, 0, 2000, s[key]); el.value = String(s[key]); changed(); });
-    };
-    gapInput(gapXIn, 'gapX');
-    gapInput(gapYIn, 'gapY');
+    bindNumber(gapXIn, 0, 2000, () => s.gapX, v => { s.gapX = v; });
+    bindNumber(gapYIn, 0, 2000, () => s.gapY, v => { s.gapY = v; });
     brickChk.addEventListener('change', () => { s.brick = brickChk.checked; changed(); });
     box.querySelectorAll('input[name="pmWmPages"]').forEach(r => r.addEventListener('change', () => {
       if (!r.checked) return;
@@ -62522,7 +62713,7 @@ function pmWmRunDialog() {
     prevBtn.addEventListener('click', () => { if (previewPos > 0) { previewPos--; loadPreviewPage(); } });
     nextBtn.addEventListener('click', () => { previewPos++; loadPreviewPage(); });
 
-    // ---- drag on the preview (single watermark only) ---------------------
+    // ---- preview mouse: left button moves the mark, right button the view --
     function pointerPt(e) {
       const fr = frameFor(previewIdx);
       const rect = pv.getBoundingClientRect();
@@ -62533,8 +62724,23 @@ function pmWmRunDialog() {
         y: (e.clientY - rect.top) / rect.height * fr.H
       };
     }
-    pv.addEventListener('pointerdown', (e) => {
-      if (s.tile || !previewData || e.button !== 0) return;
+    function moveTo(p) {
+      s.pos = {
+        fx: Math.min(1, Math.max(0, (p.x - drag.offX) / p.fr.W)),
+        fy: Math.min(1, Math.max(0, (p.y - drag.offY) / p.fr.H))
+      };
+      changed();
+    }
+    pvBox.addEventListener('contextmenu', (e) => e.preventDefault());
+    pvBox.addEventListener('pointerdown', (e) => {
+      if (e.button === 2) {
+        pan = { id: e.pointerId, x: e.clientX, y: e.clientY, sl: pvBox.scrollLeft, st: pvBox.scrollTop };
+        try { pvBox.setPointerCapture(e.pointerId); } catch (_) {}
+        pvBox.classList.add('panning');
+        e.preventDefault();
+        return;
+      }
+      if (e.button !== 0 || e.target !== pv || s.tile || !previewData) return;
       const p = pointerPt(e);
       if (!p) return;
       const r = textAtPreview(Math.max(0.5, pv.width / p.fr.W));
@@ -62544,41 +62750,41 @@ function pmWmRunDialog() {
       const dx = p.x - c.cx, dy = p.y - c.cy;
       const u = dx * Math.cos(th) - dy * Math.sin(th);
       const v = dx * Math.sin(th) + dy * Math.cos(th);
-      // Grabbed the watermark: keep the grip point under the cursor.
-      // Pressed elsewhere: the watermark jumps to the cursor.
+      // Grabbed the mark: keep the grip point under the cursor.
+      // Pressed elsewhere: the mark jumps to the cursor.
       const inside = Math.abs(u) <= r.wPt / 2 && Math.abs(v) <= r.hPt / 2;
       drag = { offX: inside ? dx : 0, offY: inside ? dy : 0, id: e.pointerId };
-      try { pv.setPointerCapture(e.pointerId); } catch (_) {}
+      try { pvBox.setPointerCapture(e.pointerId); } catch (_) {}
       e.preventDefault();
       moveTo(p);
     });
-    function moveTo(p) {
-      s.pos = {
-        mode: 'free',
-        fx: Math.min(1, Math.max(0, (p.x - drag.offX) / p.fr.W)),
-        fy: Math.min(1, Math.max(0, (p.y - drag.offY) / p.fr.H))
-      };
-      changed();
-    }
-    pv.addEventListener('pointermove', (e) => {
+    pvBox.addEventListener('pointermove', (e) => {
+      if (pan && e.pointerId === pan.id) {
+        pvBox.scrollLeft = pan.sl - (e.clientX - pan.x);
+        pvBox.scrollTop = pan.st - (e.clientY - pan.y);
+        return;
+      }
       if (!drag || e.pointerId !== drag.id) return;
       const p = pointerPt(e);
       if (p) moveTo(p);
     });
-    const endDrag = (e) => {
-      if (!drag || e.pointerId !== drag.id) return;
-      drag = null;
-      try { pv.releasePointerCapture(e.pointerId); } catch (_) {}
+    const endPointer = (e) => {
+      if (pan && e.pointerId === pan.id) { pan = null; pvBox.classList.remove('panning'); }
+      else if (drag && e.pointerId === drag.id) drag = null;
+      else return;
+      try { pvBox.releasePointerCapture(e.pointerId); } catch (_) {}
     };
-    pv.addEventListener('pointerup', endDrag);
-    pv.addEventListener('pointercancel', endDrag);
+    pvBox.addEventListener('pointerup', endPointer);
+    pvBox.addEventListener('pointercancel', endPointer);
 
     // ---- close / apply ---------------------------------------------------
     let settled = false;
     function close(result) {
       if (settled) return;
       settled = true;
+      clearTimeout(rerenderTimer);
       document.removeEventListener('keydown', onKey, true);
+      document.removeEventListener('keyup', onKeyUp, true);
       window.removeEventListener('resize', onResize);
       if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
       resolve(result);
@@ -62601,6 +62807,7 @@ function pmWmRunDialog() {
     $('pmWmCancel').addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); close(false); });
     // A stray click outside must not throw away a watermark being set up.
     overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) e.preventDefault(); });
+    const isAlt = (e) => e.key === 'Alt' || e.code === 'AltLeft' || e.code === 'AltRight';
     // Capture phase, stopped here: the app's shortcuts (Delete, Q/W, P,
     // Ctrl+Z...) must not act on the document while the dialog is up.
     // Typing itself is a default action and still happens.
@@ -62610,13 +62817,19 @@ function pmWmRunDialog() {
           ['text', 'number'].includes(e.target.type)) {
         e.preventDefault(); e.stopPropagation(); apply(); return;
       }
+      // Alt for Alt+wheel over the preview must not open the browser's menu.
+      if (isAlt(e) && pointerInPreview) { e.preventDefault(); altGuard = true; }
       e.stopPropagation();
     };
+    const onKeyUp = (e) => {
+      if (isAlt(e) && altGuard) { e.preventDefault(); altGuard = false; }
+    };
     document.addEventListener('keydown', onKey, true);
+    document.addEventListener('keyup', onKeyUp, true);
     let resizeTimer = null;
     const onResize = () => {
       clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => { previewData = null; previewIdx = -1; loadPreviewPage(); }, 200);
+      resizeTimer = setTimeout(() => { layoutCanvas(); draw(); ensureRaster(); }, 200);
     };
     window.addEventListener('resize', onResize);
 
