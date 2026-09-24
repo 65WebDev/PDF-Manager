@@ -933,29 +933,36 @@
       display: flex; align-items: center; justify-content: center; z-index: 100001;
     }
     .pm-wm-box {
-      background: #fff; border-radius: 12px; padding: 16px 20px;
+      background: #fff; border-radius: 12px; padding: 8px 10px 10px;
       box-shadow: 0 10px 30px rgba(0,0,0,0.3);
-      display: flex; flex-direction: column; gap: 10px;
-      max-width: calc(100vw - 32px); max-height: calc(100vh - 32px);
+      display: flex; flex-direction: column; gap: 8px;
+      max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); overflow: auto;
       box-sizing: border-box; color: #2c3e50; font-size: 14px;
     }
-    .pm-wm-title { font-size: 17px; font-weight: 600; }
+    .pm-wm-title { font-size: 17px; font-weight: 600; padding: 2px 2px 0; }
     .pm-wm-body { display: flex; gap: 18px; min-height: 0; }
     .pm-wm-controls {
       width: 360px; flex: none; display: flex; flex-direction: column; gap: 6px;
-      overflow-y: auto; padding-right: 4px;
+      padding-right: 4px;
     }
     .pm-wm-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-height: 28px; }
     .pm-wm-row-top { align-items: flex-start; }
     .pm-wm-row-top .pm-wm-label { line-height: 22px; }
     .pm-wm-label { width: 96px; flex: none; color: #555; }
-    .pm-wm-label3 { color: #555; margin-right: 2px; }
     .pm-wm-sub { padding-left: 102px; }
     .pm-wm-push { flex: 1; }
-    .pm-wm-brick { margin-left: auto; }
-    .pm-wm-axis { color: #6b7785; font-size: 15px; }
+    /*The label column is 96px + 6px gap, so the brick checkbox, the "↔" of
+       the spacing row and the page radios all start on the same line.*/
+    .pm-wm-axis { color: #6b7785; font-size: 15px; width: 12px; text-align: center; }
+    .pm-wm-sep { border: none; border-top: 1px solid #e3e6ea; margin: 2px 0; width: 100%; }
+    /*Tiling options read as one group.*/
+    .pm-wm-tile-block {
+      display: flex; flex-direction: column; gap: 4px;
+      margin: 4px -9px; padding: 6px 8px;
+      border: 1px solid #e3e6ea; border-radius: 8px; background: rgba(120,130,145,0.06);
+    }
+    .pm-wm-check.pm-wm-label { display: flex; align-items: center; gap: 6px; color: inherit; }
     .pm-wm-controls input[type=range]:disabled { opacity: 0.5; }
-    .pm-wm-sub.pm-wm-tile-opt { padding-left: 24px; }
     .pm-wm-off { opacity: 0.45; }
     .pm-wm-controls input[type=text],
     .pm-wm-controls input[type=number],
@@ -1013,15 +1020,17 @@
     .pm-wm-pages label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
     .pm-wm-pages input[type=radio] { margin: 0; accent-color: #3498db; }
     #pmWmRange { flex: 1; min-width: 0; }
-    .pm-wm-preview-col { display: flex; flex-direction: column; align-items: center; gap: 8px; }
-    .pm-wm-zoom { display: flex; align-items: center; gap: 6px; width: 220px; max-width: 100%; }
-    .pm-wm-zoom input[type=range] { flex: 1; min-width: 60px; accent-color: #3498db; }
-    .pm-wm-zoom .pm-wm-val { width: 40px; font-size: 13px; }
-    .pm-wm-zoom .pm-wm-tbtn { min-width: 24px; height: 24px; padding: 0; }
+    .pm-wm-preview-col { display: flex; flex-direction: column; align-items: center; gap: 4px; position: relative; }
+    .pm-wm-zoom-badge {
+      position: absolute; top: 8px; right: 8px; padding: 2px 7px; border-radius: 10px;
+      background: rgba(30,36,44,0.72); color: #fff; font-size: 12px; pointer-events: none;
+      opacity: 0; transition: opacity 0.2s;
+    }
+    .pm-wm-zoom-badge.show { opacity: 1; }
     /*Scroll box: the page sits centred while it fits and scrolls once zoomed
        past it (margin:auto on the grid item - centring that stays scrollable).*/
     .pm-wm-preview {
-      width: 360px; height: 500px; max-height: calc(100vh - 200px);
+      width: 360px; height: 560px; max-height: calc(100vh - 130px);
       background: rgba(120,130,145,0.14); border-radius: 8px;
       display: grid; overflow: auto; padding: 12px; box-sizing: border-box;
       scrollbar-width: thin; overscroll-behavior: contain;
@@ -1029,9 +1038,10 @@
     .pm-wm-preview canvas { margin: auto; display: block; box-shadow: 0 2px 10px rgba(0,0,0,0.25); background: #fff; touch-action: none; }
     .pm-wm-preview canvas.draggable { cursor: move; }
     .pm-wm-preview.panning, .pm-wm-preview.panning canvas { cursor: grabbing; }
-    .pm-wm-nav { display: flex; align-items: center; gap: 10px; color: #555; }
-    .pm-wm-error { min-height: 18px; color: #cc3d40; font-size: 13px; }
-    .pm-wm-actions { display: flex; gap: 12px; justify-content: flex-end; }
+    .pm-wm-nav { display: flex; align-items: center; gap: 8px; color: #555; font-size: 12px; }
+    .pm-wm-nav .pm-wm-tbtn { min-width: 22px; height: 20px; padding: 0 4px; font-size: 10px; }
+    .pm-wm-actions { display: flex; gap: 10px; justify-content: flex-end; align-items: center; }
+    .pm-wm-error { flex: 1; color: #cc3d40; font-size: 13px; }
     .pm-wm-ok, .pm-wm-cancel { padding: 9px 22px; border-radius: 6px; cursor: pointer; font-size: 15px; }
     .pm-wm-ok { border: none; background: #3498db; color: #fff; font-weight: bold; }
     .pm-wm-ok:hover { background: #2d86c3; }
@@ -1067,7 +1077,6 @@
     html[data-theme="dark"] .pm-wm-box .pm-wm-cancel:hover { background: #3d4550; }
     html[data-theme="dark"] .pm-wm-box .pm-wm-tbtn.active { background: #3498db; border-color: #3498db; }
     html[data-theme="dark"] .pm-wm-box .pm-wm-label,
-    html[data-theme="dark"] .pm-wm-box .pm-wm-label3,
     html[data-theme="dark"] .pm-wm-box .pm-wm-axis,
     html[data-theme="dark"] .pm-wm-box .pm-wm-unit,
     html[data-theme="dark"] .pm-wm-box .pm-wm-val,
@@ -1076,6 +1085,10 @@
     html[data-theme="dark"] .pm-wm-box .pm-wm-swatch { border-color: #262b33; box-shadow: 0 0 0 1px #5a6572; }
     html[data-theme="dark"] .pm-wm-box .pm-wm-swatch.active { box-shadow: 0 0 0 2px #3498db; }
     html[data-theme="dark"] .pm-wm-box .pm-wm-preview { background: rgba(255,255,255,0.05); }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-sep { border-top-color: #3a4048; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-tile-block { border-color: #3a4048; background: rgba(255,255,255,0.03); }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-check.pm-wm-label { color: #e2e6ea !important; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-zoom-badge { color: #fff !important; }
     html[data-theme="dark"] .pm-wm-box #pmWmRange::placeholder { color: #7d8791 !important; }
 
     /*Wrapper for cart button + visibility button for marked pages*/
@@ -8948,7 +8961,7 @@
         watermarkTitle: 'Водяной знак', watermarkDefaultText: 'КОНФИДЕНЦИАЛЬНО',
         wmText: 'Текст', wmFont: 'Шрифт', wmBold: 'Жирный', wmItalic: 'Курсив', wmColor: 'Цвет',
         wmSize: 'Размер', wmTransparency: 'Прозрачность', wmRotation: 'Поворот',
-        wmZoomHint: 'Alt + колесико мыши - изменение масштаба',
+        wmDialogTitle: 'Добавить водяной знак',
         wmTile: 'Замостить', wmGap: 'Интервал', wmGapX: 'Интервал по горизонтали', wmGapY: 'Интервал по вертикали',
         wmBrick: 'В шахматном порядке',
         wmPages: 'Страницы', wmPagesAll: 'Все ({n})', wmPagesSelected: 'Выделенные ({n})', wmPagesRange: 'Диапазон',
@@ -9357,7 +9370,7 @@
         watermarkTitle: 'Watermark', watermarkDefaultText: 'CONFIDENTIAL',
         wmText: 'Text', wmFont: 'Font', wmBold: 'Bold', wmItalic: 'Italic', wmColor: 'Color',
         wmSize: 'Size', wmTransparency: 'Transparency', wmRotation: 'Rotation',
-        wmZoomHint: 'Alt + mouse wheel - zoom',
+        wmDialogTitle: 'Add watermark',
         wmTile: 'Tile', wmGap: 'Spacing', wmGapX: 'Horizontal spacing', wmGapY: 'Vertical spacing',
         wmBrick: 'Staggered rows',
         wmPages: 'Pages', wmPagesAll: 'All ({n})', wmPagesSelected: 'Selected ({n})', wmPagesRange: 'Range',
@@ -9766,7 +9779,7 @@
         watermarkTitle: 'Marca de agua', watermarkDefaultText: 'CONFIDENCIAL',
         wmText: 'Texto', wmFont: 'Fuente', wmBold: 'Negrita', wmItalic: 'Cursiva', wmColor: 'Color',
         wmSize: 'Tamaño', wmTransparency: 'Transparencia', wmRotation: 'Rotación',
-        wmZoomHint: 'Alt + rueda del ratón - cambiar el zoom',
+        wmDialogTitle: 'Añadir marca de agua',
         wmTile: 'Mosaico', wmGap: 'Espaciado', wmGapX: 'Espaciado horizontal', wmGapY: 'Espaciado vertical',
         wmBrick: 'Filas escalonadas',
         wmPages: 'Páginas', wmPagesAll: 'Todas ({n})', wmPagesSelected: 'Seleccionadas ({n})', wmPagesRange: 'Rango',
@@ -10225,7 +10238,7 @@
         watermarkTitle: '水印', watermarkDefaultText: '机密',
         wmText: '文本', wmFont: '字体', wmBold: '粗体', wmItalic: '斜体', wmColor: '颜色',
         wmSize: '大小', wmTransparency: '透明度', wmRotation: '旋转',
-        wmZoomHint: 'Alt + 鼠标滚轮 - 缩放',
+        wmDialogTitle: '添加水印',
         wmTile: '平铺', wmGap: '间距', wmGapX: '水平间距', wmGapY: '垂直间距',
         wmBrick: '交错排列',
         wmPages: '页面', wmPagesAll: '全部 ({n})', wmPagesSelected: '所选 ({n})', wmPagesRange: '范围',
@@ -62355,8 +62368,6 @@ function pmWmRunDialog() {
     let zoom = 1;
     let drag = null;               // left button: moving the mark
     let pan = null;                // right button: moving the view
-    let pointerInPreview = false;
-    let altGuard = false;
     let rerenderTimer = null;
     let busy = false;
 
@@ -62367,7 +62378,7 @@ function pmWmRunDialog() {
     box.setAttribute('role', 'dialog');
     const esc = escapeHtml;
     box.innerHTML = `
-      <div class="pm-wm-title">${esc(t('watermarkTitle'))}</div>
+      <div class="pm-wm-title">${esc(t('wmDialogTitle'))}</div>
       <div class="pm-wm-body">
         <div class="pm-wm-controls">
           <label class="pm-wm-row"><span class="pm-wm-label">${esc(t('wmText'))}</span>
@@ -62381,6 +62392,7 @@ function pmWmRunDialog() {
             <input type="range" id="pmWmSizeRange" min="8" max="200" step="1">
             ${pmWmNumField('pmWmSize', 4, 400, 1)}<span class="pm-wm-unit">pt</span>
           </div>
+          <hr class="pm-wm-sep">
           <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('wmColor'))}</span>
             <input type="color" id="pmWmColor">
             ${PM_WM_SWATCHES.map(c => `<button type="button" class="pm-wm-swatch" data-color="${c}" style="background:${c}" title="${c}"></button>`).join('')}
@@ -62389,6 +62401,7 @@ function pmWmRunDialog() {
             <input type="range" id="pmWmTransp" min="0" max="99" step="1">
             <span class="pm-wm-val" id="pmWmTranspVal"></span>
           </div>
+          <hr class="pm-wm-sep">
           <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('wmRotation'))}</span>
             <button type="button" class="pm-wm-tbtn" data-angle="45" title="+45°">↗ 45°</button>
             <button type="button" class="pm-wm-tbtn" data-angle="0" title="0°">0°</button>
@@ -62399,13 +62412,15 @@ function pmWmRunDialog() {
           <div class="pm-wm-row pm-wm-sub">
             <input type="range" id="pmWmAngleRange" min="-180" max="180" step="1">
           </div>
-          <div class="pm-wm-row">
-            <label class="pm-wm-check"><input type="checkbox" id="pmWmTile"> <b>${esc(t('wmTile'))}</b></label>
-            <label class="pm-wm-check pm-wm-tile-opt pm-wm-brick"><input type="checkbox" id="pmWmBrick"> ${esc(t('wmBrick'))}</label>
+          <div class="pm-wm-tile-block">
+            <div class="pm-wm-row">
+              <label class="pm-wm-check pm-wm-label"><input type="checkbox" id="pmWmTile"> ${esc(t('wmTile'))}</label>
+              <label class="pm-wm-check pm-wm-tile-opt"><input type="checkbox" id="pmWmBrick"> ${esc(t('wmBrick'))}</label>
+            </div>
+            <div class="pm-wm-row pm-wm-tile-opt"><span class="pm-wm-label">${esc(t('wmGap'))}</span>
+              <span class="pm-wm-axis" title="${esc(t('wmGapX'))}">↔</span>${pmWmNumField('pmWmGapX', 0, 2000, 5)}
+              <span class="pm-wm-axis" title="${esc(t('wmGapY'))}">↕</span>${pmWmNumField('pmWmGapY', 0, 2000, 5)}<span class="pm-wm-unit">pt</span></div>
           </div>
-          <div class="pm-wm-row pm-wm-sub pm-wm-tile-opt"><span class="pm-wm-label3">${esc(t('wmGap'))}</span>
-            <span class="pm-wm-axis" title="${esc(t('wmGapX'))}">↔</span>${pmWmNumField('pmWmGapX', 0, 2000, 5)}
-            <span class="pm-wm-axis" title="${esc(t('wmGapY'))}">↕</span>${pmWmNumField('pmWmGapY', 0, 2000, 5)}<span class="pm-wm-unit">pt</span></div>
           <div class="pm-wm-row pm-wm-row-top"><span class="pm-wm-label">${esc(t('wmPages'))}</span>
             <div class="pm-wm-pages">
               <div class="pm-wm-pages-line">
@@ -62418,13 +62433,8 @@ function pmWmRunDialog() {
           </div>
         </div>
         <div class="pm-wm-preview-col">
-          <div class="pm-wm-zoom" title="${esc(t('wmZoomHint'))}">
-            <button type="button" class="pm-wm-tbtn" id="pmWmZoomOut">−</button>
-            <input type="range" id="pmWmZoom" min="100" max="${PM_WM_ZOOM_MAX * 100}" step="10" value="100">
-            <button type="button" class="pm-wm-tbtn" id="pmWmZoomIn">+</button>
-            <span class="pm-wm-val" id="pmWmZoomVal">100%</span>
-          </div>
           <div class="pm-wm-preview" id="pmWmPreviewBox"><canvas id="pmWmPreview"></canvas></div>
+          <span class="pm-wm-zoom-badge" id="pmWmZoomVal">100%</span>
           <div class="pm-wm-nav">
             <button type="button" class="pm-wm-tbtn" id="pmWmPrev">◀</button>
             <span id="pmWmNavLabel"></span>
@@ -62432,8 +62442,8 @@ function pmWmRunDialog() {
           </div>
         </div>
       </div>
-      <div class="pm-wm-error" id="pmWmError"></div>
       <div class="pm-wm-actions">
+        <div class="pm-wm-error" id="pmWmError"></div>
         <button type="button" class="pm-wm-ok" id="pmWmOk">${esc(t('wmApply'))}</button>
         <button type="button" class="pm-wm-cancel" id="pmWmCancel">${esc(t('wmCancel'))}</button>
       </div>`;
@@ -62448,7 +62458,8 @@ function pmWmRunDialog() {
     const tileChk = $('pmWmTile'), gapXIn = $('pmWmGapX'), gapYIn = $('pmWmGapY'), brickChk = $('pmWmBrick');
     const rangeIn = $('pmWmRange'), errEl = $('pmWmError');
     const pv = $('pmWmPreview'), pvBox = $('pmWmPreviewBox');
-    const zoomRange = $('pmWmZoom'), zoomVal = $('pmWmZoomVal');
+    const zoomVal = $('pmWmZoomVal');
+    let zoomBadgeTimer = null;
     const navLabel = $('pmWmNavLabel'), prevBtn = $('pmWmPrev'), nextBtn = $('pmWmNext');
 
     // ---- page targets ------------------------------------------------
@@ -62602,8 +62613,11 @@ function pmWmRunDialog() {
       const fx = r0.width ? (clientX - r0.left) / r0.width : 0.5;
       const fy = r0.height ? (clientY - r0.top) / r0.height : 0.5;
       zoom = z;
-      zoomRange.value = String(Math.round(zoom * 100));
+      // Brief zoom readout in the corner of the preview.
       zoomVal.textContent = Math.round(zoom * 100) + '%';
+      zoomVal.classList.add('show');
+      clearTimeout(zoomBadgeTimer);
+      zoomBadgeTimer = setTimeout(() => zoomVal.classList.remove('show'), 900);
       layoutCanvas();
       const r1 = pv.getBoundingClientRect();
       pvBox.scrollLeft += (r1.left + fx * r1.width) - clientX;
@@ -62612,16 +62626,12 @@ function pmWmRunDialog() {
       clearTimeout(rerenderTimer);
       rerenderTimer = setTimeout(ensureRaster, 180);
     }
-    zoomRange.addEventListener('input', () => setZoom(Number(zoomRange.value) / 100));
-    $('pmWmZoomIn').addEventListener('click', () => setZoom(zoom * 1.25));
-    $('pmWmZoomOut').addEventListener('click', () => setZoom(zoom / 1.25));
+    // The wheel over the preview zooms at the cursor (the right button pans).
     pvBox.addEventListener('wheel', (e) => {
-      if (!e.altKey) return;              // plain wheel scrolls the zoomed page
       e.preventDefault();
-      setZoom(zoom * Math.exp(-e.deltaY * 0.0015), e.clientX, e.clientY);
+      const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+      setZoom(zoom * Math.exp(-dy * 0.0015), e.clientX, e.clientY);
     }, { passive: false });
-    pvBox.addEventListener('pointerenter', () => { pointerInPreview = true; });
-    pvBox.addEventListener('pointerleave', () => { pointerInPreview = false; });
 
     // ---- controls <-> settings -----------------------------------------
     function syncControls() {
@@ -62794,8 +62804,8 @@ function pmWmRunDialog() {
       if (settled) return;
       settled = true;
       clearTimeout(rerenderTimer);
+      clearTimeout(zoomBadgeTimer);
       document.removeEventListener('keydown', onKey, true);
-      document.removeEventListener('keyup', onKeyUp, true);
       window.removeEventListener('resize', onResize);
       if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
       resolve(result);
@@ -62818,7 +62828,6 @@ function pmWmRunDialog() {
     $('pmWmCancel').addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); close(false); });
     // A stray click outside must not throw away a watermark being set up.
     overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) e.preventDefault(); });
-    const isAlt = (e) => e.key === 'Alt' || e.code === 'AltLeft' || e.code === 'AltRight';
     // Capture phase, stopped here: the app's shortcuts (Delete, Q/W, P,
     // Ctrl+Z...) must not act on the document while the dialog is up.
     // Typing itself is a default action and still happens.
@@ -62828,15 +62837,9 @@ function pmWmRunDialog() {
           ['text', 'number'].includes(e.target.type)) {
         e.preventDefault(); e.stopPropagation(); apply(); return;
       }
-      // Alt for Alt+wheel over the preview must not open the browser's menu.
-      if (isAlt(e) && pointerInPreview) { e.preventDefault(); altGuard = true; }
       e.stopPropagation();
     };
-    const onKeyUp = (e) => {
-      if (isAlt(e) && altGuard) { e.preventDefault(); altGuard = false; }
-    };
     document.addEventListener('keydown', onKey, true);
-    document.addEventListener('keyup', onKeyUp, true);
     let resizeTimer = null;
     const onResize = () => {
       clearTimeout(resizeTimer);
