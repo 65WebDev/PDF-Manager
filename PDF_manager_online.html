@@ -34055,10 +34055,13 @@ async function pmCloseTabsToRight(fromTabId) {
     else if (action === 'rename') await pmRenameTab(tabId);
   });
   document.addEventListener('mousedown', (e) => {
-    if (menu.style.display !== 'block') return;
+    if (menu.style.display !== 'block' || menu.contains(e.target)) return;
+    // A left click anywhere outside the menu dismisses it - a tab included.
+    // Another right click on a tab is left to reopen the menu there.
+    if (e.button === 0) { pmCloseTabMenu(); return; }
     if (Date.now() - pmTabMenuOpenedAt < 200) return;
-    if (!menu.contains(e.target) && !e.target.closest('.pm-tab')) pmCloseTabMenu();
-  });
+    if (!e.target.closest('.pm-tab')) pmCloseTabMenu();
+  }, true);   // capture: handlers that stop the event must not keep the menu up
   document.addEventListener('keydown', (e) => {
     if (menu.style.display === 'block' && e.key === 'Escape') pmCloseTabMenu();
   });
