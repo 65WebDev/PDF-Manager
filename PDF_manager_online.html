@@ -1024,28 +1024,30 @@
     #pmWmRange { flex: 1; min-width: 0; }
     .pm-wm-preview-col { display: flex; flex-direction: column; align-items: center; gap: 4px; position: relative; }
     .pm-wm-zoom-badge {
-      position: absolute; top: 8px; left: 8px; padding: 2px 7px; border-radius: 10px;
+      position: absolute; top: 36px; left: 8px; padding: 2px 7px; border-radius: 10px;
       background: rgba(30,36,44,0.72); color: #fff; font-size: 12px; pointer-events: none;
       opacity: 0; transition: opacity 0.2s;
     }
     .pm-wm-zoom-badge.show { opacity: 1; }
-    /*"?" in the preview's top-right corner and the mouse help it opens.*/
+    /*"?" above the preview's right edge (outside it, never over the page)
+       and the mouse help it opens.*/
+    .pm-wm-preview-head { width: 360px; max-width: 100%; display: flex; justify-content: flex-end; }
     .pm-wm-help {
-      position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; padding: 0;
+      width: 24px; height: 24px; padding: 0;
       border-radius: 50%; border: 1px solid rgba(0,0,0,0.15); background: rgba(255,255,255,0.92);
       color: #3d5468; font-weight: bold; font-size: 14px; line-height: 1; cursor: pointer;
       box-shadow: 0 1px 4px rgba(0,0,0,0.2);
     }
     .pm-wm-help:hover, .pm-wm-help[aria-expanded="true"] { background: #3498db; color: #fff; border-color: #3498db; }
     .pm-wm-help-pop {
-      position: absolute; top: 38px; right: 8px; z-index: 2; max-width: 300px;
+      position: absolute; top: 30px; right: 0; z-index: 2; max-width: 300px;
       padding: 8px 12px; border-radius: 8px; background: #fff; color: #2c3e50;
       box-shadow: 0 4px 16px rgba(0,0,0,0.25); font-size: 13px; line-height: 1.6;
     }
     /*Scroll box: the page sits centred while it fits and scrolls once zoomed
        past it (margin:auto on the grid item - centring that stays scrollable).*/
     .pm-wm-preview {
-      width: 360px; height: 560px; max-height: calc(100vh - 130px);
+      width: 360px; height: 532px; max-height: calc(100vh - 158px);
       background: rgba(120,130,145,0.14); border-radius: 8px;
       display: grid; overflow: auto; padding: 12px; box-sizing: border-box;
       scrollbar-width: thin; overscroll-behavior: contain;
@@ -62147,41 +62149,58 @@ function pmWmLoadFonts() {
 }
 
 // The watermark text as a tightly cropped transparent canvas. wPt/hPt is its
-// size on the page; pxPerPt only sets how finely it is rasterized.
+// size on the page; pxPerPt only sets how finely it is rasterized. The box is
+// measured once at the output density, so the preview (drawn coarser) and
+// the PDF get exactly the same size and spacing - measured at each density,
+// hinting and pixel rounding made the preview's tiles a few % larger, which
+// added up row by row into visibly different tiling.
+function pmWmTextFont(s, px) {
+  return (s.italic ? 'italic ' : '') + (s.bold ? 'bold ' : '') +
+    px + 'px ' + pmWmFontCss(s.font) + ', sans-serif';
+}
+function pmWmTextBox(s) {
+  const kRef = PM_WM_PX_PER_PT;
+  const ctx = document.createElement('canvas').getContext('2d');
+  ctx.font = pmWmTextFont(s, s.size * kRef);
+  const m = ctx.measureText(String(s.text || ''));
+  const fin = (v, d) => (Number.isFinite(v) ? v : d);
+  const left = fin(m.actualBoundingBoxLeft, 0) / kRef;
+  const right = fin(m.actualBoundingBoxRight, m.width) / kRef;
+  const asc = fin(m.actualBoundingBoxAscent, s.size * kRef * 0.8) / kRef;
+  const desc = fin(m.actualBoundingBoxDescent, s.size * kRef * 0.2) / kRef;
+  const pad = s.size * 0.06 + 0.5;
+  return { left, right, asc, pad, wPt: left + right + pad * 2, hPt: asc + desc + pad * 2 };
+}
 function pmWmRenderText(s, pxPerPt) {
   const text = String(s.text || '');
   if (!text.trim()) return null;
+  const box = pmWmTextBox(s);
   let k = pxPerPt;
-  const measure = () => {
-    const fontPx = s.size * k;
-    const font = (s.italic ? 'italic ' : '') + (s.bold ? 'bold ' : '') +
-      fontPx + 'px ' + pmWmFontCss(s.font) + ', sans-serif';
-    const ctx = document.createElement('canvas').getContext('2d');
-    ctx.font = font;
-    const m = ctx.measureText(text);
-    const left = Number.isFinite(m.actualBoundingBoxLeft) ? m.actualBoundingBoxLeft : 0;
-    const right = Number.isFinite(m.actualBoundingBoxRight) ? m.actualBoundingBoxRight : m.width;
-    const asc = Number.isFinite(m.actualBoundingBoxAscent) ? m.actualBoundingBoxAscent : fontPx * 0.8;
-    const desc = Number.isFinite(m.actualBoundingBoxDescent) ? m.actualBoundingBoxDescent : fontPx * 0.2;
-    const pad = Math.ceil(fontPx * 0.06) + 2;
-    return {
-      font, left, asc, pad,
-      w: Math.max(1, Math.ceil(left + right) + pad * 2),
-      h: Math.max(1, Math.ceil(asc + desc) + pad * 2)
-    };
-  };
-  let g = measure();
-  const fit = Math.min(1, 8192 / g.w, 8192 / g.h, Math.sqrt(24e6 / (g.w * g.h)));
-  if (fit < 1) { k *= fit; g = measure(); }
+  const fit = Math.min(1, 8192 / (box.wPt * k), 8192 / (box.hPt * k), Math.sqrt(24e6 / (box.wPt * box.hPt * k * k)));
+  if (fit < 1) k *= fit;
   const canvas = document.createElement('canvas');
-  canvas.width = g.w;
-  canvas.height = g.h;
+  canvas.width = Math.max(1, Math.ceil(box.wPt * k));
+  canvas.height = Math.max(1, Math.ceil(box.hPt * k));
   const ctx = canvas.getContext('2d');
-  ctx.font = g.font;
+  ctx.font = pmWmTextFont(s, s.size * k);
   ctx.fillStyle = s.color;
   ctx.textBaseline = 'alphabetic';
-  ctx.fillText(text, g.pad + g.left, g.pad + g.asc);
-  return { canvas, wPt: g.w / k, hPt: g.h / k };
+  // maxWidth: at a coarse density hinting can make the run a little wider
+  // than the box - squeeze it back rather than clip the last letter.
+  ctx.fillText(text, (box.pad + box.left) * k, (box.pad + box.asc) * k, (box.left + box.right) * k);
+  return { canvas, wPt: box.wPt, hPt: box.hPt };
+}
+
+// Tiling steps along the text (su) and across it (sv), in pt.
+function pmWmTileSteps(W, H, iw, ih, s) {
+  let su = Math.max(2, iw + s.gapX), sv = Math.max(2, ih + s.gapY);
+  const R = Math.hypot(W, H) / 2 + Math.hypot(iw, ih) / 2;
+  const est = (4 * R * R) / (su * sv);
+  if (est > PM_WM_MAX_TILES) {
+    const f = Math.sqrt(est / PM_WM_MAX_TILES);
+    su *= f; sv *= f;
+  }
+  return { su, sv };
 }
 
 // Centres (visual pt) of every copy of an iw x ih watermark on a W x H page.
@@ -62192,14 +62211,9 @@ function pmWmPlacements(W, H, iw, ih, s) {
     // A grid laid out along the text direction (u) and across it (v),
     // centred on the page and rotated with the text; every other row is
     // shifted by half a step when "brick" is on.
-    let su = Math.max(2, iw + s.gapX), sv = Math.max(2, ih + s.gapY);
+    const { su, sv } = pmWmTileSteps(W, H, iw, ih, s);
     const r = Math.hypot(iw, ih) / 2;
     const R = Math.hypot(W, H) / 2 + r;
-    const est = (4 * R * R) / (su * sv);
-    if (est > PM_WM_MAX_TILES) {
-      const f = Math.sqrt(est / PM_WM_MAX_TILES);
-      su *= f; sv *= f;
-    }
     const ni = Math.ceil(R / su) + 1, nj = Math.ceil(R / sv) + 1;
     const out = [];
     for (let j = -nj; j <= nj; j++) {
@@ -62528,9 +62542,11 @@ function pmWmRunDialog() {
           </div>
         </div>
         <div class="pm-wm-preview-col">
+          <div class="pm-wm-preview-head">
+            <button type="button" class="pm-wm-help" id="pmWmHelp" aria-expanded="false">?</button>
+          </div>
           <div class="pm-wm-preview" id="pmWmPreviewBox"><canvas id="pmWmPreview"></canvas></div>
           <span class="pm-wm-zoom-badge" id="pmWmZoomVal">100%</span>
-          <button type="button" class="pm-wm-help" id="pmWmHelp" aria-expanded="false">?</button>
           <div class="pm-wm-help-pop" id="pmWmHelpPop" hidden>
             <div>${esc(t('wmHelpLeft'))}</div>
             <div>${esc(t('wmHelpRight'))}</div>
@@ -62609,6 +62625,101 @@ function pmWmRunDialog() {
     }
     // The mark as drawn on a page W pt wide at k canvas px per pt.
     const markAt = (W, k) => pmWmMark(s, W, k, textAtPreview);
+    // The picked image at the exact size one copy takes in the preview.
+    // Drawing the full-size original (up to 2500px) scaled down once per
+    // tile on every slider step is what made tiling an image crawl.
+    let imgCache = null;
+    let imgLevels = null;   // { src, levels: [original, 1/2, 1/4, ...] }
+    function previewImage(m, k) {
+      const w = Math.max(1, Math.round(m.wPt * k)), h = Math.max(1, Math.round(m.hPt * k));
+      if (imgCache && imgCache.src === m.canvas && imgCache.w === w && imgCache.h === h) return imgCache.c;
+      // Halved copies, made once per picked image: a new size (every slider
+      // step) then costs one small draw from the nearest larger copy, and
+      // halving in steps keeps the reduced image smooth.
+      if (!imgLevels || imgLevels.src !== m.canvas) {
+        const levels = [m.canvas];
+        let src = m.canvas;
+        while (src.width > 64 && src.height > 64) {
+          const c = document.createElement('canvas');
+          c.width = Math.ceil(src.width / 2);
+          c.height = Math.ceil(src.height / 2);
+          c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
+          levels.push(c);
+          src = c;
+        }
+        imgLevels = { src: m.canvas, levels };
+      }
+      let src = imgLevels.levels[0];
+      for (const lv of imgLevels.levels) { if (lv.width >= w && lv.height >= h) src = lv; else break; }
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      const cx = c.getContext('2d');
+      cx.imageSmoothingQuality = 'high';
+      cx.drawImage(src, 0, 0, w, h);
+      imgCache = { src: m.canvas, w, h, c };
+      return c;
+    }
+    // The tiled marks as one layer the size of the preview, made with a
+    // single pattern fill (not a draw per copy) and kept while only the
+    // transparency changes - that then costs two plain copies per frame.
+    let layerCache = null;
+    function tileLayer(src, fr, r, scale, th) {
+      const key = [pv.width, pv.height, th, s.brick, s.gapX, s.gapY, scale, r.wPt, r.hPt].join('|');
+      if (layerCache && layerCache.src === src && layerCache.key === key) return layerCache.c;
+      const c = (layerCache && layerCache.c.width === pv.width && layerCache.c.height === pv.height)
+        ? layerCache.c : document.createElement('canvas');
+      c.width = pv.width;
+      c.height = pv.height;
+      const lx = c.getContext('2d');
+      lx.clearRect(0, 0, c.width, c.height);
+      const pat = tilePattern(lx, src, fr, r, scale);
+      // Pattern space -> preview: centre of the page, turned with the mark.
+      pat.setTransform(new DOMMatrix()
+        .translate(fr.W / 2 * scale, fr.H / 2 * scale)
+        .rotate(-th * 180 / Math.PI)
+        .multiply(pat.__cellMatrix));
+      lx.fillStyle = pat;
+      lx.fillRect(0, 0, c.width, c.height);
+      layerCache = { src, key, c };
+      return c;
+    }
+    // Repeating cell: one step along the mark by one (or, staggered, two)
+    // steps across it - the same grid as pmWmPlacements.
+    function tilePattern(ctx, src, fr, r, scale) {
+      const { su, sv } = pmWmTileSteps(fr.W, fr.H, r.wPt, r.hPt, s);
+      const rows = s.brick ? 2 : 1;
+      // The cell is a whole number of pixels; the pattern matrix stretches it
+      // back to the exact step so a long run of copies does not drift.
+      const cw = Math.max(1, Math.round(su * scale)), ch = Math.max(1, Math.round(sv * scale * rows));
+      const cell = document.createElement('canvas');
+      cell.width = cw;
+      cell.height = ch;
+      const cx = cell.getContext('2d');
+      const w = r.wPt * scale, h = r.hPt * scale;
+      const put = (x, y) => cx.drawImage(src, x - w / 2, y - h / 2, w, h);
+      const fx = cw / (su * scale), fy = ch / (sv * scale * rows);
+      put(cw / 2, (sv * scale / 2) * fy);
+      if (rows === 2) {
+        // Shifted row: half a step over, so it straddles the cell edge.
+        const y = (sv * scale * 1.5) * fy;
+        put(0, y);
+        put(cw, y);
+      }
+      const pat = ctx.createPattern(cell, 'repeat');
+      // Cell -> rotated page space: undo the rounding, then put the first
+      // mark's centre on the origin (the page centre).
+      pat.__cellMatrix = new DOMMatrix()
+        .translate(-su * scale / 2, -sv * scale / 2)
+        .scale(1 / fx, 1 / fy);
+      return pat;
+    }
+
+    // Slider drags fire faster than frames: draw once per frame.
+    let drawRaf = 0;
+    function drawSoon() {
+      if (!drawRaf) drawRaf = requestAnimationFrame(() => { drawRaf = 0; draw(); });
+    }
 
     function draw() {
       const ctx = pv.getContext('2d');
@@ -62624,13 +62735,20 @@ function pmWmRunDialog() {
       const r = markAt(fr.W, Math.max(0.5, scale));
       if (!r) return;
       const th = s.angle * Math.PI / 180;
+      const src = (s.useImage && pmWmImage) ? previewImage(r, scale) : r.canvas;
       ctx.save();
       ctx.globalAlpha = Math.min(1, Math.max(0.01, s.opacity / 100));
+      if (s.tile) {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.drawImage(tileLayer(src, fr, r, scale, th), 0, 0);
+        ctx.restore();
+        return;
+      }
       pmWmPlacements(fr.W, fr.H, r.wPt, r.hPt, s).forEach(p => {
         ctx.setTransform(1, 0, 0, 1, 0, 0);
         ctx.translate(p.cx * scale, p.cy * scale);
         ctx.rotate(-th);
-        ctx.drawImage(r.canvas, -r.wPt / 2 * scale, -r.hPt / 2 * scale, r.wPt * scale, r.hPt * scale);
+        ctx.drawImage(src, -r.wPt / 2 * scale, -r.hPt / 2 * scale, r.wPt * scale, r.hPt * scale);
       });
       ctx.restore();
     }
@@ -62778,7 +62896,7 @@ function pmWmRunDialog() {
 
     function changed() {
       syncControls();
-      draw();
+      drawSoon();
     }
 
     // A number field: typing applies while in range, leaving the field clamps.
@@ -62817,7 +62935,7 @@ function pmWmRunDialog() {
     });
 
     textIn.value = s.text;
-    textIn.addEventListener('input', () => { s.text = textIn.value; errEl.textContent = ''; draw(); });
+    textIn.addEventListener('input', () => { s.text = textIn.value; errEl.textContent = ''; drawSoon(); });
     fontSel.addEventListener('change', () => { s.font = fontSel.value; changed(); });
     boldBtn.addEventListener('click', () => { s.bold = !s.bold; changed(); });
     italicBtn.addEventListener('click', () => { s.italic = !s.italic; changed(); });
@@ -62957,6 +63075,7 @@ function pmWmRunDialog() {
       settled = true;
       clearTimeout(rerenderTimer);
       clearTimeout(zoomBadgeTimer);
+      cancelAnimationFrame(drawRaf);
       document.removeEventListener('keydown', onKey, true);
       window.removeEventListener('resize', onResize);
       if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
