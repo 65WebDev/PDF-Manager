@@ -5053,14 +5053,14 @@
       document name at the top of the document and pinned under the menu
       once that scrolls away (placed by pmLoadBarPlace). Fixed rather than
       sticky, so it stays in view when a zoomed document scrolls sideways.*/
+    /*The element itself is a transparent hover target PM_LOAD_BAR_HIT px
+      taller than the strip on each side - a 4px line is hard to point at -
+      and #pmLoadBarTrack is the strip.*/
     #pmLoadBar {
       position: fixed;
       top: 0; left: 0;
-      width: 120px;
-      height: 4px;
-      border-radius: 2px;
-      background: rgba(52, 152, 219, 0.2);
-      overflow: hidden;
+      width: 80px;
+      padding: 8px 0;
       z-index: 115;
       pointer-events: none;
       opacity: 0;
@@ -5072,6 +5072,17 @@
       visibility: visible;
       transition: opacity 0.2s ease;
     }
+    /*Only something to hover where there is a pointer that hovers; on a
+      touch screen it would just swallow taps on what is underneath.*/
+    @media (hover: hover) and (pointer: fine) {
+      #pmLoadBar.visible { pointer-events: auto; }
+    }
+    #pmLoadBarTrack {
+      height: 4px;
+      border-radius: 2px;
+      background: rgba(52, 152, 219, 0.2);
+      overflow: hidden;
+    }
     #pmLoadBarFill {
       height: 100%;
       width: 0;
@@ -5079,8 +5090,27 @@
       border-radius: 2px;
       transition: width 0.25s ease;
     }
-    html[data-theme="dark"] #pmLoadBar { background: rgba(255, 255, 255, 0.14); }
+    html[data-theme="dark"] #pmLoadBarTrack { background: rgba(255, 255, 255, 0.14); }
     html[data-theme="dark"] #pmLoadBarFill { background: #4aa3e0; }
+    /*Hover hint under the strip ("Loading document: N%"), kept up to date
+      while it is shown - a title attribute would freeze at the value it had
+      when the pointer arrived.*/
+    #pmLoadBarTip {
+      position: fixed;
+      top: 0; left: 0;
+      z-index: 116;
+      display: none;
+      pointer-events: none;
+      background: rgba(44, 62, 80, 0.95);
+      color: #fff;
+      padding: 5px 9px;
+      border-radius: 6px;
+      font-size: 12.5px;
+      font-weight: 600;
+      white-space: nowrap;
+      box-shadow: 0 3px 12px rgba(0, 0, 0, 0.3);
+    }
+    #pmLoadBarTip.visible { display: block; }
 
     #loadingOverlay {
       position: fixed;
@@ -7756,7 +7786,8 @@
     <pre class="pm-dd-log" id="pmDragDebugLog"></pre>
   </div>
 
-  <div id="pmLoadBar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-hidden="true"><div id="pmLoadBarFill"></div></div>
+  <div id="pmLoadBar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-hidden="true"><div id="pmLoadBarTrack"><div id="pmLoadBarFill"></div></div></div>
+  <div id="pmLoadBarTip" aria-hidden="true"></div>
 
   <div class="main" id="scrollContainer">
     <div class="content-header">
@@ -8810,6 +8841,7 @@
         loadingOpeningFiles: 'Открытие файлов...',
         loadingOpenEditor: 'Открытие редактора страницы...',
         loadingPagesProgress: 'Загрузка страниц... {cur} из {total}',
+        loadBarTooltip: 'Загрузка документа: {pct}%',
         loadingPreparingDoc: 'Подготовка документа...',
         insertFromFile: 'Вставка из файла',
         insertBlankPage: 'Вставка пустой страницы',
@@ -9204,6 +9236,7 @@
         loadingOpeningFiles: 'Opening files...',
         loadingOpenEditor: 'Opening page editor...',
         loadingPagesProgress: 'Loading pages... {cur} of {total}',
+        loadBarTooltip: 'Loading document: {pct}%',
         loadingPreparingDoc: 'Preparing document...',
         insertFromFile: 'Insert from file',
         insertBlankPage: 'Insert blank page',
@@ -9598,6 +9631,7 @@
         loadingOpeningFiles: 'Abriendo archivos...',
         loadingOpenEditor: 'Abriendo editor de página...',
         loadingPagesProgress: 'Cargando páginas... {cur} de {total}',
+        loadBarTooltip: 'Cargando documento: {pct}%',
         loadingPreparingDoc: 'Preparando documento...',
         insertFromFile: 'Insertar desde archivo',
         insertBlankPage: 'Insertar página en blanco',
@@ -10057,6 +10091,7 @@
         loadingOpeningFiles: '正在打开文件...',
         loadingOpenEditor: '正在打开页面编辑器...',
         loadingPagesProgress: '正在加载页面... {cur} / {total}',
+        loadBarTooltip: '正在加载文档：{pct}%',
         loadingPreparingDoc: '正在准备文档...',
         insertFromFile: '从文件插入',
         insertBlankPage: '插入空白页',
@@ -11759,10 +11794,13 @@
             )}</span>`
           : '') +
         `<br><br>${escapeHtml(t('recoveryAsk'))}`;
+      // Only an explicit answer: Restore / Enter, or Delete / Esc. A click
+      // outside the box used to count as "Delete" and threw the work away.
       const ok = await showConfirmDialog(msg, {
         html: true,
         yesText: t('recoveryRestore'),
-        noText: t('recoveryDelete')
+        noText: t('recoveryDelete'),
+        dismissOnBackdrop: false
       });
       if (ok) {
         try {
@@ -21681,9 +21719,14 @@
     let pmLoadBarRaf = 0;
     let pmLoadBarHideTimer = null;
     let pmLoadBarShown = false;
-    let pmLoadBarBase = 0;        // pages already drawn when the strip appeared
-    let pmLoadBarShownFrac = 0;   // never moves backwards while shown
+    let pmLoadBarBase = 0;        // pages already drawn when this batch started
+    let pmLoadBarShownFrac = 0;   // never moves backwards within a batch
+    let pmLoadBarBatchToken = -1; // lazyThumbToken the batch belongs to
+    let pmLoadBarCompleted = false; // filled to the end, about to fade out
     let pmLoadBarShowTimer = null;
+    let pmLoadBarHover = false;
+    // Transparent hover margin above and below the strip (#pmLoadBar padding).
+    const PM_LOAD_BAR_HIT = 8;
     // Work that finishes within this long (an undo re-drawing a short
     // document, a few pages scrolled into view) does not flash the strip.
     const PM_LOAD_BAR_SHOW_DELAY = 400;
@@ -21708,30 +21751,89 @@
       const left = pmLoadBarOutstanding();
       const done = lazyThumbLoaded.size;
       if (left > 0) {
+        const wasFinishing = pmLoadBarCompleted;
         clearTimeout(pmLoadBarHideTimer);
         pmLoadBarHideTimer = null;
+        pmLoadBarCompleted = false;
         if (!pmLoadBarShown) {
           if (!pmLoadBarShowTimer) pmLoadBarShowTimer = setTimeout(pmLoadBarReveal, PM_LOAD_BAR_SHOW_DELAY);
           return;
         }
+        // New work after the strip had reached the end, or thumbnails being
+        // rebuilt from scratch (undo, an edit, another tab): that is a new
+        // load, measured from zero. Carried on instead, the fill - which
+        // never moves backwards - sat at 100% for the whole new load, which
+        // read as "reached 100% and never went away".
+        if (wasFinishing || pmLoadBarBatchToken !== lazyThumbToken) pmLoadBarStartBatch(fill);
         const drawn = Math.max(0, done - pmLoadBarBase);
         const total = pmLiteActive ? drawn + left : Math.max(1, lazyThumbNumPages - pmLoadBarBase);
         pmLoadBarShownFrac = Math.max(pmLoadBarShownFrac, Math.min(1, drawn / total));
-        fill.style.width = (pmLoadBarShownFrac * 100).toFixed(1) + '%';
-        bar.setAttribute('aria-valuenow', String(Math.round(pmLoadBarShownFrac * 100)));
-        bar.title = t('loadingPagesProgress', { cur: done, total: lazyThumbNumPages });
+        pmLoadBarShowFrac(bar, fill, pmLoadBarShownFrac);
         pmLoadBarPlace();
       } else if (pmLoadBarShown && !pmLoadBarHideTimer) {
-        // Nothing left: let the strip reach the end, then fade it out. The
-        // pause also rides out the brief gap between the first visible
-        // pages and the background fill being queued, so it does not blink.
-        if (pdfDoc && lazyThumbNumPages) fill.style.width = '100%';
+        // Nothing left - for now. Only once that has held for a moment is
+        // the load done: right after the first visible pages there is a
+        // short gap before the background fill is queued, and filling to
+        // the end in it made the strip jump to 100% and then sit there, at
+        // 100%, for the whole rest of the load. Done: fill to the end, then
+        // fade out.
+        const delay = pdfDoc && lazyThumbNumPages ? 600 : 0;
         pmLoadBarHideTimer = setTimeout(() => {
-          pmLoadBarHideTimer = null;
-          if (pmLoadBarOutstanding() > 0) { pmLoadBarUpdate(); return; }
-          pmLoadBarShown = false;
-          bar.classList.remove('visible');
-        }, pdfDoc && lazyThumbNumPages ? 600 : 0);
+          if (pmLoadBarOutstanding() > 0) { pmLoadBarHideTimer = null; pmLoadBarUpdate(); return; }
+          if (delay) {
+            pmLoadBarCompleted = true;
+            pmLoadBarShowFrac(bar, fill, 1);
+          }
+          pmLoadBarHideTimer = setTimeout(() => {
+            pmLoadBarHideTimer = null;
+            if (pmLoadBarOutstanding() > 0) { pmLoadBarUpdate(); return; }
+            pmLoadBarShown = false;
+            pmLoadBarCompleted = false;
+            bar.classList.remove('visible');
+            pmLoadBarTipSync();
+          }, delay ? 350 : 0);
+        }, delay);
+      }
+    }
+    function pmLoadBarStartBatch(fill) {
+      // The whole document from the start when it is being loaded in full;
+      // just the stretch being filled in when it is not.
+      pmLoadBarBase = pmLiteActive ? lazyThumbLoaded.size : 0;
+      pmLoadBarShownFrac = 0;
+      pmLoadBarBatchToken = lazyThumbToken;
+      fill.style.transition = 'none';
+      fill.style.width = '0%';
+      void fill.offsetWidth;
+      fill.style.transition = '';
+    }
+    function pmLoadBarShowFrac(bar, fill, frac) {
+      const pct = Math.round(frac * 100);
+      fill.style.width = (frac * 100).toFixed(1) + '%';
+      bar.setAttribute('aria-valuenow', String(pct));
+      bar.setAttribute('aria-valuetext', t('loadBarTooltip', { pct }));
+      const tip = document.getElementById('pmLoadBarTip');
+      if (tip) tip.textContent = t('loadBarTooltip', { pct });
+      pmLoadBarTipSync();
+    }
+    // The hover hint: shown while the pointer is over the visible strip,
+    // right-aligned just under it.
+    function pmLoadBarTipSync() {
+      const tip = document.getElementById('pmLoadBarTip');
+      const bar = document.getElementById('pmLoadBar');
+      if (!tip || !bar) return;
+      const on = pmLoadBarHover && pmLoadBarShown;
+      tip.classList.toggle('visible', on);
+      if (!on) return;
+      const r = bar.getBoundingClientRect();
+      const tw = tip.offsetWidth;
+      const x = Math.max(4, Math.min(r.right - tw, window.innerWidth - tw - 4));
+      tip.style.transform = 'translate(' + Math.round(x) + 'px,' + Math.round(r.bottom + 2) + 'px)';
+    }
+    {
+      const bar = document.getElementById('pmLoadBar');
+      if (bar) {
+        bar.addEventListener('mouseenter', () => { pmLoadBarHover = true; pmLoadBarTipSync(); });
+        bar.addEventListener('mouseleave', () => { pmLoadBarHover = false; pmLoadBarTipSync(); });
       }
     }
     function pmLoadBarReveal() {
@@ -21740,14 +21842,7 @@
       const fill = document.getElementById('pmLoadBarFill');
       if (!bar || !fill || pmLoadBarShown || pmLoadBarOutstanding() === 0) return;
       pmLoadBarShown = true;
-      // The whole document from the start when it is being loaded in full;
-      // just the stretch being filled in when it is not.
-      pmLoadBarBase = pmLiteActive ? lazyThumbLoaded.size : 0;
-      pmLoadBarShownFrac = 0;
-      fill.style.transition = 'none';
-      fill.style.width = '0%';
-      void fill.offsetWidth;
-      fill.style.transition = '';
+      pmLoadBarStartBatch(fill);
       bar.classList.add('visible');
       pmLoadBarUpdate();
     }
@@ -21760,7 +21855,7 @@
       if (!bar || !scrollContainer) return;
       const sc = scrollContainer.getBoundingClientRect();
       const GAP = 6;
-      const w = bar.offsetWidth || 120;
+      const w = bar.offsetWidth || 80;
       let right = sc.left + scrollContainer.clientLeft + scrollContainer.clientWidth - 12;
       // The phone's scroll rail floats over the right edge of the workspace.
       const rail = document.getElementById('mobileScrollRail');
@@ -21787,7 +21882,10 @@
           top = r.bottom + GAP;
         }
       });
-      bar.style.transform = 'translate(' + Math.round(right - w) + 'px,' + Math.round(top) + 'px)';
+      // `top` is where the strip itself goes; the element starts its
+      // transparent hover margin above that.
+      bar.style.transform = 'translate(' + Math.round(right - w) + 'px,' + Math.round(top - PM_LOAD_BAR_HIT) + 'px)';
+      pmLoadBarTipSync();
     }
     scrollContainer.addEventListener('scroll', () => { if (pmLoadBarShown) pmLoadBarPlace(); }, { passive: true });
     window.addEventListener('resize', () => { if (pmLoadBarShown) pmLoadBarPlace(); });
@@ -27520,11 +27618,14 @@
         };
         bindBtn('#cfmYes', true);
         bindBtn('#cfmNo', false);
+        // opts.dismissOnBackdrop === false: a click outside the box does
+        // nothing - for choices a stray click must not make on the user's
+        // behalf (the crash-recovery prompt, where "No" deletes the work).
         overlay.addEventListener('click', (e) => {
           if (e.target === overlay) {
             e.preventDefault();
             e.stopPropagation();
-            close(false);
+            if (opts.dismissOnBackdrop !== false) close(false);
           }
         });
         const onKey = (e) => {
