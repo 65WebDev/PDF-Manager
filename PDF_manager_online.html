@@ -18447,6 +18447,11 @@
     // FIXED starting origin, so moving both fingers together while still
     // pinching didn't visually pan until you lifted them.
     let pinchStartMidX = 0, pinchStartMidY = 0;
+    // Where the page grid is at gesture start (viewport px), the scroll
+    // offset, the grid's own height and the space after it in the scroll
+    // content - what the live preview needs to stop at the document's edges
+    // (see applyPinchVisualScale).
+    let pinchPagesTop0 = 0, pinchScrollTop0 = 0, pinchPagesH0 = 0, pinchTail0 = 0, pinchViewBottom0 = 0;
 
     function getPinchAnchorPage() {
       if (pinchAnchorIndex == null) return null;
@@ -18543,6 +18548,13 @@
       pinchOriginX = midX - pagesRect.left;
       pinchOriginY = midY - pagesRect.top;
       pagesContainer.style.transformOrigin = pinchOriginX + 'px ' + pinchOriginY + 'px';
+      const host = scrollContainer.getBoundingClientRect();
+      pinchPagesTop0 = pagesRect.top;
+      pinchScrollTop0 = scrollContainer.scrollTop;
+      pinchPagesH0 = pagesRect.height;
+      pinchTail0 = Math.max(0, scrollContainer.scrollHeight -
+        (pinchScrollTop0 + (pagesRect.top - host.top) + pagesRect.height));
+      pinchViewBottom0 = host.top + scrollContainer.clientHeight;
     }
 
     function applyPinchVisualScale() {
@@ -18553,7 +18565,27 @@
       // scaled content by exactly that many screen pixels, on top of the
       // fixed-origin scale below.
       const dx = pinchLastMidX != null ? pinchLastMidX - pinchStartMidX : 0;
-      const dy = pinchLastMidY != null ? pinchLastMidY - pinchStartMidY : 0;
+      let dy = pinchLastMidY != null ? pinchLastMidY - pinchStartMidY : 0;
+      // Keep the document's edges where the layout after release will be
+      // able to put them. Zooming out near the top used to shrink the grid
+      // towards the fingers, opening a gap above the first page that no
+      // scroll position can show - so on release the whole document jumped
+      // up to close it, which read as "zoomed out around the top corner of
+      // the document, not around my fingers". Same at the bottom, while the
+      // column count stays put (a change of columns reflows the grid into a
+      // height the preview cannot know yet).
+      const T = pinchPagesTop0 + pinchOriginY * (1 - ratio) + dy;     // grid top on screen
+      const restTop = pinchPagesTop0 + pinchScrollTop0;               // ...at scroll 0
+      const h = ratio * pinchPagesH0;
+      const colsKept = !isTouchDevice || pinchStartCols <= 0 ||
+        mobileColsThatFit(currentScale, getScrollAvailWidth()) === pinchStartCols;
+      if (colsKept && restTop + h + pinchTail0 > pinchViewBottom0) {
+        const B = T + h;                                              // grid bottom on screen
+        const minB = pinchViewBottom0 - pinchTail0;                   // ...at the end of the scroll
+        if (B < minB) dy += minB - B;
+      }
+      const T2 = pinchPagesTop0 + pinchOriginY * (1 - ratio) + dy;
+      if (T2 > restTop) dy -= T2 - restTop;
       pagesContainer.style.transform = 'translate(' + dx + 'px, ' + dy + 'px) scale(' + ratio + ')';
     }
 
