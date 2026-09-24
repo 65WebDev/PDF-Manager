@@ -11794,10 +11794,13 @@
             )}</span>`
           : '') +
         `<br><br>${escapeHtml(t('recoveryAsk'))}`;
+      // Only an explicit answer: Restore / Enter, or Delete / Esc. A click
+      // outside the box used to count as "Delete" and threw the work away.
       const ok = await showConfirmDialog(msg, {
         html: true,
         yesText: t('recoveryRestore'),
-        noText: t('recoveryDelete')
+        noText: t('recoveryDelete'),
+        dismissOnBackdrop: false
       });
       if (ok) {
         try {
@@ -27615,11 +27618,14 @@
         };
         bindBtn('#cfmYes', true);
         bindBtn('#cfmNo', false);
+        // opts.dismissOnBackdrop === false: a click outside the box does
+        // nothing - for choices a stray click must not make on the user's
+        // behalf (the crash-recovery prompt, where "No" deletes the work).
         overlay.addEventListener('click', (e) => {
           if (e.target === overlay) {
             e.preventDefault();
             e.stopPropagation();
-            close(false);
+            if (opts.dismissOnBackdrop !== false) close(false);
           }
         });
         const onKey = (e) => {
