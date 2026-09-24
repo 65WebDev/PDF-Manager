@@ -5086,11 +5086,8 @@
       visibility: visible;
       transition: opacity 0.2s ease;
     }
-    /*Only something to hover where there is a pointer that hovers; on a
-      touch screen it would just swallow taps on what is underneath.*/
-    @media (hover: hover) and (pointer: fine) {
-      #pmLoadBar.visible { pointer-events: auto; }
-    }
+    /*Hovered on a desktop, tapped on a smartphone (pmLoadBarTap).*/
+    #pmLoadBar.visible { pointer-events: auto; }
     #pmLoadBarTrack {
       height: 4px;
       border-radius: 2px;
@@ -8511,6 +8508,9 @@
     let pagePushApartEls = [];
     let lastSelectedIndex = null;
     let multiSelectMode = false;
+    // Page the mobile mini-tools are showing for (null: none) - declared up
+    // here because updateMobileQuickActions() can run during script init.
+    let pmQuickActionsShownIdx = null;
     let interactionMode = 'select'; // 'select' | 'nav'
     // Desktop cursor tool (select / nav / loupe) is global across tabs and
     // survives reload via localStorage. Read mode is never persisted —
@@ -19315,6 +19315,11 @@
 
     function updateMobileQuickActions() {
       if (!isTouchDevice) return;
+      // Reset here and set again below only if the panel is shown - so
+      // "shown for which page" is exact after every run, whichever early
+      // return it takes.
+      const shownBefore = pmQuickActionsShownIdx;
+      pmQuickActionsShownIdx = null;
       document.querySelectorAll('.page.mobile-quick-visible, .page.keep-actions-visible')
         .forEach(p => {
           p.classList.remove('mobile-quick-visible', 'keep-actions-visible', 'actions-fading');
@@ -19345,6 +19350,11 @@
       if (!qa) return;
 
       page.classList.add('mobile-quick-visible');
+      // Mini-tools just came up for this page: the menu with the rest of the
+      // tools comes back too if it had folded away (once per appearance -
+      // this runs on every scroll frame while they stay up).
+      pmQuickActionsShownIdx = idx;
+      if (shownBefore !== idx) pmRevealTopMenuForSelection(page);
 
       const gap = 6;
       const pageRect = page.getBoundingClientRect();
@@ -20783,6 +20793,29 @@
       }
     }
 
+    // A page selected (its mini-tools up) while the menu is folded away:
+    // bring the menu back, as the rest of what can be done with that page is
+    // up there. The work area starts lower once the menu is open, so the
+    // page is held where it was on screen while the menu slides in, rather
+    // than being pushed down from under the finger.
+    function pmRevealTopMenuForSelection(pageEl) {
+      if (!isTouchDevice) return;
+      if (typeof readModeActive !== 'undefined' && readModeActive) return;
+      const menu = document.getElementById('topMenu');
+      if (!menu || !menu.classList.contains('collapsed')) return;
+      const top0 = pageEl ? pageEl.getBoundingClientRect().top : null;
+      toggleTopMenu();
+      if (top0 == null) return;
+      const until = performance.now() + 450;
+      const hold = () => {
+        if (!pageEl.isConnected) return;
+        const d = pageEl.getBoundingClientRect().top - top0;
+        if (Math.abs(d) >= 0.5) scrollContainer.scrollTop += d;
+        if (performance.now() < until) requestAnimationFrame(hold);
+      };
+      requestAnimationFrame(hold);
+    }
+
     function pmMaybeAutoHideTopMenu() {
       if (!isTouchDevice || !scrollContainer) return;
       const top = scrollContainer.scrollTop;
@@ -20796,6 +20829,9 @@
       if (isDragActive || rubberActive || rubberArmed || pinchActive) return;
       if (typeof readModeActive !== 'undefined' && readModeActive) return;
       if (document.getElementById('pageEditModal')?.classList.contains('open')) return;
+      // Selecting pages works with the menu's tools: it stays while the
+      // multi-select mode is on, or while a page has its mini-tools up.
+      if (multiSelectMode || pmQuickActionsShownIdx != null) return;
       const menu = document.getElementById('topMenu');
       if (!menu || menu.classList.contains('collapsed')) return;
       toggleTopMenu();
@@ -21768,6 +21804,9 @@
     let pmLoadBarCompleted = false; // filled to the end, about to fade out
     let pmLoadBarShowTimer = null;
     let pmLoadBarHover = false;
+    let pmLoadBarTapUntil = 0;     // smartphone: hint shown by a tap until then
+    let pmLoadBarTapTimer = null;
+    const PM_LOAD_BAR_TAP_HINT_MS = 2500;
     // Transparent hover margin above and below the strip (#pmLoadBar padding).
     const PM_LOAD_BAR_HIT = 8;
     // Work that finishes within this long (an undo re-drawing a short
@@ -21864,19 +21903,36 @@
       const tip = document.getElementById('pmLoadBarTip');
       const bar = document.getElementById('pmLoadBar');
       if (!tip || !bar) return;
-      const on = pmLoadBarHover && pmLoadBarShown;
+      const on = (pmLoadBarHover || performance.now() < pmLoadBarTapUntil) && pmLoadBarShown;
       tip.classList.toggle('visible', on);
       if (!on) return;
       const r = bar.getBoundingClientRect();
       const tw = tip.offsetWidth;
-      const x = Math.max(4, Math.min(r.right - tw, window.innerWidth - tw - 4));
+      // Lined up with the strip's own outer edge: right on a desktop, left on
+      // a smartphone (see pmLoadBarPlace).
+      const x0 = isTouchDevice ? r.left : r.right - tw;
+      const x = Math.max(4, Math.min(x0, window.innerWidth - tw - 4));
       tip.style.transform = 'translate(' + Math.round(x) + 'px,' + Math.round(r.bottom + 2) + 'px)';
     }
     {
       const bar = document.getElementById('pmLoadBar');
       if (bar) {
-        bar.addEventListener('mouseenter', () => { pmLoadBarHover = true; pmLoadBarTipSync(); });
-        bar.addEventListener('mouseleave', () => { pmLoadBarHover = false; pmLoadBarTipSync(); });
+        bar.addEventListener('mouseenter', () => { if (!isTouchDevice) { pmLoadBarHover = true; pmLoadBarTipSync(); } });
+        bar.addEventListener('mouseleave', () => { if (!isTouchDevice) { pmLoadBarHover = false; pmLoadBarTipSync(); } });
+        // Smartphone: a tap shows the hint for a moment (again: hides it).
+        bar.addEventListener('click', (e) => {
+          if (!isTouchDevice) return;
+          e.preventDefault();
+          e.stopPropagation();
+          clearTimeout(pmLoadBarTapTimer);
+          if (performance.now() < pmLoadBarTapUntil) {
+            pmLoadBarTapUntil = 0;
+          } else {
+            pmLoadBarTapUntil = performance.now() + PM_LOAD_BAR_TAP_HINT_MS;
+            pmLoadBarTapTimer = setTimeout(pmLoadBarTipSync, PM_LOAD_BAR_TAP_HINT_MS + 20);
+          }
+          pmLoadBarTipSync();
+        });
       }
     }
     function pmLoadBarReveal() {
@@ -21899,10 +21955,14 @@
       const sc = scrollContainer.getBoundingClientRect();
       const GAP = 6;
       const w = bar.offsetWidth || 80;
-      let right = sc.left + scrollContainer.clientLeft + scrollContainer.clientWidth - 12;
+      // Top-right on a desktop; top-left on a smartphone, where the right
+      // edge belongs to the scroll rail and the floating menu button.
+      const leftEdge = sc.left + scrollContainer.clientLeft + 12;
+      let right = isTouchDevice ? leftEdge + w
+        : sc.left + scrollContainer.clientLeft + scrollContainer.clientWidth - 12;
       // The phone's scroll rail floats over the right edge of the workspace.
       const rail = document.getElementById('mobileScrollRail');
-      if (rail && getComputedStyle(rail).display !== 'none') {
+      if (!isTouchDevice && rail && getComputedStyle(rail).display !== 'none') {
         const r = rail.getBoundingClientRect();
         if (r.width && r.left < right + 12) right = Math.min(right, r.left - 6);
       }
