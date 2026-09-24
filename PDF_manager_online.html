@@ -521,6 +521,20 @@
       transition: background .15s ease, color .15s ease;
     }
     .pm-tab:hover { background: #46596c; color: #eaf0f5; }
+    /*+ after the last tab: a new, empty document*/
+    /*(#tabBar: must not take .top-menu button's 42px sizing/padding/colours)*/
+    #tabBar .pm-tab-new {
+      flex: 0 0 auto; align-self: center; box-sizing: border-box;
+      width: 24px; height: 24px; min-width: 24px; min-height: 24px;
+      margin: 0 0 0 1px; padding: 0; gap: 0;
+      display: flex; align-items: center; justify-content: center;
+      border: none; border-radius: 6px; background: transparent;
+      color: #c9d3dc; cursor: pointer; font-size: 0;
+      transition: background .15s ease, color .15s ease;
+    }
+    #tabBar .pm-tab-new:hover { background: #46596c; color: #fff; }
+    #tabBar .pm-tab-new:focus-visible { outline: 2px solid #3498db; outline-offset: 1px; }
+    body.pm-tab-dragging #tabBar .pm-tab-new { visibility: hidden; }
     .pm-tab.active {
       background: #f4f4f4; color: #1f2d3a; font-weight: 600; box-shadow: none;
       /* No negative bottom margin: the tab used to hang 1px past the tab bar
@@ -6883,6 +6897,11 @@
       border-color: #3a4048; box-shadow: 0 2px 8px rgba(0,0,0,0.35);
     }
 
+    /*A "new document" tab: its own invitation - files go INTO it.*/
+    .drop-zone .dz-newdoc { display: none; }
+    .drop-zone.dz-new-doc .dz-desktop, .drop-zone.dz-new-doc .dz-mobile { display: none !important; }
+    .drop-zone.dz-new-doc .dz-newdoc { display: inline; }
+
     html[data-theme="dark"] .drop-zone {
       background: #1c2128; border-color: #454c56; color: #cfd5db;
     }
@@ -7797,7 +7816,7 @@
       </div>
       <div id="info" class="info" style="display:none;"></div>
     </div>
-    <div id="dropZone" class="drop-zone"><span class="dz-desktop" data-i18n="dropZoneDesktop">Нажмите здесь или перетащите в эту область один или несколько файлов для открытия</span><span class="dz-mobile" data-i18n="dropZoneMobile">Нажмите здесь для выбора одного или нескольких файлов</span><br><span data-i18n="dropZoneFormats" style="font-size:14px;color:#888;margin-top:8px;display:block;">Поддерживаются: PDF, Word (.docx), Excel (.xls, .xlsx), письма (.eml, .msg), изображения (PNG, JPEG, BMP, GIF, WEBP, TIFF)</span></div>
+    <div id="dropZone" class="drop-zone"><span class="dz-desktop" data-i18n="dropZoneDesktop">Нажмите здесь или перетащите в эту область один или несколько файлов для открытия</span><span class="dz-newdoc" data-i18n="dropZoneNewDoc">Нажмите здесь или перетащите в эту область файлы, чтобы добавить их в новый документ</span><span class="dz-mobile" data-i18n="dropZoneMobile">Нажмите здесь для выбора одного или нескольких файлов</span><br><span data-i18n="dropZoneFormats" style="font-size:14px;color:#888;margin-top:8px;display:block;">Поддерживаются: PDF, Word (.docx), Excel (.xls, .xlsx), письма (.eml, .msg), изображения (PNG, JPEG, BMP, GIF, WEBP, TIFF)</span></div>
     <div id="pagesContainer" class="pages"></div>
     <div id="insertIndicator"></div>
     <div id="insertMenu">
@@ -8203,6 +8222,11 @@
     //“Dirty” state of the document: were there any changes (rotation/movement/insertion/
     //deletion) after the last save. Resets to false when saving.
     let documentDirty = false;
+    // A "new document" tab (the tab bar's + button) that has had content put
+    // into it but was never saved: that alone makes it dirty, whatever the
+    // history says - its first history step already holds that content, so
+    // comparing against it would call the document unchanged.
+    let pmUnsavedNewDoc = false;
     const DOC_HISTORY_MAX = 40;
     // Every undo step holds a full copy of the document's bytes, so the step
     // count alone is not a memory limit: 40 steps of a 10 MB file is ~400 MB,
@@ -8994,6 +9018,8 @@
         rotateLeftSelectedShort: 'Повернуть выбранные страницы против ч.с.',
         rotateRightSelectedShort: 'Повернуть выбранные страницы по ч.с.',
         tabNoName: 'без имени', tabCloseTitle: 'Закрыть вкладку',
+        newDocTabTitle: 'Создать новый документ', newDocName: 'Новый документ {n}',
+        dropZoneNewDoc: 'Нажмите здесь или перетащите в эту область файлы, чтобы добавить их в новый документ',
         singleDocFallbackName: 'Документ', searchResultPagePrefix: 'стр.',
         bookmarkDefaultNameWord: 'Закладка',
         loadingCancelingCrop: 'Отмена кадрирования...',
@@ -9389,6 +9415,8 @@
         rotateLeftSelectedShort: 'Rotate selected pages CCW',
         rotateRightSelectedShort: 'Rotate selected pages CW',
         tabNoName: 'unnamed', tabCloseTitle: 'Close tab',
+        newDocTabTitle: 'Create a new document', newDocName: 'New document {n}',
+        dropZoneNewDoc: 'Click here or drop files into this area to add them to the new document',
         singleDocFallbackName: 'Document', searchResultPagePrefix: 'p.',
         bookmarkDefaultNameWord: 'Bookmark',
         loadingCancelingCrop: 'Canceling the crop...',
@@ -9784,6 +9812,8 @@
         rotateLeftSelectedShort: 'Girar páginas seleccionadas antihoraria',
         rotateRightSelectedShort: 'Girar páginas seleccionadas horaria',
         tabNoName: 'sin nombre', tabCloseTitle: 'Cerrar pestaña',
+        newDocTabTitle: 'Crear un documento nuevo', newDocName: 'Documento nuevo {n}',
+        dropZoneNewDoc: 'Haga clic aquí o arrastre archivos a esta área para añadirlos al documento nuevo',
         singleDocFallbackName: 'Documento', searchResultPagePrefix: 'pág.',
         bookmarkDefaultNameWord: 'Marcador',
         loadingCancelingCrop: 'Cancelando el recorte...',
@@ -10255,6 +10285,9 @@
         rotateRightSelectedShort: '顺时针旋转所选页面',
         tabNoName: '未命名',
         tabCloseTitle: '关闭标签页',
+        newDocTabTitle: '新建文档',
+        newDocName: '新文档 {n}',
+        dropZoneNewDoc: '点击此处或将文件拖到此区域，将其添加到新文档',
         singleDocFallbackName: '文档',
         searchResultPagePrefix: '页',
         bookmarkDefaultNameWord: '书签',
@@ -10787,7 +10820,8 @@
         const inScroll = scrollContainer && scrollContainer.contains(e.target);
         const onTabBar = tabBarEl && tabBarEl.contains(e.target);
         const tabFileDrag = document.body.classList.contains('pm-tab-file-drag');
-        if ((!inScroll || !pdfDoc) && !onTabBar && !tabFileDrag) {
+        if ((!inScroll || !pdfDoc) && !onTabBar && !tabFileDrag &&
+            !(typeof pmActiveIsEmptyNewDoc === 'function' && pmActiveIsEmptyNewDoc())) {
           if (typeof pmShowTabDropHint === 'function')
             pmShowTabDropHint(true, e.clientX, e.clientY, e.dataTransfer);
           if (typeof pmShowFileDragGhosts === 'function')
@@ -11087,6 +11121,9 @@
     }
 
     function updateUIState() {
+      if (typeof pmActiveIsEmptyNewDoc === 'function') {
+        dropZone.classList.toggle('dz-new-doc', pmActiveIsEmptyNewDoc());
+      }
       const disabledByLoading = isLoading;
       const noDocument = !pdfDoc;
       const baseDisabled = disabledByLoading || noDocument;
@@ -12631,7 +12668,7 @@
       if (typeof pmSearchScheduleRerunIfActive === 'function') pmSearchScheduleRerunIfActive();
       const base = docHistory.length ? docHistory[0] : null;
       const cur = docHistoryIndex >= 0 ? docHistory[docHistoryIndex] : null;
-      const dirty = !!(base && cur && (
+      const dirty = !!(pmUnsavedNewDoc && pdfDoc) || !!(base && cur && (
         !pdfBytesEqual(base.pdfBytes, cur.pdfBytes) ||
         !markedArraysEqual(base.marked || [], cur.marked || [])
       ));
@@ -12665,6 +12702,7 @@
       docHistoryIndex = docHistory.length ? 0 : -1;
       historyPushSuspended = false;
       documentDirty = false;
+      pmUnsavedNewDoc = false;
       if (typeof updateInfo === 'function') updateInfo();
       if (typeof updateStickyFileBar === 'function') updateStickyFileBar();
       if (typeof pmOnDocumentDirtyChanged === 'function') pmOnDocumentDirtyChanged();
@@ -12994,6 +13032,11 @@
         infoDiv.style.display = 'none';
       }
       updateHeaderLayout();
+      // The active tab's "*" follows along - it used to wait for the next
+      // full redraw of the tab bar (a tab switch), however the document
+      // changed.
+      const tabStar = tabBarEl && tabBarEl.querySelector('.pm-tab.active .pm-tab-star');
+      if (tabStar) tabStar.hidden = !documentDirty;
       if (typeof pmLoadBarSchedule === 'function') pmLoadBarSchedule();
     }
 
@@ -28228,6 +28271,7 @@
       }];
       tab.docHistoryIndex = 0;
       tab.dirty = false;
+      tab.unsavedNewDoc = false;
     }
 
     async function saveAllOpenTabsAsImage(jpegQuality, rasterScale, tabSources, encryptPassword) {
@@ -29446,7 +29490,7 @@
         // or (b) forceNewTab is explicitly requested (dragging onto the button when already
         // open document - the result should not be mixed with the current one).
         const tabsOn = typeof pmTabsEnabled === 'function' && pmTabsEnabled();
-        const creatingNewTab = tabsOn && (forceNewTab || !pdfDoc);
+        const creatingNewTab = tabsOn && (forceNewTab || (!pdfDoc && !pmActiveIsEmptyNewDoc()));
         let newSession = null;
         if (creatingNewTab) {
           if (!pmCanAddTab()) {
@@ -29555,11 +29599,14 @@
 
       showLoading(t('mergingFilesProgress', { count: files.length }));
       if (wasCreatingNewDocument) historyPushSuspended = true;
+      // Filling a "new document" tab: it keeps its "New document N" name.
+      const newDocTab = (typeof pmActiveIsEmptyNewDoc === 'function' && pmActiveIsEmptyNewDoc())
+        ? pmTabs.find(x => x.id === pmActiveId) : null;
 
       try {
         if (!pdfDoc) {
           pdfDoc = await PDFLib.PDFDocument.create();
-          currentFileName = files.length === 1 ? files[0].name : t('mergedFileNameDefault');
+          if (!newDocTab) currentFileName = files.length === 1 ? files[0].name : t('mergedFileNameDefault');
         }
 
         const wasEmpty = wasCreatingNewDocument; // association from scratch?
@@ -29598,6 +29645,16 @@
           }
         }
 
+        // Nothing could be added to a new document (every file failed or was
+        // cancelled): it stays an empty new document rather than a PDF with
+        // no pages, which pdf-lib would quietly give a blank page on save.
+        if (newDocTab && pdfDoc && pdfDoc.getPageCount() === 0) {
+          pdfDoc = null;
+          historyPushSuspended = false;
+          updateUIState();
+          return;
+        }
+
         if (renderedIncrementally) {
           // We update the state without completely re-reading it
           applyScale();
@@ -29615,6 +29672,16 @@
         if (wasEmpty) {
           applyInitialScale();
           if (pdfDoc) await resetDocHistoryToCurrent();
+          // Content put into a new document: something to save now - its
+          // first history step is this very content, so without the flag
+          // closing it would not ask (see pmUnsavedNewDoc).
+          if (newDocTab && pdfDoc && pdfDoc.getPageCount() > 0) {
+            newDocTab.newDocEmpty = false;
+            pmUnsavedNewDoc = true;
+            documentDirty = true;
+            updateInfo();
+            if (typeof pmOnDocumentDirtyChanged === 'function') pmOnDocumentDirtyChanged();
+          }
         }
 
       } catch (e) {
@@ -32173,6 +32240,7 @@
       e.stopPropagation();
       if (!isLoading) dropZone.classList.add('dragover');
       if (!pdfDoc && typeof pmTabsEnabled === 'function' && pmTabsEnabled() &&
+          !pmActiveIsEmptyNewDoc() &&
           typeof pmShowTabDropHint === 'function' &&
           e.dataTransfer && e.dataTransfer.types &&
           Array.prototype.indexOf.call(e.dataTransfer.types, 'Files') !== -1) {
@@ -32183,7 +32251,7 @@
     // Tap/click on an area to select one or more files.
     dropZone.addEventListener('click', () => {
       if (isLoading) return;
-      if (pdfDoc) mergeAnotherPDF();
+      if (pdfDoc || pmActiveIsEmptyNewDoc()) mergeAnotherPDF();
       else loadNewPDF();
     });
     // Light illumination when pressed (relevant for the wheelbarrow)
@@ -32240,7 +32308,8 @@
           // Blank editor: "Opens in new tabs" tooltip (desktop)
           // + ghosts of created tabs - here absolutely all files will become
           // new tabs, insertion into the document cannot occur (there is no document).
-          if (pmTabsEnabled()) {
+          // Except in a "new document" tab, where they go into that document.
+          if (pmTabsEnabled() && !pmActiveIsEmptyNewDoc()) {
             if (typeof pmShowTabDropHint === 'function')
               pmShowTabDropHint(true, e.clientX, e.clientY, e.dataTransfer);
             pmShowFileDragGhosts(pmCountDragFiles(e.dataTransfer));
@@ -32813,7 +32882,12 @@ function pmNewSession() {
     dirty: false, docHistory: [], docHistoryIndex: -1,
     scale: 100, autoScale: true, scaleLocked: false, mobileMin: 70,
     mode: 'select', multiSel: false, deletedHidden: true, scrollTop: 0,
-    selected: [], lastSel: null, zoomView: pmDefaultZoomView()
+    selected: [], lastSel: null, zoomView: pmDefaultZoomView(),
+    // A tab made by the + button: newDocNo is its number in "New document N";
+    // newDocEmpty while nothing has been put into it (no pdfDoc at all - a
+    // PDF with no pages is not something pdf-lib keeps: saving one adds a
+    // blank page to it); unsavedNewDoc once there is content, until saved.
+    newDocNo: null, newDocEmpty: false, unsavedNewDoc: false
   };
 }
 
@@ -32838,6 +32912,7 @@ function pmCaptureActive() {
   t.selected = [...selectedPages];
   t.lastSel = lastSelectedIndex;
   t.zoomView = pmReadZoomView();
+  t.unsavedNewDoc = pmUnsavedNewDoc;
 }
 
 // Expands the session to a global state and redraws the editor
@@ -32857,6 +32932,7 @@ async function pmActivate(id, skipCapture, keepSelection) {
   currentFileName = t.fileName; sourceFileHandle = t.sourceHandle;
   sourceNativePath = t.sourceNativePath || null;
   documentDirty = t.dirty; docHistory = t.docHistory; docHistoryIndex = t.docHistoryIndex;
+  pmUnsavedNewDoc = !!t.unsavedNewDoc;
   currentScale = t.scale; autoScaleEnabled = t.autoScale; scaleUserLocked = t.scaleLocked;
   mobileMinScale = t.mobileMin; deletedPagesHidden = t.deletedHidden;
   // Before the snapshot is restored: rebuilding the pages runs applyScale()
@@ -32911,7 +32987,7 @@ function pmResetGlobalsEmpty() {
   // A tab opening on a fresh document starts from a plain view - it must not
   // inherit the fit-width ladder of whatever was on screen a moment ago.
   pmWriteZoomView(null);
-  pdfDoc = null; originalFileBytes = null; documentDirty = false;
+  pdfDoc = null; originalFileBytes = null; documentDirty = false; pmUnsavedNewDoc = false;
   selectedPages.clear(); markedForDeletion.clear(); lastSelectedIndex = null;
   docHistory = []; docHistoryIndex = -1;
   if (typeof destroyLazyThumbnailPipeline === 'function') destroyLazyThumbnailPipeline();
@@ -32925,6 +33001,35 @@ function pmClearToEmpty() {
   updateUIState(); updateInfo(); updateUndoRedoUI();
   if (typeof relayoutTopUI === 'function') relayoutTopUI();
 }
+
+// The active tab, while it is a "new document" nothing has been put into yet:
+// files opened or dropped go INTO it (keeping its name) instead of into new
+// tabs, the way anything done in a browser's new tab happens in that tab.
+function pmActiveIsEmptyNewDoc() {
+  if (pdfDoc || !pmTabsEnabled()) return false;
+  const tab = pmTabs.find(x => x.id === pmActiveId);
+  return !!(tab && tab.newDocEmpty);
+}
+
+// The tab bar's + button: a tab with a document that has no pages yet,
+// "New document N" - one past the highest N among the new documents open.
+async function pmCreateNewDocTab() {
+  if (isLoading || !pmTabsEnabled()) return;
+  if (!pmCanAddTab()) {
+    alert(t('alertNoRoomForTab'));
+    return;
+  }
+  if (pmActiveId != null) pmCaptureActive();
+  const n = pmTabs.reduce((m, x) => Math.max(m, x.newDocNo || 0), 0) + 1;
+  const session = pmNewSession();
+  session.newDocNo = n;
+  session.newDocEmpty = true;
+  session.fileName = t('newDocName', { n });
+  pmTabs.push(session);
+  pmResetGlobalsEmpty();
+  await pmActivate(session.id, true);
+}
+window.pmCreateNewDocTab = pmCreateNewDocTab;
 
 // Opens one file in a NEW tab (insertAt - position on the panel, default to the end).
 async function pmOpenOneFileAsTab(file, handle, insertAt) {
@@ -33146,6 +33251,11 @@ async function handleOsFilesDrop(e, dropSnapshot) {
   const droppedFiles = filterSupportedDroppedFiles(e.dataTransfer.files);
   if (!droppedFiles.length) {
     await pmWarnIfShortcutDrop(e.dataTransfer.files);
+    return;
+  }
+  // Dropped into a "new document" tab: added to that document.
+  if (pmActiveIsEmptyNewDoc()) {
+    await mergeFilesFlow(droppedFiles);
     return;
   }
 
@@ -33550,14 +33660,24 @@ async function pmCloseTabsToRight(fromTabId) {
 // Tab width: maximum 220px; as the number of tabs grows, it shrinks so that everything
 // fit without scrolling. Lower bound (4 letters) guaranteed by locking
 // opening new tabs (pmCanAddTab), rather than horizontal scrolling.
+// 3px: .tab-bar's gap between tabs.
 function pmComputeWidth(n, avail) {
   if (n <= 0) return 0;
-  return Math.max(1, Math.min(TAB_MAX_W, Math.floor(avail / n)));
+  return Math.max(1, Math.min(TAB_MAX_W, Math.floor((avail - 3 * (n - 1)) / n)));
 }
 
 // Available width of the tab bar (if there are no tabs yet, we estimate it using the menu).
+// Room kept at the end of the bar for the + (new document) button: its
+// width, its margin and the gap before it.
+const PM_NEW_TAB_BTN_ROOM = 28;
 function pmAvailWidth() {
-  if (tabBarEl && tabBarEl.clientWidth) return tabBarEl.clientWidth;
+  if (tabBarEl && tabBarEl.clientWidth) {
+    // The content box - the tabs start after the padding that lines them up
+    // with the "Select files" button (pmAlignBarLeft).
+    const cs = getComputedStyle(tabBarEl);
+    const inner = tabBarEl.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+    return Math.max(0, inner - PM_NEW_TAB_BTN_ROOM);
+  }
   if (topMenuEl && topMenuEl.clientWidth) return Math.max(0, topMenuEl.clientWidth - 20);
   return 800;
 }
@@ -33578,7 +33698,7 @@ function pmMinTabWidth() {
 // Will another tab fit at least the minimum width (4 letters)?
 function pmCanAddTab() {
   const n = pmTabs.length + 1;
-  const w = Math.min(TAB_MAX_W, Math.floor(pmAvailWidth() / n));
+  const w = pmComputeWidth(n, pmAvailWidth());
   return w >= pmMinTabWidth();
 }
 
@@ -34039,6 +34159,15 @@ function pmRenderBar() {
     });
     tabBarEl.appendChild(el);
   });
+  const plus = document.createElement('button');
+  plus.type = 'button';
+  plus.className = 'pm-tab-new';
+  plus.title = t('newDocTabTitle');
+  plus.setAttribute('aria-label', t('newDocTabTitle'));
+  plus.innerHTML = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" fill="none"/></svg>';
+  plus.addEventListener('mousedown', (e) => e.stopPropagation());
+  plus.addEventListener('click', (e) => { e.stopPropagation(); pmCreateNewDocTab(); });
+  tabBarEl.appendChild(plus);
   if (typeof pmUpdatePageDragTabVisuals === 'function' && isDragActive) {
     pmUpdatePageDragTabVisuals();
   }
