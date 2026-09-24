@@ -1088,7 +1088,8 @@
     html[data-theme="dark"] .pm-wm-box .pm-wm-spin,
     html[data-theme="dark"] .pm-wm-box .pm-wm-spin button + button { border-color: #4a5058; }
     html[data-theme="dark"] .pm-wm-box .pm-wm-spin button { color: #9aa4ae !important; }
-    html[data-theme="dark"] .pm-wm-box .pm-wm-spin button svg { color: inherit !important; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-spin button svg,
+    html[data-theme="dark"] .pm-wm-box .pm-wm-spin button svg * { color: inherit !important; }
     html[data-theme="dark"] .pm-wm-box .pm-wm-spin button:hover:not(:disabled) { background: #2c3440; color: #5dade2 !important; }
     html[data-theme="dark"] .pm-wm-box .pm-wm-tbtn,
     html[data-theme="dark"] .pm-wm-box .pm-wm-cancel {
@@ -7214,6 +7215,22 @@
       background: #333a44 !important; border-color: #4a5058 !important;
     }
     /* Encrypt-password dialog: hover feedback on both buttons (light + dark). */
+    /*Show/hide eye inside the first password field.*/
+    .pm-pwd-wrap { position: relative; }
+    .pm-pwd-eye {
+      position: absolute; top: 50%; right: 6px; transform: translateY(-50%);
+      width: 32px; height: 32px; padding: 0; border: none; border-radius: 6px;
+      background: transparent; color: #7f8c8d; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: color 0.15s, background 0.15s;
+    }
+    .pm-pwd-eye:hover, .pm-pwd-eye:focus-visible { color: #2980b9; background: #eaf3fb; outline: none; }
+    .pm-pwd-eye svg { display: block; }
+    html[data-theme="dark"] .pm-modal-box .pm-pwd-eye { color: #9aa4ae !important; }
+    html[data-theme="dark"] .pm-modal-box .pm-pwd-eye:hover,
+    html[data-theme="dark"] .pm-modal-box .pm-pwd-eye:focus-visible { color: #5dade2 !important; background: #2c3440; }
+    html[data-theme="dark"] .pm-modal-box .pm-pwd-eye svg,
+    html[data-theme="dark"] .pm-modal-box .pm-pwd-eye svg * { color: inherit !important; }
     #encPwdCancel:hover { background: #f0f0f0 !important; }
     #encPwdOk:hover { background: #2471a3 !important; }
     html[data-theme="dark"] .pm-modal-box #encPwdCancel:hover { background: #3d4550 !important; }
@@ -9131,6 +9148,7 @@
         encryptPwdBody: 'Этот пароль потребуется, чтобы открыть сохранённый PDF.',
         encryptPwdPlaceholder: 'Пароль',
         encryptPwdConfirmPlaceholder: 'Повторите пароль',
+        pwdShow: 'Показать пароль', pwdHide: 'Скрыть пароль',
         encryptPwdOk: 'Зашифровать',
         encryptPwdEmpty: 'Введите пароль',
         encryptPwdMismatch: 'Пароли не совпадают',
@@ -9544,6 +9562,7 @@
         encryptPwdBody: 'This password will be required to open the saved PDF.',
         encryptPwdPlaceholder: 'Password',
         encryptPwdConfirmPlaceholder: 'Repeat password',
+        pwdShow: 'Show password', pwdHide: 'Hide password',
         encryptPwdOk: 'Encrypt',
         encryptPwdEmpty: 'Enter a password',
         encryptPwdMismatch: 'Passwords do not match',
@@ -9957,6 +9976,7 @@
         encryptPwdBody: 'Esta contraseña será necesaria para abrir el PDF guardado.',
         encryptPwdPlaceholder: 'Contraseña',
         encryptPwdConfirmPlaceholder: 'Repita la contraseña',
+        pwdShow: 'Mostrar contraseña', pwdHide: 'Ocultar contraseña',
         encryptPwdOk: 'Cifrar',
         encryptPwdEmpty: 'Introduzca una contraseña',
         encryptPwdMismatch: 'Las contraseñas no coinciden',
@@ -10436,6 +10456,7 @@
         encryptPwdBody: '打开已保存的 PDF 时需要输入此密码。',
         encryptPwdPlaceholder: '密码',
         encryptPwdConfirmPlaceholder: '重复密码',
+        pwdShow: '显示密码', pwdHide: '隐藏密码',
         encryptPwdOk: '加密',
         encryptPwdEmpty: '请输入密码',
         encryptPwdMismatch: '两次输入的密码不一致',
@@ -29262,6 +29283,10 @@
      * Modal: ask the user to set a NEW password to encrypt a PDF being saved.
      * Resolves to the entered password string, or null if the user cancels.
      */
+    // Eye icons for "show password": open = shown, struck through = hidden.
+    const PM_PWD_EYE_OPEN = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 12S5.5 4.5 12 4.5 22.5 12 22.5 12 18.5 19.5 12 19.5 1.5 12 1.5 12z"/><circle cx="12" cy="12" r="3.2"/></svg>';
+    const PM_PWD_EYE_CLOSED = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 12S5.5 4.5 12 4.5 22.5 12 22.5 12 18.5 19.5 12 19.5 1.5 12 1.5 12z"/><circle cx="12" cy="12" r="3.2"/><path d="M3 21 21 3"/></svg>';
+
     function showSetPdfPasswordDialog() {
       return new Promise((resolve) => {
         const overlay = document.createElement('div');
@@ -29281,10 +29306,14 @@
           <div style="font-size:14px; color:#555; margin-bottom:14px; line-height:1.45;">
             ${escapeHtml(t('encryptPwdBody'))}
           </div>
-          <input id="encPwdInput" type="password" autocomplete="new-password"
-            placeholder="${escapeHtml(t('encryptPwdPlaceholder'))}"
-            style="width:100%; box-sizing:border-box; padding:10px 12px; font-size:16px;
-              border:1px solid #ccc; border-radius:6px; margin-bottom:10px;" />
+          <div class="pm-pwd-wrap" style="margin-bottom:10px;">
+            <input id="encPwdInput" type="password" autocomplete="new-password"
+              placeholder="${escapeHtml(t('encryptPwdPlaceholder'))}"
+              style="width:100%; box-sizing:border-box; padding:10px 42px 10px 12px; font-size:16px;
+                border:1px solid #ccc; border-radius:6px;" />
+            <button type="button" id="encPwdEye" class="pm-pwd-eye" aria-pressed="false"
+              title="${escapeHtml(t('pwdShow'))}" aria-label="${escapeHtml(t('pwdShow'))}">${PM_PWD_EYE_CLOSED}</button>
+          </div>
           <input id="encPwdInput2" type="password" autocomplete="new-password"
             placeholder="${escapeHtml(t('encryptPwdConfirmPlaceholder'))}"
             style="width:100%; box-sizing:border-box; padding:10px 12px; font-size:16px;
@@ -29302,6 +29331,19 @@
         const input1 = box.querySelector('#encPwdInput');
         const input2 = box.querySelector('#encPwdInput2');
         const errEl = box.querySelector('#encPwdErr');
+        // The eye shows or hides both fields at once (the repeat must match
+        // what is shown). Closed - the default - means hidden.
+        const eye = box.querySelector('#encPwdEye');
+        eye.addEventListener('mousedown', (e) => e.preventDefault());   // keep the caret in its field
+        eye.addEventListener('click', () => {
+          const show = input1.type === 'password';
+          input1.type = input2.type = show ? 'text' : 'password';
+          eye.innerHTML = show ? PM_PWD_EYE_OPEN : PM_PWD_EYE_CLOSED;
+          const tip = t(show ? 'pwdHide' : 'pwdShow');
+          eye.title = tip;
+          eye.setAttribute('aria-label', tip);
+          eye.setAttribute('aria-pressed', String(show));
+        });
         const close = (result) => {
           document.removeEventListener('keydown', onKey, true);
           if (overlay.parentNode) document.body.removeChild(overlay);
