@@ -897,6 +897,226 @@
     #printSelectedBtn:hover:not(:disabled) { background: #3498db; }
     #printSelectedBtn svg { display: block; }
 
+    /*"Watermark" pops up under "Edit page" - the same technique as print-selected
+       above (fixed, coordinates from JS). Shown whenever a document with pages is
+       open: it does not depend on the selection the way "Edit page" does.*/
+    .edit-wrapper { position: relative; display: inline-flex; }
+    #watermarkBtn {
+      position: fixed;
+      top: 0;
+      left: 0;
+      z-index: 9999;
+      opacity: 0;
+      transform: translateY(-6px);
+      pointer-events: none;
+      transition: opacity 0.15s, transform 0.15s, background 0.15s;
+    }
+    #watermarkBtn.show::before {
+      content: '';
+      position: absolute;
+      left: 0; right: 0;
+      top: -10px; height: 10px;
+    }
+    #watermarkBtn.show {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+    #watermarkBtn.show:disabled { opacity: 0.4; }
+    #watermarkBtn:hover:not(:disabled) { background: #3498db; }
+    #watermarkBtn svg { display: block; }
+    @media (pointer: coarse) { #watermarkBtn { display: none !important; } }
+
+    /*Watermark dialog*/
+    .pm-wm-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+      display: flex; align-items: center; justify-content: center; z-index: 100001;
+    }
+    .pm-wm-box {
+      background: #fff; border-radius: 12px; padding: 8px 10px 10px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+      display: flex; flex-direction: column; gap: 8px;
+      max-width: calc(100vw - 32px); max-height: calc(100vh - 32px); overflow: auto;
+      box-sizing: border-box; color: #2c3e50; font-size: 14px;
+    }
+    .pm-wm-title { font-size: 17px; font-weight: 600; padding: 2px 2px 0; }
+    /*Title row: the "?" sits at its right end, in the dialog's top-right
+       corner - out of the preview, which gets the height instead.*/
+    .pm-wm-box { position: relative; }
+    .pm-wm-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .pm-wm-body { display: flex; gap: 18px; min-height: 0; }
+    .pm-wm-controls {
+      width: 360px; flex: none; display: flex; flex-direction: column; gap: 6px;
+      padding-right: 4px;
+    }
+    .pm-wm-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-height: 28px; }
+    .pm-wm-row-top { align-items: flex-start; }
+    .pm-wm-row-top .pm-wm-label { line-height: 22px; }
+    .pm-wm-label { width: 108px; flex: none; color: #555; }
+    .pm-wm-sub { padding-left: 114px; }
+    .pm-wm-push { flex: 1; }
+    /*The label column is 108px + 6px gap, so the brick checkbox, the "↔" of
+       the spacing row and the page radios all start on the same line.*/
+    .pm-wm-axis { color: #6b7785; font-size: 15px; width: 12px; text-align: center; }
+    .pm-wm-sep { border: none; border-top: 1px solid #e3e6ea; margin: 2px 0; width: 100%; }
+    /*B and I are 28px each with the 6px row gap between them; the size field
+       under them spans exactly that: its left edge under B, right under I.*/
+    #pmWmBold, #pmWmItalic { width: 28px; min-width: 28px; padding: 0; }
+    .pm-wm-size-num { display: inline-flex; width: 62px; }
+    .pm-wm-size-num .pm-wm-num { width: 100%; }
+    .pm-wm-size-num .pm-wm-num input[type=number] { flex: 1; width: 0; min-width: 0; }
+    .pm-wm-file { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #555; font-size: 13px; }
+    .pm-wm-text-only.pm-wm-off { opacity: 0.45; }
+    .pm-wm-check.pm-wm-label { display: flex; align-items: center; gap: 6px; color: inherit; }
+    .pm-wm-controls input[type=range]:disabled { opacity: 0.5; }
+    .pm-wm-off { opacity: 0.45; }
+    .pm-wm-controls input[type=text],
+    .pm-wm-controls input[type=number],
+    .pm-wm-controls select {
+      border: 1px solid #bbb; border-radius: 6px; padding: 3px 7px; height: 28px; font-size: 14px;
+      box-sizing: border-box; background: #fff; color: #2c3e50; outline: none;
+    }
+    .pm-wm-controls input[type=text]:focus,
+    .pm-wm-controls input[type=number]:focus,
+    .pm-wm-controls select:focus { border-color: #3498db; }
+    #pmWmText { flex: 1; min-width: 0; }
+    #pmWmFont { flex: 1; min-width: 0; }
+    /*Number field with its own arrows (the native spinner is hidden - it is
+       painted as a dark system block that ignores the dialog's colours).*/
+    .pm-wm-num {
+      display: inline-flex; align-items: stretch; height: 28px; box-sizing: border-box;
+      border: 1px solid #bbb; border-radius: 6px; background: #fff; overflow: hidden;
+    }
+    .pm-wm-num:focus-within { border-color: #3498db; }
+    .pm-wm-controls .pm-wm-num input[type=number] {
+      width: 44px; height: auto; border: none; border-radius: 0; padding: 0 2px 0 7px; background: transparent;
+      -moz-appearance: textfield; appearance: textfield;
+    }
+    .pm-wm-num input::-webkit-outer-spin-button,
+    .pm-wm-num input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+    .pm-wm-spin { display: flex; flex-direction: column; width: 18px; border-left: 1px solid #ddd; }
+    .pm-wm-spin button {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      padding: 0; border: none; background: transparent; color: #6b7785; cursor: pointer;
+    }
+    .pm-wm-spin button + button { border-top: 1px solid #ddd; }
+    .pm-wm-spin button:hover:not(:disabled) { background: #eaf3fb; color: #3498db; }
+    .pm-wm-spin button:disabled { cursor: default; }
+    .pm-wm-num:has(input:disabled) { opacity: 0.6; }
+    .pm-wm-controls input[type=range] { flex: 1; min-width: 70px; accent-color: #3498db; }
+    .pm-wm-controls input[type=color] { width: 32px; height: 26px; padding: 0 2px; border: 1px solid #bbb; border-radius: 6px; background: #fff; cursor: pointer; }
+    .pm-wm-unit { color: #777; min-width: 14px; }
+    .pm-wm-val { width: 40px; text-align: right; color: #555; }
+    .pm-wm-tbtn {
+      min-width: 28px; height: 28px; padding: 0 7px; font-size: 13px;
+      border: 1px solid #bbb; border-radius: 6px; background: #fff; color: #2c3e50; cursor: pointer;
+    }
+    .pm-wm-tbtn:hover:not(:disabled) { border-color: #3498db; }
+    .pm-wm-tbtn.active { background: #3498db; border-color: #3498db; color: #fff; }
+    .pm-wm-tbtn:disabled { opacity: 0.4; cursor: default; }
+    .pm-wm-swatch {
+      width: 22px; height: 22px; padding: 0; border-radius: 50%; cursor: pointer;
+      border: 2px solid #fff; box-shadow: 0 0 0 1px #bbb;
+    }
+    .pm-wm-swatch.active { box-shadow: 0 0 0 2px #3498db; }
+    .pm-wm-check { cursor: pointer; }
+    .pm-wm-check input { margin: 0; accent-color: #3498db; }
+    .pm-wm-pages { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; }
+    .pm-wm-pages-line { display: flex; gap: 14px; flex-wrap: wrap; min-height: 22px; align-items: center; }
+    .pm-wm-pages label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+    .pm-wm-pages input[type=radio] { margin: 0; accent-color: #3498db; }
+    #pmWmRange { flex: 1; min-width: 0; }
+    .pm-wm-preview-col { display: flex; flex-direction: column; align-items: center; gap: 4px; position: relative; }
+    .pm-wm-zoom-badge {
+      position: absolute; top: 8px; left: 8px; padding: 2px 7px; border-radius: 10px;
+      background: rgba(30,36,44,0.72); color: #fff; font-size: 12px; pointer-events: none;
+      opacity: 0; transition: opacity 0.2s;
+    }
+    .pm-wm-zoom-badge.show { opacity: 1; }
+    /*"?" and the mouse help it opens.*/
+    .pm-wm-help {
+      flex: none;
+      width: 24px; height: 24px; padding: 0;
+      border-radius: 50%; border: 1px solid rgba(0,0,0,0.15); background: rgba(255,255,255,0.92);
+      color: #3d5468; font-weight: bold; font-size: 14px; line-height: 1; cursor: pointer;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+    }
+    .pm-wm-help:hover, .pm-wm-help[aria-expanded="true"] { background: #3498db; color: #fff; border-color: #3498db; }
+    .pm-wm-help-pop {
+      position: absolute; top: 38px; right: 10px; z-index: 2; max-width: 300px;
+      padding: 8px 12px; border-radius: 8px; background: #fff; color: #2c3e50;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.25); font-size: 13px; line-height: 1.6;
+    }
+    /*Scroll box: the page sits centred while it fits and scrolls once zoomed
+       past it (margin:auto on the grid item - centring that stays scrollable).*/
+    .pm-wm-preview {
+      width: 360px; height: 560px; max-height: calc(100vh - 130px);
+      background: rgba(120,130,145,0.14); border-radius: 8px;
+      display: grid; overflow: auto; padding: 12px; box-sizing: border-box;
+      scrollbar-width: thin; overscroll-behavior: contain;
+    }
+    .pm-wm-preview canvas { margin: auto; display: block; box-shadow: 0 2px 10px rgba(0,0,0,0.25); background: #fff; touch-action: none; }
+    .pm-wm-preview canvas.draggable { cursor: move; }
+    .pm-wm-preview.panning, .pm-wm-preview.panning canvas { cursor: grabbing; }
+    .pm-wm-nav { display: flex; align-items: center; gap: 8px; color: #555; font-size: 12px; }
+    .pm-wm-nav .pm-wm-tbtn { min-width: 22px; height: 20px; padding: 0 4px; font-size: 10px; }
+    .pm-wm-actions { display: flex; gap: 10px; justify-content: center; align-items: center; }
+    .pm-wm-error { color: #cc3d40; font-size: 13px; text-align: center; }
+    .pm-wm-error:empty { display: none; }
+    .pm-wm-ok, .pm-wm-cancel { padding: 9px 22px; border-radius: 6px; cursor: pointer; font-size: 15px; }
+    .pm-wm-ok { border: none; background: #3498db; color: #fff; font-weight: bold; }
+    .pm-wm-ok:hover { background: #2d86c3; }
+    .pm-wm-cancel { border: 1px solid #ccc; background: #fff; color: #333; }
+    @media (max-width: 900px) {
+      .pm-wm-body { flex-direction: column; overflow-y: auto; }
+      .pm-wm-controls { width: auto; overflow: visible; }
+      .pm-wm-preview { width: 100%; }
+      .pm-wm-preview { height: 320px; }
+    }
+    /*Dark theme: .pm-modal-box turns all text light, so every light surface
+       of the dialog gets a dark one to stay readable.*/
+    html[data-theme="dark"] .pm-wm-box .pm-wm-controls input[type=text],
+    html[data-theme="dark"] .pm-wm-box .pm-wm-controls select,
+    html[data-theme="dark"] .pm-wm-box .pm-wm-num,
+    html[data-theme="dark"] .pm-wm-box input[type=color] {
+      background: #1c2128 !important; border-color: #4a5058 !important;
+    }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-controls select option { background: #1c2128; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-num:focus-within,
+    html[data-theme="dark"] .pm-wm-box .pm-wm-controls input[type=text]:focus,
+    html[data-theme="dark"] .pm-wm-box .pm-wm-controls select:focus { border-color: #3498db !important; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-spin,
+    html[data-theme="dark"] .pm-wm-box .pm-wm-spin button + button { border-color: #4a5058; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-spin button { color: #9aa4ae !important; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-spin button svg,
+    html[data-theme="dark"] .pm-wm-box .pm-wm-spin button svg * { color: inherit !important; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-spin button:hover:not(:disabled) { background: #2c3440; color: #5dade2 !important; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-tbtn,
+    html[data-theme="dark"] .pm-wm-box .pm-wm-cancel {
+      background: #333a44; border-color: #4a5058;
+    }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-tbtn:hover:not(:disabled),
+    html[data-theme="dark"] .pm-wm-box .pm-wm-cancel:hover { background: #3d4550; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-tbtn.active { background: #3498db; border-color: #3498db; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-label,
+    html[data-theme="dark"] .pm-wm-box .pm-wm-axis,
+    html[data-theme="dark"] .pm-wm-box .pm-wm-unit,
+    html[data-theme="dark"] .pm-wm-box .pm-wm-val,
+    html[data-theme="dark"] .pm-wm-box .pm-wm-nav span { color: #b8c0c8 !important; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-error { color: #ff7b7e !important; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-swatch { border-color: #262b33; box-shadow: 0 0 0 1px #5a6572; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-swatch.active { box-shadow: 0 0 0 2px #3498db; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-preview { background: rgba(255,255,255,0.05); }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-sep { border-top-color: #3a4048; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-help { background: #333a44; border-color: #4a5058; color: #e2e6ea !important; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-help:hover,
+    html[data-theme="dark"] .pm-wm-box .pm-wm-help[aria-expanded="true"] { background: #3498db; border-color: #3498db; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-help-pop { background: #333a44; box-shadow: 0 4px 16px rgba(0,0,0,0.6); }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-file { color: #b8c0c8 !important; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-check.pm-wm-label { color: #e2e6ea !important; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-zoom-badge { color: #fff !important; }
+    html[data-theme="dark"] .pm-wm-box #pmWmRange::placeholder { color: #7d8791 !important; }
+
     /*Wrapper for cart button + visibility button for marked pages*/
     .delete-wrapper { position: relative; display: inline-flex; }
     #toggleDeletedBtn {
@@ -995,6 +1215,7 @@
     .top-menu .img-save-btn,
     #toggleDeletedBtn,
     #printSelectedBtn,
+    #watermarkBtn,
     .readmode-wrapper .mode-btn.rl-slot-popup {
       width: 42px;
       height: 42px;
@@ -5630,6 +5851,7 @@
 
       /*Removal group (trash + eye) - without internal gap, like one cell*/
       .main-row .delete-wrapper,
+      .main-row .edit-wrapper,
       .main-row .print-wrapper { gap: 0; }
 
       /*Row alignment: each group of buttons is exactly 42px in height, elements
@@ -5640,6 +5862,7 @@
       .main-row .centered-actions,
       .main-row .img-save-wrapper,
       .main-row .delete-wrapper,
+      .main-row .edit-wrapper,
       .main-row .print-wrapper {
         height: 42px;
         align-items: center;
@@ -6676,7 +6899,7 @@
       }
       /* Beat .top-menu button / .icon-btn / .icons-mode .compact-btn fixed 42px.
          Ratios = natural size / 42 (22→0.524, 30→0.714, 26→0.619, 18→0.429). */
-      .top-menu .main-row.menu-shrink button:not(#fitWidthBtn):not(.img-save-btn):not(#printSelectedBtn):not(#toggleDeletedBtn):not(.rl-slot-popup),
+      .top-menu .main-row.menu-shrink button:not(#fitWidthBtn):not(.img-save-btn):not(#printSelectedBtn):not(#watermarkBtn):not(#toggleDeletedBtn):not(.rl-slot-popup),
       .top-menu .main-row.menu-shrink label.icon-btn,
       .main-row.menu-shrink .compact-btn,
       .main-row.menu-shrink button.icon-btn,
@@ -6722,6 +6945,7 @@
       .top-menu .main-row.menu-shrink .img-save-btn,
       .top-menu .main-row.menu-shrink #toggleDeletedBtn,
       .top-menu .main-row.menu-shrink #printSelectedBtn,
+      .top-menu .main-row.menu-shrink #watermarkBtn,
       .top-menu .main-row.menu-shrink .readmode-wrapper .mode-btn.rl-slot-popup {
         width: var(--pm-menu-ctrl-h);
         height: var(--pm-menu-ctrl-h);
@@ -6991,6 +7215,22 @@
       background: #333a44 !important; border-color: #4a5058 !important;
     }
     /* Encrypt-password dialog: hover feedback on both buttons (light + dark). */
+    /*Show/hide eye inside the first password field.*/
+    .pm-pwd-wrap { position: relative; }
+    .pm-pwd-eye {
+      position: absolute; top: 50%; right: 6px; transform: translateY(-50%);
+      width: 32px; height: 32px; padding: 0; border: none; border-radius: 6px;
+      background: transparent; color: #7f8c8d; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: color 0.15s, background 0.15s;
+    }
+    .pm-pwd-eye:hover, .pm-pwd-eye:focus-visible { color: #2980b9; background: #eaf3fb; outline: none; }
+    .pm-pwd-eye svg { display: block; }
+    html[data-theme="dark"] .pm-modal-box .pm-pwd-eye { color: #9aa4ae !important; }
+    html[data-theme="dark"] .pm-modal-box .pm-pwd-eye:hover,
+    html[data-theme="dark"] .pm-modal-box .pm-pwd-eye:focus-visible { color: #5dade2 !important; background: #2c3440; }
+    html[data-theme="dark"] .pm-modal-box .pm-pwd-eye svg,
+    html[data-theme="dark"] .pm-modal-box .pm-pwd-eye svg * { color: inherit !important; }
     #encPwdCancel:hover { background: #f0f0f0 !important; }
     #encPwdOk:hover { background: #2471a3 !important; }
     html[data-theme="dark"] .pm-modal-box #encPwdCancel:hover { background: #3d4550 !important; }
@@ -7091,7 +7331,16 @@
         </div>
         <button id="rotateLeftBtn" class="icon-btn" onclick="rotateSelected(-90)" disabled title="Повернуть выбранные страницы против часовой стрелки (Q)" data-i18n-title="rotateLeftSelected"><span class="rotate-glyph" aria-hidden="true">↺</span></button>
         <button id="rotateRightBtn" class="icon-btn" onclick="rotateSelected(90)" disabled title="Повернуть выбранные страницы по часовой стрелке (W)" data-i18n-title="rotateRightSelected"><span class="rotate-glyph" aria-hidden="true">↻</span></button>
-        <button id="editPageBtn" class="icon-btn pe-open-btn" onclick="editSelectedPage()" disabled title="Редактировать страницу" data-i18n-title="editPage"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
+        <div class="edit-wrapper">
+          <button id="editPageBtn" class="icon-btn pe-open-btn" onclick="editSelectedPage()" disabled title="Редактировать страницу" data-i18n-title="editPage"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></button>
+          <button id="watermarkBtn" class="icon-btn" onclick="openWatermarkDialog()" disabled title="Водяной знак" data-i18n-title="watermarkTitle">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+              <polyline points="14 2 14 8 20 8"/>
+              <path d="M12 10.2c-2 2.5-3 4.2-3 5.5a3 3 0 0 0 6 0c0-1.3-1-3-3-5.5z" fill="#5dade2" stroke="none"/>
+            </svg>
+          </button>
+        </div>
         <div class="delete-wrapper">
           <button id="deleteBtn" class="icon-btn delete-btn" onclick="deleteSelected()" disabled title="Удалить выбранные страницы (Del)" data-i18n-title="deleteSelectedPages">🗑</button>
           <button id="toggleDeletedBtn" class="icon-btn" onclick="toggleDeletedVisibility()" title="Скрыты страницы помеченные на удаление (Shift+H)" data-i18n-title="deletedPagesHidden"></button>
@@ -8751,6 +9000,21 @@
         newDocumentHint: 'Будет создан новый документ', openInNewTabs: 'Откроется в новых вкладках',
         tabClose: 'Закрыть вкладку', tabCloseOthers: 'Закрыть другие вкладки', tabCloseRight: 'Закрыть вкладки справа',
         tabRename: 'Переименовать', tabRenameTitle: 'Переименовать документ',
+        watermarkTitle: 'Водяной знак', watermarkDefaultText: 'КОНФИДЕНЦИАЛЬНО',
+        wmText: 'Текст', wmFont: 'Шрифт', wmBold: 'Жирный', wmItalic: 'Курсив', wmColor: 'Цвет',
+        wmSize: 'Размер', wmTransparency: 'Прозрачность', wmRotation: 'Поворот',
+        wmDialogTitle: 'Добавить водяной знак',
+        wmImage: 'Изображение', wmPickImage: 'Выбрать файл...', wmScale: 'Масштаб', wmScaleHint: '% ширины страницы',
+        wmNoImage: 'Выберите файл изображения', wmImageError: 'Не удалось открыть изображение',
+        wmHelpLeft: 'Левая кнопка мыши - расположение водяного знака', wmHelpRight: 'Правая кнопка мыши - перемещение',
+        wmHelpWheel: 'Колесико - изменение масштаба',
+        wmTile: 'Замостить', wmGap: 'Интервал', wmGapX: 'Интервал по горизонтали', wmGapY: 'Интервал по вертикали',
+        wmBrick: 'В шахматном порядке',
+        wmPages: 'Страницы', wmPagesAll: 'Все ({n})', wmPagesSelected: 'Выделенные ({n})', wmPagesRange: 'Диапазон',
+        wmRangePlaceholder: 'например, 1-3, 5', wmPreviewPage: 'Страница {n} из {total}',
+        wmApply: 'Применить', wmCancel: 'Отмена', wmApplying: 'Нанесение водяного знака...',
+        wmNoText: 'Введите текст водяного знака', wmBadRange: 'Неверный диапазон страниц',
+        wmApplyError: 'Не удалось нанести водяной знак',
         peInsertText: 'Вставить текст', peInsertImage: 'Вставить изображение', peInsertSignature: 'Вставить подпись', peSignatureAddNew: 'Добавить новую подпись', peSignatureDefaultName: 'Подпись {n}', peSignatureRenameTitle: 'Переименовать подпись', peAddShapes: 'Добавить фигуры',
         peShapeRect: 'Прямоугольник', peShapeEllipse: 'Круг / овал', peShapeArrow: 'Стрелка',
         peShapeLine: 'Линия', peShapePlus: 'Плюс', peShapeFreehand: 'Свободная форма', peShapeStar: 'Звезда',
@@ -8884,6 +9148,7 @@
         encryptPwdBody: 'Этот пароль потребуется, чтобы открыть сохранённый PDF.',
         encryptPwdPlaceholder: 'Пароль',
         encryptPwdConfirmPlaceholder: 'Повторите пароль',
+        pwdShow: 'Показать пароль', pwdHide: 'Скрыть пароль',
         encryptPwdOk: 'Зашифровать',
         encryptPwdEmpty: 'Введите пароль',
         encryptPwdMismatch: 'Пароли не совпадают',
@@ -9149,6 +9414,21 @@
         newDocumentHint: 'A new document will be created', openInNewTabs: 'Open in new tabs',
         tabClose: 'Close tab', tabCloseOthers: 'Close other tabs', tabCloseRight: 'Close tabs to the right',
         tabRename: 'Rename', tabRenameTitle: 'Rename document',
+        watermarkTitle: 'Watermark', watermarkDefaultText: 'CONFIDENTIAL',
+        wmText: 'Text', wmFont: 'Font', wmBold: 'Bold', wmItalic: 'Italic', wmColor: 'Color',
+        wmSize: 'Size', wmTransparency: 'Transparency', wmRotation: 'Rotation',
+        wmDialogTitle: 'Add watermark',
+        wmImage: 'Image', wmPickImage: 'Choose file...', wmScale: 'Scale', wmScaleHint: '% of the page width',
+        wmNoImage: 'Choose an image file', wmImageError: 'Could not open the image',
+        wmHelpLeft: 'Left mouse button - place the watermark', wmHelpRight: 'Right mouse button - move around',
+        wmHelpWheel: 'Wheel - zoom',
+        wmTile: 'Tile', wmGap: 'Spacing', wmGapX: 'Horizontal spacing', wmGapY: 'Vertical spacing',
+        wmBrick: 'Staggered rows',
+        wmPages: 'Pages', wmPagesAll: 'All ({n})', wmPagesSelected: 'Selected ({n})', wmPagesRange: 'Range',
+        wmRangePlaceholder: 'e.g. 1-3, 5', wmPreviewPage: 'Page {n} of {total}',
+        wmApply: 'Apply', wmCancel: 'Cancel', wmApplying: 'Applying watermark...',
+        wmNoText: 'Enter the watermark text', wmBadRange: 'Invalid page range',
+        wmApplyError: 'Could not apply the watermark',
         peInsertText: 'Insert text', peInsertImage: 'Insert image', peInsertSignature: 'Insert signature', peSignatureAddNew: 'Add new signature', peSignatureDefaultName: 'Signature {n}', peSignatureRenameTitle: 'Rename signature', peAddShapes: 'Add shapes',
         peShapeRect: 'Rectangle', peShapeEllipse: 'Circle / oval', peShapeArrow: 'Arrow',
         peShapeLine: 'Line', peShapePlus: 'Plus', peShapeFreehand: 'Freeform', peShapeStar: 'Star',
@@ -9282,6 +9562,7 @@
         encryptPwdBody: 'This password will be required to open the saved PDF.',
         encryptPwdPlaceholder: 'Password',
         encryptPwdConfirmPlaceholder: 'Repeat password',
+        pwdShow: 'Show password', pwdHide: 'Hide password',
         encryptPwdOk: 'Encrypt',
         encryptPwdEmpty: 'Enter a password',
         encryptPwdMismatch: 'Passwords do not match',
@@ -9547,6 +9828,21 @@
         newDocumentHint: 'Se creará un nuevo documento', openInNewTabs: 'Se abrirá en nuevas pestañas',
         tabClose: 'Cerrar pestaña', tabCloseOthers: 'Cerrar otras pestañas', tabCloseRight: 'Cerrar pestañas a la derecha',
         tabRename: 'Cambiar nombre', tabRenameTitle: 'Cambiar el nombre del documento',
+        watermarkTitle: 'Marca de agua', watermarkDefaultText: 'CONFIDENCIAL',
+        wmText: 'Texto', wmFont: 'Fuente', wmBold: 'Negrita', wmItalic: 'Cursiva', wmColor: 'Color',
+        wmSize: 'Tamaño', wmTransparency: 'Transparencia', wmRotation: 'Rotación',
+        wmDialogTitle: 'Añadir marca de agua',
+        wmImage: 'Imagen', wmPickImage: 'Elegir archivo...', wmScale: 'Escala', wmScaleHint: '% del ancho de la página',
+        wmNoImage: 'Elija un archivo de imagen', wmImageError: 'No se pudo abrir la imagen',
+        wmHelpLeft: 'Botón izquierdo - colocar la marca de agua', wmHelpRight: 'Botón derecho - desplazarse',
+        wmHelpWheel: 'Rueda - zoom',
+        wmTile: 'Mosaico', wmGap: 'Espaciado', wmGapX: 'Espaciado horizontal', wmGapY: 'Espaciado vertical',
+        wmBrick: 'Filas escalonadas',
+        wmPages: 'Páginas', wmPagesAll: 'Todas ({n})', wmPagesSelected: 'Seleccionadas ({n})', wmPagesRange: 'Rango',
+        wmRangePlaceholder: 'p. ej. 1-3, 5', wmPreviewPage: 'Página {n} de {total}',
+        wmApply: 'Aplicar', wmCancel: 'Cancelar', wmApplying: 'Aplicando marca de agua...',
+        wmNoText: 'Introduzca el texto de la marca de agua', wmBadRange: 'Rango de páginas no válido',
+        wmApplyError: 'No se pudo aplicar la marca de agua',
         peInsertText: 'Insertar texto', peInsertImage: 'Insertar imagen', peInsertSignature: 'Insertar firma', peSignatureAddNew: 'Añadir nueva firma', peSignatureDefaultName: 'Firma {n}', peSignatureRenameTitle: 'Renombrar firma', peAddShapes: 'Añadir formas',
         peShapeRect: 'Rectángulo', peShapeEllipse: 'Círculo / óvalo', peShapeArrow: 'Flecha',
         peShapeLine: 'Línea', peShapePlus: 'Cruz', peShapeFreehand: 'Forma libre', peShapeStar: 'Estrella',
@@ -9680,6 +9976,7 @@
         encryptPwdBody: 'Esta contraseña será necesaria para abrir el PDF guardado.',
         encryptPwdPlaceholder: 'Contraseña',
         encryptPwdConfirmPlaceholder: 'Repita la contraseña',
+        pwdShow: 'Mostrar contraseña', pwdHide: 'Ocultar contraseña',
         encryptPwdOk: 'Cifrar',
         encryptPwdEmpty: 'Introduzca una contraseña',
         encryptPwdMismatch: 'Las contraseñas no coinciden',
@@ -9995,6 +10292,21 @@
         tabCloseOthers: '关闭其他标签页',
         tabCloseRight: '关闭右侧标签页',
         tabRename: '重命名',
+        watermarkTitle: '水印', watermarkDefaultText: '机密',
+        wmText: '文本', wmFont: '字体', wmBold: '粗体', wmItalic: '斜体', wmColor: '颜色',
+        wmSize: '大小', wmTransparency: '透明度', wmRotation: '旋转',
+        wmDialogTitle: '添加水印',
+        wmImage: '图片', wmPickImage: '选择文件...', wmScale: '缩放', wmScaleHint: '页面宽度的百分比',
+        wmNoImage: '请选择图片文件', wmImageError: '无法打开图片',
+        wmHelpLeft: '鼠标左键 - 放置水印', wmHelpRight: '鼠标右键 - 移动视图',
+        wmHelpWheel: '滚轮 - 缩放',
+        wmTile: '平铺', wmGap: '间距', wmGapX: '水平间距', wmGapY: '垂直间距',
+        wmBrick: '交错排列',
+        wmPages: '页面', wmPagesAll: '全部 ({n})', wmPagesSelected: '所选 ({n})', wmPagesRange: '范围',
+        wmRangePlaceholder: '例如 1-3, 5', wmPreviewPage: '第 {n} 页，共 {total} 页',
+        wmApply: '应用', wmCancel: '取消', wmApplying: '正在添加水印...',
+        wmNoText: '请输入水印文本', wmBadRange: '页面范围无效',
+        wmApplyError: '无法添加水印',
         tabRenameTitle: '重命名文档',
         peInsertText: '插入文字',
         peInsertImage: '插入图片',
@@ -10144,6 +10456,7 @@
         encryptPwdBody: '打开已保存的 PDF 时需要输入此密码。',
         encryptPwdPlaceholder: '密码',
         encryptPwdConfirmPlaceholder: '重复密码',
+        pwdShow: '显示密码', pwdHide: '隐藏密码',
         encryptPwdOk: '加密',
         encryptPwdEmpty: '请输入密码',
         encryptPwdMismatch: '两次输入的密码不一致',
@@ -11177,6 +11490,8 @@
       if (editPageBtn) {
         editPageBtn.disabled = baseDisabled || selectedNonDeleted.length !== 1;
       }
+      const watermarkBtnEl = document.getElementById('watermarkBtn');
+      if (watermarkBtnEl) watermarkBtnEl.disabled = baseDisabled || pdfDoc.getPageCount() === 0;
       saveBtn.disabled = baseDisabled;
       scaleSlider.disabled = baseDisabled;
       const fitWidthBtnEl = document.getElementById('fitWidthBtn');
@@ -12493,7 +12808,15 @@
     //we collect from the previous step + redrawing only the changed pages according to
     //bytes of EXACTLY this step - therefore each step is visually correct, and UNDO
     //does not require re-downloading.
-    async function commitHistoryStep(savePromise, marked, hint) {
+    // opts.lazyPages: the changed pages get no picture in this step at all
+    // instead of a "pending" one. Pending pages are drawn in the background
+    // right away, all in one go and holding the live pdfDoc for as long as
+    // that takes - fine for the few pages a rotate touches, but a change to
+    // every page of a big document (a watermark) meant hundreds of renders
+    // with the document tied up the whole time. Picture-less pages are drawn
+    // like any not yet seen page instead: when they come into view after an
+    // undo/redo returns to this step.
+    async function commitHistoryStep(savePromise, marked, hint, opts) {
       if (historyPushSuspended || undoRedoBusy || !pdfDoc) return;
       let pdfBytes;
       try { pdfBytes = await savePromise; } catch (e) { return; }
@@ -12515,8 +12838,12 @@
       if (cur && cur.pages && cur.pages.length) {
         pages = cur.pages.map(p => ({ src: p.src, rotated: p.rotated }));
         pendingIdx = [];
+        const lazy = !!(opts && opts.lazyPages);
         hint.forEach(i => {
-          if (pages[i]) {
+          if (!pages[i]) return;
+          if (lazy) {
+            pages[i] = { src: '', rotated: pages[i].rotated };
+          } else {
             pages[i] = { src: pages[i].src, rotated: pages[i].rotated, pending: true };
             pendingIdx.push(i);
           }
@@ -17667,6 +17994,8 @@
     window.addEventListener('keyup', (e) => {
       if (isTouchDevice || !pdfDoc) return;
       if (e.key !== 'Alt' && e.code !== 'AltLeft' && e.code !== 'AltRight') return;
+      // A dialog is up: focus stays in it (the page behind cannot take keys).
+      if (document.querySelector('.modal-overlay-active')) return;
       // Changing the keyboard layout (usually Alt+Shift) also releases Alt - do not select it
       // input fields (for example, the search bar) have focus, otherwise the layout loses focus.
       const tag = (e.target.tagName || '').toLowerCase();
@@ -28954,6 +29283,10 @@
      * Modal: ask the user to set a NEW password to encrypt a PDF being saved.
      * Resolves to the entered password string, or null if the user cancels.
      */
+    // Eye icons for "show password": open = shown, struck through = hidden.
+    const PM_PWD_EYE_OPEN = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 12S5.5 4.5 12 4.5 22.5 12 22.5 12 18.5 19.5 12 19.5 1.5 12 1.5 12z"/><circle cx="12" cy="12" r="3.2"/></svg>';
+    const PM_PWD_EYE_CLOSED = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1.5 12S5.5 4.5 12 4.5 22.5 12 22.5 12 18.5 19.5 12 19.5 1.5 12 1.5 12z"/><circle cx="12" cy="12" r="3.2"/><path d="M3 21 21 3"/></svg>';
+
     function showSetPdfPasswordDialog() {
       return new Promise((resolve) => {
         const overlay = document.createElement('div');
@@ -28973,10 +29306,14 @@
           <div style="font-size:14px; color:#555; margin-bottom:14px; line-height:1.45;">
             ${escapeHtml(t('encryptPwdBody'))}
           </div>
-          <input id="encPwdInput" type="password" autocomplete="new-password"
-            placeholder="${escapeHtml(t('encryptPwdPlaceholder'))}"
-            style="width:100%; box-sizing:border-box; padding:10px 12px; font-size:16px;
-              border:1px solid #ccc; border-radius:6px; margin-bottom:10px;" />
+          <div class="pm-pwd-wrap" style="margin-bottom:10px;">
+            <input id="encPwdInput" type="password" autocomplete="new-password"
+              placeholder="${escapeHtml(t('encryptPwdPlaceholder'))}"
+              style="width:100%; box-sizing:border-box; padding:10px 42px 10px 12px; font-size:16px;
+                border:1px solid #ccc; border-radius:6px;" />
+            <button type="button" id="encPwdEye" class="pm-pwd-eye" aria-pressed="false"
+              title="${escapeHtml(t('pwdShow'))}" aria-label="${escapeHtml(t('pwdShow'))}">${PM_PWD_EYE_CLOSED}</button>
+          </div>
           <input id="encPwdInput2" type="password" autocomplete="new-password"
             placeholder="${escapeHtml(t('encryptPwdConfirmPlaceholder'))}"
             style="width:100%; box-sizing:border-box; padding:10px 12px; font-size:16px;
@@ -28994,6 +29331,19 @@
         const input1 = box.querySelector('#encPwdInput');
         const input2 = box.querySelector('#encPwdInput2');
         const errEl = box.querySelector('#encPwdErr');
+        // The eye shows or hides both fields at once (the repeat must match
+        // what is shown). Closed - the default - means hidden.
+        const eye = box.querySelector('#encPwdEye');
+        eye.addEventListener('mousedown', (e) => e.preventDefault());   // keep the caret in its field
+        eye.addEventListener('click', () => {
+          const show = input1.type === 'password';
+          input1.type = input2.type = show ? 'text' : 'password';
+          eye.innerHTML = show ? PM_PWD_EYE_OPEN : PM_PWD_EYE_CLOSED;
+          const tip = t(show ? 'pwdHide' : 'pwdShow');
+          eye.title = tip;
+          eye.setAttribute('aria-label', tip);
+          eye.setAttribute('aria-pressed', String(show));
+        });
         const close = (result) => {
           document.removeEventListener('keydown', onKey, true);
           if (overlay.parentNode) document.body.removeChild(overlay);
@@ -32936,6 +33286,39 @@
       });
     })();
 
+    // "Watermark" under "Edit page" - the same pop-up as print-selected above.
+    (function initWatermarkToggle() {
+      if (isTouchDevice) return;
+      const wrapper = document.querySelector('.edit-wrapper');
+      const btn = document.getElementById('watermarkBtn');
+      if (!wrapper || !btn || !editPageBtn) return;
+      let hideTimer = null;
+
+      function positionWatermarkBtn() {
+        const r = editPageBtn.getBoundingClientRect();
+        btn.style.left = Math.round(r.left) + 'px';
+        btn.style.top = Math.round(r.bottom + 6) + 'px';
+      }
+      function show() {
+        if (!pdfDoc) return;
+        clearTimeout(hideTimer);
+        positionWatermarkBtn();
+        btn.classList.add('show');
+      }
+      function scheduleHide() {
+        clearTimeout(hideTimer);
+        hideTimer = setTimeout(() => btn.classList.remove('show'), POPUP_BTN_HIDE_MS);
+      }
+      [wrapper, editPageBtn, btn].forEach(el => {
+        el.addEventListener('mouseenter', show);
+        el.addEventListener('mouseleave', scheduleHide);
+      });
+      btn.addEventListener('click', () => btn.classList.remove('show'));
+      window.addEventListener('resize', () => {
+        if (btn.classList.contains('show')) positionWatermarkBtn();
+      });
+    })();
+
     (function initImgSaveButtons() {
       if (isTouchDevice) return;
       document.querySelectorAll('.img-save-wrapper').forEach(wrapper => {
@@ -33844,10 +34227,13 @@ async function pmCloseTabsToRight(fromTabId) {
     else if (action === 'rename') await pmRenameTab(tabId);
   });
   document.addEventListener('mousedown', (e) => {
-    if (menu.style.display !== 'block') return;
+    if (menu.style.display !== 'block' || menu.contains(e.target)) return;
+    // A left click anywhere outside the menu dismisses it - a tab included.
+    // Another right click on a tab is left to reopen the menu there.
+    if (e.button === 0) { pmCloseTabMenu(); return; }
     if (Date.now() - pmTabMenuOpenedAt < 200) return;
-    if (!menu.contains(e.target) && !e.target.closest('.pm-tab')) pmCloseTabMenu();
-  });
+    if (!e.target.closest('.pm-tab')) pmCloseTabMenu();
+  }, true);   // capture: handlers that stop the event must not keep the menu up
   document.addEventListener('keydown', (e) => {
     if (menu.style.display === 'block' && e.key === 'Escape') pmCloseTabMenu();
   });
@@ -61637,6 +62023,1172 @@ async function pageEditSave(options) {
     pdfDocCriticalWriterActive = false;
     hideLoading();
   }
+}
+
+// ============================================================
+// WATERMARK: text rendered once to a transparent PNG, embedded once and
+// drawn onto every target page (a single image XObject shared by all of
+// them). The same placement math drives the live preview and the PDF.
+// Coordinates below are "visual": the page as it is seen (its /Rotate
+// applied), in pt, origin at the top-left, y down. The watermark angle is
+// counter-clockwise as seen - +45 makes the text rise to the right.
+// ============================================================
+const PM_WM_STORAGE_KEY = 'pmWatermarkSettings';
+const PM_WM_ROBOTO_FAMILY = 'PM Watermark Roboto';
+const PM_WM_FONT_CANDIDATES = [
+  'Arial', 'Helvetica', 'Segoe UI', 'Calibri', 'Verdana', 'Tahoma', 'Trebuchet MS',
+  'Century Gothic', 'Franklin Gothic Medium', 'Impact', 'Times New Roman', 'Georgia',
+  'Cambria', 'Garamond', 'Palatino Linotype', 'Book Antiqua', 'Courier New', 'Consolas',
+  'Lucida Console', 'Comic Sans MS', 'DejaVu Sans', 'DejaVu Serif', 'Liberation Sans',
+  'Liberation Serif', 'Noto Sans', 'Noto Serif', 'Ubuntu', 'PT Sans', 'PT Serif'
+];
+const PM_WM_SWATCHES = ['#808080', '#000000', '#e74c3c', '#2980b9'];
+// Raster density of the embedded text image: 300 dpi keeps the edges clean
+// in print and when zoomed in, while a mostly transparent PNG stays small.
+const PM_WM_PX_PER_PT = 300 / 72;
+// Upper bound on images drawn per page when tiling a tiny text with no gap.
+const PM_WM_MAX_TILES = 1500;
+let pmWmFontsPromise = null;
+let pmWmDialogOpen = false;
+
+function pmWmDefaults() {
+  return {
+    text: t('watermarkDefaultText'),
+    font: PM_WM_ROBOTO_FAMILY,
+    bold: true,
+    italic: false,
+    color: '#808080',
+    size: 48,
+    opacity: 30,
+    angle: 45,
+    pos: { fx: 0.5, fy: 0.5 },
+    tile: false,
+    gapX: 60,
+    gapY: 60,
+    brick: true,
+    useImage: false,
+    imgScale: 30          // image width, % of the page width
+  };
+}
+
+function pmWmClampNum(v, lo, hi, dflt) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return dflt;
+  return Math.min(hi, Math.max(lo, n));
+}
+
+function pmWmSanitize(s) {
+  const d = pmWmDefaults();
+  const out = Object.assign({}, d, s || {});
+  out.text = typeof out.text === 'string' ? out.text : d.text;
+  out.font = typeof out.font === 'string' && out.font ? out.font : d.font;
+  out.bold = !!out.bold;
+  out.italic = !!out.italic;
+  out.color = /^#[0-9a-f]{6}$/i.test(out.color || '') ? out.color : d.color;
+  out.size = pmWmClampNum(out.size, 4, 400, d.size);
+  out.opacity = pmWmClampNum(out.opacity, 1, 100, d.opacity);
+  out.angle = pmWmClampNum(out.angle, -180, 180, d.angle);
+  out.gapX = pmWmClampNum(out.gapX, 0, 2000, d.gapX);
+  out.gapY = pmWmClampNum(out.gapY, 0, 2000, d.gapY);
+  out.imgScale = pmWmClampNum(out.imgScale, 1, 100, d.imgScale);
+  out.useImage = !!out.useImage;
+  out.tile = !!out.tile;
+  out.brick = !!out.brick;
+  // Centre of the mark as a share of the page's width / height.
+  const p = out.pos || {};
+  out.pos = { fx: pmWmClampNum(p.fx, 0, 1, 0.5), fy: pmWmClampNum(p.fy, 0, 1, 0.5) };
+  return out;
+}
+
+function pmWmLoadSettings() {
+  let s = null;
+  try {
+    const raw = localStorage.getItem(PM_WM_STORAGE_KEY);
+    if (raw) s = pmWmSanitize(JSON.parse(raw));
+  } catch (_) {}
+  if (!s) s = pmWmSanitize(null);
+  // Every new watermark starts grey; the colour is not carried over.
+  s.color = pmWmDefaults().color;
+  // The picked image lives only for this session.
+  if (!pmWmImage) s.useImage = false;
+  return s;
+}
+
+// Image picked for an image watermark. Kept for the session (reopening the
+// dialog offers it again), not stored: a reload asks for the file again.
+let pmWmImage = null;   // { name, canvas, jpeg }
+const PM_WM_IMAGE_MAX_PX = 2500;
+
+// Decodes the picked file the way the browser shows it (EXIF orientation
+// applied, any format it can display) into a canvas, capped in size.
+async function pmWmLoadImageFile(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    const w0 = img.naturalWidth || 300, h0 = img.naturalHeight || 300;
+    const f = Math.min(1, PM_WM_IMAGE_MAX_PX / Math.max(w0, h0));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(w0 * f));
+    canvas.height = Math.max(1, Math.round(h0 * f));
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+    return { name: file.name, canvas, jpeg: /jpe?g/i.test(file.type || file.name) };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+// The mark for a page W pt wide: the picked image at its share of the page
+// width, or the text (the same size on every page).
+function pmWmMark(s, W, pxPerPt, textCacheRef) {
+  if (s.useImage && pmWmImage) {
+    const c = pmWmImage.canvas;
+    const wPt = W * s.imgScale / 100;
+    return { canvas: c, wPt, hPt: wPt * c.height / c.width };
+  }
+  return textCacheRef ? textCacheRef(pxPerPt) : pmWmRenderText(s, pxPerPt);
+}
+
+function pmWmStoreSettings(s) {
+  try { localStorage.setItem(PM_WM_STORAGE_KEY, JSON.stringify(s)); } catch (_) {}
+}
+
+function pmWmFontCss(family) {
+  return '"' + String(family).replace(/["\\]/g, '') + '"';
+}
+
+// A font counts as installed when text set in it measures differently from
+// the bare fallback it would otherwise land on.
+function pmWmFontAvailable(family) {
+  const ctx = document.createElement('canvas').getContext('2d');
+  const probe = 'mmmmmmmmmmlli WW@#0Жж';
+  return ['monospace', 'serif', 'sans-serif'].some(base => {
+    ctx.font = '72px ' + base;
+    const w0 = ctx.measureText(probe).width;
+    ctx.font = '72px ' + pmWmFontCss(family) + ', ' + base;
+    return ctx.measureText(probe).width !== w0;
+  });
+}
+
+// Roboto ships inside the app (the form-field fallback font), so it is there
+// offline and on every system; the others are listed only if installed.
+function pmWmLoadFonts() {
+  if (!pmWmFontsPromise) {
+    pmWmFontsPromise = (async () => {
+      try {
+        const face = new FontFace(PM_WM_ROBOTO_FAMILY, pmFormLoadFallbackFontBytes());
+        await face.load();
+        document.fonts.add(face);
+      } catch (e) {
+        console.warn('watermark: embedded font not loaded', e);
+      }
+      const list = [{ family: PM_WM_ROBOTO_FAMILY, label: 'Roboto' }];
+      PM_WM_FONT_CANDIDATES.forEach(f => {
+        try { if (pmWmFontAvailable(f)) list.push({ family: f, label: f }); } catch (_) {}
+      });
+      return list;
+    })();
+  }
+  return pmWmFontsPromise;
+}
+
+// The watermark text as a tightly cropped transparent canvas. wPt/hPt is its
+// size on the page; pxPerPt only sets how finely it is rasterized. The box is
+// measured once at the output density, so the preview (drawn coarser) and
+// the PDF get exactly the same size and spacing - measured at each density,
+// hinting and pixel rounding made the preview's tiles a few % larger, which
+// added up row by row into visibly different tiling.
+function pmWmTextFont(s, px) {
+  return (s.italic ? 'italic ' : '') + (s.bold ? 'bold ' : '') +
+    px + 'px ' + pmWmFontCss(s.font) + ', sans-serif';
+}
+function pmWmTextBox(s) {
+  const kRef = PM_WM_PX_PER_PT;
+  const ctx = document.createElement('canvas').getContext('2d');
+  ctx.font = pmWmTextFont(s, s.size * kRef);
+  const m = ctx.measureText(String(s.text || ''));
+  const fin = (v, d) => (Number.isFinite(v) ? v : d);
+  const left = fin(m.actualBoundingBoxLeft, 0) / kRef;
+  const right = fin(m.actualBoundingBoxRight, m.width) / kRef;
+  const asc = fin(m.actualBoundingBoxAscent, s.size * kRef * 0.8) / kRef;
+  const desc = fin(m.actualBoundingBoxDescent, s.size * kRef * 0.2) / kRef;
+  const pad = s.size * 0.06 + 0.5;
+  return { left, right, asc, pad, wPt: left + right + pad * 2, hPt: asc + desc + pad * 2 };
+}
+function pmWmRenderText(s, pxPerPt) {
+  const text = String(s.text || '');
+  if (!text.trim()) return null;
+  const box = pmWmTextBox(s);
+  let k = pxPerPt;
+  const fit = Math.min(1, 8192 / (box.wPt * k), 8192 / (box.hPt * k), Math.sqrt(24e6 / (box.wPt * box.hPt * k * k)));
+  if (fit < 1) k *= fit;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.ceil(box.wPt * k));
+  canvas.height = Math.max(1, Math.ceil(box.hPt * k));
+  const ctx = canvas.getContext('2d');
+  ctx.font = pmWmTextFont(s, s.size * k);
+  ctx.fillStyle = s.color;
+  ctx.textBaseline = 'alphabetic';
+  // maxWidth: at a coarse density hinting can make the run a little wider
+  // than the box - squeeze it back rather than clip the last letter.
+  ctx.fillText(text, (box.pad + box.left) * k, (box.pad + box.asc) * k, (box.left + box.right) * k);
+  return { canvas, wPt: box.wPt, hPt: box.hPt };
+}
+
+// Tiling steps along the text (su) and across it (sv), in pt.
+function pmWmTileSteps(W, H, iw, ih, s) {
+  let su = Math.max(2, iw + s.gapX), sv = Math.max(2, ih + s.gapY);
+  const R = Math.hypot(W, H) / 2 + Math.hypot(iw, ih) / 2;
+  const est = (4 * R * R) / (su * sv);
+  if (est > PM_WM_MAX_TILES) {
+    const f = Math.sqrt(est / PM_WM_MAX_TILES);
+    su *= f; sv *= f;
+  }
+  return { su, sv };
+}
+
+// Centres (visual pt) of every copy of an iw x ih watermark on a W x H page.
+function pmWmPlacements(W, H, iw, ih, s) {
+  const th = s.angle * Math.PI / 180;
+  const cos = Math.cos(th), sin = Math.sin(th);
+  if (s.tile) {
+    // A grid laid out along the text direction (u) and across it (v),
+    // centred on the page and rotated with the text; every other row is
+    // shifted by half a step when "brick" is on.
+    const { su, sv } = pmWmTileSteps(W, H, iw, ih, s);
+    const r = Math.hypot(iw, ih) / 2;
+    const R = Math.hypot(W, H) / 2 + r;
+    const ni = Math.ceil(R / su) + 1, nj = Math.ceil(R / sv) + 1;
+    const out = [];
+    for (let j = -nj; j <= nj; j++) {
+      const off = (s.brick && (j & 1)) ? su / 2 : 0;
+      for (let i = -ni; i <= ni; i++) {
+        const u = i * su + off, v = j * sv;
+        const cx = W / 2 + u * cos + v * sin;
+        const cy = H / 2 - u * sin + v * cos;
+        if (cx < -r || cx > W + r || cy < -r || cy > H + r) continue;
+        out.push({ cx, cy });
+      }
+    }
+    return out;
+  }
+  return [{ cx: s.pos.fx * W, cy: s.pos.fy * H }];
+}
+
+// The page as seen: its visual size, plus what peOverlayPlacement needs to
+// map visual coordinates back into the page's own (unrotated) space.
+function pmWmPageFrame(page) {
+  const rot = (((page.getRotation().angle || 0) % 360) + 360) % 360;
+  const full = peOverlayPlacement(rot, page.getCropBox());
+  return { rot, full, W: full.w, H: full.h };
+}
+
+function pmWmDrawOnPage(page, img, sizeFor, s) {
+  const { rot, full, W, H } = pmWmPageFrame(page);
+  const { iw, ih } = sizeFor(W);
+  const th = s.angle * Math.PI / 180;
+  const cos = Math.cos(th), sin = Math.sin(th);
+  // drawImage rotates around the image's lower-left corner: offset of that
+  // corner from the centre once the text is turned by the angle (y up).
+  const dx = -iw / 2 * cos + ih / 2 * sin;
+  const dy = -iw / 2 * sin - ih / 2 * cos;
+  const opacity = Math.min(1, Math.max(0.01, s.opacity / 100));
+  peFreshContentStream(page);
+  pmWmPlacements(W, H, iw, ih, s).forEach(p => {
+    const lx = full.x + p.cx + dx;
+    const ly = full.y + (H - p.cy) + dy;
+    const a = peRotatePointAround(lx, ly, full.x, full.y, rot);
+    page.drawImage(img, {
+      x: a.x, y: a.y, width: iw, height: ih,
+      rotate: PDFLib.degrees(rot + s.angle),
+      opacity
+    });
+  });
+}
+
+// "1-3, 5, 8-" → sorted 0-based page indices, or null if it does not parse.
+function pmWmParseRange(str, count) {
+  const out = new Set();
+  const parts = String(str || '').split(/[,;\s]+/).filter(Boolean);
+  if (!parts.length) return null;
+  for (const part of parts) {
+    const m = /^(\d*)\s*[-–—]\s*(\d*)$/.exec(part) || /^(\d+)$/.exec(part);
+    if (!m) return null;
+    let a, b;
+    if (m.length === 2) { a = b = parseInt(m[1], 10); }
+    else {
+      a = m[1] ? parseInt(m[1], 10) : 1;
+      b = m[2] ? parseInt(m[2], 10) : count;
+    }
+    if (!(a >= 1) || !(b >= 1) || a > b || a > count) return null;
+    for (let i = a; i <= Math.min(b, count); i++) out.add(i - 1);
+  }
+  return [...out].sort((x, y) => x - y);
+}
+
+async function pmWmCanvasToBytes(canvas, type, quality) {
+  const blob = await new Promise((resolve, reject) => {
+    canvas.toBlob(b => (b ? resolve(b) : reject(new Error('toBlob failed'))), type, quality);
+  });
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+// Page image for the preview, `pxPerPt` canvas pixels per pt of the page.
+// The live document's own pdf.js copy is used when there is one (a page of
+// an already parsed document renders at once); otherwise just that page is
+// copied out and rendered.
+async function pmWmRenderPagePreview(idx, pxPerPt) {
+  if (typeof whenPdfDocIdle === 'function') await whenPdfDocIdle();
+  if (!pdfDoc) return null;
+  let pj = null, own = false;
+  if (typeof hqPdfjsDoc !== 'undefined' && hqPdfjsDoc && hqPdfjsDoc.numPages === pdfDoc.getPageCount()) {
+    pj = hqPdfjsDoc;
+  }
+  const render = async (doc, pageNo) => {
+    const page = await doc.getPage(pageNo);
+    const rot = typeof page.rotate === 'number' ? page.rotate : 0;
+    const vp = page.getViewport({ scale: pxPerPt, rotation: rot });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(vp.width));
+    canvas.height = Math.max(1, Math.round(vp.height));
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    if (typeof peCompositeEditorObjectsOnCanvas === 'function') {
+      try { await peCompositeEditorObjectsOnCanvas(ctx, idx, canvas.width, canvas.height); } catch (_) {}
+    }
+    return canvas;
+  };
+  if (pj) {
+    try { return await render(pj, idx + 1); } catch (_) { /* dropped meanwhile - copy the page out */ }
+  }
+  const single = await peSinglePageDoc(pdfDoc, idx);
+  pj = await pdfjsLib.getDocument({ data: await single.save() }).promise;
+  own = true;
+  try {
+    return await render(pj, 1);
+  } finally {
+    if (own) { try { pj.destroy(); } catch (_) {} }
+  }
+}
+
+// After the pages changed: new page images for exactly those pages, drawn
+// from the bytes just saved (the old image stays up until its replacement
+// is ready - no blank flash), everything else kept as it is.
+async function pmWmRefreshPageImages(bytes, indices) {
+  activeOperationId++;
+  const operationId = activeOperationId;
+  destroyLazyThumbnailPipeline();
+  invalidateHQ();
+  let pj;
+  try {
+    pj = await pdfjsLib.getDocument({ data: bytes }).promise;
+  } catch (e) {
+    console.warn('watermark: preview refresh failed', e);
+    return;
+  }
+  if (activeOperationId !== operationId) return;
+  lazyThumbPdfjsDoc = pj;
+  lazyThumbNumPages = pj.numPages;
+  // Same bytes the live pdfDoc holds: the sharp renders and the text/link
+  // layers can use them instead of serializing the whole document again.
+  hqPdfjsDoc = pj;
+  pdfDocKnownBytesDoc = pdfDoc;
+  pdfDocKnownBytes = bytes;
+  const changed = new Set(indices);
+  pagesContainer.querySelectorAll('.page').forEach(div => {
+    const idx = parseInt(div.dataset.index, 10);
+    if (Number.isNaN(idx) || changed.has(idx)) return;
+    const img = div.querySelector('img');
+    const src = img && img.getAttribute('src');
+    if (src && src.length > 8) {
+      lazyThumbLoaded.add(idx);
+      div.classList.add('page-lazy-loaded');
+    } else {
+      div.classList.add('page-lazy-pending');
+    }
+  });
+  lazyThumbObserver = pmCreateLazyThumbObserver(operationId, lazyThumbNumPages);
+  pagesContainer.querySelectorAll('.page').forEach(div => {
+    const idx = parseInt(div.dataset.index, 10);
+    if (!Number.isNaN(idx) && !lazyThumbLoaded.has(idx)) lazyThumbObserver.observe(div);
+  });
+  await loadInitialVisibleThumbnails(operationId, lazyThumbNumPages);
+  requestAnimationFrame(() => {
+    if (activeOperationId === operationId) startLazyThumbnailBackgroundPrefetch(operationId, lazyThumbNumPages);
+  });
+  if (typeof scheduleHQUpgrade === 'function') scheduleHQUpgrade();
+}
+
+// Draws the watermark into the live document as one undoable step.
+async function pmWmApply(s, indices) {
+  if (!pdfDoc || !indices.length) return false;
+  const useImage = !!(s.useImage && pmWmImage);
+  const rendered = useImage ? null : pmWmRenderText(s, PM_WM_PX_PER_PT);
+  if (!useImage && !rendered) return false;
+  // A photo stays JPEG (a PNG of it would be several times larger).
+  const asJpeg = useImage && pmWmImage.jpeg;
+  const markBytes = asJpeg
+    ? await pmWmCanvasToBytes(pmWmImage.canvas, 'image/jpeg', 0.92)
+    : await pmWmCanvasToBytes(useImage ? pmWmImage.canvas : rendered.canvas, 'image/png');
+  const sizeFor = useImage
+    ? (W) => { const m = pmWmMark(s, W); return { iw: m.wPt, ih: m.hPt }; }
+    : () => ({ iw: rendered.wPt, ih: rendered.hPt });
+  showLoadingDeferred(t('wmApplying'), 300);
+  let claimed = false;
+  let bytes = null;
+  try {
+    claimed = await peClaimLivePdfDocWriter();
+    const docRef = pdfDoc;
+    if (!docRef) return false;
+    const img = asJpeg ? await docRef.embedJpg(markBytes) : await docRef.embedPng(markBytes);
+    const count = docRef.getPageCount();
+    const done = [];
+    for (const idx of indices) {
+      if (idx < 0 || idx >= count) continue;
+      pmWmDrawOnPage(docRef.getPage(idx), img, sizeFor, s);
+      done.push(idx);
+    }
+    if (pdfDoc !== docRef || !done.length) return false;
+    bytes = new Uint8Array(await docRef.save());
+    indices = done;
+  } catch (err) {
+    console.error(err);
+    alert(t('wmApplyError') + ': ' + (err && err.message || err));
+    return false;
+  } finally {
+    if (claimed) pdfDocCriticalWriterActive = false;
+    hideLoading();
+  }
+
+  originalFileBytes = bytes;
+  const marked = [...markedForDeletion].sort((x, y) => x - y);
+  const historyBytes = bytes.slice();
+  historyCommitChain = historyCommitChain
+    .then(() => commitHistoryStep(Promise.resolve(historyBytes), marked, indices, { lazyPages: true }))
+    .catch(e => console.warn('history commit error', e));
+  documentDirty = true;
+  if (typeof updateInfo === 'function') updateInfo();
+  if (typeof updateStickyFileBar === 'function') updateStickyFileBar();
+  if (typeof pmOnDocumentDirtyChanged === 'function') pmOnDocumentDirtyChanged();
+  await pmWmRefreshPageImages(bytes, indices);
+  return true;
+}
+
+async function openWatermarkDialog() {
+  if (pmWmDialogOpen || !pdfDoc || isLoading || pdfDoc.getPageCount() === 0) return;
+  if (typeof pmPageEditorOpen === 'function' && pmPageEditorOpen()) return;
+  pmWmDialogOpen = true;
+  try {
+    await pmWmRunDialog();
+  } finally {
+    pmWmDialogOpen = false;
+  }
+}
+
+// Number field with its own up/down arrows (the native spinner is hidden:
+// it is drawn by the system as a dark block that does not follow the theme).
+function pmWmNumField(id, min, max, step) {
+  const up = '<svg viewBox="0 0 10 6" width="9" height="6" aria-hidden="true"><path d="M1 5l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const down = '<svg viewBox="0 0 10 6" width="9" height="6" aria-hidden="true"><path d="M1 1l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  return `<span class="pm-wm-num"><input type="number" id="${id}" min="${min}" max="${max}" step="${step}">` +
+    `<span class="pm-wm-spin"><button type="button" tabindex="-1" data-dir="1">${up}</button>` +
+    `<button type="button" tabindex="-1" data-dir="-1">${down}</button></span></span>`;
+}
+
+const PM_WM_ZOOM_MAX = 5;
+// Canvas pixels the preview may use for the page at high zoom.
+const PM_WM_PREVIEW_MAX_PX = 16e6;
+
+function pmWmRunDialog() {
+  return new Promise((resolve) => {
+    const s = pmWmLoadSettings();
+    const pageCount = pdfDoc.getPageCount();
+    const selected = [...selectedPages].filter(i => !markedForDeletion.has(i) && i < pageCount).sort((a, b) => a - b);
+    let pagesMode = 'all';
+    let rangeText = '';
+    let previewPos = 0;
+    let previewIdx = -1;
+    let previewData = null;       // { canvas, pxPerPt } - page raster of previewIdx
+    let previewToken = 0;
+    const rasterCache = new Map(); // page index -> { canvas, pxPerPt }
+    let textCache = null;          // { key, r } - watermark text at preview density
+    let zoom = 1;
+    let drag = null;               // left button: moving the mark
+    let pan = null;                // right button: moving the view
+    let rerenderTimer = null;
+    let busy = false;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay-active pm-wm-overlay';
+    const box = document.createElement('div');
+    box.className = 'pm-modal-box pm-wm-box';
+    box.setAttribute('role', 'dialog');
+    const esc = escapeHtml;
+    box.innerHTML = `
+      <div class="pm-wm-head">
+        <div class="pm-wm-title">${esc(t('wmDialogTitle'))}</div>
+        <button type="button" class="pm-wm-help" id="pmWmHelp" aria-expanded="false">?</button>
+      </div>
+      <div class="pm-wm-help-pop" id="pmWmHelpPop" hidden>
+        <div>${esc(t('wmHelpLeft'))}</div>
+        <div>${esc(t('wmHelpRight'))}</div>
+        <div>${esc(t('wmHelpWheel'))}</div>
+      </div>
+      <div class="pm-wm-body">
+        <div class="pm-wm-controls">
+          <label class="pm-wm-row pm-wm-text-only"><span class="pm-wm-label">${esc(t('wmText'))}</span>
+            <input type="text" id="pmWmText" spellcheck="false" autocomplete="off"></label>
+          <div class="pm-wm-row pm-wm-text-only"><span class="pm-wm-label">${esc(t('wmFont'))}</span>
+            <select id="pmWmFont"></select>
+            <button type="button" class="pm-wm-tbtn" id="pmWmBold" title="${esc(t('wmBold'))}"><b>B</b></button>
+            <button type="button" class="pm-wm-tbtn" id="pmWmItalic" title="${esc(t('wmItalic'))}"><i>I</i></button>
+          </div>
+          <div class="pm-wm-row"><span class="pm-wm-label" id="pmWmSizeLabel">${esc(t('wmSize'))}</span>
+            <input type="range" id="pmWmSizeRange" min="8" max="200" step="1">
+            <span class="pm-wm-size-num">${pmWmNumField('pmWmSize', 4, 400, 1)}</span>
+          </div>
+          <hr class="pm-wm-sep">
+          <div class="pm-wm-row">
+            <label class="pm-wm-check pm-wm-label"><input type="checkbox" id="pmWmUseImage"> ${esc(t('wmImage'))}</label>
+            <button type="button" class="pm-wm-tbtn" id="pmWmPickImage">${esc(t('wmPickImage'))}</button>
+            <span class="pm-wm-file" id="pmWmImageName"></span>
+            <input type="file" id="pmWmImageFile" accept="image/*" hidden>
+          </div>
+          <hr class="pm-wm-sep">
+          <div class="pm-wm-row pm-wm-text-only"><span class="pm-wm-label">${esc(t('wmColor'))}</span>
+            <input type="color" id="pmWmColor">
+            ${PM_WM_SWATCHES.map(c => `<button type="button" class="pm-wm-swatch" data-color="${c}" style="background:${c}" title="${c}"></button>`).join('')}
+          </div>
+          <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('wmTransparency'))}</span>
+            <input type="range" id="pmWmTransp" min="0" max="99" step="1">
+            <span class="pm-wm-val" id="pmWmTranspVal"></span>
+          </div>
+          <hr class="pm-wm-sep">
+          <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('wmRotation'))}</span>
+            <button type="button" class="pm-wm-tbtn" data-angle="45" title="+45°">↗ 45°</button>
+            <button type="button" class="pm-wm-tbtn" data-angle="0" title="0°">0°</button>
+            <button type="button" class="pm-wm-tbtn" data-angle="-45" title="−45°">↘ −45°</button>
+            <span class="pm-wm-push"></span>
+            ${pmWmNumField('pmWmAngle', -180, 180, 1)}<span class="pm-wm-unit">°</span>
+          </div>
+          <hr class="pm-wm-sep">
+          <div class="pm-wm-row">
+            <label class="pm-wm-check pm-wm-label"><input type="checkbox" id="pmWmTile"> ${esc(t('wmTile'))}</label>
+            <label class="pm-wm-check pm-wm-tile-opt"><input type="checkbox" id="pmWmBrick"> ${esc(t('wmBrick'))}</label>
+          </div>
+          <div class="pm-wm-row pm-wm-tile-opt"><span class="pm-wm-label">${esc(t('wmGap'))}</span>
+            <span class="pm-wm-axis" title="${esc(t('wmGapX'))}">↔</span>${pmWmNumField('pmWmGapX', 0, 2000, 5)}
+            <span class="pm-wm-axis" title="${esc(t('wmGapY'))}">↕</span>${pmWmNumField('pmWmGapY', 0, 2000, 5)}<span class="pm-wm-unit">pt</span></div>
+          <hr class="pm-wm-sep">
+          <div class="pm-wm-row pm-wm-row-top"><span class="pm-wm-label">${esc(t('wmPages'))}</span>
+            <div class="pm-wm-pages">
+              <div class="pm-wm-pages-line">
+                <label><input type="radio" name="pmWmPages" value="all"> ${esc(t('wmPagesAll', { n: pageCount }))}</label>
+                <label><input type="radio" name="pmWmPages" value="selected"${selected.length ? '' : ' disabled'}> ${esc(t('wmPagesSelected', { n: selected.length }))}</label>
+              </div>
+              <label><input type="radio" name="pmWmPages" value="range"> ${esc(t('wmPagesRange'))}
+                <input type="text" id="pmWmRange" placeholder="${esc(t('wmRangePlaceholder'))}" spellcheck="false" autocomplete="off"></label>
+            </div>
+          </div>
+        </div>
+        <div class="pm-wm-preview-col">
+          <div class="pm-wm-preview" id="pmWmPreviewBox"><canvas id="pmWmPreview"></canvas></div>
+          <span class="pm-wm-zoom-badge" id="pmWmZoomVal">100%</span>
+          <div class="pm-wm-nav">
+            <button type="button" class="pm-wm-tbtn" id="pmWmPrev">◀</button>
+            <span id="pmWmNavLabel"></span>
+            <button type="button" class="pm-wm-tbtn" id="pmWmNext">▶</button>
+          </div>
+        </div>
+      </div>
+      <div class="pm-wm-error" id="pmWmError"></div>
+      <div class="pm-wm-actions">
+        <button type="button" class="pm-wm-ok" id="pmWmOk">${esc(t('wmApply'))}</button>
+        <button type="button" class="pm-wm-cancel" id="pmWmCancel">${esc(t('wmCancel'))}</button>
+      </div>`;
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    const $ = (id) => box.querySelector('#' + id);
+    const textIn = $('pmWmText'), fontSel = $('pmWmFont'), boldBtn = $('pmWmBold'), italicBtn = $('pmWmItalic');
+    const colorIn = $('pmWmColor'), sizeRange = $('pmWmSizeRange'), sizeIn = $('pmWmSize');
+    const transpRange = $('pmWmTransp'), transpVal = $('pmWmTranspVal');
+    const angleIn = $('pmWmAngle');
+    const imgChk = $('pmWmUseImage'), imgBtn = $('pmWmPickImage'), imgName = $('pmWmImageName'), fileIn = $('pmWmImageFile');
+    const sizeLabel = $('pmWmSizeLabel'), helpBtn = $('pmWmHelp'), helpPop = $('pmWmHelpPop');
+    const tileChk = $('pmWmTile'), gapXIn = $('pmWmGapX'), gapYIn = $('pmWmGapY'), brickChk = $('pmWmBrick');
+    const rangeIn = $('pmWmRange'), errEl = $('pmWmError');
+    const pv = $('pmWmPreview'), pvBox = $('pmWmPreviewBox');
+    const zoomVal = $('pmWmZoomVal');
+    let zoomBadgeTimer = null;
+    const navLabel = $('pmWmNavLabel'), prevBtn = $('pmWmPrev'), nextBtn = $('pmWmNext');
+
+    // ---- page targets ------------------------------------------------
+    function targetIndices() {
+      let list;
+      if (pagesMode === 'selected') list = selected.slice();
+      else if (pagesMode === 'range') list = pmWmParseRange(rangeText, pageCount) || [];
+      else { list = []; for (let i = 0; i < pageCount; i++) list.push(i); }
+      return list.filter(i => !markedForDeletion.has(i));
+    }
+
+    // ---- preview geometry: fit the page into the box, times the zoom ------
+    function frameFor(idx) {
+      try { return pmWmPageFrame(pdfDoc.getPage(idx)); } catch (_) { return null; }
+    }
+    // The box's own size (not clientWidth/Height, which lose the scrollbar
+    // once one shows), less its 12px padding and a pixel of slack so the
+    // fitted page never spills over by a rounding fraction.
+    function fitCssPerPt(fr) {
+      const b = pvBox.getBoundingClientRect();
+      const w = Math.max(80, b.width - 25), h = Math.max(80, b.height - 25);
+      return Math.min(w / fr.W, h / fr.H);
+    }
+    // Canvas pixels per pt for the page at the current zoom (capped in area).
+    function wantedPxPerPt(fr) {
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      let k = fitCssPerPt(fr) * zoom * dpr;
+      const area = fr.W * fr.H * k * k;
+      if (area > PM_WM_PREVIEW_MAX_PX) k *= Math.sqrt(PM_WM_PREVIEW_MAX_PX / area);
+      return k;
+    }
+    function layoutCanvas() {
+      const fr = frameFor(previewIdx);
+      if (!fr) return null;
+      const css = fitCssPerPt(fr) * zoom;
+      const k = wantedPxPerPt(fr);
+      pv.style.width = Math.floor(fr.W * css) + 'px';
+      pv.style.height = Math.floor(fr.H * css) + 'px';
+      // Scrollbars only once zoomed in: at the fitted size there is nothing
+      // to scroll to.
+      pvBox.style.overflow = zoom > 1.001 ? 'auto' : 'hidden';
+      const w = Math.max(1, Math.round(fr.W * k)), h = Math.max(1, Math.round(fr.H * k));
+      if (pv.width !== w || pv.height !== h) { pv.width = w; pv.height = h; }
+      return fr;
+    }
+
+    function textAtPreview(k) {
+      const key = [s.text, s.font, s.bold, s.italic, s.color, s.size, Math.round(k * 100)].join('|');
+      if (!textCache || textCache.key !== key) textCache = { key, r: pmWmRenderText(s, k) };
+      return textCache.r;
+    }
+    // The mark as drawn on a page W pt wide at k canvas px per pt.
+    const markAt = (W, k) => pmWmMark(s, W, k, textAtPreview);
+    // The picked image at the exact size one copy takes in the preview.
+    // Drawing the full-size original (up to 2500px) scaled down once per
+    // tile on every slider step is what made tiling an image crawl.
+    let imgCache = null;
+    let imgLevels = null;   // { src, levels: [original, 1/2, 1/4, ...] }
+    function previewImage(m, k) {
+      const w = Math.max(1, Math.round(m.wPt * k)), h = Math.max(1, Math.round(m.hPt * k));
+      if (imgCache && imgCache.src === m.canvas && imgCache.w === w && imgCache.h === h) return imgCache.c;
+      // Halved copies, made once per picked image: a new size (every slider
+      // step) then costs one small draw from the nearest larger copy, and
+      // halving in steps keeps the reduced image smooth.
+      if (!imgLevels || imgLevels.src !== m.canvas) {
+        const levels = [m.canvas];
+        let src = m.canvas;
+        while (src.width > 64 && src.height > 64) {
+          const c = document.createElement('canvas');
+          c.width = Math.ceil(src.width / 2);
+          c.height = Math.ceil(src.height / 2);
+          c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
+          levels.push(c);
+          src = c;
+        }
+        imgLevels = { src: m.canvas, levels };
+      }
+      let src = imgLevels.levels[0];
+      for (const lv of imgLevels.levels) { if (lv.width >= w && lv.height >= h) src = lv; else break; }
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      const cx = c.getContext('2d');
+      cx.imageSmoothingQuality = 'high';
+      cx.drawImage(src, 0, 0, w, h);
+      imgCache = { src: m.canvas, w, h, c };
+      return c;
+    }
+    // The tiled marks as one layer the size of the preview, made with a
+    // single pattern fill (not a draw per copy) and kept while only the
+    // transparency changes - that then costs two plain copies per frame.
+    let layerCache = null;
+    function tileLayer(src, fr, r, scale, th) {
+      const key = [pv.width, pv.height, th, s.brick, s.gapX, s.gapY, scale, r.wPt, r.hPt].join('|');
+      if (layerCache && layerCache.src === src && layerCache.key === key) return layerCache.c;
+      const c = (layerCache && layerCache.c.width === pv.width && layerCache.c.height === pv.height)
+        ? layerCache.c : document.createElement('canvas');
+      c.width = pv.width;
+      c.height = pv.height;
+      const lx = c.getContext('2d');
+      lx.clearRect(0, 0, c.width, c.height);
+      const pat = tilePattern(lx, src, fr, r, scale);
+      // Pattern space -> preview: centre of the page, turned with the mark.
+      pat.setTransform(new DOMMatrix()
+        .translate(fr.W / 2 * scale, fr.H / 2 * scale)
+        .rotate(-th * 180 / Math.PI)
+        .multiply(pat.__cellMatrix));
+      lx.fillStyle = pat;
+      lx.fillRect(0, 0, c.width, c.height);
+      layerCache = { src, key, c };
+      return c;
+    }
+    // Repeating cell: one step along the mark by one (or, staggered, two)
+    // steps across it - the same grid as pmWmPlacements.
+    function tilePattern(ctx, src, fr, r, scale) {
+      const { su, sv } = pmWmTileSteps(fr.W, fr.H, r.wPt, r.hPt, s);
+      const rows = s.brick ? 2 : 1;
+      // The cell is a whole number of pixels; the pattern matrix stretches it
+      // back to the exact step so a long run of copies does not drift.
+      const cw = Math.max(1, Math.round(su * scale)), ch = Math.max(1, Math.round(sv * scale * rows));
+      const cell = document.createElement('canvas');
+      cell.width = cw;
+      cell.height = ch;
+      const cx = cell.getContext('2d');
+      const w = r.wPt * scale, h = r.hPt * scale;
+      const put = (x, y) => cx.drawImage(src, x - w / 2, y - h / 2, w, h);
+      const fx = cw / (su * scale), fy = ch / (sv * scale * rows);
+      put(cw / 2, (sv * scale / 2) * fy);
+      if (rows === 2) {
+        // Shifted row: half a step over, so it straddles the cell edge.
+        const y = (sv * scale * 1.5) * fy;
+        put(0, y);
+        put(cw, y);
+      }
+      const pat = ctx.createPattern(cell, 'repeat');
+      // Cell -> rotated page space: undo the rounding, then put the first
+      // mark's centre on the origin (the page centre).
+      pat.__cellMatrix = new DOMMatrix()
+        .translate(-su * scale / 2, -sv * scale / 2)
+        .scale(1 / fx, 1 / fy);
+      return pat;
+    }
+
+    // Slider drags fire faster than frames: draw once per frame.
+    let drawRaf = 0;
+    function drawSoon() {
+      if (!drawRaf) drawRaf = requestAnimationFrame(() => { drawRaf = 0; draw(); });
+    }
+
+    function draw() {
+      const ctx = pv.getContext('2d');
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      const fr = previewIdx >= 0 ? frameFor(previewIdx) : null;
+      if (!previewData || !fr) {
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, pv.width, pv.height);
+        return;
+      }
+      ctx.drawImage(previewData.canvas, 0, 0, pv.width, pv.height);
+      const scale = pv.width / fr.W;              // canvas px per pt
+      const r = markAt(fr.W, Math.max(0.5, scale));
+      if (!r) return;
+      const th = s.angle * Math.PI / 180;
+      const src = (s.useImage && pmWmImage) ? previewImage(r, scale) : r.canvas;
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, Math.max(0.01, s.opacity / 100));
+      if (s.tile) {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.drawImage(tileLayer(src, fr, r, scale, th), 0, 0);
+        ctx.restore();
+        return;
+      }
+      pmWmPlacements(fr.W, fr.H, r.wPt, r.hPt, s).forEach(p => {
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.translate(p.cx * scale, p.cy * scale);
+        ctx.rotate(-th);
+        ctx.drawImage(src, -r.wPt / 2 * scale, -r.hPt / 2 * scale, r.wPt * scale, r.hPt * scale);
+      });
+      ctx.restore();
+    }
+
+    function cacheRaster(idx, data) {
+      rasterCache.delete(idx);
+      rasterCache.set(idx, data);
+      while (rasterCache.size > 8) rasterCache.delete(rasterCache.keys().next().value);
+    }
+    function cachedRaster(idx, k) {
+      const c = rasterCache.get(idx);
+      return (c && c.pxPerPt >= k * 0.9) ? c : null;
+    }
+
+    // Sharp raster of the shown page for the current zoom. Until it is
+    // there the preview keeps drawing whatever raster it has, stretched.
+    async function ensureRaster() {
+      const idx = previewIdx;
+      const fr = idx >= 0 ? frameFor(idx) : null;
+      if (!fr) return;
+      const k = wantedPxPerPt(fr);
+      const hit = cachedRaster(idx, k);
+      if (hit) { previewData = hit; draw(); return; }
+      const token = ++previewToken;
+      let canvas = null;
+      try { canvas = await pmWmRenderPagePreview(idx, k); } catch (e) { console.warn('watermark preview', e); }
+      if (!overlay.isConnected || !canvas) return;
+      const data = { canvas, pxPerPt: k };
+      cacheRaster(idx, data);
+      if (token !== previewToken || idx !== previewIdx) return;
+      previewData = data;
+      draw();
+      prefetchNext(idx);
+    }
+
+    // The next target page, at the plain fit size, so ▶ shows it at once.
+    let prefetching = false;
+    async function prefetchNext(idx) {
+      const targets = targetIndices();
+      const next = targets[targets.indexOf(idx) + 1];
+      if (next == null || prefetching) return;
+      const fr = frameFor(next);
+      if (!fr) return;
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const k = fitCssPerPt(fr) * dpr;
+      if (cachedRaster(next, k)) return;
+      prefetching = true;
+      try {
+        const canvas = await pmWmRenderPagePreview(next, k);
+        if (canvas && overlay.isConnected && !rasterCache.has(next)) cacheRaster(next, { canvas, pxPerPt: k });
+      } catch (_) {
+      } finally { prefetching = false; }
+    }
+
+    function loadPreviewPage() {
+      const targets = targetIndices();
+      if (previewPos > targets.length - 1) previewPos = Math.max(0, targets.length - 1);
+      const idx = targets.length ? targets[previewPos] : -1;
+      navLabel.textContent = idx >= 0 ? t('wmPreviewPage', { n: idx + 1, total: pageCount }) : '—';
+      prevBtn.disabled = previewPos <= 0 || !targets.length;
+      nextBtn.disabled = previewPos >= targets.length - 1 || !targets.length;
+      if (idx !== previewIdx) {
+        previewIdx = idx;
+        // Any raster of this page (even a blurry one) beats an empty sheet.
+        previewData = idx >= 0 ? (rasterCache.get(idx) || null) : null;
+        pvBox.scrollLeft = 0;
+        pvBox.scrollTop = 0;
+      }
+      layoutCanvas();
+      draw();
+      ensureRaster();
+    }
+
+    // ---- zoom (Alt + wheel over the preview, or the slider) ----------------
+    function setZoom(z, clientX, clientY) {
+      z = Math.min(PM_WM_ZOOM_MAX, Math.max(1, z));
+      if (Math.abs(z - zoom) < 1e-3) return;
+      const r0 = pv.getBoundingClientRect();
+      if (clientX == null) {
+        const b = pvBox.getBoundingClientRect();
+        clientX = b.left + b.width / 2;
+        clientY = b.top + b.height / 2;
+      }
+      // Keep the point under the cursor where it is.
+      const fx = r0.width ? (clientX - r0.left) / r0.width : 0.5;
+      const fy = r0.height ? (clientY - r0.top) / r0.height : 0.5;
+      zoom = z;
+      // Brief zoom readout in the corner of the preview.
+      zoomVal.textContent = Math.round(zoom * 100) + '%';
+      zoomVal.classList.add('show');
+      clearTimeout(zoomBadgeTimer);
+      zoomBadgeTimer = setTimeout(() => zoomVal.classList.remove('show'), 900);
+      layoutCanvas();
+      const r1 = pv.getBoundingClientRect();
+      pvBox.scrollLeft += (r1.left + fx * r1.width) - clientX;
+      pvBox.scrollTop += (r1.top + fy * r1.height) - clientY;
+      draw();
+      clearTimeout(rerenderTimer);
+      rerenderTimer = setTimeout(ensureRaster, 180);
+    }
+    // The wheel over the preview zooms at the cursor (the right button pans).
+    pvBox.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+      setZoom(zoom * Math.exp(-dy * 0.0015), e.clientX, e.clientY);
+    }, { passive: false });
+
+    // ---- controls <-> settings -----------------------------------------
+    function syncControls() {
+      boldBtn.classList.toggle('active', s.bold);
+      italicBtn.classList.toggle('active', s.italic);
+      colorIn.value = s.color;
+      box.querySelectorAll('.pm-wm-swatch').forEach(b => b.classList.toggle('active', b.dataset.color.toLowerCase() === s.color.toLowerCase()));
+      // With an image the size row sets its width as a share of the page.
+      const img = s.useImage && !!pmWmImage;
+      sizeLabel.textContent = img ? t('wmScale') : t('wmSize');
+      sizeIn.title = img ? t('wmScaleHint') : 'pt';
+      sizeRange.min = img ? '5' : '8'; sizeRange.max = img ? '100' : '200';
+      sizeIn.min = img ? '1' : '4'; sizeIn.max = img ? '100' : '400';
+      const sz = img ? s.imgScale : s.size;
+      sizeRange.value = String(sz);
+      if (document.activeElement !== sizeIn) sizeIn.value = String(sz);
+      imgChk.checked = s.useImage;
+      imgBtn.disabled = !s.useImage;
+      imgName.textContent = pmWmImage ? pmWmImage.name : '';
+      imgName.title = imgName.textContent;
+      imgName.classList.toggle('pm-wm-off', !s.useImage);
+      // Text-only settings step back while an image is the mark.
+      [textIn, fontSel, boldBtn, italicBtn, colorIn].forEach(el => { el.disabled = img; });
+      box.querySelectorAll('.pm-wm-swatch').forEach(b => { b.disabled = img; });
+      box.querySelectorAll('.pm-wm-text-only').forEach(el => el.classList.toggle('pm-wm-off', img));
+      transpRange.value = String(100 - s.opacity);
+      transpVal.textContent = (100 - s.opacity) + '%';
+      if (document.activeElement !== angleIn) angleIn.value = String(s.angle);
+      box.querySelectorAll('[data-angle]').forEach(b => b.classList.toggle('active', Number(b.dataset.angle) === s.angle));
+      tileChk.checked = s.tile;
+      box.querySelectorAll('.pm-wm-tile-opt').forEach(el => el.classList.toggle('pm-wm-off', !s.tile));
+      box.querySelectorAll('.pm-wm-tile-opt input, .pm-wm-tile-opt button').forEach(el => { el.disabled = !s.tile; });
+      if (document.activeElement !== gapXIn) gapXIn.value = String(s.gapX);
+      if (document.activeElement !== gapYIn) gapYIn.value = String(s.gapY);
+      brickChk.checked = s.brick;
+      pv.classList.toggle('draggable', !s.tile);
+      box.querySelectorAll('input[name="pmWmPages"]').forEach(r => { r.checked = r.value === pagesMode; });
+    }
+
+    function changed() {
+      syncControls();
+      drawSoon();
+    }
+
+    // A number field: typing applies while in range, leaving the field clamps.
+    function bindNumber(el, lo, hi, get, set) {
+      el.addEventListener('input', () => {
+        const v = Number(el.value);
+        if (el.value !== '' && Number.isFinite(v) && v >= lo && v <= hi) { set(v); changed(); }
+      });
+      el.addEventListener('change', () => { set(pmWmClampNum(el.value, lo, hi, get())); el.value = String(get()); changed(); });
+    }
+    // Own arrows: a click steps once, holding repeats.
+    box.querySelectorAll('.pm-wm-num').forEach(wrap => {
+      const input = wrap.querySelector('input');
+      wrap.querySelectorAll('.pm-wm-spin button').forEach(btn => {
+        let hold = null;
+        const stepOnce = () => {
+          if (input.disabled) return;
+          if (btn.dataset.dir === '1') input.stepUp(); else input.stepDown();
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        };
+        const stop = () => {
+          if (!hold) return;
+          clearTimeout(hold.t); clearInterval(hold.i); hold = null;
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        };
+        btn.addEventListener('pointerdown', (e) => {
+          if (e.button !== 0 || input.disabled) return;
+          e.preventDefault();
+          stepOnce();
+          hold = { t: setTimeout(() => { if (hold) hold.i = setInterval(stepOnce, 60); }, 400), i: null };
+        });
+        btn.addEventListener('pointerup', stop);
+        btn.addEventListener('pointerleave', stop);
+        btn.addEventListener('pointercancel', stop);
+      });
+    });
+
+    textIn.value = s.text;
+    textIn.addEventListener('input', () => { s.text = textIn.value; errEl.textContent = ''; drawSoon(); });
+    fontSel.addEventListener('change', () => { s.font = fontSel.value; changed(); });
+    boldBtn.addEventListener('click', () => { s.bold = !s.bold; changed(); });
+    italicBtn.addEventListener('click', () => { s.italic = !s.italic; changed(); });
+    colorIn.addEventListener('input', () => { s.color = colorIn.value; changed(); });
+    box.querySelectorAll('.pm-wm-swatch').forEach(b => b.addEventListener('click', () => { s.color = b.dataset.color; changed(); }));
+    const imageMode = () => s.useImage && !!pmWmImage;
+    sizeRange.addEventListener('input', () => {
+      if (imageMode()) s.imgScale = Number(sizeRange.value); else s.size = Number(sizeRange.value);
+      sizeIn.value = sizeRange.value; changed();
+    });
+    bindNumber(sizeIn, 1, 400,
+      () => imageMode() ? s.imgScale : s.size,
+      v => { if (imageMode()) s.imgScale = Math.min(100, v); else s.size = Math.max(4, v); });
+    imgChk.addEventListener('change', () => {
+      s.useImage = imgChk.checked;
+      errEl.textContent = '';
+      changed();
+      // Ticked with no file yet: straight to choosing one.
+      if (s.useImage && !pmWmImage) fileIn.click();
+    });
+    imgBtn.addEventListener('click', () => { if (!imgBtn.disabled) fileIn.click(); });
+    fileIn.addEventListener('change', async () => {
+      const f = fileIn.files && fileIn.files[0];
+      fileIn.value = '';
+      if (!f) return;
+      try {
+        pmWmImage = await pmWmLoadImageFile(f);
+        errEl.textContent = '';
+      } catch (e) {
+        console.warn('watermark image', e);
+        errEl.textContent = t('wmImageError');
+      }
+      if (overlay.isConnected) changed();
+    });
+    // Help next to the preview: what the mouse buttons and the wheel do.
+    const setHelp = (open) => { helpPop.hidden = !open; helpBtn.setAttribute('aria-expanded', String(open)); };
+    helpBtn.addEventListener('click', (e) => { e.stopPropagation(); setHelp(helpPop.hidden); });
+    overlay.addEventListener('pointerdown', (e) => {
+      if (!helpPop.hidden && e.target !== helpBtn && !helpPop.contains(e.target)) setHelp(false);
+    }, true);
+    transpRange.addEventListener('input', () => { s.opacity = 100 - Number(transpRange.value); changed(); });
+    box.querySelectorAll('[data-angle]').forEach(b => b.addEventListener('click', () => { s.angle = Number(b.dataset.angle); angleIn.value = String(s.angle); changed(); }));
+    bindNumber(angleIn, -180, 180, () => s.angle, v => { s.angle = v; });
+    tileChk.addEventListener('change', () => { s.tile = tileChk.checked; changed(); });
+    bindNumber(gapXIn, 0, 2000, () => s.gapX, v => { s.gapX = v; });
+    bindNumber(gapYIn, 0, 2000, () => s.gapY, v => { s.gapY = v; });
+    brickChk.addEventListener('change', () => { s.brick = brickChk.checked; changed(); });
+    box.querySelectorAll('input[name="pmWmPages"]').forEach(r => r.addEventListener('change', () => {
+      if (!r.checked) return;
+      pagesMode = r.value;
+      previewPos = 0;
+      errEl.textContent = '';
+      syncControls();
+      if (pagesMode === 'range') rangeIn.focus();
+      loadPreviewPage();
+    }));
+    rangeIn.addEventListener('input', () => {
+      rangeText = rangeIn.value;
+      previewPos = 0;
+      errEl.textContent = '';
+      loadPreviewPage();
+    });
+    rangeIn.addEventListener('focus', () => {
+      if (pagesMode !== 'range') { pagesMode = 'range'; syncControls(); loadPreviewPage(); }
+    });
+    prevBtn.addEventListener('click', () => { if (previewPos > 0) { previewPos--; loadPreviewPage(); } });
+    nextBtn.addEventListener('click', () => { previewPos++; loadPreviewPage(); });
+
+    // ---- preview mouse: left button moves the mark, right button the view --
+    function pointerPt(e) {
+      const fr = frameFor(previewIdx);
+      const rect = pv.getBoundingClientRect();
+      if (!fr || !rect.width) return null;
+      return {
+        fr,
+        x: (e.clientX - rect.left) / rect.width * fr.W,
+        y: (e.clientY - rect.top) / rect.height * fr.H
+      };
+    }
+    function moveTo(p) {
+      s.pos = {
+        fx: Math.min(1, Math.max(0, (p.x - drag.offX) / p.fr.W)),
+        fy: Math.min(1, Math.max(0, (p.y - drag.offY) / p.fr.H))
+      };
+      changed();
+    }
+    pvBox.addEventListener('contextmenu', (e) => e.preventDefault());
+    pvBox.addEventListener('pointerdown', (e) => {
+      if (e.button === 2) {
+        pan = { id: e.pointerId, x: e.clientX, y: e.clientY, sl: pvBox.scrollLeft, st: pvBox.scrollTop };
+        try { pvBox.setPointerCapture(e.pointerId); } catch (_) {}
+        pvBox.classList.add('panning');
+        e.preventDefault();
+        return;
+      }
+      if (e.button !== 0 || e.target !== pv || s.tile || !previewData) return;
+      const p = pointerPt(e);
+      if (!p) return;
+      const r = markAt(p.fr.W, Math.max(0.5, pv.width / p.fr.W));
+      if (!r) return;
+      const c = pmWmPlacements(p.fr.W, p.fr.H, r.wPt, r.hPt, s)[0];
+      const th = s.angle * Math.PI / 180;
+      const dx = p.x - c.cx, dy = p.y - c.cy;
+      const u = dx * Math.cos(th) - dy * Math.sin(th);
+      const v = dx * Math.sin(th) + dy * Math.cos(th);
+      // Grabbed the mark: keep the grip point under the cursor.
+      // Pressed elsewhere: the mark jumps to the cursor.
+      const inside = Math.abs(u) <= r.wPt / 2 && Math.abs(v) <= r.hPt / 2;
+      drag = { offX: inside ? dx : 0, offY: inside ? dy : 0, id: e.pointerId };
+      try { pvBox.setPointerCapture(e.pointerId); } catch (_) {}
+      e.preventDefault();
+      moveTo(p);
+    });
+    pvBox.addEventListener('pointermove', (e) => {
+      if (pan && e.pointerId === pan.id) {
+        pvBox.scrollLeft = pan.sl - (e.clientX - pan.x);
+        pvBox.scrollTop = pan.st - (e.clientY - pan.y);
+        return;
+      }
+      if (!drag || e.pointerId !== drag.id) return;
+      const p = pointerPt(e);
+      if (p) moveTo(p);
+    });
+    const endPointer = (e) => {
+      if (pan && e.pointerId === pan.id) { pan = null; pvBox.classList.remove('panning'); }
+      else if (drag && e.pointerId === drag.id) drag = null;
+      else return;
+      try { pvBox.releasePointerCapture(e.pointerId); } catch (_) {}
+    };
+    pvBox.addEventListener('pointerup', endPointer);
+    pvBox.addEventListener('pointercancel', endPointer);
+
+    // ---- close / apply ---------------------------------------------------
+    let settled = false;
+    function close(result) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(rerenderTimer);
+      clearTimeout(zoomBadgeTimer);
+      cancelAnimationFrame(drawRaf);
+      document.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('resize', onResize);
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      resolve(result);
+    }
+    async function apply() {
+      if (busy) return;
+      errEl.textContent = '';
+      if (s.useImage && !pmWmImage) { errEl.textContent = t('wmNoImage'); return; }
+      if (!s.useImage && !String(s.text || '').trim()) { errEl.textContent = t('wmNoText'); textIn.focus(); return; }
+      if (pagesMode === 'range' && !pmWmParseRange(rangeText, pageCount)) {
+        errEl.textContent = t('wmBadRange'); rangeIn.focus(); return;
+      }
+      const targets = targetIndices();
+      if (!targets.length) { errEl.textContent = t('wmBadRange'); return; }
+      busy = true;
+      pmWmStoreSettings(s);
+      close(true);
+      await pmWmApply(s, targets);
+    }
+    $('pmWmOk').addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); apply(); });
+    $('pmWmCancel').addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); close(false); });
+    // A stray click outside must not throw away a watermark being set up.
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) e.preventDefault(); });
+    // Capture phase, stopped here: the app's shortcuts (Delete, Q/W, P,
+    // Ctrl+Z...) must not act on the document while the dialog is up.
+    // Typing itself is a default action and still happens.
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault(); e.stopPropagation();
+        if (!helpPop.hidden) setHelp(false); else close(false);
+        return;
+      }
+      if (e.key === 'Enter' && e.target && e.target.tagName === 'INPUT' &&
+          ['text', 'number'].includes(e.target.type)) {
+        e.preventDefault(); e.stopPropagation(); apply(); return;
+      }
+      e.stopPropagation();
+    };
+    document.addEventListener('keydown', onKey, true);
+    let resizeTimer = null;
+    const onResize = () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => { layoutCanvas(); draw(); ensureRaster(); }, 200);
+    };
+    window.addEventListener('resize', onResize);
+
+    syncControls();
+    pmWmLoadFonts().then(list => {
+      if (!overlay.isConnected) return;
+      if (!list.some(f => f.family === s.font)) s.font = PM_WM_ROBOTO_FAMILY;
+      fontSel.innerHTML = list.map(f =>
+        `<option value="${esc(f.family)}" style="font-family:${esc(pmWmFontCss(f.family))}">${esc(f.label)}</option>`).join('');
+      fontSel.value = s.font;
+      textCache = null;
+      draw();
+    });
+    loadPreviewPage();
+    textIn.focus();
+    textIn.select();
+  });
 }
   </script>
 </body>
