@@ -948,19 +948,21 @@
     .pm-wm-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-height: 28px; }
     .pm-wm-row-top { align-items: flex-start; }
     .pm-wm-row-top .pm-wm-label { line-height: 22px; }
-    .pm-wm-label { width: 96px; flex: none; color: #555; }
-    .pm-wm-sub { padding-left: 102px; }
+    .pm-wm-label { width: 108px; flex: none; color: #555; }
+    .pm-wm-sub { padding-left: 114px; }
     .pm-wm-push { flex: 1; }
-    /*The label column is 96px + 6px gap, so the brick checkbox, the "↔" of
+    /*The label column is 108px + 6px gap, so the brick checkbox, the "↔" of
        the spacing row and the page radios all start on the same line.*/
     .pm-wm-axis { color: #6b7785; font-size: 15px; width: 12px; text-align: center; }
     .pm-wm-sep { border: none; border-top: 1px solid #e3e6ea; margin: 2px 0; width: 100%; }
-    /*Tiling options read as one group.*/
-    .pm-wm-tile-block {
-      display: flex; flex-direction: column; gap: 4px;
-      margin: 4px -9px; padding: 6px 8px;
-      border: 1px solid #e3e6ea; border-radius: 8px; background: rgba(120,130,145,0.06);
-    }
+    /*B and I are 28px each with the 6px row gap between them; the size field
+       under them spans exactly that: its left edge under B, right under I.*/
+    #pmWmBold, #pmWmItalic { width: 28px; min-width: 28px; padding: 0; }
+    .pm-wm-size-num { display: inline-flex; width: 62px; }
+    .pm-wm-size-num .pm-wm-num { width: 100%; }
+    .pm-wm-size-num .pm-wm-num input[type=number] { flex: 1; width: 0; min-width: 0; }
+    .pm-wm-file { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #555; font-size: 13px; }
+    .pm-wm-text-only.pm-wm-off { opacity: 0.45; }
     .pm-wm-check.pm-wm-label { display: flex; align-items: center; gap: 6px; color: inherit; }
     .pm-wm-controls input[type=range]:disabled { opacity: 0.5; }
     .pm-wm-off { opacity: 0.45; }
@@ -1022,11 +1024,24 @@
     #pmWmRange { flex: 1; min-width: 0; }
     .pm-wm-preview-col { display: flex; flex-direction: column; align-items: center; gap: 4px; position: relative; }
     .pm-wm-zoom-badge {
-      position: absolute; top: 8px; right: 8px; padding: 2px 7px; border-radius: 10px;
+      position: absolute; top: 8px; left: 8px; padding: 2px 7px; border-radius: 10px;
       background: rgba(30,36,44,0.72); color: #fff; font-size: 12px; pointer-events: none;
       opacity: 0; transition: opacity 0.2s;
     }
     .pm-wm-zoom-badge.show { opacity: 1; }
+    /*"?" in the preview's top-right corner and the mouse help it opens.*/
+    .pm-wm-help {
+      position: absolute; top: 8px; right: 8px; width: 24px; height: 24px; padding: 0;
+      border-radius: 50%; border: 1px solid rgba(0,0,0,0.15); background: rgba(255,255,255,0.92);
+      color: #3d5468; font-weight: bold; font-size: 14px; line-height: 1; cursor: pointer;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+    }
+    .pm-wm-help:hover, .pm-wm-help[aria-expanded="true"] { background: #3498db; color: #fff; border-color: #3498db; }
+    .pm-wm-help-pop {
+      position: absolute; top: 38px; right: 8px; z-index: 2; max-width: 300px;
+      padding: 8px 12px; border-radius: 8px; background: #fff; color: #2c3e50;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.25); font-size: 13px; line-height: 1.6;
+    }
     /*Scroll box: the page sits centred while it fits and scrolls once zoomed
        past it (margin:auto on the grid item - centring that stays scrollable).*/
     .pm-wm-preview {
@@ -1040,8 +1055,9 @@
     .pm-wm-preview.panning, .pm-wm-preview.panning canvas { cursor: grabbing; }
     .pm-wm-nav { display: flex; align-items: center; gap: 8px; color: #555; font-size: 12px; }
     .pm-wm-nav .pm-wm-tbtn { min-width: 22px; height: 20px; padding: 0 4px; font-size: 10px; }
-    .pm-wm-actions { display: flex; gap: 10px; justify-content: flex-end; align-items: center; }
-    .pm-wm-error { flex: 1; color: #cc3d40; font-size: 13px; }
+    .pm-wm-actions { display: flex; gap: 10px; justify-content: center; align-items: center; }
+    .pm-wm-error { color: #cc3d40; font-size: 13px; text-align: center; }
+    .pm-wm-error:empty { display: none; }
     .pm-wm-ok, .pm-wm-cancel { padding: 9px 22px; border-radius: 6px; cursor: pointer; font-size: 15px; }
     .pm-wm-ok { border: none; background: #3498db; color: #fff; font-weight: bold; }
     .pm-wm-ok:hover { background: #2d86c3; }
@@ -1086,7 +1102,11 @@
     html[data-theme="dark"] .pm-wm-box .pm-wm-swatch.active { box-shadow: 0 0 0 2px #3498db; }
     html[data-theme="dark"] .pm-wm-box .pm-wm-preview { background: rgba(255,255,255,0.05); }
     html[data-theme="dark"] .pm-wm-box .pm-wm-sep { border-top-color: #3a4048; }
-    html[data-theme="dark"] .pm-wm-box .pm-wm-tile-block { border-color: #3a4048; background: rgba(255,255,255,0.03); }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-help { background: #333a44; border-color: #4a5058; color: #e2e6ea !important; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-help:hover,
+    html[data-theme="dark"] .pm-wm-box .pm-wm-help[aria-expanded="true"] { background: #3498db; border-color: #3498db; }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-help-pop { background: #333a44; box-shadow: 0 4px 16px rgba(0,0,0,0.6); }
+    html[data-theme="dark"] .pm-wm-box .pm-wm-file { color: #b8c0c8 !important; }
     html[data-theme="dark"] .pm-wm-box .pm-wm-check.pm-wm-label { color: #e2e6ea !important; }
     html[data-theme="dark"] .pm-wm-box .pm-wm-zoom-badge { color: #fff !important; }
     html[data-theme="dark"] .pm-wm-box #pmWmRange::placeholder { color: #7d8791 !important; }
@@ -8962,6 +8982,10 @@
         wmText: 'Текст', wmFont: 'Шрифт', wmBold: 'Жирный', wmItalic: 'Курсив', wmColor: 'Цвет',
         wmSize: 'Размер', wmTransparency: 'Прозрачность', wmRotation: 'Поворот',
         wmDialogTitle: 'Добавить водяной знак',
+        wmImage: 'Изображение', wmPickImage: 'Выбрать файл...', wmScale: 'Масштаб', wmScaleHint: '% ширины страницы',
+        wmNoImage: 'Выберите файл изображения', wmImageError: 'Не удалось открыть изображение',
+        wmHelpLeft: 'Левая кнопка мыши - расположение водяного знака', wmHelpRight: 'Правая кнопка мыши - перемещение',
+        wmHelpWheel: 'Колесико - изменение масштаба',
         wmTile: 'Замостить', wmGap: 'Интервал', wmGapX: 'Интервал по горизонтали', wmGapY: 'Интервал по вертикали',
         wmBrick: 'В шахматном порядке',
         wmPages: 'Страницы', wmPagesAll: 'Все ({n})', wmPagesSelected: 'Выделенные ({n})', wmPagesRange: 'Диапазон',
@@ -9371,6 +9395,10 @@
         wmText: 'Text', wmFont: 'Font', wmBold: 'Bold', wmItalic: 'Italic', wmColor: 'Color',
         wmSize: 'Size', wmTransparency: 'Transparency', wmRotation: 'Rotation',
         wmDialogTitle: 'Add watermark',
+        wmImage: 'Image', wmPickImage: 'Choose file...', wmScale: 'Scale', wmScaleHint: '% of the page width',
+        wmNoImage: 'Choose an image file', wmImageError: 'Could not open the image',
+        wmHelpLeft: 'Left mouse button - place the watermark', wmHelpRight: 'Right mouse button - move around',
+        wmHelpWheel: 'Wheel - zoom',
         wmTile: 'Tile', wmGap: 'Spacing', wmGapX: 'Horizontal spacing', wmGapY: 'Vertical spacing',
         wmBrick: 'Staggered rows',
         wmPages: 'Pages', wmPagesAll: 'All ({n})', wmPagesSelected: 'Selected ({n})', wmPagesRange: 'Range',
@@ -9780,6 +9808,10 @@
         wmText: 'Texto', wmFont: 'Fuente', wmBold: 'Negrita', wmItalic: 'Cursiva', wmColor: 'Color',
         wmSize: 'Tamaño', wmTransparency: 'Transparencia', wmRotation: 'Rotación',
         wmDialogTitle: 'Añadir marca de agua',
+        wmImage: 'Imagen', wmPickImage: 'Elegir archivo...', wmScale: 'Escala', wmScaleHint: '% del ancho de la página',
+        wmNoImage: 'Elija un archivo de imagen', wmImageError: 'No se pudo abrir la imagen',
+        wmHelpLeft: 'Botón izquierdo - colocar la marca de agua', wmHelpRight: 'Botón derecho - desplazarse',
+        wmHelpWheel: 'Rueda - zoom',
         wmTile: 'Mosaico', wmGap: 'Espaciado', wmGapX: 'Espaciado horizontal', wmGapY: 'Espaciado vertical',
         wmBrick: 'Filas escalonadas',
         wmPages: 'Páginas', wmPagesAll: 'Todas ({n})', wmPagesSelected: 'Seleccionadas ({n})', wmPagesRange: 'Rango',
@@ -10239,6 +10271,10 @@
         wmText: '文本', wmFont: '字体', wmBold: '粗体', wmItalic: '斜体', wmColor: '颜色',
         wmSize: '大小', wmTransparency: '透明度', wmRotation: '旋转',
         wmDialogTitle: '添加水印',
+        wmImage: '图片', wmPickImage: '选择文件...', wmScale: '缩放', wmScaleHint: '页面宽度的百分比',
+        wmNoImage: '请选择图片文件', wmImageError: '无法打开图片',
+        wmHelpLeft: '鼠标左键 - 放置水印', wmHelpRight: '鼠标右键 - 移动视图',
+        wmHelpWheel: '滚轮 - 缩放',
         wmTile: '平铺', wmGap: '间距', wmGapX: '水平间距', wmGapY: '垂直间距',
         wmBrick: '交错排列',
         wmPages: '页面', wmPagesAll: '全部 ({n})', wmPagesSelected: '所选 ({n})', wmPagesRange: '范围',
@@ -61982,7 +62018,9 @@ function pmWmDefaults() {
     tile: false,
     gapX: 60,
     gapY: 60,
-    brick: true
+    brick: true,
+    useImage: false,
+    imgScale: 30          // image width, % of the page width
   };
 }
 
@@ -62005,6 +62043,8 @@ function pmWmSanitize(s) {
   out.angle = pmWmClampNum(out.angle, -180, 180, d.angle);
   out.gapX = pmWmClampNum(out.gapX, 0, 2000, d.gapX);
   out.gapY = pmWmClampNum(out.gapY, 0, 2000, d.gapY);
+  out.imgScale = pmWmClampNum(out.imgScale, 1, 100, d.imgScale);
+  out.useImage = !!out.useImage;
   out.tile = !!out.tile;
   out.brick = !!out.brick;
   // Centre of the mark as a share of the page's width / height.
@@ -62014,11 +62054,53 @@ function pmWmSanitize(s) {
 }
 
 function pmWmLoadSettings() {
+  let s = null;
   try {
     const raw = localStorage.getItem(PM_WM_STORAGE_KEY);
-    if (raw) return pmWmSanitize(JSON.parse(raw));
+    if (raw) s = pmWmSanitize(JSON.parse(raw));
   } catch (_) {}
-  return pmWmSanitize(null);
+  if (!s) s = pmWmSanitize(null);
+  // Every new watermark starts grey; the colour is not carried over.
+  s.color = pmWmDefaults().color;
+  // The picked image lives only for this session.
+  if (!pmWmImage) s.useImage = false;
+  return s;
+}
+
+// Image picked for an image watermark. Kept for the session (reopening the
+// dialog offers it again), not stored: a reload asks for the file again.
+let pmWmImage = null;   // { name, canvas, jpeg }
+const PM_WM_IMAGE_MAX_PX = 2500;
+
+// Decodes the picked file the way the browser shows it (EXIF orientation
+// applied, any format it can display) into a canvas, capped in size.
+async function pmWmLoadImageFile(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    const w0 = img.naturalWidth || 300, h0 = img.naturalHeight || 300;
+    const f = Math.min(1, PM_WM_IMAGE_MAX_PX / Math.max(w0, h0));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(w0 * f));
+    canvas.height = Math.max(1, Math.round(h0 * f));
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+    return { name: file.name, canvas, jpeg: /jpe?g/i.test(file.type || file.name) };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+// The mark for a page W pt wide: the picked image at its share of the page
+// width, or the text (the same size on every page).
+function pmWmMark(s, W, pxPerPt, textCacheRef) {
+  if (s.useImage && pmWmImage) {
+    const c = pmWmImage.canvas;
+    const wPt = W * s.imgScale / 100;
+    return { canvas: c, wPt, hPt: wPt * c.height / c.width };
+  }
+  return textCacheRef ? textCacheRef(pxPerPt) : pmWmRenderText(s, pxPerPt);
 }
 
 function pmWmStoreSettings(s) {
@@ -62143,8 +62225,9 @@ function pmWmPageFrame(page) {
   return { rot, full, W: full.w, H: full.h };
 }
 
-function pmWmDrawOnPage(page, img, iw, ih, s) {
+function pmWmDrawOnPage(page, img, sizeFor, s) {
   const { rot, full, W, H } = pmWmPageFrame(page);
+  const { iw, ih } = sizeFor(W);
   const th = s.angle * Math.PI / 180;
   const cos = Math.cos(th), sin = Math.sin(th);
   // drawImage rotates around the image's lower-left corner: offset of that
@@ -62185,9 +62268,9 @@ function pmWmParseRange(str, count) {
   return [...out].sort((x, y) => x - y);
 }
 
-async function pmWmCanvasToPngBytes(canvas) {
+async function pmWmCanvasToBytes(canvas, type, quality) {
   const blob = await new Promise((resolve, reject) => {
-    canvas.toBlob(b => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/png');
+    canvas.toBlob(b => (b ? resolve(b) : reject(new Error('toBlob failed'))), type, quality);
   });
   return new Uint8Array(await blob.arrayBuffer());
 }
@@ -62283,9 +62366,17 @@ async function pmWmRefreshPageImages(bytes, indices) {
 // Draws the watermark into the live document as one undoable step.
 async function pmWmApply(s, indices) {
   if (!pdfDoc || !indices.length) return false;
-  const rendered = pmWmRenderText(s, PM_WM_PX_PER_PT);
-  if (!rendered) return false;
-  const pngBytes = await pmWmCanvasToPngBytes(rendered.canvas);
+  const useImage = !!(s.useImage && pmWmImage);
+  const rendered = useImage ? null : pmWmRenderText(s, PM_WM_PX_PER_PT);
+  if (!useImage && !rendered) return false;
+  // A photo stays JPEG (a PNG of it would be several times larger).
+  const asJpeg = useImage && pmWmImage.jpeg;
+  const markBytes = asJpeg
+    ? await pmWmCanvasToBytes(pmWmImage.canvas, 'image/jpeg', 0.92)
+    : await pmWmCanvasToBytes(useImage ? pmWmImage.canvas : rendered.canvas, 'image/png');
+  const sizeFor = useImage
+    ? (W) => { const m = pmWmMark(s, W); return { iw: m.wPt, ih: m.hPt }; }
+    : () => ({ iw: rendered.wPt, ih: rendered.hPt });
   showLoadingDeferred(t('wmApplying'), 300);
   let claimed = false;
   let bytes = null;
@@ -62293,12 +62384,12 @@ async function pmWmApply(s, indices) {
     claimed = await peClaimLivePdfDocWriter();
     const docRef = pdfDoc;
     if (!docRef) return false;
-    const img = await docRef.embedPng(pngBytes);
+    const img = asJpeg ? await docRef.embedJpg(markBytes) : await docRef.embedPng(markBytes);
     const count = docRef.getPageCount();
     const done = [];
     for (const idx of indices) {
       if (idx < 0 || idx >= count) continue;
-      pmWmDrawOnPage(docRef.getPage(idx), img, rendered.wPt, rendered.hPt, s);
+      pmWmDrawOnPage(docRef.getPage(idx), img, sizeFor, s);
       done.push(idx);
     }
     if (pdfDoc !== docRef || !done.length) return false;
@@ -62381,19 +62472,26 @@ function pmWmRunDialog() {
       <div class="pm-wm-title">${esc(t('wmDialogTitle'))}</div>
       <div class="pm-wm-body">
         <div class="pm-wm-controls">
-          <label class="pm-wm-row"><span class="pm-wm-label">${esc(t('wmText'))}</span>
+          <label class="pm-wm-row pm-wm-text-only"><span class="pm-wm-label">${esc(t('wmText'))}</span>
             <input type="text" id="pmWmText" spellcheck="false" autocomplete="off"></label>
-          <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('wmFont'))}</span>
+          <div class="pm-wm-row pm-wm-text-only"><span class="pm-wm-label">${esc(t('wmFont'))}</span>
             <select id="pmWmFont"></select>
             <button type="button" class="pm-wm-tbtn" id="pmWmBold" title="${esc(t('wmBold'))}"><b>B</b></button>
             <button type="button" class="pm-wm-tbtn" id="pmWmItalic" title="${esc(t('wmItalic'))}"><i>I</i></button>
           </div>
-          <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('wmSize'))}</span>
+          <div class="pm-wm-row"><span class="pm-wm-label" id="pmWmSizeLabel">${esc(t('wmSize'))}</span>
             <input type="range" id="pmWmSizeRange" min="8" max="200" step="1">
-            ${pmWmNumField('pmWmSize', 4, 400, 1)}<span class="pm-wm-unit">pt</span>
+            <span class="pm-wm-size-num">${pmWmNumField('pmWmSize', 4, 400, 1)}</span>
           </div>
           <hr class="pm-wm-sep">
-          <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('wmColor'))}</span>
+          <div class="pm-wm-row">
+            <label class="pm-wm-check pm-wm-label"><input type="checkbox" id="pmWmUseImage"> ${esc(t('wmImage'))}</label>
+            <button type="button" class="pm-wm-tbtn" id="pmWmPickImage">${esc(t('wmPickImage'))}</button>
+            <span class="pm-wm-file" id="pmWmImageName"></span>
+            <input type="file" id="pmWmImageFile" accept="image/*" hidden>
+          </div>
+          <hr class="pm-wm-sep">
+          <div class="pm-wm-row pm-wm-text-only"><span class="pm-wm-label">${esc(t('wmColor'))}</span>
             <input type="color" id="pmWmColor">
             ${PM_WM_SWATCHES.map(c => `<button type="button" class="pm-wm-swatch" data-color="${c}" style="background:${c}" title="${c}"></button>`).join('')}
           </div>
@@ -62409,18 +62507,15 @@ function pmWmRunDialog() {
             <span class="pm-wm-push"></span>
             ${pmWmNumField('pmWmAngle', -180, 180, 1)}<span class="pm-wm-unit">°</span>
           </div>
-          <div class="pm-wm-row pm-wm-sub">
-            <input type="range" id="pmWmAngleRange" min="-180" max="180" step="1">
+          <hr class="pm-wm-sep">
+          <div class="pm-wm-row">
+            <label class="pm-wm-check pm-wm-label"><input type="checkbox" id="pmWmTile"> ${esc(t('wmTile'))}</label>
+            <label class="pm-wm-check pm-wm-tile-opt"><input type="checkbox" id="pmWmBrick"> ${esc(t('wmBrick'))}</label>
           </div>
-          <div class="pm-wm-tile-block">
-            <div class="pm-wm-row">
-              <label class="pm-wm-check pm-wm-label"><input type="checkbox" id="pmWmTile"> ${esc(t('wmTile'))}</label>
-              <label class="pm-wm-check pm-wm-tile-opt"><input type="checkbox" id="pmWmBrick"> ${esc(t('wmBrick'))}</label>
-            </div>
-            <div class="pm-wm-row pm-wm-tile-opt"><span class="pm-wm-label">${esc(t('wmGap'))}</span>
-              <span class="pm-wm-axis" title="${esc(t('wmGapX'))}">↔</span>${pmWmNumField('pmWmGapX', 0, 2000, 5)}
-              <span class="pm-wm-axis" title="${esc(t('wmGapY'))}">↕</span>${pmWmNumField('pmWmGapY', 0, 2000, 5)}<span class="pm-wm-unit">pt</span></div>
-          </div>
+          <div class="pm-wm-row pm-wm-tile-opt"><span class="pm-wm-label">${esc(t('wmGap'))}</span>
+            <span class="pm-wm-axis" title="${esc(t('wmGapX'))}">↔</span>${pmWmNumField('pmWmGapX', 0, 2000, 5)}
+            <span class="pm-wm-axis" title="${esc(t('wmGapY'))}">↕</span>${pmWmNumField('pmWmGapY', 0, 2000, 5)}<span class="pm-wm-unit">pt</span></div>
+          <hr class="pm-wm-sep">
           <div class="pm-wm-row pm-wm-row-top"><span class="pm-wm-label">${esc(t('wmPages'))}</span>
             <div class="pm-wm-pages">
               <div class="pm-wm-pages-line">
@@ -62435,6 +62530,12 @@ function pmWmRunDialog() {
         <div class="pm-wm-preview-col">
           <div class="pm-wm-preview" id="pmWmPreviewBox"><canvas id="pmWmPreview"></canvas></div>
           <span class="pm-wm-zoom-badge" id="pmWmZoomVal">100%</span>
+          <button type="button" class="pm-wm-help" id="pmWmHelp" aria-expanded="false">?</button>
+          <div class="pm-wm-help-pop" id="pmWmHelpPop" hidden>
+            <div>${esc(t('wmHelpLeft'))}</div>
+            <div>${esc(t('wmHelpRight'))}</div>
+            <div>${esc(t('wmHelpWheel'))}</div>
+          </div>
           <div class="pm-wm-nav">
             <button type="button" class="pm-wm-tbtn" id="pmWmPrev">◀</button>
             <span id="pmWmNavLabel"></span>
@@ -62442,8 +62543,8 @@ function pmWmRunDialog() {
           </div>
         </div>
       </div>
+      <div class="pm-wm-error" id="pmWmError"></div>
       <div class="pm-wm-actions">
-        <div class="pm-wm-error" id="pmWmError"></div>
         <button type="button" class="pm-wm-ok" id="pmWmOk">${esc(t('wmApply'))}</button>
         <button type="button" class="pm-wm-cancel" id="pmWmCancel">${esc(t('wmCancel'))}</button>
       </div>`;
@@ -62454,7 +62555,9 @@ function pmWmRunDialog() {
     const textIn = $('pmWmText'), fontSel = $('pmWmFont'), boldBtn = $('pmWmBold'), italicBtn = $('pmWmItalic');
     const colorIn = $('pmWmColor'), sizeRange = $('pmWmSizeRange'), sizeIn = $('pmWmSize');
     const transpRange = $('pmWmTransp'), transpVal = $('pmWmTranspVal');
-    const angleRange = $('pmWmAngleRange'), angleIn = $('pmWmAngle');
+    const angleIn = $('pmWmAngle');
+    const imgChk = $('pmWmUseImage'), imgBtn = $('pmWmPickImage'), imgName = $('pmWmImageName'), fileIn = $('pmWmImageFile');
+    const sizeLabel = $('pmWmSizeLabel'), helpBtn = $('pmWmHelp'), helpPop = $('pmWmHelpPop');
     const tileChk = $('pmWmTile'), gapXIn = $('pmWmGapX'), gapYIn = $('pmWmGapY'), brickChk = $('pmWmBrick');
     const rangeIn = $('pmWmRange'), errEl = $('pmWmError');
     const pv = $('pmWmPreview'), pvBox = $('pmWmPreviewBox');
@@ -62504,6 +62607,8 @@ function pmWmRunDialog() {
       if (!textCache || textCache.key !== key) textCache = { key, r: pmWmRenderText(s, k) };
       return textCache.r;
     }
+    // The mark as drawn on a page W pt wide at k canvas px per pt.
+    const markAt = (W, k) => pmWmMark(s, W, k, textAtPreview);
 
     function draw() {
       const ctx = pv.getContext('2d');
@@ -62516,7 +62621,7 @@ function pmWmRunDialog() {
       }
       ctx.drawImage(previewData.canvas, 0, 0, pv.width, pv.height);
       const scale = pv.width / fr.W;              // canvas px per pt
-      const r = textAtPreview(Math.max(0.5, scale));
+      const r = markAt(fr.W, Math.max(0.5, scale));
       if (!r) return;
       const th = s.angle * Math.PI / 180;
       ctx.save();
@@ -62639,11 +62744,26 @@ function pmWmRunDialog() {
       italicBtn.classList.toggle('active', s.italic);
       colorIn.value = s.color;
       box.querySelectorAll('.pm-wm-swatch').forEach(b => b.classList.toggle('active', b.dataset.color.toLowerCase() === s.color.toLowerCase()));
-      sizeRange.value = String(Math.min(200, Math.max(8, s.size)));
-      if (document.activeElement !== sizeIn) sizeIn.value = String(s.size);
+      // With an image the size row sets its width as a share of the page.
+      const img = s.useImage && !!pmWmImage;
+      sizeLabel.textContent = img ? t('wmScale') : t('wmSize');
+      sizeIn.title = img ? t('wmScaleHint') : 'pt';
+      sizeRange.min = img ? '5' : '8'; sizeRange.max = img ? '100' : '200';
+      sizeIn.min = img ? '1' : '4'; sizeIn.max = img ? '100' : '400';
+      const sz = img ? s.imgScale : s.size;
+      sizeRange.value = String(sz);
+      if (document.activeElement !== sizeIn) sizeIn.value = String(sz);
+      imgChk.checked = s.useImage;
+      imgBtn.disabled = !s.useImage;
+      imgName.textContent = pmWmImage ? pmWmImage.name : '';
+      imgName.title = imgName.textContent;
+      imgName.classList.toggle('pm-wm-off', !s.useImage);
+      // Text-only settings step back while an image is the mark.
+      [textIn, fontSel, boldBtn, italicBtn, colorIn].forEach(el => { el.disabled = img; });
+      box.querySelectorAll('.pm-wm-swatch').forEach(b => { b.disabled = img; });
+      box.querySelectorAll('.pm-wm-text-only').forEach(el => el.classList.toggle('pm-wm-off', img));
       transpRange.value = String(100 - s.opacity);
       transpVal.textContent = (100 - s.opacity) + '%';
-      angleRange.value = String(s.angle);
       if (document.activeElement !== angleIn) angleIn.value = String(s.angle);
       box.querySelectorAll('[data-angle]').forEach(b => b.classList.toggle('active', Number(b.dataset.angle) === s.angle));
       tileChk.checked = s.tile;
@@ -62703,11 +62823,43 @@ function pmWmRunDialog() {
     italicBtn.addEventListener('click', () => { s.italic = !s.italic; changed(); });
     colorIn.addEventListener('input', () => { s.color = colorIn.value; changed(); });
     box.querySelectorAll('.pm-wm-swatch').forEach(b => b.addEventListener('click', () => { s.color = b.dataset.color; changed(); }));
-    sizeRange.addEventListener('input', () => { s.size = Number(sizeRange.value); sizeIn.value = sizeRange.value; changed(); });
-    bindNumber(sizeIn, 4, 400, () => s.size, v => { s.size = v; });
+    const imageMode = () => s.useImage && !!pmWmImage;
+    sizeRange.addEventListener('input', () => {
+      if (imageMode()) s.imgScale = Number(sizeRange.value); else s.size = Number(sizeRange.value);
+      sizeIn.value = sizeRange.value; changed();
+    });
+    bindNumber(sizeIn, 1, 400,
+      () => imageMode() ? s.imgScale : s.size,
+      v => { if (imageMode()) s.imgScale = Math.min(100, v); else s.size = Math.max(4, v); });
+    imgChk.addEventListener('change', () => {
+      s.useImage = imgChk.checked;
+      errEl.textContent = '';
+      changed();
+      // Ticked with no file yet: straight to choosing one.
+      if (s.useImage && !pmWmImage) fileIn.click();
+    });
+    imgBtn.addEventListener('click', () => { if (!imgBtn.disabled) fileIn.click(); });
+    fileIn.addEventListener('change', async () => {
+      const f = fileIn.files && fileIn.files[0];
+      fileIn.value = '';
+      if (!f) return;
+      try {
+        pmWmImage = await pmWmLoadImageFile(f);
+        errEl.textContent = '';
+      } catch (e) {
+        console.warn('watermark image', e);
+        errEl.textContent = t('wmImageError');
+      }
+      if (overlay.isConnected) changed();
+    });
+    // Help next to the preview: what the mouse buttons and the wheel do.
+    const setHelp = (open) => { helpPop.hidden = !open; helpBtn.setAttribute('aria-expanded', String(open)); };
+    helpBtn.addEventListener('click', (e) => { e.stopPropagation(); setHelp(helpPop.hidden); });
+    overlay.addEventListener('pointerdown', (e) => {
+      if (!helpPop.hidden && e.target !== helpBtn && !helpPop.contains(e.target)) setHelp(false);
+    }, true);
     transpRange.addEventListener('input', () => { s.opacity = 100 - Number(transpRange.value); changed(); });
     box.querySelectorAll('[data-angle]').forEach(b => b.addEventListener('click', () => { s.angle = Number(b.dataset.angle); angleIn.value = String(s.angle); changed(); }));
-    angleRange.addEventListener('input', () => { s.angle = Number(angleRange.value); angleIn.value = angleRange.value; changed(); });
     bindNumber(angleIn, -180, 180, () => s.angle, v => { s.angle = v; });
     tileChk.addEventListener('change', () => { s.tile = tileChk.checked; changed(); });
     bindNumber(gapXIn, 0, 2000, () => s.gapX, v => { s.gapX = v; });
@@ -62764,7 +62916,7 @@ function pmWmRunDialog() {
       if (e.button !== 0 || e.target !== pv || s.tile || !previewData) return;
       const p = pointerPt(e);
       if (!p) return;
-      const r = textAtPreview(Math.max(0.5, pv.width / p.fr.W));
+      const r = markAt(p.fr.W, Math.max(0.5, pv.width / p.fr.W));
       if (!r) return;
       const c = pmWmPlacements(p.fr.W, p.fr.H, r.wPt, r.hPt, s)[0];
       const th = s.angle * Math.PI / 180;
@@ -62813,7 +62965,8 @@ function pmWmRunDialog() {
     async function apply() {
       if (busy) return;
       errEl.textContent = '';
-      if (!String(s.text || '').trim()) { errEl.textContent = t('wmNoText'); textIn.focus(); return; }
+      if (s.useImage && !pmWmImage) { errEl.textContent = t('wmNoImage'); return; }
+      if (!s.useImage && !String(s.text || '').trim()) { errEl.textContent = t('wmNoText'); textIn.focus(); return; }
       if (pagesMode === 'range' && !pmWmParseRange(rangeText, pageCount)) {
         errEl.textContent = t('wmBadRange'); rangeIn.focus(); return;
       }
@@ -62832,7 +62985,11 @@ function pmWmRunDialog() {
     // Ctrl+Z...) must not act on the document while the dialog is up.
     // Typing itself is a default action and still happens.
     const onKey = (e) => {
-      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(false); return; }
+      if (e.key === 'Escape') {
+        e.preventDefault(); e.stopPropagation();
+        if (!helpPop.hidden) setHelp(false); else close(false);
+        return;
+      }
       if (e.key === 'Enter' && e.target && e.target.tagName === 'INPUT' &&
           ['text', 'number'].includes(e.target.type)) {
         e.preventDefault(); e.stopPropagation(); apply(); return;
