@@ -940,6 +940,10 @@
       box-sizing: border-box; color: #2c3e50; font-size: 14px;
     }
     .pm-wm-title { font-size: 17px; font-weight: 600; padding: 2px 2px 0; }
+    /*Title row: the "?" sits at its right end, in the dialog's top-right
+       corner - out of the preview, which gets the height instead.*/
+    .pm-wm-box { position: relative; }
+    .pm-wm-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
     .pm-wm-body { display: flex; gap: 18px; min-height: 0; }
     .pm-wm-controls {
       width: 360px; flex: none; display: flex; flex-direction: column; gap: 6px;
@@ -1024,15 +1028,14 @@
     #pmWmRange { flex: 1; min-width: 0; }
     .pm-wm-preview-col { display: flex; flex-direction: column; align-items: center; gap: 4px; position: relative; }
     .pm-wm-zoom-badge {
-      position: absolute; top: 36px; left: 8px; padding: 2px 7px; border-radius: 10px;
+      position: absolute; top: 8px; left: 8px; padding: 2px 7px; border-radius: 10px;
       background: rgba(30,36,44,0.72); color: #fff; font-size: 12px; pointer-events: none;
       opacity: 0; transition: opacity 0.2s;
     }
     .pm-wm-zoom-badge.show { opacity: 1; }
-    /*"?" above the preview's right edge (outside it, never over the page)
-       and the mouse help it opens.*/
-    .pm-wm-preview-head { width: 360px; max-width: 100%; display: flex; justify-content: flex-end; }
+    /*"?" and the mouse help it opens.*/
     .pm-wm-help {
+      flex: none;
       width: 24px; height: 24px; padding: 0;
       border-radius: 50%; border: 1px solid rgba(0,0,0,0.15); background: rgba(255,255,255,0.92);
       color: #3d5468; font-weight: bold; font-size: 14px; line-height: 1; cursor: pointer;
@@ -1040,14 +1043,14 @@
     }
     .pm-wm-help:hover, .pm-wm-help[aria-expanded="true"] { background: #3498db; color: #fff; border-color: #3498db; }
     .pm-wm-help-pop {
-      position: absolute; top: 30px; right: 0; z-index: 2; max-width: 300px;
+      position: absolute; top: 38px; right: 10px; z-index: 2; max-width: 300px;
       padding: 8px 12px; border-radius: 8px; background: #fff; color: #2c3e50;
       box-shadow: 0 4px 16px rgba(0,0,0,0.25); font-size: 13px; line-height: 1.6;
     }
     /*Scroll box: the page sits centred while it fits and scrolls once zoomed
        past it (margin:auto on the grid item - centring that stays scrollable).*/
     .pm-wm-preview {
-      width: 360px; height: 532px; max-height: calc(100vh - 158px);
+      width: 360px; height: 560px; max-height: calc(100vh - 130px);
       background: rgba(120,130,145,0.14); border-radius: 8px;
       display: grid; overflow: auto; padding: 12px; box-sizing: border-box;
       scrollbar-width: thin; overscroll-behavior: contain;
@@ -62483,7 +62486,15 @@ function pmWmRunDialog() {
     box.setAttribute('role', 'dialog');
     const esc = escapeHtml;
     box.innerHTML = `
-      <div class="pm-wm-title">${esc(t('wmDialogTitle'))}</div>
+      <div class="pm-wm-head">
+        <div class="pm-wm-title">${esc(t('wmDialogTitle'))}</div>
+        <button type="button" class="pm-wm-help" id="pmWmHelp" aria-expanded="false">?</button>
+      </div>
+      <div class="pm-wm-help-pop" id="pmWmHelpPop" hidden>
+        <div>${esc(t('wmHelpLeft'))}</div>
+        <div>${esc(t('wmHelpRight'))}</div>
+        <div>${esc(t('wmHelpWheel'))}</div>
+      </div>
       <div class="pm-wm-body">
         <div class="pm-wm-controls">
           <label class="pm-wm-row pm-wm-text-only"><span class="pm-wm-label">${esc(t('wmText'))}</span>
@@ -62542,16 +62553,8 @@ function pmWmRunDialog() {
           </div>
         </div>
         <div class="pm-wm-preview-col">
-          <div class="pm-wm-preview-head">
-            <button type="button" class="pm-wm-help" id="pmWmHelp" aria-expanded="false">?</button>
-          </div>
           <div class="pm-wm-preview" id="pmWmPreviewBox"><canvas id="pmWmPreview"></canvas></div>
           <span class="pm-wm-zoom-badge" id="pmWmZoomVal">100%</span>
-          <div class="pm-wm-help-pop" id="pmWmHelpPop" hidden>
-            <div>${esc(t('wmHelpLeft'))}</div>
-            <div>${esc(t('wmHelpRight'))}</div>
-            <div>${esc(t('wmHelpWheel'))}</div>
-          </div>
           <div class="pm-wm-nav">
             <button type="button" class="pm-wm-tbtn" id="pmWmPrev">◀</button>
             <span id="pmWmNavLabel"></span>
