@@ -21,23 +21,23 @@ const HEAD_SCRIPTS = [
   },
   {
     comment: 'mammoth: Convert DOCX to HTML when importing Word documents (jsdelivr npm mirror, not cdnjs - avoids cdnjs\'s curation lag for a fresh release)',
-    url: 'https://cdn.jsdelivr.net/npm/mammoth@1.12.1/mammoth.browser.min.js',
+    url: 'https://cdn.jsdelivr.net/npm/mammoth@1.12.3/mammoth.browser.min.js',
   },
   {
-    comment: 'SheetJS (xlsx): Read XLSX/XLS when importing tables',
-    url: 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
+    comment: 'SheetJS (xlsx): Read XLSX/XLS when importing tables. From SheetJS\'s own CDN: npm/cdnjs stopped at 0.18.5, which has two known vulnerabilities on crafted files (CVE-2023-30533, CVE-2024-22363)',
+    url: 'https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js',
   },
   {
     comment: 'html2canvas: rasterization of HTML markup (Word/Excel pages) into an image for PDF assembly',
     url: 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
   },
   {
-    comment: 'JSZip: DOCX unpacking (this is a zip archive) - needed for docx-preview',
-    url: 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
+    comment: 'JSZip: DOCX unpacking (this is a zip archive) - needed for docx-preview (jsdelivr npm mirror: cdnjs lags behind fresh releases)',
+    url: 'https://cdn.jsdelivr.net/npm/jszip@3.10.2/dist/jszip.min.js',
   },
   {
     comment: 'docx-preview: page-by-page rendering of DOCX to HTML, taking into account Word page breaks',
-    url: 'https://cdn.jsdelivr.net/npm/docx-preview@0.4.0/dist/docx-preview.min.js',
+    url: 'https://cdn.jsdelivr.net/npm/docx-preview@0.4.1/dist/docx-preview.min.js',
   },
   {
     comment: 'ExcelJS: Read XLSX with styles and print options for pagination when converting to PDF',
@@ -52,13 +52,13 @@ const PDFJS_WORKER_URL =
   'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.149/build/pdf.worker.min.mjs';
 
 const CANTOO_IMPORT =
-  "import('https://esm.sh/@cantoo/pdf-lib@2.9.1')";
+  "import('https://esm.sh/@cantoo/pdf-lib@2.11.1')";
 
 const FONTKIT_IMPORT =
   "import('https://esm.sh/@pdf-lib/fontkit@1.1.1')";
 
 const POSTAL_MIME_IMPORT =
-  "import('https://cdn.jsdelivr.net/npm/postal-mime@3.0.0/+esm')";
+  "import('https://cdn.jsdelivr.net/npm/postal-mime@3.0.1/+esm')";
 
 const MSG_READER_IMPORT =
   "import('https://cdn.jsdelivr.net/npm/@kenjiuno/msgreader-web-ng@0.2.0-alpha1/+esm')";
