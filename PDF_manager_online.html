@@ -634,6 +634,15 @@
     }
     #pmTabMenu button:hover:not(:disabled), #pmDzMenu button:hover:not(:disabled) { background: #eef4fb; }
     #pmTabMenu button:disabled, #pmDzMenu button:disabled { opacity: .45; cursor: default; }
+    /*Note shown by the drop-zone menu (e.g. "press Ctrl+V").*/
+    #pmDzHint {
+      position: fixed; z-index: 100061; max-width: 340px; padding: 9px 14px;
+      border-radius: 8px; background: #2c3e50; color: #fff; font-size: 14px; line-height: 1.4;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.3); pointer-events: none;
+      opacity: 0; visibility: hidden; transition: opacity .2s, visibility .2s;
+    }
+    #pmDzHint.show { opacity: 1; visibility: visible; }
+    html[data-theme="dark"] #pmDzHint { background: #3d4550; }
     /*File insertion indicator between tabs*/
     #pmTabInsertIndicator {
       position: fixed; z-index: 100050; display: none; pointer-events: none;
@@ -9159,7 +9168,7 @@
         dzPasteFromClipboard: 'Вставить из буфера обмена (Ctrl+V)',
         pasteNothing: 'В буфере обмена нет файлов, страниц или изображения для вставки.',
         pasteNoSupportedFiles: 'Файлы в буфере обмена не поддерживаются. Поддерживаются PDF, Word, Excel, письма (.eml, .msg) и изображения.',
-        pasteMenuNothing: 'В буфере обмена нет скопированных страниц или изображения. Скопированные файлы браузер передаёт только по сочетанию клавиш - нажмите Ctrl+V.',
+        pasteMenuHint: 'Чтобы вставить скопированные файлы или изображение, нажмите Ctrl+V',
         encryptPwdOk: 'Зашифровать',
         encryptPwdEmpty: 'Введите пароль',
         encryptPwdMismatch: 'Пароли не совпадают',
@@ -9577,7 +9586,7 @@
         dzPasteFromClipboard: 'Paste from clipboard (Ctrl+V)',
         pasteNothing: 'The clipboard holds no files, pages or image to paste.',
         pasteNoSupportedFiles: 'The files in the clipboard are not supported. Supported: PDF, Word, Excel, emails (.eml, .msg) and images.',
-        pasteMenuNothing: 'The clipboard holds no copied pages or image. Browsers hand over copied files only through the keyboard shortcut - press Ctrl+V.',
+        pasteMenuHint: 'To paste copied files or an image, press Ctrl+V',
         encryptPwdOk: 'Encrypt',
         encryptPwdEmpty: 'Enter a password',
         encryptPwdMismatch: 'Passwords do not match',
@@ -9995,7 +10004,7 @@
         dzPasteFromClipboard: 'Pegar desde el portapapeles (Ctrl+V)',
         pasteNothing: 'El portapapeles no contiene archivos, páginas ni imágenes para pegar.',
         pasteNoSupportedFiles: 'Los archivos del portapapeles no son compatibles. Compatibles: PDF, Word, Excel, correos (.eml, .msg) e imágenes.',
-        pasteMenuNothing: 'El portapapeles no contiene páginas copiadas ni una imagen. Los navegadores solo entregan archivos copiados mediante el atajo de teclado: pulse Ctrl+V.',
+        pasteMenuHint: 'Para pegar archivos o una imagen copiados, pulse Ctrl+V',
         encryptPwdOk: 'Cifrar',
         encryptPwdEmpty: 'Introduzca una contraseña',
         encryptPwdMismatch: 'Las contraseñas no coinciden',
@@ -10479,7 +10488,7 @@
         dzPasteFromClipboard: '从剪贴板粘贴 (Ctrl+V)',
         pasteNothing: '剪贴板中没有可粘贴的文件、页面或图片。',
         pasteNoSupportedFiles: '剪贴板中的文件不受支持。支持：PDF、Word、Excel、邮件 (.eml, .msg) 和图片。',
-        pasteMenuNothing: '剪贴板中没有复制的页面或图片。浏览器仅通过快捷键传递复制的文件 - 请按 Ctrl+V。',
+        pasteMenuHint: '要粘贴复制的文件或图片，请按 Ctrl+V',
         encryptPwdOk: '加密',
         encryptPwdEmpty: '请输入密码',
         encryptPwdMismatch: '两次输入的密码不一致',
@@ -33960,11 +33969,44 @@ document.addEventListener('paste', (e) => {
   })();
 });
 
+// Whether reading the clipboard would go through without asking: the menu
+// never brings up the browser's permission prompt itself - the usual reason
+// to use it is files copied in Explorer, which no permission would make
+// readable anyway.
+async function pmClipboardReadGranted() {
+  try {
+    const st = await navigator.permissions.query({ name: 'clipboard-read' });
+    return st && st.state === 'granted';
+  } catch (_) { return false; }
+}
+
+// A short note next to where the menu was, gone after a few seconds or on
+// the next click / key (in place of a blocking dialog).
+function pmShowDzHint(text, x, y) {
+  let el = document.getElementById('pmDzHint');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'pmDzHint';
+    el.setAttribute('role', 'status');
+    document.body.appendChild(el);
+    const hide = () => el.classList.remove('show');
+    document.addEventListener('mousedown', hide, true);
+    document.addEventListener('keydown', hide, true);
+  }
+  el.textContent = text;
+  el.classList.add('show');
+  const w = el.offsetWidth, h = el.offsetHeight;
+  el.style.left = Math.max(8, Math.min(x - w / 2, window.innerWidth - w - 8)) + 'px';
+  el.style.top = Math.max(8, Math.min(y + 12, window.innerHeight - h - 8)) + 'px';
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => el.classList.remove('show'), 5000);
+}
+
 // The menu item: a click is not a paste, and browsers hand copied FILES to a
 // page only with a real paste (Ctrl+V). Ask for one anyway (some shells allow
-// it), then fall back to what can be read directly: the page buffer, or an
-// image via the async clipboard API.
-async function pmDzPasteFromMenu() {
+// it), then take what can be read directly: the page buffer, or - if reading
+// is already allowed - a clipboard image; otherwise point to Ctrl+V.
+async function pmDzPasteFromMenu(x, y) {
   if (isLoading) return;
   let files = null;
   try {
@@ -33984,10 +34026,12 @@ async function pmDzPasteFromMenu() {
   } catch (_) { files = null; }
   if (files && files.length) { await pmPasteIntoWorkspace(files); return; }
   if (await pmPastePageBuffer()) return;
-  const clip = await pmReadSystemClipboardImage();
-  const img = clip && pmClipboardImageToFile(clip);
-  if (img) { await pmOpenPastedFiles([img], true); return; }
-  alert(t('pasteMenuNothing'));
+  if (await pmClipboardReadGranted()) {
+    const clip = await pmReadSystemClipboardImage();
+    const img = clip && pmClipboardImageToFile(clip);
+    if (img) { await pmOpenPastedFiles([img], true); return; }
+  }
+  pmShowDzHint(t('pasteMenuHint'), x, y);
 }
 
 (function initDropZoneMenu() {
@@ -33998,6 +34042,7 @@ async function pmDzPasteFromMenu() {
     if (isLoading || pdfDoc) return;
     e.preventDefault();
     if (typeof pmCloseTabMenu === 'function') pmCloseTabMenu();
+    menu._at = { x: e.clientX, y: e.clientY };   // the hint appears under this point
     menu.style.display = 'block';
     menu.setAttribute('aria-hidden', 'false');
     const w = menu.offsetWidth || 260, h = menu.offsetHeight || 50;
@@ -34010,8 +34055,9 @@ async function pmDzPasteFromMenu() {
   menu.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-action]');
     if (!btn) return;
+    const at = menu._at || { x: e.clientX, y: e.clientY };
     close();
-    if (btn.dataset.action === 'paste') void pmDzPasteFromMenu();
+    if (btn.dataset.action === 'paste') void pmDzPasteFromMenu(at.x, at.y);
   });
   // Any other left click, a right click elsewhere, Esc, scroll or a
   // resize puts it away.
