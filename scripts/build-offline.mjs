@@ -46,10 +46,10 @@ const HEAD_SCRIPTS = [
 ];
 
 const PDFJS_CORE_IMPORT =
-  "import('https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.149/build/pdf.min.mjs')";
+  "import('https://cdn.jsdelivr.net/npm/pdfjs-dist@6.3.289/legacy/build/pdf.min.mjs')";
 
 const PDFJS_WORKER_URL =
-  'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.149/build/pdf.worker.min.mjs';
+  'https://cdn.jsdelivr.net/npm/pdfjs-dist@6.3.289/legacy/build/pdf.worker.min.mjs';
 
 const CANTOO_IMPORT =
   "import('https://esm.sh/@cantoo/pdf-lib@2.11.1')";
@@ -143,11 +143,28 @@ function escapeRegExp(value) {
 // imports to resolve), so unlike @cantoo/pdf-lib etc. these just need their
 // text read from the locally installed package, not run through esbuild.
 function readPdfJsCore() {
-  return readFileSync(join(root, 'node_modules/pdfjs-dist/build/pdf.min.mjs'), 'utf8');
+  return readFileSync(join(root, 'node_modules/pdfjs-dist/legacy/build/pdf.min.mjs'), 'utf8');
 }
 
 function readPdfJsWorker() {
-  return readFileSync(join(root, 'node_modules/pdfjs-dist/build/pdf.worker.min.mjs'), 'utf8');
+  return readFileSync(join(root, 'node_modules/pdfjs-dist/legacy/build/pdf.worker.min.mjs'), 'utf8');
+}
+
+// pdf.js's WebAssembly decoders (JBIG2 / CCITT fax and JPEG 2000 images):
+// the online page fetches them from the CDN on demand (see
+// PmPdfjsBinaryDataFactory); here they go into the file as base64.
+const PDFJS_WASM_FILES = ['jbig2.wasm', 'openjpeg.wasm'];
+const PDFJS_WASM_INLINE_DECL = 'var PM_PDFJS_WASM_INLINE = null;';
+
+function replacePdfjsWasmInline(html) {
+  if (!html.includes(PDFJS_WASM_INLINE_DECL)) {
+    throw new Error('Could not find the pdf.js wasm inline declaration');
+  }
+  const files = {};
+  for (const name of PDFJS_WASM_FILES) {
+    files[name] = readFileSync(join(root, 'node_modules/pdfjs-dist/wasm', name)).toString('base64');
+  }
+  return html.replace(PDFJS_WASM_INLINE_DECL, () => `var PM_PDFJS_WASM_INLINE = ${JSON.stringify(files)};`);
 }
 
 function replacePdfjsCoreImport(html, bundledEsm) {
@@ -368,6 +385,7 @@ async function main() {
   html = replaceHeadScripts(html, inlinedBlocks);
   html = replacePdfjsCoreImport(html, pdfjsCoreCode);
   html = replacePdfjsWorkerUrl(html, pdfjsWorkerCode);
+  html = replacePdfjsWasmInline(html);
   html = replaceCantooImport(html, cantooBundle);
   html = replaceFontkitImport(html, fontkitBundle);
   html = replacePostalMimeImport(html, postalMimeBundle);

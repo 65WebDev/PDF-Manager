@@ -49,6 +49,8 @@
 
 After downloading, open the HTML file in your browser. The online version loads its libraries from a CDN; the offline version bundles everything inside the file and works without internet access.
 
+Supported browsers: Chrome/Edge 125+, Firefox ESR, Safari 18+ (including iOS/iPadOS 18+).
+
 ### Features
 
 - **Page management** — merge, split, drag to reorder, delete and rotate pages.
@@ -66,7 +68,7 @@ After downloading, open the HTML file in your browser. The online version loads 
 **Embedded libraries:**
 
 - **pdf-lib** v1.17.1 — PDF assembly and editing (pages, rotation, merging, saving)
-- **pdf.js** v5.4.149 — rendering PDF pages (thumbnails, preview)
+- **pdf.js** v6.3.289 — rendering PDF pages (thumbnails, preview)
 - **mammoth** v1.12.3 — converting Word (`.docx`) files to HTML on import
 - **SheetJS (xlsx)** v0.20.3 — reading Excel (`.xls`/`.xlsx`) tables on import
 - **html2canvas** v1.4.1 — rasterizing HTML markup into an image for PDF assembly
@@ -126,6 +128,8 @@ After downloading, open the HTML file in your browser. The online version loads 
 
 После скачивания откройте HTML-файл в браузере. Онлайн-версия подгружает библиотеки из CDN; офлайн-версия содержит все зависимости внутри файла и работает без интернета.
 
+Поддерживаемые браузеры: Chrome/Edge 125+, Firefox ESR, Safari 18+ (в том числе iOS/iPadOS 18+).
+
 ### Возможности
 
 - **Управление страницами** — слияние, разбиение, перетаскивание, удаление и поворот страниц.
@@ -143,7 +147,7 @@ After downloading, open the HTML file in your browser. The online version loads 
 **Используемые библиотеки:**
 
 - **pdf-lib** v1.17.1 — сборка и редактирование PDF (страницы, поворот, слияние, сохранение)
-- **pdf.js** v5.4.149 — рендер страниц PDF (миниатюры, предпросмотр)
+- **pdf.js** v6.3.289 — рендер страниц PDF (миниатюры, предпросмотр)
 - **mammoth** v1.12.3 — конвертация файлов Word (`.docx`) в HTML при импорте
 - **SheetJS (xlsx)** v0.20.3 — чтение таблиц Excel (`.xls`/`.xlsx`) при импорте
 - **html2canvas** v1.4.1 — растеризация HTML-разметки в изображение для сборки PDF

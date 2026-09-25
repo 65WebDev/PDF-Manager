@@ -3774,6 +3774,34 @@
         forced-color-adjust: none;
       }
     }
+    /*Span geometry of the pdf.js text layer. Since pdf.js 6 TextLayer no
+       longer writes font-size/transform inline: it sets --font-height,
+       --scale-x and --rotate on each span (and --min-font-size on the
+       container) and leaves turning them into a size and a transform to
+       pdf_viewer.css, which this app does not load. Without these rules
+       every span laid out at the inherited 16px, unstretched and unrotated,
+       so the invisible text drifted off the glyphs it stands for and a drag
+       selected the wrong words. Copied from pdf.js's own stylesheet, and
+       unconditional, since the preview grid and the page editor both use
+       the layer in every mode. Nested spans are positioned in % of the page
+       too, so a .markedContent wrapper must not form a box of its own
+       (display:contents), or everything inside it collapses to its top.*/
+    .textLayer.page-text-layer-inner {
+      --min-font-size: 1;
+      --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+      --min-font-size-inv: calc(1 / var(--min-font-size));
+    }
+    .textLayer.page-text-layer-inner > :not(.markedContent),
+    .textLayer.page-text-layer-inner .markedContent span:not(.markedContent) {
+      --font-height: 0;
+      font-size: calc(var(--text-scale-factor) * var(--font-height));
+      --scale-x: 1;
+      --rotate: 0deg;
+      transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+    }
+    .textLayer.page-text-layer-inner .markedContent {
+      display: contents;
+    }
     /*Safety net, deliberately OUTSIDE the "@media (pointer: fine)" gate above and
        marked !important: the text layer's own glyphs must never actually be
        painted - they exist purely so the browser has real characters to select
@@ -8328,9 +8356,14 @@
         .catch(function () { return false; });
     }
 
-    var pdfjsLibReadyPromise = import('https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.149/build/pdf.min.mjs')
+    // The LEGACY build on purpose: pdf.js 6's default build is only for the
+    // very latest browsers (it relies on e.g. Map.prototype.getOrInsertComputed,
+    // absent even from Chrome 141) and fails to load anywhere older. The
+    // legacy build is the same code with polyfills: Chrome/Edge 125+,
+    // Firefox ESR, Safari 18+ (pdf.js's own support list).
+    var pdfjsLibReadyPromise = import('https://cdn.jsdelivr.net/npm/pdfjs-dist@6.3.289/legacy/build/pdf.min.mjs')
       .then(function (mod) {
-        mod.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.149/build/pdf.worker.min.mjs';
+        mod.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@6.3.289/legacy/build/pdf.worker.min.mjs';
         // pdfjsLibReal stays unset until the worker is decided, so no
         // document can be opened before it and end up on the fallback.
         return pmModuleBlobWorkersStart()
@@ -8371,6 +8404,61 @@
       if (data instanceof ArrayBuffer) return new Uint8Array(data).slice();
       return data;
     }
+    // Closes a pdf.js document and frees what its worker holds for it. pdf.js
+    // 6 removed PDFDocumentProxy.destroy(): a document is closed through the
+    // loading task that opened it (the shared worker itself stays up - see
+    // pmPdfjsSharedWorker). Never throws; null / already closed is fine.
+    function pmDestroyPdfjsDoc(doc) {
+      if (!doc) return Promise.resolve();
+      try {
+        if (doc.loadingTask && typeof doc.loadingTask.destroy === 'function') return doc.loadingTask.destroy().catch(function () {});
+        if (typeof doc.destroy === 'function') return Promise.resolve(doc.destroy()).catch(function () {});   // pdf.js 5.x
+      } catch (_) {}
+      return Promise.resolve();
+    }
+
+    // A viewport's rectangle from a PDF-space [x1, y1, x2, y2] (pdf.js 6
+    // removed PageViewport.convertToViewportRectangle - same arithmetic).
+    function pmViewportRect(viewport, rect) {
+      const a = viewport.convertToViewportPoint(rect[0], rect[1]);
+      const b = viewport.convertToViewportPoint(rect[2], rect[3]);
+      return [a[0], a[1], b[0], b[1]];
+    }
+
+    // WebAssembly decoders pdf.js loads on demand: JBIG2 and CCITT fax images
+    // (black-and-white scans - pdf.js 6 decodes them only this way) and JPEG
+    // 2000 (JPX) images. pdf.js looks them up by file name through a "binary
+    // data factory"; this one serves them from the CDN - or, in the offline
+    // build, from the copies inlined below by scripts/build-offline.mjs. CMaps
+    // and standard font data are not configured, as before.
+    var PM_PDFJS_WASM_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@6.3.289/wasm/';
+    var PM_PDFJS_WASM_INLINE = null;   // offline build: { 'jbig2.wasm': base64, ... }
+    var pmPdfjsWasmCache = {};
+    function pmBase64ToBytes(b64) {
+      var bin = atob(b64), out = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    }
+    function PmPdfjsBinaryDataFactory(opts) { this.opts = opts || {}; }
+    PmPdfjsBinaryDataFactory.prototype.fetch = function (req) {
+      var kind = req && req.kind, filename = req && req.filename;
+      if (kind !== 'wasmUrl' || !filename) {
+        return Promise.reject(new Error('Ensure that the `' + kind + '` API parameter is provided.'));
+      }
+      // One download / decode per file; each caller gets its own copy (pdf.js
+      // may hand the buffer over to its worker).
+      if (!pmPdfjsWasmCache[filename]) {
+        pmPdfjsWasmCache[filename] = (PM_PDFJS_WASM_INLINE && PM_PDFJS_WASM_INLINE[filename])
+          ? Promise.resolve(pmBase64ToBytes(PM_PDFJS_WASM_INLINE[filename]))
+          : fetch(PM_PDFJS_WASM_URL + filename).then(function (r) {
+              if (!r.ok) throw new Error('HTTP ' + r.status);
+              return r.arrayBuffer();
+            }).then(function (b) { return new Uint8Array(b); });
+        pmPdfjsWasmCache[filename].catch(function () { delete pmPdfjsWasmCache[filename]; });
+      }
+      return pmPdfjsWasmCache[filename].then(function (bytes) { return bytes.slice(); });
+    };
+
     // Every getDocument() call: the bytes get copied, and every document goes
     // to the shared classic worker when there is one (see pmPdfjsSharedWorker)
     // - unless a caller brought its own.
@@ -8384,6 +8472,7 @@
         out = Object.assign({}, out, { data: pmOwnPdfBytesCopy(src.data) });
       }
       if (pmPdfjsSharedWorker && !out.worker) out = Object.assign({}, out, { worker: pmPdfjsSharedWorker });
+      if (!out.BinaryDataFactory) out = Object.assign({}, out, { BinaryDataFactory: PmPdfjsBinaryDataFactory });
       if (out === args[0]) return args;
       return [out].concat(rest);
     }
@@ -8638,9 +8727,16 @@
         and a page click there should always mean page selection, never
         text-selection (same principle as the internal-link hotzone gate). */
     function isZoomTextSelect() {
-      return isZoomPanMode() && interactionMode === 'select' &&
+      return (isZoomPanMode() || pmTouchTextSelHeld) && interactionMode === 'select' &&
         (typeof isPagesSingleColumnLayout !== 'function' || isPagesSingleColumnLayout());
     }
+    // Smartphone: text selected on a page keeps the text-select mode on
+    // below its zoom threshold, until the selection is gone. Pinching out
+    // and back in is how a phone user looks around the text they selected,
+    // and dropping the mode removed the text layer - and the selection and
+    // its handles with it - on the way out. var: read by isZoomTextSelect,
+    // which runs early in the script.
+    var pmTouchTextSelHeld = false;
     /** Desktop-only helpers (blank-area pan, RMB image copy, etc.). */
     function isDesktopZoomTextSelect() {
       return !isTouchDevice && isZoomTextSelect();
@@ -8697,9 +8793,13 @@
     //   hqRasterScaleCap  - idx -> { scale, budgetMs } a pass at that scale
     //                       already overran budgetMs, so do not go past it
     //                       again unless a later pass is allowed more time
-    // Both are cleared wherever hqRenderedScale is.
+    //   hqRasterChunkPerMp - idx -> ms per megapixel of the longest single
+    //                       step pdf.js drew that page in (see
+    //                       HQ_RASTER_CHUNK_MAX_MS)
+    // All three are cleared wherever hqRenderedScale is.
     let hqRasterCostPerMp = new Map();
     let hqRasterScaleCap = new Map();
+    let hqRasterChunkPerMp = new Map();
     // How far a single pass may raise a page's raster scale. Expensive pages
     // are approached in steps so the first one lands quickly and each step
     // re-measures the cost, instead of one jump that blocks for seconds.
@@ -8710,7 +8810,15 @@
     // the rest of the way: if the user does come back, the first touch stops
     // it rather than queueing behind it.
     const HQ_RASTER_BUDGET_MS = 550;
-    const HQ_RASTER_BUDGET_IDLE_MS = 4000;
+    const HQ_RASTER_BUDGET_IDLE_MS = 6000;
+    // A render can only be aborted between the steps pdf.js draws it in, so
+    // the longest step is how long a touch waits. Most steps are a few ms, but
+    // some operations cost in proportion to the canvas: since pdf.js 6 every
+    // soft mask (SMask in an ExtGState) is prepared over the whole canvas in
+    // one go, so a page of transparency groups can hold a single step for
+    // most of a second at a large raster. A pass never asks for a raster big
+    // enough to push the longest step past this.
+    const HQ_RASTER_CHUNK_MAX_MS = 800;
     // A pass is a full render plus a JPEG encode on the main thread, so it has
     // to be worth sitting through - a few per cent sharper is not.
     const HQ_RASTER_MIN_GAIN = 1.2;
@@ -8727,7 +8835,11 @@
       // Nothing measured for this page yet: take one step rather than leaping
       // the whole way, and let that step's own timing size the next one.
       if (!(costPerMp > 0)) return Math.min(ceiling, fromScale * HQ_RASTER_STEP_UP);
-      const affordable = Math.sqrt((budgetMs / costPerMp) / mpAtScale1);
+      let affordable = Math.sqrt((budgetMs / costPerMp) / mpAtScale1);
+      const chunkPerMp = hqRasterChunkPerMp.get(idx);
+      if (chunkPerMp > 0) {
+        affordable = Math.min(affordable, Math.sqrt((HQ_RASTER_CHUNK_MAX_MS / chunkPerMp) / mpAtScale1));
+      }
       return Math.min(ceiling, Math.max(affordable, THUMBNAIL_SCALE));
     }
     // The pdf.js render task currently drawing an HQ raster, if any. Holding
@@ -8751,6 +8863,35 @@
     function hqClearRasterCostModel() {
       hqRasterCostPerMp.clear();
       hqRasterScaleCap.clear();
+      hqRasterChunkPerMp.clear();
+    }
+    /**
+     * Time the steps of a pdf.js render task. pdf.js hands each continuation
+     * to onContinue; for a display render the step itself then runs in the
+     * next animation frame, so a frame callback queued just before it marks
+     * the moment the step starts. Returns a function that gives the longest
+     * step seen so far, in ms.
+     */
+    function hqTimeRenderSteps(renderTask) {
+      let startedAt = null;
+      let longest = 0;
+      const close = () => {
+        if (startedAt == null) return;
+        const ms = performance.now() - startedAt;
+        if (ms > longest) longest = ms;
+        startedAt = null;
+      };
+      renderTask.onContinue = (cont) => {
+        close();
+        requestAnimationFrame(() => { startedAt = performance.now(); });
+        cont();
+      };
+      return () => { close(); return longest; };
+    }
+    function hqNoteRasterChunk(idx, ms, pixelW, pixelH) {
+      const mp = (pixelW * pixelH) / 1e6;
+      if (idx == null || !(ms > 0) || !(mp > 0)) return;
+      hqRasterChunkPerMp.set(idx, ms / mp);
     }
     let hqScheduleTimer = null;
     let pageTextLayerTimer = null;
@@ -12840,7 +12981,7 @@
       } finally {
         pdfDoc = prevDoc;
         pdfDocBorrowDepth--;
-        try { pdfjsDoc.destroy && pdfjsDoc.destroy(); } catch (e) {}
+        try { pmDestroyPdfjsDoc(pdfjsDoc); } catch (e) {}
       }
       return result;
     }
@@ -13198,7 +13339,7 @@
         pdfjsDoc = await pdfjsLib.getDocument({ data: pdfBytes.slice() }).promise;
       } catch (e) { return; }
       if (activeOperationId !== operationId) {
-        try { pdfjsDoc.destroy && pdfjsDoc.destroy(); } catch (_) {}
+        try { pmDestroyPdfjsDoc(pdfjsDoc); } catch (_) {}
         return;
       }
       lazyThumbPdfjsDoc = pdfjsDoc;
@@ -13283,6 +13424,7 @@
                 // The page's content may have changed with the step, so its
                 // measured raster cost and ceiling no longer describe it.
                 hqRasterCostPerMp.delete(i);
+                hqRasterChunkPerMp.delete(i);
                 hqRasterScaleCap.delete(i);
               });
               snap.pendingIdx = [];
@@ -13372,17 +13514,23 @@
       //the state will be recalculated in the finally operation.
       if (undoRedoBusy) return;
 
-      const showBar = canUndoDoc() || canRedoDoc();
+      // The version for smartphones steps through edits and positions
+      // together (see pmNavTimeline).
+      const timeline = typeof pmNavTimelineActive === 'function' && pmNavTimelineActive();
+      if (timeline) pmNavTimelineSyncDoc();
+      const canUndo = timeline ? pmNavTimelineCanUndo() : canUndoDoc();
+      const canRedo = timeline ? pmNavTimelineCanRedo() : canRedoDoc();
+      const showBar = canUndo || canRedo;
       bar.classList.toggle('visible', showBar);
       bar.setAttribute('aria-hidden', showBar ? 'false' : 'true');
       if (undoBtn) {
         //Slot is always occupied: Undo does not "jump" when Redo appears.
         undoBtn.style.display = '';
-        undoBtn.disabled = !canUndoDoc();
+        undoBtn.disabled = !canUndo;
       }
       if (redoBtn) {
         redoBtn.style.display = '';
-        redoBtn.disabled = !canRedoDoc();
+        redoBtn.disabled = !canRedo;
       }
       if (showBar) positionMobileUndoRedoBar();
       if (typeof updateZoomPanHandBadge === 'function') updateZoomPanHandBadge();
@@ -13391,8 +13539,9 @@
     function initMobileUndoRedo() {
       const undoBtn = document.getElementById('mobileUndoBtn');
       const redoBtn = document.getElementById('mobileRedoBtn');
-      if (undoBtn) undoBtn.addEventListener('click', () => undoDocument());
-      if (redoBtn) redoBtn.addEventListener('click', () => redoDocument());
+      const timeline = () => typeof pmNavTimelineActive === 'function' && pmNavTimelineActive();
+      if (undoBtn) undoBtn.addEventListener('click', () => { if (timeline()) pmNavTimelineStep(-1); else undoDocument(); });
+      if (redoBtn) redoBtn.addEventListener('click', () => { if (timeline()) pmNavTimelineStep(1); else redoDocument(); });
     }
     initMobileUndoRedo();
 
@@ -15539,12 +15688,12 @@
               if (token !== hqPdfjsToken) return { aspectRatio, links: [] };
             } catch (_) { continue; }
             if (targetPageIndex == null) continue;
-            // convertToViewportRectangle maps PDF-space corners into the
+            // pmViewportRect maps PDF-space corners into the
             // rotated viewport pairwise (x1->x1', y1->y1', ...) WITHOUT
             // re-sorting into min/max order - a flipped y-axis (and, under
             // rotation, a swapped axis) means the "first" corner can end up
             // larger than the "second" one, so min/max must be taken here.
-            const r = viewport.convertToViewportRectangle(a.rect);
+            const r = pmViewportRect(viewport, a.rect);
             const left = Math.min(r[0], r[2]) / viewport.width;
             const top = Math.min(r[1], r[3]) / viewport.height;
             const width = Math.abs(r[2] - r[0]) / viewport.width;
@@ -15728,7 +15877,7 @@
               // reportlab/Acrobat included) are skipped rather than guessed at.
               if (pageIndex !== pageIdx) return;
               const r = w.getRectangle();
-              const rect = viewport.convertToViewportRectangle(
+              const rect = pmViewportRect(viewport,
                 [r.x, r.y, r.x + r.width, r.y + r.height]
               );
               const left = Math.min(rect[0], rect[2]) / viewport.width;
@@ -16325,7 +16474,7 @@
       // into a scroll, a tap, or a drag - isDragActive alone only covers the
       // (much rarer) long-press-to-reorder case. Defer entirely and retry
       // once the finger lifts.
-      if (isDragActive || pageTouchActive) {
+      if (isDragActive || pageTouchActive || hqFingerHoldsRasters()) {
         scheduleHQUpgrade(opts);
         return;
       }
@@ -16352,7 +16501,7 @@
 
       for (const div of visible) {
         if (token !== hqPdfjsToken) return;
-        if (isDragActive || pageTouchActive) { scheduleHQUpgrade(opts); return; }
+        if (isDragActive || pageTouchActive || hqFingerHoldsRasters()) { scheduleHQUpgrade(opts); return; }
         const idx = parseInt(div.dataset.index);
         // Skip pages still showing a CSS rotate (animating OR waiting for raster
         // swap). Writing a baked /Rotate image under a non-zero transform doubles
@@ -16427,9 +16576,11 @@
           const hqCtx = canvas.getContext('2d', { willReadFrequently: true });
           const rasterStartedAt = performance.now();
           const renderTask = page.render({ canvasContext: hqCtx, viewport });
+          const longestStep = hqTimeRenderSteps(renderTask);
           hqActiveRenderTask = renderTask;
           try {
             await renderTask.promise;
+            hqNoteRasterChunk(idx, longestStep(), viewport.width, viewport.height);
           } catch (err) {
             // Cancelled because the user touched the pages, or because a new
             // zoom made this raster the wrong size. Nothing is recorded, so
@@ -16477,6 +16628,32 @@
         }
       }
       if (escalateAfter) scheduleHQUpgrade({ escalate: true });
+    }
+
+    // Any finger on the pages area stops a heavy raster at once. This cannot
+    // wait for onPagePointerDown: at high zoom most touches land on the text
+    // layer, a link or a quick action, and those paths return before the
+    // page-drag bookkeeping (pageTouchActive) is ever set up - the raster
+    // then ran to completion under the finger. Capture phase, so nothing
+    // below can swallow it first.
+    // runHQUpgrade also waits while a finger is down. A touchend can be lost
+    // (its target card rebuilt mid-gesture), so a contact older than
+    // HQ_FINGER_STALE_MS no longer holds the rasters back.
+    const HQ_FINGER_STALE_MS = 10000;
+    let hqFingerOnPages = false;
+    let hqFingerDownAt = 0;
+    function hqFingerHoldsRasters() {
+      return hqFingerOnPages && performance.now() - hqFingerDownAt < HQ_FINGER_STALE_MS;
+    }
+    if (scrollContainer) {
+      scrollContainer.addEventListener('touchstart', () => {
+        hqFingerOnPages = true;
+        hqFingerDownAt = performance.now();
+        hqCancelActiveRender();
+      }, { capture: true, passive: true });
+      const lift = (e) => { if (!e.touches || !e.touches.length) hqFingerOnPages = false; };
+      scrollContainer.addEventListener('touchend', lift, { capture: true, passive: true });
+      scrollContainer.addEventListener('touchcancel', lift, { capture: true, passive: true });
     }
 
     // Dynamic cascade when narrowing the window (desktop):
@@ -19657,7 +19834,7 @@
       if (pageDiv) pageDiv.classList.add('pm-auto-page');
     }
 
-    function pmSelectOnlyPage(idx, pageDiv) {
+    function pmSelectOnlyPage(idx, pageDiv, opts) {
       selectedPages.clear();
       document.querySelectorAll('.page.selected').forEach(p => p.classList.remove('selected'));
       selectedPages.add(idx);
@@ -19665,7 +19842,7 @@
       lastSelectedIndex = idx;
       refreshCheckboxes();
       updateUIState();
-      notifySelectionChanged();
+      if (!(opts && opts.noHistory)) notifySelectionChanged();
     }
 
     // Throttle: this sweeps every page's getBoundingClientRect() AND calls
@@ -19711,7 +19888,12 @@
       // A different page scrolled into place - its mini-tools are not
       // wanted either until someone holds on it.
       pmQuickActionsRequestedIdx = null;
-      pmSelectOnlyPage(idx, page);
+      // Following the scroll is navigation, not something to undo: as a
+      // history step of its own it also cut off the redo of an undone edit
+      // the moment the user scrolled, and on the smartphone undo/redo
+      // buttons, which step through positions as well (pmNavTimeline), every
+      // step back to a spot re-selected its page and wiped the steps ahead.
+      pmSelectOnlyPage(idx, page, { noHistory: true });
       updateMobileQuickActions();
     }
 
@@ -19857,6 +20039,7 @@
       clearTimeout(pmPosHistorySaveTimer);
       clearTimeout(pmPosHistoryJumpGuardTimer);
       pmPosHistoryJumping = false;
+      if (typeof pmNavTimelineReset === 'function') pmNavTimelineReset();
     }
 
     // Records the current scrollTop as a new history entry, unless it's
@@ -19883,6 +20066,7 @@
     // for 1.5s. Suppressed while pmPosHistoryJumping (a Alt+←/→ jump's own
     // scroll shouldn't record a fresh/duplicate entry).
     function pmPosHistoryScheduleSave() {
+      if (typeof pmNavTimelineScheduleSave === 'function') pmNavTimelineScheduleSave();
       if (pmPosHistoryJumping || readModeActive) return;
       clearTimeout(pmPosHistorySaveTimer);
       pmPosHistorySaveTimer = setTimeout(pmPosHistoryRecordCurrent, 1500);
@@ -19929,6 +20113,270 @@
       clearTimeout(pmPosHistorySaveTimer);
       if (pmPosHistoryIndex >= pmPosHistory.length - 1) return;
       pmPosHistoryJumpTo(pmPosHistoryIndex + 1);
+    }
+
+    // ─── Smartphone undo/redo: edits and positions on one timeline ─────
+    // The version for smartphones has no Alt+←/→, so its undo/redo buttons
+    // step back and forth through edits AND the places the user settled on,
+    // in the order they happened: scroll to page 20 after an edit on page 3,
+    // and the first undo takes you back to page 3, the second one undoes the
+    // edit. Each step is one entry:
+    //   { kind: 'doc', prev, snap } - a document history step, from the
+    //       docHistory entry `prev` to `snap`. Entries are matched by object,
+    //       so an undo made elsewhere (Ctrl+Z, the page menu) only moves the
+    //       cursor, and a step that no longer matches is skipped.
+    //   { kind: 'pos', prev, at } - the pages area came to rest at spot
+    //       `at`, having been at `prev` before (see pmNavTimelineSpot).
+    // pmNavTimelineIndex is the last applied entry (-1: none).
+    // var, not let: updateUndoRedoUI reads this state and can run before
+    // this part of the script has.
+    var pmNavTimeline = [];
+    var pmNavTimelineIndex = -1;
+    var pmNavTimelineBaseSnap = null;
+    var pmNavTimelineBaseSpot = null;
+    var pmNavTimelineSaveTimer = null;
+    var pmNavTimelineJumpGuardTimer = null;
+    var pmNavTimelineJumping = false;
+    // Set while a timeline step itself runs undoDocument/redoDocument, so the
+    // history change it causes is not read back as an outside one.
+    var pmNavTimelineDriving = false;
+    // Where the last scroll event found the pages area (see ScheduleSave).
+    var pmNavTimelineLastScroll = null;
+    var PM_NAV_TIMELINE_MAX = 200;
+
+    function pmNavTimelineActive() {
+      return typeof isTouchDevice !== 'undefined' && isTouchDevice && !!pdfDoc && !readModeActive;
+    }
+
+    function pmNavTimelineReset() {
+      pmNavTimeline = [];
+      pmNavTimelineIndex = -1;
+      pmNavTimelineBaseSnap = docHistoryIndex >= 0 ? docHistory[docHistoryIndex] : null;
+      pmNavTimelineBaseSpot = pmNavTimelineSpot();
+      clearTimeout(pmNavTimelineSaveTimer);
+      pmNavTimelineSaveTimer = null;
+    }
+
+    /** The document history entry the timeline cursor stands on. */
+    function pmNavTimelineDocAt(i) {
+      for (let k = i; k >= 0; k--) if (pmNavTimeline[k].kind === 'doc') return pmNavTimeline[k].snap;
+      return pmNavTimelineBaseSnap;
+    }
+
+    /** The spot the timeline cursor stands on. */
+    function pmNavTimelineSpotAt(i) {
+      for (let k = i; k >= 0; k--) if (pmNavTimeline[k].kind === 'pos') return pmNavTimeline[k].at;
+      return pmNavTimelineBaseSpot;
+    }
+
+    /**
+     * Where the pages area is scrolled to. On a smartphone the zoom changes
+     * all the time, and a raw scrollTop means a different place at another
+     * zoom, so the spot is also kept as the page at the top-left of the view
+     * and how far into it (fractions of its size). The zoom itself is not
+     * part of the spot and is never changed by stepping to one.
+     */
+    function pmNavTimelineSpot() {
+      if (!scrollContainer) return null;
+      const spot = { top: scrollContainer.scrollTop, left: scrollContainer.scrollLeft, scale: currentScale, idx: null, fy: 0, fx: 0 };
+      const host = scrollContainer.getBoundingClientRect();
+      const pages = pagesContainer ? pagesContainer.querySelectorAll('.page') : [];
+      for (const p of pages) {
+        if (p.style.display === 'none') continue;
+        const r = p.getBoundingClientRect();
+        if (!(r.height > 0) || r.bottom <= host.top) continue;
+        spot.idx = parseInt(p.dataset.index, 10);
+        spot.fy = (host.top - r.top) / r.height;
+        spot.fx = r.width > 0 ? (host.left - r.left) / r.width : 0;
+        break;
+      }
+      return spot;
+    }
+
+    function pmNavTimelineSameSpot(a, b) {
+      if (!a || !b) return false;
+      if (Math.abs(a.scale - b.scale) < 1e-4) {
+        return Math.abs(a.top - b.top) < 4 && Math.abs(a.left - b.left) < 4;
+      }
+      return a.idx === b.idx && Math.abs(a.fy - b.fy) < 0.02 && Math.abs(a.fx - b.fx) < 0.02;
+    }
+
+    function pmNavTimelineGoToSpot(spot) {
+      if (!spot || !scrollContainer) return;
+      let top = spot.top, left = spot.left;
+      if (Math.abs(spot.scale - currentScale) >= 1e-4 && spot.idx != null) {
+        const p = pagesContainer.querySelector('.page[data-index="' + spot.idx + '"]');
+        if (p) {
+          const host = scrollContainer.getBoundingClientRect();
+          const r = p.getBoundingClientRect();
+          top = scrollContainer.scrollTop + (r.top - host.top) + spot.fy * r.height;
+          left = scrollContainer.scrollLeft + (r.left - host.left) + spot.fx * r.width;
+        }
+      }
+      pmNavTimelineJumping = true;
+      clearTimeout(pmNavTimelineSaveTimer);
+      pmNavTimelineSaveTimer = null;
+      clearTimeout(pmNavTimelineJumpGuardTimer);
+      scrollContainer.scrollTo({ top, left, behavior: 'auto' });
+      if (typeof syncScrollLockFromContainer === 'function') syncScrollLockFromContainer();
+      pmNavTimelineJumpGuardTimer = setTimeout(() => { pmNavTimelineJumping = false; }, 400);
+    }
+
+    function pmNavTimelinePush(entry) {
+      // A new edit ends every step ahead of it, as docHistory does. A new
+      // spot only ends the spots ahead: settling somewhere after an undo
+      // must not cost the user the redo of their edits.
+      const ahead = entry.kind === 'pos'
+        ? pmNavTimeline.slice(pmNavTimelineIndex + 1).filter(e => e.kind === 'doc') : [];
+      pmNavTimeline = pmNavTimeline.slice(0, pmNavTimelineIndex + 1);
+      pmNavTimeline.push(entry);
+      const at = pmNavTimeline.length - 1;
+      pmNavTimeline.push(...ahead);
+      if (pmNavTimeline.length > PM_NAV_TIMELINE_MAX) {
+        // Fold the oldest entry into the base, so what is left still
+        // describes where each remaining step starts from.
+        const dropped = pmNavTimeline.shift();
+        if (dropped.kind === 'doc') pmNavTimelineBaseSnap = dropped.snap;
+        else pmNavTimelineBaseSpot = dropped.at;
+        pmNavTimelineIndex = at - 1;
+      } else {
+        pmNavTimelineIndex = at;
+      }
+    }
+
+    /**
+     * Bring the timeline in line with docHistory after it changed: a new
+     * step is appended, an undo/redo made outside the timeline moves the
+     * cursor, anything unrecognisable (another document, a tab switch)
+     * starts a fresh timeline.
+     */
+    function pmNavTimelineSyncDoc() {
+      if (pmNavTimelineDriving) return;
+      const cur = docHistoryIndex >= 0 ? docHistory[docHistoryIndex] : null;
+      const at = pmNavTimelineDocAt(pmNavTimelineIndex);
+      if (cur === at) return;
+      const known = cur === pmNavTimelineBaseSnap || pmNavTimeline.some(e => e.kind === 'doc' && e.snap === cur);
+      const prev = docHistoryIndex > 0 ? docHistory[docHistoryIndex - 1] : null;
+      if (!known && cur && at && prev === at) {
+        // The edit was made where the user is now. If that spot has not
+        // been recorded yet (still inside the 1.5 s settle), record it first,
+        // or undo would step over the edit before returning to its page.
+        if (pmNavTimelineSaveTimer && !pmNavTimelineJumping) {
+          clearTimeout(pmNavTimelineSaveTimer);
+          pmNavTimelineSaveTimer = null;
+          const spot = pmNavTimelineSpot();
+          const was = pmNavTimelineSpotAt(pmNavTimelineIndex);
+          if (spot && was && !pmNavTimelineSameSpot(spot, was)) pmNavTimelinePush({ kind: 'pos', prev: was, at: spot });
+        }
+        pmNavTimelinePush({ kind: 'doc', prev: at, snap: cur });
+        return;
+      }
+      for (let k = pmNavTimelineIndex; k >= 0; k--) {
+        const e = pmNavTimeline[k];
+        if (e.kind === 'doc' && e.snap === at && e.prev === cur) { pmNavTimelineIndex = k - 1; return; }
+        if (e.kind === 'doc') break;
+      }
+      for (let k = pmNavTimelineIndex + 1; k < pmNavTimeline.length; k++) {
+        const e = pmNavTimeline[k];
+        if (e.kind === 'doc' && e.prev === at && e.snap === cur) { pmNavTimelineIndex = k; return; }
+        if (e.kind === 'doc') break;
+      }
+      pmNavTimelineReset();
+    }
+
+    function pmNavTimelineRecordPos() {
+      clearTimeout(pmNavTimelineSaveTimer);
+      pmNavTimelineSaveTimer = null;
+      if (!pmNavTimelineActive() || !scrollContainer) return false;
+      pmNavTimelineSyncDoc();
+      const at = pmNavTimelineSpot();
+      const prev = pmNavTimelineSpotAt(pmNavTimelineIndex);
+      if (!at || !prev || pmNavTimelineSameSpot(at, prev)) return false;
+      pmNavTimelinePush({ kind: 'pos', prev, at });
+      updateUndoRedoUI();
+      return true;
+    }
+
+    /** Same 1.5 s settle as the desktop position history. */
+    function pmNavTimelineScheduleSave() {
+      if (pmNavTimelineJumping || !pmNavTimelineActive()) return;
+      // Relayouts (thumbnails arriving, scroll anchoring) fire scroll events
+      // without the view moving; only real movement restarts the settle
+      // wait, or a spot could go unrecorded for as long as they keep coming.
+      const top = scrollContainer.scrollTop, left = scrollContainer.scrollLeft;
+      const last = pmNavTimelineLastScroll;
+      pmNavTimelineLastScroll = { top, left };
+      if (pmNavTimelineSaveTimer && last && Math.abs(last.top - top) < 2 && Math.abs(last.left - left) < 2) return;
+      clearTimeout(pmNavTimelineSaveTimer);
+      const armed = !!pmNavTimelineSaveTimer;
+      pmNavTimelineSaveTimer = setTimeout(pmNavTimelineRecordPos, 1500);
+      // Scrolling away is itself something undo can take back - light the
+      // button up now rather than 1.5 s later.
+      if (!armed) {
+        const undoBtn = document.getElementById('mobileUndoBtn');
+        if (undoBtn && undoBtn.disabled) updateUndoRedoUI();
+      }
+    }
+
+    function pmNavTimelineCanUndo() {
+      if (!pmNavTimelineActive() || undoRedoBusy || isLoading) return false;
+      // Scrolled since the last recorded spot: undo brings the user back.
+      if (pmNavTimelineSaveTimer
+          && !pmNavTimelineSameSpot(pmNavTimelineSpot(), pmNavTimelineSpotAt(pmNavTimelineIndex))) return true;
+      for (let k = pmNavTimelineIndex; k >= 0; k--) {
+        const e = pmNavTimeline[k];
+        if (e.kind === 'pos') return true;
+        if (docHistory[docHistoryIndex] === e.snap && docHistory[docHistoryIndex - 1] === e.prev) return true;
+      }
+      return false;
+    }
+
+    function pmNavTimelineCanRedo() {
+      if (!pmNavTimelineActive() || undoRedoBusy || isLoading) return false;
+      for (let k = pmNavTimelineIndex + 1; k < pmNavTimeline.length; k++) {
+        const e = pmNavTimeline[k];
+        if (e.kind === 'pos') return true;
+        if (docHistory[docHistoryIndex] === e.prev && docHistory[docHistoryIndex + 1] === e.snap) return true;
+      }
+      return false;
+    }
+
+    async function pmNavTimelineStep(dir) {
+      if (!pmNavTimelineActive() || undoRedoBusy || isLoading) return;
+      pmNavTimelineSyncDoc();
+      // A spot the user scrolled to but has not rested on for 1.5 s yet is
+      // still a place to come back to: record it before stepping away.
+      if (dir < 0 && pmNavTimelineSaveTimer && !pmNavTimelineJumping) pmNavTimelineRecordPos();
+      while (dir < 0 ? pmNavTimelineIndex >= 0 : pmNavTimelineIndex < pmNavTimeline.length - 1) {
+        const e = pmNavTimeline[dir < 0 ? pmNavTimelineIndex : pmNavTimelineIndex + 1];
+        if (e.kind === 'pos') {
+          pmNavTimelineIndex += dir < 0 ? -1 : 1;
+          pmNavTimelineGoToSpot(dir < 0 ? e.prev : e.at);
+          updateUndoRedoUI();
+          return;
+        }
+        const applicable = dir < 0
+          ? docHistory[docHistoryIndex] === e.snap && docHistory[docHistoryIndex - 1] === e.prev
+          : docHistory[docHistoryIndex] === e.prev && docHistory[docHistoryIndex + 1] === e.snap;
+        pmNavTimelineIndex += dir < 0 ? -1 : 1;
+        if (!applicable) continue;   // superseded elsewhere - skip it
+        pmNavTimelineDriving = true;
+        // Restoring a step can relayout the pages (a page comes back or
+        // goes away) and move scrollTop; that is not a spot the user chose.
+        pmNavTimelineJumping = true;
+        clearTimeout(pmNavTimelineSaveTimer);
+        pmNavTimelineSaveTimer = null;
+        clearTimeout(pmNavTimelineJumpGuardTimer);
+        try {
+          if (dir < 0) await undoDocument(); else await redoDocument();
+        } finally {
+          pmNavTimelineDriving = false;
+          pmNavTimelineJumpGuardTimer = setTimeout(() => { pmNavTimelineJumping = false; }, 600);
+        }
+        updateUndoRedoUI();
+        return;
+      }
+      updateUndoRedoUI();
     }
 
     // ─── Hot keys ───────────────────────── ──────────────────────────
@@ -24478,6 +24926,19 @@
         // handles a selection confined to one page). Defer the rebuild
         // until the drag ends instead.
         if (textLayerDrag && selPages.has(div)) continue;
+        // Smartphone: the selection handles belong to the selection the user
+        // made with their finger. Rebuilding the page's spans destroys it,
+        // and the copy restored in code below comes back without handles
+        // (the browser shows them for a touch selection only), sometimes on
+        // the neighbouring words once the new layout differs a little. Keep
+        // the old layer instead: syncPreviewTextLayersLiveScale stretches it
+        // to the new zoom, which keeps it on the glyphs, and the page gets
+        // its fresh layer once the selection is gone (see below).
+        if (isTouchDevice && selPages.has(div)) {
+          const held = div.querySelector('.page-text-layer');
+          if (held) held.dataset.rebuildPending = '1';
+          continue;
+        }
         await buildPageTextLayer(div, doc, token);
       }
 
@@ -24509,6 +24970,35 @@
         });
       }
     }
+
+    // pmTouchTextSelHeld follows the selection: on while it lives in a page's
+    // text layer, off once it is gone - and then, if the zoom is below the
+    // text-select threshold by now, the mode switches off as it would have.
+    document.addEventListener('selectionchange', () => {
+      if (!isTouchDevice) return;
+      const sel = window.getSelection();
+      let held = false;
+      if (sel && sel.rangeCount && !sel.isCollapsed) {
+        let n = sel.getRangeAt(0).commonAncestorContainer;
+        if (n && n.nodeType === 3) n = n.parentElement;
+        held = !!(n && n.closest && n.closest('#scrollContainer .page .page-text-layer'));
+      }
+      if (held === pmTouchTextSelHeld) return;
+      pmTouchTextSelHeld = held;
+      if (!held && !isZoomPanMode()) updateZoomPanMode();
+    });
+
+    // A text layer held back for a live selection (see runPageTextLayerBuild)
+    // is rebuilt as soon as that selection is gone.
+    document.addEventListener('selectionchange', () => {
+      if (!isTouchDevice || !isZoomTextSelect()) return;
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount && !sel.isCollapsed) return;
+      if (!pagesContainer.querySelector('.page .page-text-layer[data-rebuild-pending="1"]')) return;
+      pagesContainer.querySelectorAll('.page .page-text-layer[data-rebuild-pending="1"]')
+        .forEach(l => { delete l.dataset.rebuildPending; delete l.dataset.layerKey; });
+      schedulePageTextLayerBuild();
+    });
 
     function updateZoomPanMode() {
       const on = isZoomPanMode();
@@ -27224,7 +27714,7 @@
           if (!opts.skipLoading) showLoading(t('loadingInsertingPagesCount', { i: i + 1, srcCount }));
           await renderPageImageInto(div, img, targetPdfjs, newIdx + 1, newIdx, THUMBNAIL_SCALE);
         }
-        try { targetPdfjs.destroy && targetPdfjs.destroy(); } catch (_) {}
+        try { pmDestroyPdfjsDoc(targetPdfjs); } catch (_) {}
 
         applyScale();
         renumberVisiblePages();
@@ -28271,7 +28761,7 @@
 
     const PDF_MANAGER_LIBRARIES = [
       ['pdf-lib', '1.17.1'],
-      ['pdf.js', '5.4.149'],
+      ['pdf.js', '6.3.289'],
       ['mammoth', '1.12.3'],
       ['SheetJS (xlsx)', '0.20.3'],
       ['html2canvas', '1.4.1'],
@@ -28744,7 +29234,7 @@
         }
         return await newPdf.save();
       } finally {
-        try { doc.destroy(); } catch (_) {}
+        try { pmDestroyPdfjsDoc(doc); } catch (_) {}
       }
     }
 
@@ -35413,7 +35903,7 @@ async function pmSearchExtractText(bytes) {
     console.error('Поиск: не удалось извлечь текст документа', e);
     return [];
   } finally {
-    if (doc) { try { doc.destroy(); } catch (_) {} }
+    if (doc) { try { pmDestroyPdfjsDoc(doc); } catch (_) {} }
   }
 }
 
@@ -35882,7 +36372,7 @@ async function pmSearchComputeRectFrac(r) {
     console.error('Поиск: не удалось вычислить положение найденного текста', e);
     return null;
   } finally {
-    if (ctx && ctx.doc) { try { ctx.doc.destroy(); } catch (_) {} }
+    if (ctx && ctx.doc) { try { pmDestroyPdfjsDoc(ctx.doc); } catch (_) {} }
   }
 }
 
@@ -35912,7 +36402,7 @@ async function pmSearchEnsureRectsForActiveTab() {
     } catch (e) {
       console.error('Поиск: не удалось вычислить положения совпадений на странице', e);
     } finally {
-      if (ctx && ctx.doc) { try { ctx.doc.destroy(); } catch (_) {} }
+      if (ctx && ctx.doc) { try { pmDestroyPdfjsDoc(ctx.doc); } catch (_) {} }
     }
   }
 }
@@ -39806,7 +40296,7 @@ async function peLoadEditorPageFromLiveDoc() {
   const one = await peSinglePageDoc(pdfDoc, peState.idx);
   const doc = await pdfjsLib.getDocument({ data: await one.save() }).promise;
   const newPage = await doc.getPage(1);
-  try { peState.doc.destroy(); } catch (_) {}
+  try { pmDestroyPdfjsDoc(peState.doc); } catch (_) {}
   peState.doc = doc;
   peState.page = newPage;
 }
@@ -41501,7 +41991,7 @@ function editSelectedPage() {
     } catch (e) {
       console.error('preview markup refresh failed', e);
     } finally {
-      try { if (pj && pj.destroy) pj.destroy(); } catch (_) {}
+      try { pmDestroyPdfjsDoc(pj); } catch (_) {}
       if (keepPj) { /* hqPdfjsDoc owns the doc */ }
     }
   }
@@ -42580,7 +43070,7 @@ async function peRevertSessionPdfEdits() {
   const div = pagesContainer.querySelector('.page[data-index="' + idx + '"]');
   const im = div ? div.querySelector('img') : null;
   if (div && im) await renderPageImageInto(div, im, pj, idx + 1, idx, THUMBNAIL_SCALE);
-  try { pj.destroy && pj.destroy(); } catch (_) {}
+  try { pmDestroyPdfjsDoc(pj); } catch (_) {}
   invalidateHQ();
   if (typeof invalidatePageTextLayers === 'function') invalidatePageTextLayers();
   setDocumentDirty(!!peState.wasDocumentDirtyAtOpen);
@@ -42715,7 +43205,7 @@ function peDestroy() {
   if (layer) layer.innerHTML = '';
   const crop = document.getElementById('peCrop');
   if (crop) crop.classList.remove('visible');
-  if (peState && peState.doc) { try { peState.doc.destroy(); } catch (_) {} }
+  if (peState && peState.doc) { try { pmDestroyPdfjsDoc(peState.doc); } catch (_) {} }
   peState = null;
   updatePeUndoRedoUI();
   peCloseShapeMenu();
@@ -59140,7 +59630,7 @@ async function peRasterizePageInDoc(srcDoc, pageIdx) {
     peCopyImageCatalogEntries(srcDoc, newDoc);
     return newDoc;
   } finally {
-    try { pj.destroy(); } catch (_) {}
+    try { pmDestroyPdfjsDoc(pj); } catch (_) {}
   }
 }
 
@@ -59343,7 +59833,7 @@ async function peBuildDocWithRasterizedShapesPage(srcDoc, pageIdx, shapes) {
     peCopyImageCatalogEntries(srcDoc, newDoc);
     return newDoc;
   } finally {
-    try { pj.destroy(); } catch (_) {}
+    try { pmDestroyPdfjsDoc(pj); } catch (_) {}
   }
 }
 
@@ -59488,7 +59978,7 @@ async function peRenderPageWithMaskedBoxes(bytes, pageIdx, boxes, scale, maskPad
     });
     return canvas;
   } finally {
-    try { pj.destroy(); } catch (_) {}
+    try { pmDestroyPdfjsDoc(pj); } catch (_) {}
   }
 }
 
@@ -59547,7 +60037,7 @@ async function peVerifyRegionalRedaction(bytesBefore, bytesAfter, pageIdx, rects
     peLastVerifyFailReason = 'text check exception';
     return false;
   } finally {
-    if (pj) try { pj.destroy(); } catch (_) {}
+    if (pj) try { pmDestroyPdfjsDoc(pj); } catch (_) {}
   }
 
   // (b) pixels outside the boxes AND outside the removed glyphs must be
@@ -59808,7 +60298,7 @@ async function peOverlayRasterizedShapePatch(doc, pageIdx, shapes) {
     doc.removePage(pageIdx);
     doc.insertPage(pageIdx, replacement);
   } finally {
-    try { pj.destroy(); } catch (_) {}
+    try { pmDestroyPdfjsDoc(pj); } catch (_) {}
   }
 }
 
@@ -61996,7 +62486,7 @@ async function peFlattenEditorObjectsIntoDoc(targetDoc, sourcePageIndices) {
     workDoc = await peApplyPendingRedactRasterization(workDoc);
     return workDoc;
   } finally {
-    if (pjDoc) try { pjDoc.destroy(); } catch (_) {}
+    if (pjDoc) try { pmDestroyPdfjsDoc(pjDoc); } catch (_) {}
   }
 }
 
@@ -62308,7 +62798,7 @@ async function pageEditSave(options) {
         }
       }
     }
-    try { pj.destroy && pj.destroy(); } catch (_) {}
+    try { pmDestroyPdfjsDoc(pj); } catch (_) {}
     if (typeof scheduleSnapshotFill === 'function') scheduleSnapshotFill();
 
     syncDirtyFromHistory();
@@ -62684,7 +63174,7 @@ async function pmWmRenderPagePreview(idx, pxPerPt) {
   try {
     return await render(pj, 1);
   } finally {
-    if (own) { try { pj.destroy(); } catch (_) {} }
+    if (own) { try { pmDestroyPdfjsDoc(pj); } catch (_) {} }
   }
 }
 
