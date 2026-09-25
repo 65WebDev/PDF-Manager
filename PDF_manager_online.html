@@ -20006,8 +20006,9 @@
             return;
           }
           if (!e.shiftKey && e.code === 'KeyV') {
-            e.preventDefault();
-            void pasteFromClipboardSmart();
+            // Not handled here: the browser's paste event that follows is
+            // the only way files copied in Explorer reach the page (and it
+            // carries a copied image too) - see pmPasteIntoDocument.
             return;
           }
         }
@@ -25985,8 +25986,9 @@
       document.getElementById('insertFromClipboardBtn').addEventListener('click', async (e) => {
         e.stopPropagation();
         const pos = pendingInsert;
+        const r = e.currentTarget.getBoundingClientRect();
         closeInsertMenu();
-        await insertFromClipboard(pos);
+        await insertFromClipboard(pos, { x: r.left + r.width / 2, y: r.bottom });
       });
 
       // Click/tap outside the menu - close
@@ -26155,9 +26157,19 @@
     }
 
     // Pastes pages from the app page buffer, or an OS clipboard image as a new page.
-    async function insertFromClipboard(insert) {
+    // On desktop a click cannot read copied files and must not bring up the
+    // clipboard permission prompt: without a granted permission it points to
+    // Ctrl+V instead, and the next Ctrl+V (within a minute) lands in this gap.
+    async function insertFromClipboard(insert, hintAt) {
       if (!pdfDoc || !insert) return;
       const insertAt = resolveInsertIndex(insert);
+      if (!isTouchDevice && !(pmPageClipboard && pmPageClipboard.pdfBytes) &&
+          !(await pmClipboardReadGranted())) {
+        pmNextPasteInsert = { insert, until: Date.now() + 60000 };
+        const at = hintAt || { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+        pmShowDzHint(t('pasteMenuHint'), at.x, at.y);
+        return;
+      }
 
       if (pmPageClipboard && pmPageClipboard.pdfBytes) {
         const wasCut = pmPageClipboard.mode === 'cut';
@@ -26174,7 +26186,13 @@
       try {
         const ok = await insertClipboardImageAt(insertAt);
         if (!ok) {
-          alert(t('alertClipboardEmpty'));
+          if (!isTouchDevice) {
+            pmNextPasteInsert = { insert, until: Date.now() + 60000 };
+            const at = hintAt || { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+            pmShowDzHint(t('pasteMenuHint'), at.x, at.y);
+          } else {
+            alert(t('alertClipboardEmpty'));
+          }
         }
       } catch (err) {
         console.error(err);
@@ -26199,23 +26217,6 @@
       }
     }
 
-    /** Ctrl+V in preview: app page buffer first, else OS clipboard image as a new page. */
-    async function pasteFromClipboardSmart() {
-      if (!pdfDoc) return;
-      if (pmPageClipboard && pmPageClipboard.pdfBytes) {
-        await pastePagesFromClipboard();
-        return;
-      }
-      let insertAt = getDefaultPasteInsertAt();
-      if (hoverInsert) insertAt = resolveInsertIndex(hoverInsert);
-      else if (pendingInsert) insertAt = resolveInsertIndex(pendingInsert);
-      try {
-        await insertClipboardImageAt(insertAt);
-      } catch (err) {
-        console.error(err);
-        alert(t('alertPasteImageError') + ': ' + (err.message || err));
-      }
-    }
 
     // Inserts pages from the selected file (PDF or Office) at the specified position.
     async function insertFromFile(insert) {
@@ -33981,10 +33982,66 @@ async function pmPasteIntoWorkspace(files) {
   return pmPastePageBuffer();
 }
 
+// Ctrl+V in an open document (preview, selection mode), through the paste
+// event: files copied in Explorer (or a copied image) go in at the paste
+// point - several through the order dialog, like a drop on the insertion
+// line; with none, the app's page buffer. What was copied last wins: copying
+// pages replaces the system clipboard (pmClaimOsClipboardForPages), so files
+// can only be in it if they were copied after the pages.
+let pmNextPasteInsert = null;   // { insert, until } - gap chosen in the insert menu
+function pmDocTakesPaste(e) {
+  if (!pdfDoc || isLoading || isTouchDevice) return false;
+  if (readModeActive || interactionMode !== 'select') return false;
+  if (typeof pmPageEditorOpen === 'function' && pmPageEditorOpen()) return false;
+  if (document.querySelector('.modal-overlay-active')) return false;
+  const tg = e && e.target;
+  if (tg && (tg.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(tg.tagName || ''))) return false;
+  return true;
+}
+function pmPasteInsertPoint() {
+  const count = pdfDoc.getPageCount();
+  let at;
+  if (pmNextPasteInsert && pmNextPasteInsert.until > Date.now()) at = resolveInsertIndex(pmNextPasteInsert.insert);
+  else if (hoverInsert) at = resolveInsertIndex(hoverInsert);
+  else if (pendingInsert) at = resolveInsertIndex(pendingInsert);
+  else at = getDefaultPasteInsertAt();
+  pmNextPasteInsert = null;
+  at = Math.max(0, Math.min(count, at));
+  return { at, insert: at < count ? { targetIndex: at, insertBefore: true } : { targetIndex: count - 1, insertBefore: false } };
+}
+async function pmPasteIntoDocument(files) {
+  const supported = filterSupportedDroppedFiles(files || []);
+  if (supported.length) {
+    const { insert } = pmPasteInsertPoint();
+    if (supported.length > 1) {
+      showMergeOrderModal(supported, async (ordered) => { await insertFilesAtPosition(ordered, insert); });
+    } else {
+      await insertFilesAtPosition(supported, insert);
+    }
+    return;
+  }
+  if (files && files.length) { alert(t('pasteNoSupportedFiles')); return; }
+  if (pmPageClipboard && pmPageClipboard.pdfBytes) {
+    const { at } = pmPasteInsertPoint();
+    const once = pmPageClipboard.mode === 'cut';
+    await insertPagesFromPdfBytes(pmPageClipboard.pdfBytes, at);
+    if (once) pmPageClipboard = null;
+  }
+}
+
 document.addEventListener('paste', (e) => {
   if (pmDzPasteProbe) {           // the menu's own attempt, below
     e.preventDefault();
     pmDzPasteProbe(pmFilesFromDataTransfer(e.clipboardData));
+    return;
+  }
+  if (pdfDoc) {
+    if (!pmDocTakesPaste(e)) return;
+    e.preventDefault();
+    void pmPasteIntoDocument(pmFilesFromDataTransfer(e.clipboardData)).catch(err => {
+      console.error(err);
+      alert(t('alertPasteError') + ': ' + (err.message || err));
+    });
     return;
   }
   if (!pmWorkspaceTakesPaste(e)) return;
