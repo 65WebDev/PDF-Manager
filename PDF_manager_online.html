@@ -8727,9 +8727,16 @@
         and a page click there should always mean page selection, never
         text-selection (same principle as the internal-link hotzone gate). */
     function isZoomTextSelect() {
-      return isZoomPanMode() && interactionMode === 'select' &&
+      return (isZoomPanMode() || pmTouchTextSelHeld) && interactionMode === 'select' &&
         (typeof isPagesSingleColumnLayout !== 'function' || isPagesSingleColumnLayout());
     }
+    // Smartphone: text selected on a page keeps the text-select mode on
+    // below its zoom threshold, until the selection is gone. Pinching out
+    // and back in is how a phone user looks around the text they selected,
+    // and dropping the mode removed the text layer - and the selection and
+    // its handles with it - on the way out. var: read by isZoomTextSelect,
+    // which runs early in the script.
+    var pmTouchTextSelHeld = false;
     /** Desktop-only helpers (blank-area pan, RMB image copy, etc.). */
     function isDesktopZoomTextSelect() {
       return !isTouchDevice && isZoomTextSelect();
@@ -13507,17 +13514,23 @@
       //the state will be recalculated in the finally operation.
       if (undoRedoBusy) return;
 
-      const showBar = canUndoDoc() || canRedoDoc();
+      // The version for smartphones steps through edits and positions
+      // together (see pmNavTimeline).
+      const timeline = typeof pmNavTimelineActive === 'function' && pmNavTimelineActive();
+      if (timeline) pmNavTimelineSyncDoc();
+      const canUndo = timeline ? pmNavTimelineCanUndo() : canUndoDoc();
+      const canRedo = timeline ? pmNavTimelineCanRedo() : canRedoDoc();
+      const showBar = canUndo || canRedo;
       bar.classList.toggle('visible', showBar);
       bar.setAttribute('aria-hidden', showBar ? 'false' : 'true');
       if (undoBtn) {
         //Slot is always occupied: Undo does not "jump" when Redo appears.
         undoBtn.style.display = '';
-        undoBtn.disabled = !canUndoDoc();
+        undoBtn.disabled = !canUndo;
       }
       if (redoBtn) {
         redoBtn.style.display = '';
-        redoBtn.disabled = !canRedoDoc();
+        redoBtn.disabled = !canRedo;
       }
       if (showBar) positionMobileUndoRedoBar();
       if (typeof updateZoomPanHandBadge === 'function') updateZoomPanHandBadge();
@@ -13526,8 +13539,9 @@
     function initMobileUndoRedo() {
       const undoBtn = document.getElementById('mobileUndoBtn');
       const redoBtn = document.getElementById('mobileRedoBtn');
-      if (undoBtn) undoBtn.addEventListener('click', () => undoDocument());
-      if (redoBtn) redoBtn.addEventListener('click', () => redoDocument());
+      const timeline = () => typeof pmNavTimelineActive === 'function' && pmNavTimelineActive();
+      if (undoBtn) undoBtn.addEventListener('click', () => { if (timeline()) pmNavTimelineStep(-1); else undoDocument(); });
+      if (redoBtn) redoBtn.addEventListener('click', () => { if (timeline()) pmNavTimelineStep(1); else redoDocument(); });
     }
     initMobileUndoRedo();
 
@@ -19820,7 +19834,7 @@
       if (pageDiv) pageDiv.classList.add('pm-auto-page');
     }
 
-    function pmSelectOnlyPage(idx, pageDiv) {
+    function pmSelectOnlyPage(idx, pageDiv, opts) {
       selectedPages.clear();
       document.querySelectorAll('.page.selected').forEach(p => p.classList.remove('selected'));
       selectedPages.add(idx);
@@ -19828,7 +19842,7 @@
       lastSelectedIndex = idx;
       refreshCheckboxes();
       updateUIState();
-      notifySelectionChanged();
+      if (!(opts && opts.noHistory)) notifySelectionChanged();
     }
 
     // Throttle: this sweeps every page's getBoundingClientRect() AND calls
@@ -19874,7 +19888,12 @@
       // A different page scrolled into place - its mini-tools are not
       // wanted either until someone holds on it.
       pmQuickActionsRequestedIdx = null;
-      pmSelectOnlyPage(idx, page);
+      // Following the scroll is navigation, not something to undo: as a
+      // history step of its own it also cut off the redo of an undone edit
+      // the moment the user scrolled, and on the smartphone undo/redo
+      // buttons, which step through positions as well (pmNavTimeline), every
+      // step back to a spot re-selected its page and wiped the steps ahead.
+      pmSelectOnlyPage(idx, page, { noHistory: true });
       updateMobileQuickActions();
     }
 
@@ -20020,6 +20039,7 @@
       clearTimeout(pmPosHistorySaveTimer);
       clearTimeout(pmPosHistoryJumpGuardTimer);
       pmPosHistoryJumping = false;
+      if (typeof pmNavTimelineReset === 'function') pmNavTimelineReset();
     }
 
     // Records the current scrollTop as a new history entry, unless it's
@@ -20046,6 +20066,7 @@
     // for 1.5s. Suppressed while pmPosHistoryJumping (a Alt+←/→ jump's own
     // scroll shouldn't record a fresh/duplicate entry).
     function pmPosHistoryScheduleSave() {
+      if (typeof pmNavTimelineScheduleSave === 'function') pmNavTimelineScheduleSave();
       if (pmPosHistoryJumping || readModeActive) return;
       clearTimeout(pmPosHistorySaveTimer);
       pmPosHistorySaveTimer = setTimeout(pmPosHistoryRecordCurrent, 1500);
@@ -20092,6 +20113,270 @@
       clearTimeout(pmPosHistorySaveTimer);
       if (pmPosHistoryIndex >= pmPosHistory.length - 1) return;
       pmPosHistoryJumpTo(pmPosHistoryIndex + 1);
+    }
+
+    // ─── Smartphone undo/redo: edits and positions on one timeline ─────
+    // The version for smartphones has no Alt+←/→, so its undo/redo buttons
+    // step back and forth through edits AND the places the user settled on,
+    // in the order they happened: scroll to page 20 after an edit on page 3,
+    // and the first undo takes you back to page 3, the second one undoes the
+    // edit. Each step is one entry:
+    //   { kind: 'doc', prev, snap } - a document history step, from the
+    //       docHistory entry `prev` to `snap`. Entries are matched by object,
+    //       so an undo made elsewhere (Ctrl+Z, the page menu) only moves the
+    //       cursor, and a step that no longer matches is skipped.
+    //   { kind: 'pos', prev, at } - the pages area came to rest at spot
+    //       `at`, having been at `prev` before (see pmNavTimelineSpot).
+    // pmNavTimelineIndex is the last applied entry (-1: none).
+    // var, not let: updateUndoRedoUI reads this state and can run before
+    // this part of the script has.
+    var pmNavTimeline = [];
+    var pmNavTimelineIndex = -1;
+    var pmNavTimelineBaseSnap = null;
+    var pmNavTimelineBaseSpot = null;
+    var pmNavTimelineSaveTimer = null;
+    var pmNavTimelineJumpGuardTimer = null;
+    var pmNavTimelineJumping = false;
+    // Set while a timeline step itself runs undoDocument/redoDocument, so the
+    // history change it causes is not read back as an outside one.
+    var pmNavTimelineDriving = false;
+    // Where the last scroll event found the pages area (see ScheduleSave).
+    var pmNavTimelineLastScroll = null;
+    var PM_NAV_TIMELINE_MAX = 200;
+
+    function pmNavTimelineActive() {
+      return typeof isTouchDevice !== 'undefined' && isTouchDevice && !!pdfDoc && !readModeActive;
+    }
+
+    function pmNavTimelineReset() {
+      pmNavTimeline = [];
+      pmNavTimelineIndex = -1;
+      pmNavTimelineBaseSnap = docHistoryIndex >= 0 ? docHistory[docHistoryIndex] : null;
+      pmNavTimelineBaseSpot = pmNavTimelineSpot();
+      clearTimeout(pmNavTimelineSaveTimer);
+      pmNavTimelineSaveTimer = null;
+    }
+
+    /** The document history entry the timeline cursor stands on. */
+    function pmNavTimelineDocAt(i) {
+      for (let k = i; k >= 0; k--) if (pmNavTimeline[k].kind === 'doc') return pmNavTimeline[k].snap;
+      return pmNavTimelineBaseSnap;
+    }
+
+    /** The spot the timeline cursor stands on. */
+    function pmNavTimelineSpotAt(i) {
+      for (let k = i; k >= 0; k--) if (pmNavTimeline[k].kind === 'pos') return pmNavTimeline[k].at;
+      return pmNavTimelineBaseSpot;
+    }
+
+    /**
+     * Where the pages area is scrolled to. On a smartphone the zoom changes
+     * all the time, and a raw scrollTop means a different place at another
+     * zoom, so the spot is also kept as the page at the top-left of the view
+     * and how far into it (fractions of its size). The zoom itself is not
+     * part of the spot and is never changed by stepping to one.
+     */
+    function pmNavTimelineSpot() {
+      if (!scrollContainer) return null;
+      const spot = { top: scrollContainer.scrollTop, left: scrollContainer.scrollLeft, scale: currentScale, idx: null, fy: 0, fx: 0 };
+      const host = scrollContainer.getBoundingClientRect();
+      const pages = pagesContainer ? pagesContainer.querySelectorAll('.page') : [];
+      for (const p of pages) {
+        if (p.style.display === 'none') continue;
+        const r = p.getBoundingClientRect();
+        if (!(r.height > 0) || r.bottom <= host.top) continue;
+        spot.idx = parseInt(p.dataset.index, 10);
+        spot.fy = (host.top - r.top) / r.height;
+        spot.fx = r.width > 0 ? (host.left - r.left) / r.width : 0;
+        break;
+      }
+      return spot;
+    }
+
+    function pmNavTimelineSameSpot(a, b) {
+      if (!a || !b) return false;
+      if (Math.abs(a.scale - b.scale) < 1e-4) {
+        return Math.abs(a.top - b.top) < 4 && Math.abs(a.left - b.left) < 4;
+      }
+      return a.idx === b.idx && Math.abs(a.fy - b.fy) < 0.02 && Math.abs(a.fx - b.fx) < 0.02;
+    }
+
+    function pmNavTimelineGoToSpot(spot) {
+      if (!spot || !scrollContainer) return;
+      let top = spot.top, left = spot.left;
+      if (Math.abs(spot.scale - currentScale) >= 1e-4 && spot.idx != null) {
+        const p = pagesContainer.querySelector('.page[data-index="' + spot.idx + '"]');
+        if (p) {
+          const host = scrollContainer.getBoundingClientRect();
+          const r = p.getBoundingClientRect();
+          top = scrollContainer.scrollTop + (r.top - host.top) + spot.fy * r.height;
+          left = scrollContainer.scrollLeft + (r.left - host.left) + spot.fx * r.width;
+        }
+      }
+      pmNavTimelineJumping = true;
+      clearTimeout(pmNavTimelineSaveTimer);
+      pmNavTimelineSaveTimer = null;
+      clearTimeout(pmNavTimelineJumpGuardTimer);
+      scrollContainer.scrollTo({ top, left, behavior: 'auto' });
+      if (typeof syncScrollLockFromContainer === 'function') syncScrollLockFromContainer();
+      pmNavTimelineJumpGuardTimer = setTimeout(() => { pmNavTimelineJumping = false; }, 400);
+    }
+
+    function pmNavTimelinePush(entry) {
+      // A new edit ends every step ahead of it, as docHistory does. A new
+      // spot only ends the spots ahead: settling somewhere after an undo
+      // must not cost the user the redo of their edits.
+      const ahead = entry.kind === 'pos'
+        ? pmNavTimeline.slice(pmNavTimelineIndex + 1).filter(e => e.kind === 'doc') : [];
+      pmNavTimeline = pmNavTimeline.slice(0, pmNavTimelineIndex + 1);
+      pmNavTimeline.push(entry);
+      const at = pmNavTimeline.length - 1;
+      pmNavTimeline.push(...ahead);
+      if (pmNavTimeline.length > PM_NAV_TIMELINE_MAX) {
+        // Fold the oldest entry into the base, so what is left still
+        // describes where each remaining step starts from.
+        const dropped = pmNavTimeline.shift();
+        if (dropped.kind === 'doc') pmNavTimelineBaseSnap = dropped.snap;
+        else pmNavTimelineBaseSpot = dropped.at;
+        pmNavTimelineIndex = at - 1;
+      } else {
+        pmNavTimelineIndex = at;
+      }
+    }
+
+    /**
+     * Bring the timeline in line with docHistory after it changed: a new
+     * step is appended, an undo/redo made outside the timeline moves the
+     * cursor, anything unrecognisable (another document, a tab switch)
+     * starts a fresh timeline.
+     */
+    function pmNavTimelineSyncDoc() {
+      if (pmNavTimelineDriving) return;
+      const cur = docHistoryIndex >= 0 ? docHistory[docHistoryIndex] : null;
+      const at = pmNavTimelineDocAt(pmNavTimelineIndex);
+      if (cur === at) return;
+      const known = cur === pmNavTimelineBaseSnap || pmNavTimeline.some(e => e.kind === 'doc' && e.snap === cur);
+      const prev = docHistoryIndex > 0 ? docHistory[docHistoryIndex - 1] : null;
+      if (!known && cur && at && prev === at) {
+        // The edit was made where the user is now. If that spot has not
+        // been recorded yet (still inside the 1.5 s settle), record it first,
+        // or undo would step over the edit before returning to its page.
+        if (pmNavTimelineSaveTimer && !pmNavTimelineJumping) {
+          clearTimeout(pmNavTimelineSaveTimer);
+          pmNavTimelineSaveTimer = null;
+          const spot = pmNavTimelineSpot();
+          const was = pmNavTimelineSpotAt(pmNavTimelineIndex);
+          if (spot && was && !pmNavTimelineSameSpot(spot, was)) pmNavTimelinePush({ kind: 'pos', prev: was, at: spot });
+        }
+        pmNavTimelinePush({ kind: 'doc', prev: at, snap: cur });
+        return;
+      }
+      for (let k = pmNavTimelineIndex; k >= 0; k--) {
+        const e = pmNavTimeline[k];
+        if (e.kind === 'doc' && e.snap === at && e.prev === cur) { pmNavTimelineIndex = k - 1; return; }
+        if (e.kind === 'doc') break;
+      }
+      for (let k = pmNavTimelineIndex + 1; k < pmNavTimeline.length; k++) {
+        const e = pmNavTimeline[k];
+        if (e.kind === 'doc' && e.prev === at && e.snap === cur) { pmNavTimelineIndex = k; return; }
+        if (e.kind === 'doc') break;
+      }
+      pmNavTimelineReset();
+    }
+
+    function pmNavTimelineRecordPos() {
+      clearTimeout(pmNavTimelineSaveTimer);
+      pmNavTimelineSaveTimer = null;
+      if (!pmNavTimelineActive() || !scrollContainer) return false;
+      pmNavTimelineSyncDoc();
+      const at = pmNavTimelineSpot();
+      const prev = pmNavTimelineSpotAt(pmNavTimelineIndex);
+      if (!at || !prev || pmNavTimelineSameSpot(at, prev)) return false;
+      pmNavTimelinePush({ kind: 'pos', prev, at });
+      updateUndoRedoUI();
+      return true;
+    }
+
+    /** Same 1.5 s settle as the desktop position history. */
+    function pmNavTimelineScheduleSave() {
+      if (pmNavTimelineJumping || !pmNavTimelineActive()) return;
+      // Relayouts (thumbnails arriving, scroll anchoring) fire scroll events
+      // without the view moving; only real movement restarts the settle
+      // wait, or a spot could go unrecorded for as long as they keep coming.
+      const top = scrollContainer.scrollTop, left = scrollContainer.scrollLeft;
+      const last = pmNavTimelineLastScroll;
+      pmNavTimelineLastScroll = { top, left };
+      if (pmNavTimelineSaveTimer && last && Math.abs(last.top - top) < 2 && Math.abs(last.left - left) < 2) return;
+      clearTimeout(pmNavTimelineSaveTimer);
+      const armed = !!pmNavTimelineSaveTimer;
+      pmNavTimelineSaveTimer = setTimeout(pmNavTimelineRecordPos, 1500);
+      // Scrolling away is itself something undo can take back - light the
+      // button up now rather than 1.5 s later.
+      if (!armed) {
+        const undoBtn = document.getElementById('mobileUndoBtn');
+        if (undoBtn && undoBtn.disabled) updateUndoRedoUI();
+      }
+    }
+
+    function pmNavTimelineCanUndo() {
+      if (!pmNavTimelineActive() || undoRedoBusy || isLoading) return false;
+      // Scrolled since the last recorded spot: undo brings the user back.
+      if (pmNavTimelineSaveTimer
+          && !pmNavTimelineSameSpot(pmNavTimelineSpot(), pmNavTimelineSpotAt(pmNavTimelineIndex))) return true;
+      for (let k = pmNavTimelineIndex; k >= 0; k--) {
+        const e = pmNavTimeline[k];
+        if (e.kind === 'pos') return true;
+        if (docHistory[docHistoryIndex] === e.snap && docHistory[docHistoryIndex - 1] === e.prev) return true;
+      }
+      return false;
+    }
+
+    function pmNavTimelineCanRedo() {
+      if (!pmNavTimelineActive() || undoRedoBusy || isLoading) return false;
+      for (let k = pmNavTimelineIndex + 1; k < pmNavTimeline.length; k++) {
+        const e = pmNavTimeline[k];
+        if (e.kind === 'pos') return true;
+        if (docHistory[docHistoryIndex] === e.prev && docHistory[docHistoryIndex + 1] === e.snap) return true;
+      }
+      return false;
+    }
+
+    async function pmNavTimelineStep(dir) {
+      if (!pmNavTimelineActive() || undoRedoBusy || isLoading) return;
+      pmNavTimelineSyncDoc();
+      // A spot the user scrolled to but has not rested on for 1.5 s yet is
+      // still a place to come back to: record it before stepping away.
+      if (dir < 0 && pmNavTimelineSaveTimer && !pmNavTimelineJumping) pmNavTimelineRecordPos();
+      while (dir < 0 ? pmNavTimelineIndex >= 0 : pmNavTimelineIndex < pmNavTimeline.length - 1) {
+        const e = pmNavTimeline[dir < 0 ? pmNavTimelineIndex : pmNavTimelineIndex + 1];
+        if (e.kind === 'pos') {
+          pmNavTimelineIndex += dir < 0 ? -1 : 1;
+          pmNavTimelineGoToSpot(dir < 0 ? e.prev : e.at);
+          updateUndoRedoUI();
+          return;
+        }
+        const applicable = dir < 0
+          ? docHistory[docHistoryIndex] === e.snap && docHistory[docHistoryIndex - 1] === e.prev
+          : docHistory[docHistoryIndex] === e.prev && docHistory[docHistoryIndex + 1] === e.snap;
+        pmNavTimelineIndex += dir < 0 ? -1 : 1;
+        if (!applicable) continue;   // superseded elsewhere - skip it
+        pmNavTimelineDriving = true;
+        // Restoring a step can relayout the pages (a page comes back or
+        // goes away) and move scrollTop; that is not a spot the user chose.
+        pmNavTimelineJumping = true;
+        clearTimeout(pmNavTimelineSaveTimer);
+        pmNavTimelineSaveTimer = null;
+        clearTimeout(pmNavTimelineJumpGuardTimer);
+        try {
+          if (dir < 0) await undoDocument(); else await redoDocument();
+        } finally {
+          pmNavTimelineDriving = false;
+          pmNavTimelineJumpGuardTimer = setTimeout(() => { pmNavTimelineJumping = false; }, 600);
+        }
+        updateUndoRedoUI();
+        return;
+      }
+      updateUndoRedoUI();
     }
 
     // ─── Hot keys ───────────────────────── ──────────────────────────
@@ -24641,6 +24926,19 @@
         // handles a selection confined to one page). Defer the rebuild
         // until the drag ends instead.
         if (textLayerDrag && selPages.has(div)) continue;
+        // Smartphone: the selection handles belong to the selection the user
+        // made with their finger. Rebuilding the page's spans destroys it,
+        // and the copy restored in code below comes back without handles
+        // (the browser shows them for a touch selection only), sometimes on
+        // the neighbouring words once the new layout differs a little. Keep
+        // the old layer instead: syncPreviewTextLayersLiveScale stretches it
+        // to the new zoom, which keeps it on the glyphs, and the page gets
+        // its fresh layer once the selection is gone (see below).
+        if (isTouchDevice && selPages.has(div)) {
+          const held = div.querySelector('.page-text-layer');
+          if (held) held.dataset.rebuildPending = '1';
+          continue;
+        }
         await buildPageTextLayer(div, doc, token);
       }
 
@@ -24672,6 +24970,35 @@
         });
       }
     }
+
+    // pmTouchTextSelHeld follows the selection: on while it lives in a page's
+    // text layer, off once it is gone - and then, if the zoom is below the
+    // text-select threshold by now, the mode switches off as it would have.
+    document.addEventListener('selectionchange', () => {
+      if (!isTouchDevice) return;
+      const sel = window.getSelection();
+      let held = false;
+      if (sel && sel.rangeCount && !sel.isCollapsed) {
+        let n = sel.getRangeAt(0).commonAncestorContainer;
+        if (n && n.nodeType === 3) n = n.parentElement;
+        held = !!(n && n.closest && n.closest('#scrollContainer .page .page-text-layer'));
+      }
+      if (held === pmTouchTextSelHeld) return;
+      pmTouchTextSelHeld = held;
+      if (!held && !isZoomPanMode()) updateZoomPanMode();
+    });
+
+    // A text layer held back for a live selection (see runPageTextLayerBuild)
+    // is rebuilt as soon as that selection is gone.
+    document.addEventListener('selectionchange', () => {
+      if (!isTouchDevice || !isZoomTextSelect()) return;
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount && !sel.isCollapsed) return;
+      if (!pagesContainer.querySelector('.page .page-text-layer[data-rebuild-pending="1"]')) return;
+      pagesContainer.querySelectorAll('.page .page-text-layer[data-rebuild-pending="1"]')
+        .forEach(l => { delete l.dataset.rebuildPending; delete l.dataset.layerKey; });
+      schedulePageTextLayerBuild();
+    });
 
     function updateZoomPanMode() {
       const on = isZoomPanMode();
