@@ -8328,9 +8328,14 @@
         .catch(function () { return false; });
     }
 
-    var pdfjsLibReadyPromise = import('https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.149/build/pdf.min.mjs')
+    // The LEGACY build on purpose: pdf.js 6's default build is only for the
+    // very latest browsers (it relies on e.g. Map.prototype.getOrInsertComputed,
+    // absent even from Chrome 141) and fails to load anywhere older. The
+    // legacy build is the same code with polyfills: Chrome/Edge 125+,
+    // Firefox ESR, Safari 18+ (pdf.js's own support list).
+    var pdfjsLibReadyPromise = import('https://cdn.jsdelivr.net/npm/pdfjs-dist@6.3.289/legacy/build/pdf.min.mjs')
       .then(function (mod) {
-        mod.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@5.4.149/build/pdf.worker.min.mjs';
+        mod.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@6.3.289/legacy/build/pdf.worker.min.mjs';
         // pdfjsLibReal stays unset until the worker is decided, so no
         // document can be opened before it and end up on the fallback.
         return pmModuleBlobWorkersStart()
@@ -8371,6 +8376,61 @@
       if (data instanceof ArrayBuffer) return new Uint8Array(data).slice();
       return data;
     }
+    // Closes a pdf.js document and frees what its worker holds for it. pdf.js
+    // 6 removed PDFDocumentProxy.destroy(): a document is closed through the
+    // loading task that opened it (the shared worker itself stays up - see
+    // pmPdfjsSharedWorker). Never throws; null / already closed is fine.
+    function pmDestroyPdfjsDoc(doc) {
+      if (!doc) return Promise.resolve();
+      try {
+        if (doc.loadingTask && typeof doc.loadingTask.destroy === 'function') return doc.loadingTask.destroy().catch(function () {});
+        if (typeof doc.destroy === 'function') return Promise.resolve(doc.destroy()).catch(function () {});   // pdf.js 5.x
+      } catch (_) {}
+      return Promise.resolve();
+    }
+
+    // A viewport's rectangle from a PDF-space [x1, y1, x2, y2] (pdf.js 6
+    // removed PageViewport.convertToViewportRectangle - same arithmetic).
+    function pmViewportRect(viewport, rect) {
+      const a = viewport.convertToViewportPoint(rect[0], rect[1]);
+      const b = viewport.convertToViewportPoint(rect[2], rect[3]);
+      return [a[0], a[1], b[0], b[1]];
+    }
+
+    // WebAssembly decoders pdf.js loads on demand: JBIG2 and CCITT fax images
+    // (black-and-white scans - pdf.js 6 decodes them only this way) and JPEG
+    // 2000 (JPX) images. pdf.js looks them up by file name through a "binary
+    // data factory"; this one serves them from the CDN - or, in the offline
+    // build, from the copies inlined below by scripts/build-offline.mjs. CMaps
+    // and standard font data are not configured, as before.
+    var PM_PDFJS_WASM_URL = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@6.3.289/wasm/';
+    var PM_PDFJS_WASM_INLINE = null;   // offline build: { 'jbig2.wasm': base64, ... }
+    var pmPdfjsWasmCache = {};
+    function pmBase64ToBytes(b64) {
+      var bin = atob(b64), out = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+      return out;
+    }
+    function PmPdfjsBinaryDataFactory(opts) { this.opts = opts || {}; }
+    PmPdfjsBinaryDataFactory.prototype.fetch = function (req) {
+      var kind = req && req.kind, filename = req && req.filename;
+      if (kind !== 'wasmUrl' || !filename) {
+        return Promise.reject(new Error('Ensure that the `' + kind + '` API parameter is provided.'));
+      }
+      // One download / decode per file; each caller gets its own copy (pdf.js
+      // may hand the buffer over to its worker).
+      if (!pmPdfjsWasmCache[filename]) {
+        pmPdfjsWasmCache[filename] = (PM_PDFJS_WASM_INLINE && PM_PDFJS_WASM_INLINE[filename])
+          ? Promise.resolve(pmBase64ToBytes(PM_PDFJS_WASM_INLINE[filename]))
+          : fetch(PM_PDFJS_WASM_URL + filename).then(function (r) {
+              if (!r.ok) throw new Error('HTTP ' + r.status);
+              return r.arrayBuffer();
+            }).then(function (b) { return new Uint8Array(b); });
+        pmPdfjsWasmCache[filename].catch(function () { delete pmPdfjsWasmCache[filename]; });
+      }
+      return pmPdfjsWasmCache[filename].then(function (bytes) { return bytes.slice(); });
+    };
+
     // Every getDocument() call: the bytes get copied, and every document goes
     // to the shared classic worker when there is one (see pmPdfjsSharedWorker)
     // - unless a caller brought its own.
@@ -8384,6 +8444,7 @@
         out = Object.assign({}, out, { data: pmOwnPdfBytesCopy(src.data) });
       }
       if (pmPdfjsSharedWorker && !out.worker) out = Object.assign({}, out, { worker: pmPdfjsSharedWorker });
+      if (!out.BinaryDataFactory) out = Object.assign({}, out, { BinaryDataFactory: PmPdfjsBinaryDataFactory });
       if (out === args[0]) return args;
       return [out].concat(rest);
     }
@@ -12840,7 +12901,7 @@
       } finally {
         pdfDoc = prevDoc;
         pdfDocBorrowDepth--;
-        try { pdfjsDoc.destroy && pdfjsDoc.destroy(); } catch (e) {}
+        try { pmDestroyPdfjsDoc(pdfjsDoc); } catch (e) {}
       }
       return result;
     }
@@ -13198,7 +13259,7 @@
         pdfjsDoc = await pdfjsLib.getDocument({ data: pdfBytes.slice() }).promise;
       } catch (e) { return; }
       if (activeOperationId !== operationId) {
-        try { pdfjsDoc.destroy && pdfjsDoc.destroy(); } catch (_) {}
+        try { pmDestroyPdfjsDoc(pdfjsDoc); } catch (_) {}
         return;
       }
       lazyThumbPdfjsDoc = pdfjsDoc;
@@ -15539,12 +15600,12 @@
               if (token !== hqPdfjsToken) return { aspectRatio, links: [] };
             } catch (_) { continue; }
             if (targetPageIndex == null) continue;
-            // convertToViewportRectangle maps PDF-space corners into the
+            // pmViewportRect maps PDF-space corners into the
             // rotated viewport pairwise (x1->x1', y1->y1', ...) WITHOUT
             // re-sorting into min/max order - a flipped y-axis (and, under
             // rotation, a swapped axis) means the "first" corner can end up
             // larger than the "second" one, so min/max must be taken here.
-            const r = viewport.convertToViewportRectangle(a.rect);
+            const r = pmViewportRect(viewport, a.rect);
             const left = Math.min(r[0], r[2]) / viewport.width;
             const top = Math.min(r[1], r[3]) / viewport.height;
             const width = Math.abs(r[2] - r[0]) / viewport.width;
@@ -15728,7 +15789,7 @@
               // reportlab/Acrobat included) are skipped rather than guessed at.
               if (pageIndex !== pageIdx) return;
               const r = w.getRectangle();
-              const rect = viewport.convertToViewportRectangle(
+              const rect = pmViewportRect(viewport,
                 [r.x, r.y, r.x + r.width, r.y + r.height]
               );
               const left = Math.min(rect[0], rect[2]) / viewport.width;
@@ -27224,7 +27285,7 @@
           if (!opts.skipLoading) showLoading(t('loadingInsertingPagesCount', { i: i + 1, srcCount }));
           await renderPageImageInto(div, img, targetPdfjs, newIdx + 1, newIdx, THUMBNAIL_SCALE);
         }
-        try { targetPdfjs.destroy && targetPdfjs.destroy(); } catch (_) {}
+        try { pmDestroyPdfjsDoc(targetPdfjs); } catch (_) {}
 
         applyScale();
         renumberVisiblePages();
@@ -28271,7 +28332,7 @@
 
     const PDF_MANAGER_LIBRARIES = [
       ['pdf-lib', '1.17.1'],
-      ['pdf.js', '5.4.149'],
+      ['pdf.js', '6.3.289'],
       ['mammoth', '1.12.3'],
       ['SheetJS (xlsx)', '0.20.3'],
       ['html2canvas', '1.4.1'],
@@ -28744,7 +28805,7 @@
         }
         return await newPdf.save();
       } finally {
-        try { doc.destroy(); } catch (_) {}
+        try { pmDestroyPdfjsDoc(doc); } catch (_) {}
       }
     }
 
@@ -35413,7 +35474,7 @@ async function pmSearchExtractText(bytes) {
     console.error('Поиск: не удалось извлечь текст документа', e);
     return [];
   } finally {
-    if (doc) { try { doc.destroy(); } catch (_) {} }
+    if (doc) { try { pmDestroyPdfjsDoc(doc); } catch (_) {} }
   }
 }
 
@@ -35882,7 +35943,7 @@ async function pmSearchComputeRectFrac(r) {
     console.error('Поиск: не удалось вычислить положение найденного текста', e);
     return null;
   } finally {
-    if (ctx && ctx.doc) { try { ctx.doc.destroy(); } catch (_) {} }
+    if (ctx && ctx.doc) { try { pmDestroyPdfjsDoc(ctx.doc); } catch (_) {} }
   }
 }
 
@@ -35912,7 +35973,7 @@ async function pmSearchEnsureRectsForActiveTab() {
     } catch (e) {
       console.error('Поиск: не удалось вычислить положения совпадений на странице', e);
     } finally {
-      if (ctx && ctx.doc) { try { ctx.doc.destroy(); } catch (_) {} }
+      if (ctx && ctx.doc) { try { pmDestroyPdfjsDoc(ctx.doc); } catch (_) {} }
     }
   }
 }
@@ -39806,7 +39867,7 @@ async function peLoadEditorPageFromLiveDoc() {
   const one = await peSinglePageDoc(pdfDoc, peState.idx);
   const doc = await pdfjsLib.getDocument({ data: await one.save() }).promise;
   const newPage = await doc.getPage(1);
-  try { peState.doc.destroy(); } catch (_) {}
+  try { pmDestroyPdfjsDoc(peState.doc); } catch (_) {}
   peState.doc = doc;
   peState.page = newPage;
 }
@@ -41501,7 +41562,7 @@ function editSelectedPage() {
     } catch (e) {
       console.error('preview markup refresh failed', e);
     } finally {
-      try { if (pj && pj.destroy) pj.destroy(); } catch (_) {}
+      try { pmDestroyPdfjsDoc(pj); } catch (_) {}
       if (keepPj) { /* hqPdfjsDoc owns the doc */ }
     }
   }
@@ -42580,7 +42641,7 @@ async function peRevertSessionPdfEdits() {
   const div = pagesContainer.querySelector('.page[data-index="' + idx + '"]');
   const im = div ? div.querySelector('img') : null;
   if (div && im) await renderPageImageInto(div, im, pj, idx + 1, idx, THUMBNAIL_SCALE);
-  try { pj.destroy && pj.destroy(); } catch (_) {}
+  try { pmDestroyPdfjsDoc(pj); } catch (_) {}
   invalidateHQ();
   if (typeof invalidatePageTextLayers === 'function') invalidatePageTextLayers();
   setDocumentDirty(!!peState.wasDocumentDirtyAtOpen);
@@ -42715,7 +42776,7 @@ function peDestroy() {
   if (layer) layer.innerHTML = '';
   const crop = document.getElementById('peCrop');
   if (crop) crop.classList.remove('visible');
-  if (peState && peState.doc) { try { peState.doc.destroy(); } catch (_) {} }
+  if (peState && peState.doc) { try { pmDestroyPdfjsDoc(peState.doc); } catch (_) {} }
   peState = null;
   updatePeUndoRedoUI();
   peCloseShapeMenu();
@@ -59140,7 +59201,7 @@ async function peRasterizePageInDoc(srcDoc, pageIdx) {
     peCopyImageCatalogEntries(srcDoc, newDoc);
     return newDoc;
   } finally {
-    try { pj.destroy(); } catch (_) {}
+    try { pmDestroyPdfjsDoc(pj); } catch (_) {}
   }
 }
 
@@ -59343,7 +59404,7 @@ async function peBuildDocWithRasterizedShapesPage(srcDoc, pageIdx, shapes) {
     peCopyImageCatalogEntries(srcDoc, newDoc);
     return newDoc;
   } finally {
-    try { pj.destroy(); } catch (_) {}
+    try { pmDestroyPdfjsDoc(pj); } catch (_) {}
   }
 }
 
@@ -59488,7 +59549,7 @@ async function peRenderPageWithMaskedBoxes(bytes, pageIdx, boxes, scale, maskPad
     });
     return canvas;
   } finally {
-    try { pj.destroy(); } catch (_) {}
+    try { pmDestroyPdfjsDoc(pj); } catch (_) {}
   }
 }
 
@@ -59547,7 +59608,7 @@ async function peVerifyRegionalRedaction(bytesBefore, bytesAfter, pageIdx, rects
     peLastVerifyFailReason = 'text check exception';
     return false;
   } finally {
-    if (pj) try { pj.destroy(); } catch (_) {}
+    if (pj) try { pmDestroyPdfjsDoc(pj); } catch (_) {}
   }
 
   // (b) pixels outside the boxes AND outside the removed glyphs must be
@@ -59808,7 +59869,7 @@ async function peOverlayRasterizedShapePatch(doc, pageIdx, shapes) {
     doc.removePage(pageIdx);
     doc.insertPage(pageIdx, replacement);
   } finally {
-    try { pj.destroy(); } catch (_) {}
+    try { pmDestroyPdfjsDoc(pj); } catch (_) {}
   }
 }
 
@@ -61996,7 +62057,7 @@ async function peFlattenEditorObjectsIntoDoc(targetDoc, sourcePageIndices) {
     workDoc = await peApplyPendingRedactRasterization(workDoc);
     return workDoc;
   } finally {
-    if (pjDoc) try { pjDoc.destroy(); } catch (_) {}
+    if (pjDoc) try { pmDestroyPdfjsDoc(pjDoc); } catch (_) {}
   }
 }
 
@@ -62308,7 +62369,7 @@ async function pageEditSave(options) {
         }
       }
     }
-    try { pj.destroy && pj.destroy(); } catch (_) {}
+    try { pmDestroyPdfjsDoc(pj); } catch (_) {}
     if (typeof scheduleSnapshotFill === 'function') scheduleSnapshotFill();
 
     syncDirtyFromHistory();
@@ -62684,7 +62745,7 @@ async function pmWmRenderPagePreview(idx, pxPerPt) {
   try {
     return await render(pj, 1);
   } finally {
-    if (own) { try { pj.destroy(); } catch (_) {} }
+    if (own) { try { pmDestroyPdfjsDoc(pj); } catch (_) {} }
   }
 }
 
