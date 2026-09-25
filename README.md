@@ -49,7 +49,7 @@
 
 After downloading, open the HTML file in your browser. The online version loads its libraries from a CDN; the offline version bundles everything inside the file and works without internet access.
 
-Supported browsers: Chrome/Edge 125+, Firefox ESR (128+), Safari 18+ (including iOS/iPadOS 18+).
+Supported browsers: Chrome/Edge 125+, Firefox ESR, Safari 18+ (including iOS/iPadOS 18+).
 
 ### Features
 
@@ -128,7 +128,7 @@ Supported browsers: Chrome/Edge 125+, Firefox ESR (128+), Safari 18+ (including 
 
 После скачивания откройте HTML-файл в браузере. Онлайн-версия подгружает библиотеки из CDN; офлайн-версия содержит все зависимости внутри файла и работает без интернета.
 
-Поддерживаемые браузеры: Chrome/Edge 125+, Firefox ESR (128+), Safari 18+ (в том числе iOS/iPadOS 18+).
+Поддерживаемые браузеры: Chrome/Edge 125+, Firefox ESR, Safari 18+ (в том числе iOS/iPadOS 18+).
 
 ### Возможности
 
