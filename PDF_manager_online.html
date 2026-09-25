@@ -9166,6 +9166,7 @@
         encryptPwdConfirmPlaceholder: 'Повторите пароль',
         pwdShow: 'Показать пароль', pwdHide: 'Скрыть пароль',
         dzPasteFromClipboard: 'Вставить из буфера обмена (Ctrl+V)',
+        pagesCopiedClipboardNote: 'Страницы PDF скопированы в PDF Manager: {n}',
         pasteNothing: 'В буфере обмена нет файлов, страниц или изображения для вставки.',
         pasteNoSupportedFiles: 'Файлы в буфере обмена не поддерживаются. Поддерживаются PDF, Word, Excel, письма (.eml, .msg) и изображения.',
         pasteMenuHint: 'Чтобы вставить скопированные файлы или изображение, нажмите Ctrl+V',
@@ -9584,6 +9585,7 @@
         encryptPwdConfirmPlaceholder: 'Repeat password',
         pwdShow: 'Show password', pwdHide: 'Hide password',
         dzPasteFromClipboard: 'Paste from clipboard (Ctrl+V)',
+        pagesCopiedClipboardNote: 'PDF pages copied in PDF Manager: {n}',
         pasteNothing: 'The clipboard holds no files, pages or image to paste.',
         pasteNoSupportedFiles: 'The files in the clipboard are not supported. Supported: PDF, Word, Excel, emails (.eml, .msg) and images.',
         pasteMenuHint: 'To paste copied files or an image, press Ctrl+V',
@@ -10002,6 +10004,7 @@
         encryptPwdConfirmPlaceholder: 'Repita la contraseña',
         pwdShow: 'Mostrar contraseña', pwdHide: 'Ocultar contraseña',
         dzPasteFromClipboard: 'Pegar desde el portapapeles (Ctrl+V)',
+        pagesCopiedClipboardNote: 'Páginas PDF copiadas en PDF Manager: {n}',
         pasteNothing: 'El portapapeles no contiene archivos, páginas ni imágenes para pegar.',
         pasteNoSupportedFiles: 'Los archivos del portapapeles no son compatibles. Compatibles: PDF, Word, Excel, correos (.eml, .msg) e imágenes.',
         pasteMenuHint: 'Para pegar archivos o una imagen copiados, pulse Ctrl+V',
@@ -10486,6 +10489,7 @@
         encryptPwdConfirmPlaceholder: '重复密码',
         pwdShow: '显示密码', pwdHide: '隐藏密码',
         dzPasteFromClipboard: '从剪贴板粘贴 (Ctrl+V)',
+        pagesCopiedClipboardNote: '已在 PDF Manager 中复制 PDF 页面：{n}',
         pasteNothing: '剪贴板中没有可粘贴的文件、页面或图片。',
         pasteNoSupportedFiles: '剪贴板中的文件不受支持。支持：PDF、Word、Excel、邮件 (.eml, .msg) 和图片。',
         pasteMenuHint: '要粘贴复制的文件或图片，请按 Ctrl+V',
@@ -27241,9 +27245,31 @@
       return pdfDoc.getPageCount();
     }
 
+    // Copying pages also puts a short note into the system clipboard. Ctrl+V
+    // in an empty document takes files from the system clipboard before the
+    // app's page buffer, and the browser does not say which was copied last:
+    // files copied in Explorer BEFORE these pages would still be pasted
+    // instead of them. The note replaces those files, so whatever the user
+    // copied last is what gets pasted. Called synchronously from the copy /
+    // cut gesture (a copy event then has the clipboard to write to).
+    function pmClaimOsClipboardForPages(count) {
+      const text = t('pagesCopiedClipboardNote', { n: count });
+      let done = false;
+      const onCopy = (e) => {
+        try { e.clipboardData.setData('text/plain', text); e.preventDefault(); done = true; } catch (_) {}
+      };
+      document.addEventListener('copy', onCopy, true);
+      try { document.execCommand('copy'); } catch (_) {}
+      document.removeEventListener('copy', onCopy, true);
+      if (!done && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).catch(() => {});
+      }
+    }
+
     async function copySelectedPagesToClipboard() {
       const indices = getOperableSelectedIndices();
       if (!indices.length) return;
+      pmClaimOsClipboardForPages(indices.length);
       showLoading(t('loadingCopyingPages'));
       try {
         const bytes = await extractPagesAsPdfBytes(indices);
@@ -27258,6 +27284,7 @@
     async function cutSelectedPagesToClipboard() {
       const indices = getOperableSelectedIndices();
       if (!indices.length) return;
+      pmClaimOsClipboardForPages(indices.length);
       showLoading(t('loadingCuttingPages'));
       try {
         const bytes = await extractPagesAsPdfBytes(indices);
