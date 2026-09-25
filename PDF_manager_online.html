@@ -8758,9 +8758,13 @@
     //   hqRasterScaleCap  - idx -> { scale, budgetMs } a pass at that scale
     //                       already overran budgetMs, so do not go past it
     //                       again unless a later pass is allowed more time
-    // Both are cleared wherever hqRenderedScale is.
+    //   hqRasterChunkPerMp - idx -> ms per megapixel of the longest single
+    //                       step pdf.js drew that page in (see
+    //                       HQ_RASTER_CHUNK_MAX_MS)
+    // All three are cleared wherever hqRenderedScale is.
     let hqRasterCostPerMp = new Map();
     let hqRasterScaleCap = new Map();
+    let hqRasterChunkPerMp = new Map();
     // How far a single pass may raise a page's raster scale. Expensive pages
     // are approached in steps so the first one lands quickly and each step
     // re-measures the cost, instead of one jump that blocks for seconds.
@@ -8771,7 +8775,15 @@
     // the rest of the way: if the user does come back, the first touch stops
     // it rather than queueing behind it.
     const HQ_RASTER_BUDGET_MS = 550;
-    const HQ_RASTER_BUDGET_IDLE_MS = 4000;
+    const HQ_RASTER_BUDGET_IDLE_MS = 6000;
+    // A render can only be aborted between the steps pdf.js draws it in, so
+    // the longest step is how long a touch waits. Most steps are a few ms, but
+    // some operations cost in proportion to the canvas: since pdf.js 6 every
+    // soft mask (SMask in an ExtGState) is prepared over the whole canvas in
+    // one go, so a page of transparency groups can hold a single step for
+    // most of a second at a large raster. A pass never asks for a raster big
+    // enough to push the longest step past this.
+    const HQ_RASTER_CHUNK_MAX_MS = 800;
     // A pass is a full render plus a JPEG encode on the main thread, so it has
     // to be worth sitting through - a few per cent sharper is not.
     const HQ_RASTER_MIN_GAIN = 1.2;
@@ -8788,7 +8800,11 @@
       // Nothing measured for this page yet: take one step rather than leaping
       // the whole way, and let that step's own timing size the next one.
       if (!(costPerMp > 0)) return Math.min(ceiling, fromScale * HQ_RASTER_STEP_UP);
-      const affordable = Math.sqrt((budgetMs / costPerMp) / mpAtScale1);
+      let affordable = Math.sqrt((budgetMs / costPerMp) / mpAtScale1);
+      const chunkPerMp = hqRasterChunkPerMp.get(idx);
+      if (chunkPerMp > 0) {
+        affordable = Math.min(affordable, Math.sqrt((HQ_RASTER_CHUNK_MAX_MS / chunkPerMp) / mpAtScale1));
+      }
       return Math.min(ceiling, Math.max(affordable, THUMBNAIL_SCALE));
     }
     // The pdf.js render task currently drawing an HQ raster, if any. Holding
@@ -8812,6 +8828,35 @@
     function hqClearRasterCostModel() {
       hqRasterCostPerMp.clear();
       hqRasterScaleCap.clear();
+      hqRasterChunkPerMp.clear();
+    }
+    /**
+     * Time the steps of a pdf.js render task. pdf.js hands each continuation
+     * to onContinue; for a display render the step itself then runs in the
+     * next animation frame, so a frame callback queued just before it marks
+     * the moment the step starts. Returns a function that gives the longest
+     * step seen so far, in ms.
+     */
+    function hqTimeRenderSteps(renderTask) {
+      let startedAt = null;
+      let longest = 0;
+      const close = () => {
+        if (startedAt == null) return;
+        const ms = performance.now() - startedAt;
+        if (ms > longest) longest = ms;
+        startedAt = null;
+      };
+      renderTask.onContinue = (cont) => {
+        close();
+        requestAnimationFrame(() => { startedAt = performance.now(); });
+        cont();
+      };
+      return () => { close(); return longest; };
+    }
+    function hqNoteRasterChunk(idx, ms, pixelW, pixelH) {
+      const mp = (pixelW * pixelH) / 1e6;
+      if (idx == null || !(ms > 0) || !(mp > 0)) return;
+      hqRasterChunkPerMp.set(idx, ms / mp);
     }
     let hqScheduleTimer = null;
     let pageTextLayerTimer = null;
@@ -13344,6 +13389,7 @@
                 // The page's content may have changed with the step, so its
                 // measured raster cost and ceiling no longer describe it.
                 hqRasterCostPerMp.delete(i);
+                hqRasterChunkPerMp.delete(i);
                 hqRasterScaleCap.delete(i);
               });
               snap.pendingIdx = [];
@@ -16386,7 +16432,7 @@
       // into a scroll, a tap, or a drag - isDragActive alone only covers the
       // (much rarer) long-press-to-reorder case. Defer entirely and retry
       // once the finger lifts.
-      if (isDragActive || pageTouchActive) {
+      if (isDragActive || pageTouchActive || hqFingerHoldsRasters()) {
         scheduleHQUpgrade(opts);
         return;
       }
@@ -16413,7 +16459,7 @@
 
       for (const div of visible) {
         if (token !== hqPdfjsToken) return;
-        if (isDragActive || pageTouchActive) { scheduleHQUpgrade(opts); return; }
+        if (isDragActive || pageTouchActive || hqFingerHoldsRasters()) { scheduleHQUpgrade(opts); return; }
         const idx = parseInt(div.dataset.index);
         // Skip pages still showing a CSS rotate (animating OR waiting for raster
         // swap). Writing a baked /Rotate image under a non-zero transform doubles
@@ -16488,9 +16534,11 @@
           const hqCtx = canvas.getContext('2d', { willReadFrequently: true });
           const rasterStartedAt = performance.now();
           const renderTask = page.render({ canvasContext: hqCtx, viewport });
+          const longestStep = hqTimeRenderSteps(renderTask);
           hqActiveRenderTask = renderTask;
           try {
             await renderTask.promise;
+            hqNoteRasterChunk(idx, longestStep(), viewport.width, viewport.height);
           } catch (err) {
             // Cancelled because the user touched the pages, or because a new
             // zoom made this raster the wrong size. Nothing is recorded, so
@@ -16538,6 +16586,32 @@
         }
       }
       if (escalateAfter) scheduleHQUpgrade({ escalate: true });
+    }
+
+    // Any finger on the pages area stops a heavy raster at once. This cannot
+    // wait for onPagePointerDown: at high zoom most touches land on the text
+    // layer, a link or a quick action, and those paths return before the
+    // page-drag bookkeeping (pageTouchActive) is ever set up - the raster
+    // then ran to completion under the finger. Capture phase, so nothing
+    // below can swallow it first.
+    // runHQUpgrade also waits while a finger is down. A touchend can be lost
+    // (its target card rebuilt mid-gesture), so a contact older than
+    // HQ_FINGER_STALE_MS no longer holds the rasters back.
+    const HQ_FINGER_STALE_MS = 10000;
+    let hqFingerOnPages = false;
+    let hqFingerDownAt = 0;
+    function hqFingerHoldsRasters() {
+      return hqFingerOnPages && performance.now() - hqFingerDownAt < HQ_FINGER_STALE_MS;
+    }
+    if (scrollContainer) {
+      scrollContainer.addEventListener('touchstart', () => {
+        hqFingerOnPages = true;
+        hqFingerDownAt = performance.now();
+        hqCancelActiveRender();
+      }, { capture: true, passive: true });
+      const lift = (e) => { if (!e.touches || !e.touches.length) hqFingerOnPages = false; };
+      scrollContainer.addEventListener('touchend', lift, { capture: true, passive: true });
+      scrollContainer.addEventListener('touchcancel', lift, { capture: true, passive: true });
     }
 
     // Dynamic cascade when narrowing the window (desktop):
