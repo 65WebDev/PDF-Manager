@@ -566,9 +566,13 @@
       display: flex; align-items: center; justify-content: center;
       font-size: 15px; opacity: 0; transition: opacity .12s, background .12s;
     }
+    /*The icon never takes the click: the handlers check the target's class.*/
+    .pm-tab-close svg { display: block; pointer-events: none; }
     .pm-tab:hover .pm-tab-close, .pm-tab.active .pm-tab-close { opacity: .65; }
-    .pm-tab-close:hover { opacity: 1; background: rgba(0,0,0,.18); }
-    .pm-tab.active .pm-tab-close:hover { background: rgba(0,0,0,.12); }
+    /*Hover: a red circle, the cross white on it (both themes).*/
+    .pm-tab-close:hover,
+    .pm-tab.active .pm-tab-close:hover,
+    html[data-theme="dark"] .pm-tab .pm-tab-close:hover { opacity: 1; background: #e05548; color: #fff; }
     /*Drag and drop tabs (like in a browser)*/
     .pm-tab.pm-shift {
       transition: transform .18s cubic-bezier(.2,.7,.3,1), background .15s ease, color .15s ease;
@@ -7163,12 +7167,6 @@
     html[data-theme="dark"] body.pm-page-tab-dragging .pm-tab.pm-page-drag-source:hover,
     html[data-theme="dark"] .pm-tab.pm-tab-hover-activate.pm-tab-hover-activate-run {
       background: #14171c !important; color: #e8ecef !important;
-    }
-    /* The close-button hover circle used a black tint, invisible against the
-       active tab's now-dark background - use a light tint there instead. */
-    html[data-theme="dark"] .pm-tab.active .pm-tab-close:hover,
-    html[data-theme="dark"] .pm-tab.pm-tab-selected:not(.active) .pm-tab-close:hover {
-      background: rgba(255,255,255,.18);
     }
 
     html[data-theme="dark"] #stickyFileBar {
@@ -34104,6 +34102,13 @@ function pmHideTabInsertIndicator() {
   document.body.classList.remove('pm-tab-file-drag');
 }
 
+// Close icon of a tab: centred in the 16px circle whatever the font.
+// (A function, not a const: tabs can be drawn before this line has run.)
+function pmTabCloseIcon() {
+  return '<svg viewBox="0 0 10 10" width="8" height="8" aria-hidden="true">' +
+    '<path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
+}
+
 // Tab context menu
 function pmCloseTabMenu() {
   const menu = document.getElementById('pmTabMenu');
@@ -34695,10 +34700,12 @@ function pmRenderBar() {
     el.title = tab.fileName || '';
     el.dataset.tabId = tab.id;
     const dirty = (tab.id === pmActiveId) ? documentDirty : tab.dirty;
+    // A drawn cross (not the × character, which sits on the text baseline
+    // and came out a pixel or two above the centre of its hover circle).
     el.innerHTML =
       '<span class="pm-tab-star"' + (dirty ? '' : ' hidden') + '>*</span>' +
       '<span class="pm-tab-label">' + escapeHtml(tab.fileName || tabNoNameLabel) + '</span>' +
-      '<span class="pm-tab-close" title="' + escapeHtml(tabCloseLabel) + '">&times;</span>';
+      '<span class="pm-tab-close" title="' + escapeHtml(tabCloseLabel) + '">' + pmTabCloseIcon() + '</span>';
     el.addEventListener('click', (e) => {
       pmTabSyncModifiers(e);
       if (pmDragSuppressClick) { pmDragSuppressClick = false; e.stopPropagation(); return; }
