@@ -523,10 +523,13 @@
     .pm-tab:hover { background: #46596c; color: #eaf0f5; }
     /*+ after the last tab: a new, empty document*/
     /*(#tabBar: must not take .top-menu button's 42px sizing/padding/colours)*/
+    /*Level with the tabs' close crosses: a tab is 30px tall from the bar's
+       bottom with a 1px top border, so its cross sits 14.5px above the bottom;
+       2.5px under this 24px button puts its centre there too.*/
     #tabBar .pm-tab-new {
-      flex: 0 0 auto; align-self: center; box-sizing: border-box;
+      flex: 0 0 auto; align-self: flex-end; box-sizing: border-box;
       width: 24px; height: 24px; min-width: 24px; min-height: 24px;
-      margin: 0 0 0 1px; padding: 0; gap: 0;
+      margin: 0 0 2.5px 1px; padding: 0; gap: 0;
       display: flex; align-items: center; justify-content: center;
       border: none; border-radius: 6px; background: transparent;
       color: #c9d3dc; cursor: pointer; font-size: 0;
@@ -566,9 +569,13 @@
       display: flex; align-items: center; justify-content: center;
       font-size: 15px; opacity: 0; transition: opacity .12s, background .12s;
     }
+    /*The icon never takes the click: the handlers check the target's class.*/
+    .pm-tab-close svg { display: block; pointer-events: none; }
     .pm-tab:hover .pm-tab-close, .pm-tab.active .pm-tab-close { opacity: .65; }
-    .pm-tab-close:hover { opacity: 1; background: rgba(0,0,0,.18); }
-    .pm-tab.active .pm-tab-close:hover { background: rgba(0,0,0,.12); }
+    /*Hover: a red circle, the cross white on it (both themes).*/
+    .pm-tab-close:hover,
+    .pm-tab.active .pm-tab-close:hover,
+    html[data-theme="dark"] .pm-tab .pm-tab-close:hover { opacity: 1; background: #e05548; color: #fff; }
     /*Drag and drop tabs (like in a browser)*/
     .pm-tab.pm-shift {
       transition: transform .18s cubic-bezier(.2,.7,.3,1), background .15s ease, color .15s ease;
@@ -615,18 +622,27 @@
       box-shadow: 0 4px 16px rgba(0,0,0,.3);
     }
     /*Tab context menu*/
-    #pmTabMenu {
+    #pmTabMenu, #pmDzMenu {
       position: fixed; z-index: 100060; display: none;
       background: #fff; border: 1px solid #ddd; border-radius: 8px;
       box-shadow: 0 6px 20px rgba(0,0,0,0.25); padding: 6px; min-width: 210px;
     }
-    #pmTabMenu button {
+    #pmTabMenu button, #pmDzMenu button {
       display: block; width: 100%; border: none; background: transparent;
       padding: 10px 12px; border-radius: 6px; cursor: pointer;
       font-size: 14px; color: #2c3e50; text-align: left;
     }
-    #pmTabMenu button:hover:not(:disabled) { background: #eef4fb; }
-    #pmTabMenu button:disabled { opacity: .45; cursor: default; }
+    #pmTabMenu button:hover:not(:disabled), #pmDzMenu button:hover:not(:disabled) { background: #eef4fb; }
+    #pmTabMenu button:disabled, #pmDzMenu button:disabled { opacity: .45; cursor: default; }
+    /*Note shown by the drop-zone menu (e.g. "press Ctrl+V").*/
+    #pmDzHint {
+      position: fixed; z-index: 100061; max-width: 340px; padding: 9px 14px;
+      border-radius: 8px; background: #2c3e50; color: #fff; font-size: 14px; line-height: 1.4;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.3); pointer-events: none;
+      opacity: 0; visibility: hidden; transition: opacity .2s, visibility .2s;
+    }
+    #pmDzHint.show { opacity: 1; visibility: visible; }
+    html[data-theme="dark"] #pmDzHint { background: #3d4550; }
     /*File insertion indicator between tabs*/
     #pmTabInsertIndicator {
       position: fixed; z-index: 100050; display: none; pointer-events: none;
@@ -7146,11 +7162,12 @@
     html[data-theme="dark"] #insertMenu button:hover:not(:disabled) { background: #333a44; }
     html[data-theme="dark"] #insertMenu button:disabled { color: #7a828c; }
 
-    html[data-theme="dark"] #pmTabMenu {
+    html[data-theme="dark"] #pmTabMenu, html[data-theme="dark"] #pmDzMenu {
       background: #262b33; border-color: #3a4048;
     }
-    html[data-theme="dark"] #pmTabMenu button { color: #d7dbe0; }
-    html[data-theme="dark"] #pmTabMenu button:hover:not(:disabled) { background: #333a44; }
+    html[data-theme="dark"] #pmTabMenu button, html[data-theme="dark"] #pmDzMenu button { color: #d7dbe0; }
+    html[data-theme="dark"] #pmTabMenu button:hover:not(:disabled),
+    html[data-theme="dark"] #pmDzMenu button:hover:not(:disabled) { background: #333a44; }
 
     /* Active/selected tab chrome matches the new dark canvas background,
        same "merges with the content below" effect as in light mode. */
@@ -7163,12 +7180,6 @@
     html[data-theme="dark"] body.pm-page-tab-dragging .pm-tab.pm-page-drag-source:hover,
     html[data-theme="dark"] .pm-tab.pm-tab-hover-activate.pm-tab-hover-activate-run {
       background: #14171c !important; color: #e8ecef !important;
-    }
-    /* The close-button hover circle used a black tint, invisible against the
-       active tab's now-dark background - use a light tint there instead. */
-    html[data-theme="dark"] .pm-tab.active .pm-tab-close:hover,
-    html[data-theme="dark"] .pm-tab.pm-tab-selected:not(.active) .pm-tab-close:hover {
-      background: rgba(255,255,255,.18);
     }
 
     html[data-theme="dark"] #stickyFileBar {
@@ -8035,6 +8046,11 @@
     <button type="button" data-action="close-others" data-i18n="tabCloseOthers">Закрыть другие вкладки</button>
     <button type="button" data-action="close-right" data-i18n="tabCloseRight">Закрыть вкладки справа</button>
     <button type="button" data-action="rename" data-i18n="tabRename">Переименовать</button>
+  </div>
+
+  <!--Right-click menu of the empty work area ("click here or drag files...")-->
+  <div id="pmDzMenu" aria-hidden="true">
+    <button type="button" data-action="paste" data-i18n="dzPasteFromClipboard">Вставить из буфера обмена (Ctrl+V)</button>
   </div>
 
   <!--File insertion position indicator between tabs-->
@@ -9149,6 +9165,11 @@
         encryptPwdPlaceholder: 'Пароль',
         encryptPwdConfirmPlaceholder: 'Повторите пароль',
         pwdShow: 'Показать пароль', pwdHide: 'Скрыть пароль',
+        dzPasteFromClipboard: 'Вставить из буфера обмена (Ctrl+V)',
+        pagesCopiedClipboardNote: 'Страницы PDF скопированы в PDF Manager: {n}',
+        pasteNothing: 'В буфере обмена нет файлов, страниц или изображения для вставки.',
+        pasteNoSupportedFiles: 'Файлы в буфере обмена не поддерживаются. Поддерживаются PDF, Word, Excel, письма (.eml, .msg) и изображения.',
+        pasteMenuHint: 'Чтобы вставить скопированные файлы или изображение, нажмите Ctrl+V',
         encryptPwdOk: 'Зашифровать',
         encryptPwdEmpty: 'Введите пароль',
         encryptPwdMismatch: 'Пароли не совпадают',
@@ -9563,6 +9584,11 @@
         encryptPwdPlaceholder: 'Password',
         encryptPwdConfirmPlaceholder: 'Repeat password',
         pwdShow: 'Show password', pwdHide: 'Hide password',
+        dzPasteFromClipboard: 'Paste from clipboard (Ctrl+V)',
+        pagesCopiedClipboardNote: 'PDF pages copied in PDF Manager: {n}',
+        pasteNothing: 'The clipboard holds no files, pages or image to paste.',
+        pasteNoSupportedFiles: 'The files in the clipboard are not supported. Supported: PDF, Word, Excel, emails (.eml, .msg) and images.',
+        pasteMenuHint: 'To paste copied files or an image, press Ctrl+V',
         encryptPwdOk: 'Encrypt',
         encryptPwdEmpty: 'Enter a password',
         encryptPwdMismatch: 'Passwords do not match',
@@ -9977,6 +10003,11 @@
         encryptPwdPlaceholder: 'Contraseña',
         encryptPwdConfirmPlaceholder: 'Repita la contraseña',
         pwdShow: 'Mostrar contraseña', pwdHide: 'Ocultar contraseña',
+        dzPasteFromClipboard: 'Pegar desde el portapapeles (Ctrl+V)',
+        pagesCopiedClipboardNote: 'Páginas PDF copiadas en PDF Manager: {n}',
+        pasteNothing: 'El portapapeles no contiene archivos, páginas ni imágenes para pegar.',
+        pasteNoSupportedFiles: 'Los archivos del portapapeles no son compatibles. Compatibles: PDF, Word, Excel, correos (.eml, .msg) e imágenes.',
+        pasteMenuHint: 'Para pegar archivos o una imagen copiados, pulse Ctrl+V',
         encryptPwdOk: 'Cifrar',
         encryptPwdEmpty: 'Introduzca una contraseña',
         encryptPwdMismatch: 'Las contraseñas no coinciden',
@@ -10457,6 +10488,11 @@
         encryptPwdPlaceholder: '密码',
         encryptPwdConfirmPlaceholder: '重复密码',
         pwdShow: '显示密码', pwdHide: '隐藏密码',
+        dzPasteFromClipboard: '从剪贴板粘贴 (Ctrl+V)',
+        pagesCopiedClipboardNote: '已在 PDF Manager 中复制 PDF 页面：{n}',
+        pasteNothing: '剪贴板中没有可粘贴的文件、页面或图片。',
+        pasteNoSupportedFiles: '剪贴板中的文件不受支持。支持：PDF、Word、Excel、邮件 (.eml, .msg) 和图片。',
+        pasteMenuHint: '要粘贴复制的文件或图片，请按 Ctrl+V',
         encryptPwdOk: '加密',
         encryptPwdEmpty: '请输入密码',
         encryptPwdMismatch: '两次输入的密码不一致',
@@ -19970,8 +20006,9 @@
             return;
           }
           if (!e.shiftKey && e.code === 'KeyV') {
-            e.preventDefault();
-            void pasteFromClipboardSmart();
+            // Not handled here: the browser's paste event that follows is
+            // the only way files copied in Explorer reach the page (and it
+            // carries a copied image too) - see pmPasteIntoDocument.
             return;
           }
         }
@@ -25949,8 +25986,9 @@
       document.getElementById('insertFromClipboardBtn').addEventListener('click', async (e) => {
         e.stopPropagation();
         const pos = pendingInsert;
+        const r = e.currentTarget.getBoundingClientRect();
         closeInsertMenu();
-        await insertFromClipboard(pos);
+        await insertFromClipboard(pos, { x: r.left + r.width / 2, y: r.bottom });
       });
 
       // Click/tap outside the menu - close
@@ -26119,9 +26157,19 @@
     }
 
     // Pastes pages from the app page buffer, or an OS clipboard image as a new page.
-    async function insertFromClipboard(insert) {
+    // On desktop a click cannot read copied files and must not bring up the
+    // clipboard permission prompt: without a granted permission it points to
+    // Ctrl+V instead, and the next Ctrl+V (within a minute) lands in this gap.
+    async function insertFromClipboard(insert, hintAt) {
       if (!pdfDoc || !insert) return;
       const insertAt = resolveInsertIndex(insert);
+      if (!isTouchDevice && !(pmPageClipboard && pmPageClipboard.pdfBytes) &&
+          !(await pmClipboardReadGranted())) {
+        pmNextPasteInsert = { insert, until: Date.now() + 60000 };
+        const at = hintAt || { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+        pmShowDzHint(t('pasteMenuHint'), at.x, at.y);
+        return;
+      }
 
       if (pmPageClipboard && pmPageClipboard.pdfBytes) {
         const wasCut = pmPageClipboard.mode === 'cut';
@@ -26138,7 +26186,13 @@
       try {
         const ok = await insertClipboardImageAt(insertAt);
         if (!ok) {
-          alert(t('alertClipboardEmpty'));
+          if (!isTouchDevice) {
+            pmNextPasteInsert = { insert, until: Date.now() + 60000 };
+            const at = hintAt || { x: window.innerWidth / 2, y: window.innerHeight / 2 };
+            pmShowDzHint(t('pasteMenuHint'), at.x, at.y);
+          } else {
+            alert(t('alertClipboardEmpty'));
+          }
         }
       } catch (err) {
         console.error(err);
@@ -26163,23 +26217,6 @@
       }
     }
 
-    /** Ctrl+V in preview: app page buffer first, else OS clipboard image as a new page. */
-    async function pasteFromClipboardSmart() {
-      if (!pdfDoc) return;
-      if (pmPageClipboard && pmPageClipboard.pdfBytes) {
-        await pastePagesFromClipboard();
-        return;
-      }
-      let insertAt = getDefaultPasteInsertAt();
-      if (hoverInsert) insertAt = resolveInsertIndex(hoverInsert);
-      else if (pendingInsert) insertAt = resolveInsertIndex(pendingInsert);
-      try {
-        await insertClipboardImageAt(insertAt);
-      } catch (err) {
-        console.error(err);
-        alert(t('alertPasteImageError') + ': ' + (err.message || err));
-      }
-    }
 
     // Inserts pages from the selected file (PDF or Office) at the specified position.
     async function insertFromFile(insert) {
@@ -27209,9 +27246,31 @@
       return pdfDoc.getPageCount();
     }
 
+    // Copying pages also puts a short note into the system clipboard. Ctrl+V
+    // in an empty document takes files from the system clipboard before the
+    // app's page buffer, and the browser does not say which was copied last:
+    // files copied in Explorer BEFORE these pages would still be pasted
+    // instead of them. The note replaces those files, so whatever the user
+    // copied last is what gets pasted. Called synchronously from the copy /
+    // cut gesture (a copy event then has the clipboard to write to).
+    function pmClaimOsClipboardForPages(count) {
+      const text = t('pagesCopiedClipboardNote', { n: count });
+      let done = false;
+      const onCopy = (e) => {
+        try { e.clipboardData.setData('text/plain', text); e.preventDefault(); done = true; } catch (_) {}
+      };
+      document.addEventListener('copy', onCopy, true);
+      try { document.execCommand('copy'); } catch (_) {}
+      document.removeEventListener('copy', onCopy, true);
+      if (!done && navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).catch(() => {});
+      }
+    }
+
     async function copySelectedPagesToClipboard() {
       const indices = getOperableSelectedIndices();
       if (!indices.length) return;
+      pmClaimOsClipboardForPages(indices.length);
       showLoading(t('loadingCopyingPages'));
       try {
         const bytes = await extractPagesAsPdfBytes(indices);
@@ -27226,6 +27285,7 @@
     async function cutSelectedPagesToClipboard() {
       const indices = getOperableSelectedIndices();
       if (!indices.length) return;
+      pmClaimOsClipboardForPages(indices.length);
       showLoading(t('loadingCuttingPages'));
       try {
         const bytes = await extractPagesAsPdfBytes(indices);
@@ -33855,6 +33915,246 @@ async function handleOsFilesDrop(e, dropSnapshot) {
   }
 }
 
+// ─── Paste into the empty work area (start screen / empty "new document") ───
+// Ctrl+V there (and the drop zone's right-click menu) takes what the
+// clipboard holds the way a drop would: files copied in Explorer, pages
+// copied in another tab (Ctrl+C / Ctrl+X), or a copied image. One file
+// opens as a document; several go through "merge" (order dialog, one
+// document), as if dragged onto the Merge button. In an empty "new
+// document" tab everything goes into that tab.
+
+// Files a paste event carries (DataTransfer.files, or file items).
+function pmFilesFromDataTransfer(dt) {
+  if (!dt) return [];
+  if (dt.files && dt.files.length) return Array.from(dt.files);
+  const out = [];
+  Array.from(dt.items || []).forEach(it => {
+    if (it.kind === 'file') { const f = it.getAsFile(); if (f) out.push(f); }
+  });
+  return out;
+}
+
+// anonymous: content with no name of its own (copied pages, a clipboard
+// image) - it becomes a "New document N" rather than a tab named after it.
+async function pmOpenPastedFiles(files, anonymous) {
+  if (pmActiveIsEmptyNewDoc()) { await mergeFilesFlow(files); return true; }
+  if (pmTabsEnabled()) {
+    if (anonymous) {
+      await pmCreateNewDocTab();
+      if (!pmActiveIsEmptyNewDoc()) return false;
+      await mergeFilesFlow(files);
+      return true;
+    }
+    if (files.length === 1) { await pmOpenOneFileAsTab(files[0], null, pmTabs.length); return true; }
+    await mergeFilesFlow(files, { forceNewTab: true });
+    return true;
+  }
+  if (files.length === 1) { loadPDF(files[0]); return true; }
+  await mergeFilesFlow(files);
+  return true;
+}
+
+// The app's own page buffer (Ctrl+C / Ctrl+X in a document) as a file.
+async function pmPastePageBuffer() {
+  if (!(pmPageClipboard && pmPageClipboard.pdfBytes)) return false;
+  const wasCut = pmPageClipboard.mode === 'cut';
+  const file = new File([pmPageClipboard.pdfBytes], 'pages.pdf', { type: 'application/pdf' });
+  const ok = await pmOpenPastedFiles([file], true);
+  if (ok && wasCut) pmPageClipboard = null;
+  return ok;
+}
+
+// Whether the empty work area is what Ctrl+V should act on.
+function pmWorkspaceTakesPaste(e) {
+  if (pdfDoc || isLoading) return false;
+  if (document.querySelector('.modal-overlay-active')) return false;
+  const tg = e && e.target;
+  if (tg && (tg.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(tg.tagName || ''))) return false;
+  return true;
+}
+
+let pmDzPasteProbe = null;   // set while the menu tries to get a real paste event
+async function pmPasteIntoWorkspace(files) {
+  const all = files || [];
+  const supported = filterSupportedDroppedFiles(all);
+  if (supported.length) return pmOpenPastedFiles(supported, false);
+  if (all.length) { alert(t('pasteNoSupportedFiles')); return false; }
+  return pmPastePageBuffer();
+}
+
+// Ctrl+V in an open document (preview, selection mode), through the paste
+// event: files copied in Explorer (or a copied image) go in at the paste
+// point - several through the order dialog, like a drop on the insertion
+// line; with none, the app's page buffer. What was copied last wins: copying
+// pages replaces the system clipboard (pmClaimOsClipboardForPages), so files
+// can only be in it if they were copied after the pages.
+let pmNextPasteInsert = null;   // { insert, until } - gap chosen in the insert menu
+function pmDocTakesPaste(e) {
+  if (!pdfDoc || isLoading || isTouchDevice) return false;
+  if (readModeActive || interactionMode !== 'select') return false;
+  if (typeof pmPageEditorOpen === 'function' && pmPageEditorOpen()) return false;
+  if (document.querySelector('.modal-overlay-active')) return false;
+  const tg = e && e.target;
+  if (tg && (tg.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(tg.tagName || ''))) return false;
+  return true;
+}
+function pmPasteInsertPoint() {
+  const count = pdfDoc.getPageCount();
+  let at;
+  if (pmNextPasteInsert && pmNextPasteInsert.until > Date.now()) at = resolveInsertIndex(pmNextPasteInsert.insert);
+  else if (hoverInsert) at = resolveInsertIndex(hoverInsert);
+  else if (pendingInsert) at = resolveInsertIndex(pendingInsert);
+  else at = getDefaultPasteInsertAt();
+  pmNextPasteInsert = null;
+  at = Math.max(0, Math.min(count, at));
+  return { at, insert: at < count ? { targetIndex: at, insertBefore: true } : { targetIndex: count - 1, insertBefore: false } };
+}
+async function pmPasteIntoDocument(files) {
+  const supported = filterSupportedDroppedFiles(files || []);
+  if (supported.length) {
+    const { insert } = pmPasteInsertPoint();
+    if (supported.length > 1) {
+      showMergeOrderModal(supported, async (ordered) => { await insertFilesAtPosition(ordered, insert); });
+    } else {
+      await insertFilesAtPosition(supported, insert);
+    }
+    return;
+  }
+  if (files && files.length) { alert(t('pasteNoSupportedFiles')); return; }
+  if (pmPageClipboard && pmPageClipboard.pdfBytes) {
+    const { at } = pmPasteInsertPoint();
+    const once = pmPageClipboard.mode === 'cut';
+    await insertPagesFromPdfBytes(pmPageClipboard.pdfBytes, at);
+    if (once) pmPageClipboard = null;
+  }
+}
+
+document.addEventListener('paste', (e) => {
+  if (pmDzPasteProbe) {           // the menu's own attempt, below
+    e.preventDefault();
+    pmDzPasteProbe(pmFilesFromDataTransfer(e.clipboardData));
+    return;
+  }
+  if (pdfDoc) {
+    if (!pmDocTakesPaste(e)) return;
+    e.preventDefault();
+    void pmPasteIntoDocument(pmFilesFromDataTransfer(e.clipboardData)).catch(err => {
+      console.error(err);
+      alert(t('alertPasteError') + ': ' + (err.message || err));
+    });
+    return;
+  }
+  if (!pmWorkspaceTakesPaste(e)) return;
+  e.preventDefault();
+  const files = pmFilesFromDataTransfer(e.clipboardData);
+  void (async () => {
+    const ok = await pmPasteIntoWorkspace(files);
+    if (!ok && !files.length) alert(t('pasteNothing'));
+  })();
+});
+
+// Whether reading the clipboard would go through without asking: the menu
+// never brings up the browser's permission prompt itself - the usual reason
+// to use it is files copied in Explorer, which no permission would make
+// readable anyway.
+async function pmClipboardReadGranted() {
+  try {
+    const st = await navigator.permissions.query({ name: 'clipboard-read' });
+    return st && st.state === 'granted';
+  } catch (_) { return false; }
+}
+
+// A short note next to where the menu was, gone after a few seconds or on
+// the next click / key (in place of a blocking dialog).
+function pmShowDzHint(text, x, y) {
+  let el = document.getElementById('pmDzHint');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'pmDzHint';
+    el.setAttribute('role', 'status');
+    document.body.appendChild(el);
+    const hide = () => el.classList.remove('show');
+    document.addEventListener('mousedown', hide, true);
+    document.addEventListener('keydown', hide, true);
+  }
+  el.textContent = text;
+  el.classList.add('show');
+  const w = el.offsetWidth, h = el.offsetHeight;
+  el.style.left = Math.max(8, Math.min(x - w / 2, window.innerWidth - w - 8)) + 'px';
+  el.style.top = Math.max(8, Math.min(y + 12, window.innerHeight - h - 8)) + 'px';
+  clearTimeout(el._timer);
+  el._timer = setTimeout(() => el.classList.remove('show'), 5000);
+}
+
+// The menu item: a click is not a paste, and browsers hand copied FILES to a
+// page only with a real paste (Ctrl+V). Ask for one anyway (some shells allow
+// it), then take what can be read directly: the page buffer, or - if reading
+// is already allowed - a clipboard image; otherwise point to Ctrl+V.
+async function pmDzPasteFromMenu(x, y) {
+  if (isLoading) return;
+  let files = null;
+  try {
+    files = await new Promise((resolve) => {
+      const sink = document.createElement('div');
+      sink.contentEditable = 'true';
+      sink.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;';
+      document.body.appendChild(sink);
+      const done = (v) => { pmDzPasteProbe = null; sink.remove(); resolve(v); };
+      pmDzPasteProbe = (f) => done(f);
+      sink.focus();
+      let ok = false;
+      try { ok = document.execCommand('paste'); } catch (_) {}
+      if (!ok) done(null);
+      else setTimeout(() => { if (pmDzPasteProbe) done(null); }, 300);
+    });
+  } catch (_) { files = null; }
+  if (files && files.length) { await pmPasteIntoWorkspace(files); return; }
+  if (await pmPastePageBuffer()) return;
+  if (await pmClipboardReadGranted()) {
+    const clip = await pmReadSystemClipboardImage();
+    const img = clip && pmClipboardImageToFile(clip);
+    if (img) { await pmOpenPastedFiles([img], true); return; }
+  }
+  pmShowDzHint(t('pasteMenuHint'), x, y);
+}
+
+(function initDropZoneMenu() {
+  const menu = document.getElementById('pmDzMenu');
+  if (!menu || isTouchDevice) return;
+  const close = () => { menu.style.display = 'none'; menu.setAttribute('aria-hidden', 'true'); };
+  dropZone.addEventListener('contextmenu', (e) => {
+    if (isLoading || pdfDoc) return;
+    e.preventDefault();
+    if (typeof pmCloseTabMenu === 'function') pmCloseTabMenu();
+    menu._at = { x: e.clientX, y: e.clientY };   // the hint appears under this point
+    menu.style.display = 'block';
+    menu.setAttribute('aria-hidden', 'false');
+    const w = menu.offsetWidth || 260, h = menu.offsetHeight || 50;
+    let x = e.clientX + 4, y = e.clientY + 4;
+    if (x + w > window.innerWidth - 6) x = e.clientX - w - 4;
+    if (y + h > window.innerHeight - 6) y = e.clientY - h - 4;
+    menu.style.left = Math.max(6, x) + 'px';
+    menu.style.top = Math.max(6, y) + 'px';
+  });
+  menu.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-action]');
+    if (!btn) return;
+    const at = menu._at || { x: e.clientX, y: e.clientY };
+    close();
+    if (btn.dataset.action === 'paste') void pmDzPasteFromMenu(at.x, at.y);
+  });
+  // Any other left click, a right click elsewhere, Esc, scroll or a
+  // resize puts it away.
+  document.addEventListener('mousedown', (e) => {
+    if (menu.style.display === 'block' && !menu.contains(e.target)) close();
+  }, true);
+  document.addEventListener('keydown', (e) => {
+    if (menu.style.display === 'block' && e.key === 'Escape') close();
+  });
+  window.addEventListener('resize', close);
+  window.addEventListener('blur', close);
+})();
+
 // Open files from Explorer in separate tabs: supported filter,
 // sorting alphabetically, then opening (those that fit open, then -
 // standard message from pmOpenOneFileAsTab about the need to close tabs).
@@ -34102,6 +34402,13 @@ function pmHideTabInsertIndicator() {
   if (ind) ind.style.display = 'none';
   pmTabInsertIndex = null;
   document.body.classList.remove('pm-tab-file-drag');
+}
+
+// Close icon of a tab: centred in the 16px circle whatever the font.
+// (A function, not a const: tabs can be drawn before this line has run.)
+function pmTabCloseIcon() {
+  return '<svg viewBox="0 0 10 10" width="8" height="8" aria-hidden="true">' +
+    '<path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>';
 }
 
 // Tab context menu
@@ -34695,10 +35002,12 @@ function pmRenderBar() {
     el.title = tab.fileName || '';
     el.dataset.tabId = tab.id;
     const dirty = (tab.id === pmActiveId) ? documentDirty : tab.dirty;
+    // A drawn cross (not the × character, which sits on the text baseline
+    // and came out a pixel or two above the centre of its hover circle).
     el.innerHTML =
       '<span class="pm-tab-star"' + (dirty ? '' : ' hidden') + '>*</span>' +
       '<span class="pm-tab-label">' + escapeHtml(tab.fileName || tabNoNameLabel) + '</span>' +
-      '<span class="pm-tab-close" title="' + escapeHtml(tabCloseLabel) + '">&times;</span>';
+      '<span class="pm-tab-close" title="' + escapeHtml(tabCloseLabel) + '">' + pmTabCloseIcon() + '</span>';
     el.addEventListener('click', (e) => {
       pmTabSyncModifiers(e);
       if (pmDragSuppressClick) { pmDragSuppressClick = false; e.stopPropagation(); return; }
@@ -62627,6 +62936,13 @@ function pmWmRunDialog() {
     const navLabel = $('pmWmNavLabel'), prevBtn = $('pmWmPrev'), nextBtn = $('pmWmNext');
 
     // ---- page targets ------------------------------------------------
+    // The preview opens on the (first) selected page even though the mark
+    // goes on all pages by default; switching the page choice keeps it on
+    // that page while it is among the targets.
+    function startPreviewPos() {
+      if (!selected.length) return 0;
+      return Math.max(0, targetIndices().indexOf(selected[0]));
+    }
     function targetIndices() {
       let list;
       if (pagesMode === 'selected') list = selected.slice();
@@ -63038,7 +63354,7 @@ function pmWmRunDialog() {
     box.querySelectorAll('input[name="pmWmPages"]').forEach(r => r.addEventListener('change', () => {
       if (!r.checked) return;
       pagesMode = r.value;
-      previewPos = 0;
+      previewPos = startPreviewPos();
       errEl.textContent = '';
       syncControls();
       if (pagesMode === 'range') rangeIn.focus();
@@ -63046,7 +63362,7 @@ function pmWmRunDialog() {
     }));
     rangeIn.addEventListener('input', () => {
       rangeText = rangeIn.value;
-      previewPos = 0;
+      previewPos = startPreviewPos();
       errEl.textContent = '';
       loadPreviewPage();
     });
@@ -63185,6 +63501,7 @@ function pmWmRunDialog() {
       textCache = null;
       draw();
     });
+    previewPos = startPreviewPos();
     loadPreviewPage();
     textIn.focus();
     textIn.select();
