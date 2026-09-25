@@ -62936,6 +62936,13 @@ function pmWmRunDialog() {
     const navLabel = $('pmWmNavLabel'), prevBtn = $('pmWmPrev'), nextBtn = $('pmWmNext');
 
     // ---- page targets ------------------------------------------------
+    // The preview opens on the (first) selected page even though the mark
+    // goes on all pages by default; switching the page choice keeps it on
+    // that page while it is among the targets.
+    function startPreviewPos() {
+      if (!selected.length) return 0;
+      return Math.max(0, targetIndices().indexOf(selected[0]));
+    }
     function targetIndices() {
       let list;
       if (pagesMode === 'selected') list = selected.slice();
@@ -63347,7 +63354,7 @@ function pmWmRunDialog() {
     box.querySelectorAll('input[name="pmWmPages"]').forEach(r => r.addEventListener('change', () => {
       if (!r.checked) return;
       pagesMode = r.value;
-      previewPos = 0;
+      previewPos = startPreviewPos();
       errEl.textContent = '';
       syncControls();
       if (pagesMode === 'range') rangeIn.focus();
@@ -63355,7 +63362,7 @@ function pmWmRunDialog() {
     }));
     rangeIn.addEventListener('input', () => {
       rangeText = rangeIn.value;
-      previewPos = 0;
+      previewPos = startPreviewPos();
       errEl.textContent = '';
       loadPreviewPage();
     });
@@ -63494,6 +63501,7 @@ function pmWmRunDialog() {
       textCache = null;
       draw();
     });
+    previewPos = startPreviewPos();
     loadPreviewPage();
     textIn.focus();
     textIn.select();
