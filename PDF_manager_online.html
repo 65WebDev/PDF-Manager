@@ -3774,6 +3774,34 @@
         forced-color-adjust: none;
       }
     }
+    /*Span geometry of the pdf.js text layer. Since pdf.js 6 TextLayer no
+       longer writes font-size/transform inline: it sets --font-height,
+       --scale-x and --rotate on each span (and --min-font-size on the
+       container) and leaves turning them into a size and a transform to
+       pdf_viewer.css, which this app does not load. Without these rules
+       every span laid out at the inherited 16px, unstretched and unrotated,
+       so the invisible text drifted off the glyphs it stands for and a drag
+       selected the wrong words. Copied from pdf.js's own stylesheet, and
+       unconditional, since the preview grid and the page editor both use
+       the layer in every mode. Nested spans are positioned in % of the page
+       too, so a .markedContent wrapper must not form a box of its own
+       (display:contents), or everything inside it collapses to its top.*/
+    .textLayer.page-text-layer-inner {
+      --min-font-size: 1;
+      --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+      --min-font-size-inv: calc(1 / var(--min-font-size));
+    }
+    .textLayer.page-text-layer-inner > :not(.markedContent),
+    .textLayer.page-text-layer-inner .markedContent span:not(.markedContent) {
+      --font-height: 0;
+      font-size: calc(var(--text-scale-factor) * var(--font-height));
+      --scale-x: 1;
+      --rotate: 0deg;
+      transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+    }
+    .textLayer.page-text-layer-inner .markedContent {
+      display: contents;
+    }
     /*Safety net, deliberately OUTSIDE the "@media (pointer: fine)" gate above and
        marked !important: the text layer's own glyphs must never actually be
        painted - they exist purely so the browser has real characters to select
