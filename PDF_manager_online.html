@@ -622,18 +622,18 @@
       box-shadow: 0 4px 16px rgba(0,0,0,.3);
     }
     /*Tab context menu*/
-    #pmTabMenu {
+    #pmTabMenu, #pmDzMenu {
       position: fixed; z-index: 100060; display: none;
       background: #fff; border: 1px solid #ddd; border-radius: 8px;
       box-shadow: 0 6px 20px rgba(0,0,0,0.25); padding: 6px; min-width: 210px;
     }
-    #pmTabMenu button {
+    #pmTabMenu button, #pmDzMenu button {
       display: block; width: 100%; border: none; background: transparent;
       padding: 10px 12px; border-radius: 6px; cursor: pointer;
       font-size: 14px; color: #2c3e50; text-align: left;
     }
-    #pmTabMenu button:hover:not(:disabled) { background: #eef4fb; }
-    #pmTabMenu button:disabled { opacity: .45; cursor: default; }
+    #pmTabMenu button:hover:not(:disabled), #pmDzMenu button:hover:not(:disabled) { background: #eef4fb; }
+    #pmTabMenu button:disabled, #pmDzMenu button:disabled { opacity: .45; cursor: default; }
     /*File insertion indicator between tabs*/
     #pmTabInsertIndicator {
       position: fixed; z-index: 100050; display: none; pointer-events: none;
@@ -7153,11 +7153,12 @@
     html[data-theme="dark"] #insertMenu button:hover:not(:disabled) { background: #333a44; }
     html[data-theme="dark"] #insertMenu button:disabled { color: #7a828c; }
 
-    html[data-theme="dark"] #pmTabMenu {
+    html[data-theme="dark"] #pmTabMenu, html[data-theme="dark"] #pmDzMenu {
       background: #262b33; border-color: #3a4048;
     }
-    html[data-theme="dark"] #pmTabMenu button { color: #d7dbe0; }
-    html[data-theme="dark"] #pmTabMenu button:hover:not(:disabled) { background: #333a44; }
+    html[data-theme="dark"] #pmTabMenu button, html[data-theme="dark"] #pmDzMenu button { color: #d7dbe0; }
+    html[data-theme="dark"] #pmTabMenu button:hover:not(:disabled),
+    html[data-theme="dark"] #pmDzMenu button:hover:not(:disabled) { background: #333a44; }
 
     /* Active/selected tab chrome matches the new dark canvas background,
        same "merges with the content below" effect as in light mode. */
@@ -8036,6 +8037,11 @@
     <button type="button" data-action="close-others" data-i18n="tabCloseOthers">Закрыть другие вкладки</button>
     <button type="button" data-action="close-right" data-i18n="tabCloseRight">Закрыть вкладки справа</button>
     <button type="button" data-action="rename" data-i18n="tabRename">Переименовать</button>
+  </div>
+
+  <!--Right-click menu of the empty work area ("click here or drag files...")-->
+  <div id="pmDzMenu" aria-hidden="true">
+    <button type="button" data-action="paste" data-i18n="dzPasteFromClipboard">Вставить из буфера обмена (Ctrl+V)</button>
   </div>
 
   <!--File insertion position indicator between tabs-->
@@ -9150,6 +9156,10 @@
         encryptPwdPlaceholder: 'Пароль',
         encryptPwdConfirmPlaceholder: 'Повторите пароль',
         pwdShow: 'Показать пароль', pwdHide: 'Скрыть пароль',
+        dzPasteFromClipboard: 'Вставить из буфера обмена (Ctrl+V)',
+        pasteNothing: 'В буфере обмена нет файлов, страниц или изображения для вставки.',
+        pasteNoSupportedFiles: 'Файлы в буфере обмена не поддерживаются. Поддерживаются PDF, Word, Excel, письма (.eml, .msg) и изображения.',
+        pasteMenuNothing: 'В буфере обмена нет скопированных страниц или изображения. Скопированные файлы браузер передаёт только по сочетанию клавиш - нажмите Ctrl+V.',
         encryptPwdOk: 'Зашифровать',
         encryptPwdEmpty: 'Введите пароль',
         encryptPwdMismatch: 'Пароли не совпадают',
@@ -9564,6 +9574,10 @@
         encryptPwdPlaceholder: 'Password',
         encryptPwdConfirmPlaceholder: 'Repeat password',
         pwdShow: 'Show password', pwdHide: 'Hide password',
+        dzPasteFromClipboard: 'Paste from clipboard (Ctrl+V)',
+        pasteNothing: 'The clipboard holds no files, pages or image to paste.',
+        pasteNoSupportedFiles: 'The files in the clipboard are not supported. Supported: PDF, Word, Excel, emails (.eml, .msg) and images.',
+        pasteMenuNothing: 'The clipboard holds no copied pages or image. Browsers hand over copied files only through the keyboard shortcut - press Ctrl+V.',
         encryptPwdOk: 'Encrypt',
         encryptPwdEmpty: 'Enter a password',
         encryptPwdMismatch: 'Passwords do not match',
@@ -9978,6 +9992,10 @@
         encryptPwdPlaceholder: 'Contraseña',
         encryptPwdConfirmPlaceholder: 'Repita la contraseña',
         pwdShow: 'Mostrar contraseña', pwdHide: 'Ocultar contraseña',
+        dzPasteFromClipboard: 'Pegar desde el portapapeles (Ctrl+V)',
+        pasteNothing: 'El portapapeles no contiene archivos, páginas ni imágenes para pegar.',
+        pasteNoSupportedFiles: 'Los archivos del portapapeles no son compatibles. Compatibles: PDF, Word, Excel, correos (.eml, .msg) e imágenes.',
+        pasteMenuNothing: 'El portapapeles no contiene páginas copiadas ni una imagen. Los navegadores solo entregan archivos copiados mediante el atajo de teclado: pulse Ctrl+V.',
         encryptPwdOk: 'Cifrar',
         encryptPwdEmpty: 'Introduzca una contraseña',
         encryptPwdMismatch: 'Las contraseñas no coinciden',
@@ -10458,6 +10476,10 @@
         encryptPwdPlaceholder: '密码',
         encryptPwdConfirmPlaceholder: '重复密码',
         pwdShow: '显示密码', pwdHide: '隐藏密码',
+        dzPasteFromClipboard: '从剪贴板粘贴 (Ctrl+V)',
+        pasteNothing: '剪贴板中没有可粘贴的文件、页面或图片。',
+        pasteNoSupportedFiles: '剪贴板中的文件不受支持。支持：PDF、Word、Excel、邮件 (.eml, .msg) 和图片。',
+        pasteMenuNothing: '剪贴板中没有复制的页面或图片。浏览器仅通过快捷键传递复制的文件 - 请按 Ctrl+V。',
         encryptPwdOk: '加密',
         encryptPwdEmpty: '请输入密码',
         encryptPwdMismatch: '两次输入的密码不一致',
@@ -33855,6 +33877,153 @@ async function handleOsFilesDrop(e, dropSnapshot) {
     });
   }
 }
+
+// ─── Paste into the empty work area (start screen / empty "new document") ───
+// Ctrl+V there (and the drop zone's right-click menu) takes what the
+// clipboard holds the way a drop would: files copied in Explorer, pages
+// copied in another tab (Ctrl+C / Ctrl+X), or a copied image. One file
+// opens as a document; several go through "merge" (order dialog, one
+// document), as if dragged onto the Merge button. In an empty "new
+// document" tab everything goes into that tab.
+
+// Files a paste event carries (DataTransfer.files, or file items).
+function pmFilesFromDataTransfer(dt) {
+  if (!dt) return [];
+  if (dt.files && dt.files.length) return Array.from(dt.files);
+  const out = [];
+  Array.from(dt.items || []).forEach(it => {
+    if (it.kind === 'file') { const f = it.getAsFile(); if (f) out.push(f); }
+  });
+  return out;
+}
+
+// anonymous: content with no name of its own (copied pages, a clipboard
+// image) - it becomes a "New document N" rather than a tab named after it.
+async function pmOpenPastedFiles(files, anonymous) {
+  if (pmActiveIsEmptyNewDoc()) { await mergeFilesFlow(files); return true; }
+  if (pmTabsEnabled()) {
+    if (anonymous) {
+      await pmCreateNewDocTab();
+      if (!pmActiveIsEmptyNewDoc()) return false;
+      await mergeFilesFlow(files);
+      return true;
+    }
+    if (files.length === 1) { await pmOpenOneFileAsTab(files[0], null, pmTabs.length); return true; }
+    await mergeFilesFlow(files, { forceNewTab: true });
+    return true;
+  }
+  if (files.length === 1) { loadPDF(files[0]); return true; }
+  await mergeFilesFlow(files);
+  return true;
+}
+
+// The app's own page buffer (Ctrl+C / Ctrl+X in a document) as a file.
+async function pmPastePageBuffer() {
+  if (!(pmPageClipboard && pmPageClipboard.pdfBytes)) return false;
+  const wasCut = pmPageClipboard.mode === 'cut';
+  const file = new File([pmPageClipboard.pdfBytes], 'pages.pdf', { type: 'application/pdf' });
+  const ok = await pmOpenPastedFiles([file], true);
+  if (ok && wasCut) pmPageClipboard = null;
+  return ok;
+}
+
+// Whether the empty work area is what Ctrl+V should act on.
+function pmWorkspaceTakesPaste(e) {
+  if (pdfDoc || isLoading) return false;
+  if (document.querySelector('.modal-overlay-active')) return false;
+  const tg = e && e.target;
+  if (tg && (tg.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(tg.tagName || ''))) return false;
+  return true;
+}
+
+let pmDzPasteProbe = null;   // set while the menu tries to get a real paste event
+async function pmPasteIntoWorkspace(files) {
+  const all = files || [];
+  const supported = filterSupportedDroppedFiles(all);
+  if (supported.length) return pmOpenPastedFiles(supported, false);
+  if (all.length) { alert(t('pasteNoSupportedFiles')); return false; }
+  return pmPastePageBuffer();
+}
+
+document.addEventListener('paste', (e) => {
+  if (pmDzPasteProbe) {           // the menu's own attempt, below
+    e.preventDefault();
+    pmDzPasteProbe(pmFilesFromDataTransfer(e.clipboardData));
+    return;
+  }
+  if (!pmWorkspaceTakesPaste(e)) return;
+  e.preventDefault();
+  const files = pmFilesFromDataTransfer(e.clipboardData);
+  void (async () => {
+    const ok = await pmPasteIntoWorkspace(files);
+    if (!ok && !files.length) alert(t('pasteNothing'));
+  })();
+});
+
+// The menu item: a click is not a paste, and browsers hand copied FILES to a
+// page only with a real paste (Ctrl+V). Ask for one anyway (some shells allow
+// it), then fall back to what can be read directly: the page buffer, or an
+// image via the async clipboard API.
+async function pmDzPasteFromMenu() {
+  if (isLoading) return;
+  let files = null;
+  try {
+    files = await new Promise((resolve) => {
+      const sink = document.createElement('div');
+      sink.contentEditable = 'true';
+      sink.style.cssText = 'position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0;';
+      document.body.appendChild(sink);
+      const done = (v) => { pmDzPasteProbe = null; sink.remove(); resolve(v); };
+      pmDzPasteProbe = (f) => done(f);
+      sink.focus();
+      let ok = false;
+      try { ok = document.execCommand('paste'); } catch (_) {}
+      if (!ok) done(null);
+      else setTimeout(() => { if (pmDzPasteProbe) done(null); }, 300);
+    });
+  } catch (_) { files = null; }
+  if (files && files.length) { await pmPasteIntoWorkspace(files); return; }
+  if (await pmPastePageBuffer()) return;
+  const clip = await pmReadSystemClipboardImage();
+  const img = clip && pmClipboardImageToFile(clip);
+  if (img) { await pmOpenPastedFiles([img], true); return; }
+  alert(t('pasteMenuNothing'));
+}
+
+(function initDropZoneMenu() {
+  const menu = document.getElementById('pmDzMenu');
+  if (!menu || isTouchDevice) return;
+  const close = () => { menu.style.display = 'none'; menu.setAttribute('aria-hidden', 'true'); };
+  dropZone.addEventListener('contextmenu', (e) => {
+    if (isLoading || pdfDoc) return;
+    e.preventDefault();
+    if (typeof pmCloseTabMenu === 'function') pmCloseTabMenu();
+    menu.style.display = 'block';
+    menu.setAttribute('aria-hidden', 'false');
+    const w = menu.offsetWidth || 260, h = menu.offsetHeight || 50;
+    let x = e.clientX + 4, y = e.clientY + 4;
+    if (x + w > window.innerWidth - 6) x = e.clientX - w - 4;
+    if (y + h > window.innerHeight - 6) y = e.clientY - h - 4;
+    menu.style.left = Math.max(6, x) + 'px';
+    menu.style.top = Math.max(6, y) + 'px';
+  });
+  menu.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-action]');
+    if (!btn) return;
+    close();
+    if (btn.dataset.action === 'paste') void pmDzPasteFromMenu();
+  });
+  // Any other left click, a right click elsewhere, Esc, scroll or a
+  // resize puts it away.
+  document.addEventListener('mousedown', (e) => {
+    if (menu.style.display === 'block' && !menu.contains(e.target)) close();
+  }, true);
+  document.addEventListener('keydown', (e) => {
+    if (menu.style.display === 'block' && e.key === 'Escape') close();
+  });
+  window.addEventListener('resize', close);
+  window.addEventListener('blur', close);
+})();
 
 // Open files from Explorer in separate tabs: supported filter,
 // sorting alphabetically, then opening (those that fit open, then -
