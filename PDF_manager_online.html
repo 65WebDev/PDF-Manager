@@ -48437,13 +48437,20 @@ function peSetFormatBtnActive(id, active) {
   if (el) el.classList.toggle('active', !!active);
 }
 
-function peSyncPropsSizeUi(fontPt) {
+// `forKey` names the block(s) the size belongs to. The number field keeps
+// what is being typed into it while it has focus - but only for the same
+// block: typing a size leaves the focus in the field, and a click on another
+// text block does not take it away, so without the key the field went on
+// showing the previous block's size.
+function peSyncPropsSizeUi(fontPt, forKey) {
   const sizeEl = document.getElementById('pePropSize');
   const sizeNumEl = document.getElementById('pePropSizeNum');
   if (!sizeEl || !sizeNumEl || fontPt == null) return;
   const v = peRoundPt(fontPt);
   sizeEl.value = String(Math.max(parseInt(sizeEl.min, 10), Math.min(parseInt(sizeEl.max, 10), Math.round(v))));
-  if (document.activeElement !== sizeNumEl) sizeNumEl.value = v;
+  const key = forKey != null ? String(forKey) : (sizeNumEl.dataset.peFor || '');
+  if (document.activeElement !== sizeNumEl || sizeNumEl.dataset.peFor !== key) sizeNumEl.value = v;
+  sizeNumEl.dataset.peFor = key;
 }
 
 function peNormalizeTextAlign(o) {
@@ -48902,7 +48909,7 @@ function peUpdateProps() {
     if (sSep) sSep.style.display = '';
     if (bgW) bgW.style.display = '';
     if (fRow) fRow.style.display = '';
-    peSyncPropsSizeUi(o.fontPt);
+    peSyncPropsSizeUi(o.fontPt, info.mode === 'multi' ? info.objs.map(x => x.id).join(',') : o.id);
     // Programmatically overwriting .value of the active (in focus) input[type=color] —
     // precisely when its native pop-up palette is open - in a number of cases
     // browsers immediately closes this popup. We just recorded it there anyway
@@ -52918,7 +52925,7 @@ function peProcessDrag(clientX, clientY) {
       peTextSetPosFromFixedCorner(d.obj, d.oppCorner, d.anchorX, d.anchorY, W, H);
       peRedrawObjects();
     }
-    if (peState.sel === d.obj) peSyncPropsSizeUi(d.obj.fontPt);
+    if (peState.sel === d.obj) peSyncPropsSizeUi(d.obj.fontPt, d.obj.id);
   } else if (d.kind === 'freehand-draw') {
     if (!d.obj || !d.points || !d.points.length) return;
     const last = d.points[d.points.length - 1];
