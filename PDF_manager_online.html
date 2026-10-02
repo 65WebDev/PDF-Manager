@@ -3575,6 +3575,15 @@
        Redact tools) made the pdf.js textLayer participate in document flow
        under the canvas and roughly doubled #peStagePad height — a vertical
        scrollbar appeared on #peStageWrap even though the page still fit. */
+    /*Guide line while a text block snaps to another one's edge (peSnapTextBlockX).*/
+    #peStage > .pe-snap-guide {
+      position: absolute;
+      width: 0;
+      border-left: 1px dashed #e0368f;
+      margin-left: -0.5px;
+      pointer-events: none;
+      z-index: 50;
+    }
     #peTextLayer {
       pointer-events: none;
       position: absolute;
@@ -52481,6 +52490,101 @@ function peApplyGroupMove(d, pt, W, H) {
   peRedrawObjects();
 }
 
+// ── Aligning a text block with the other text blocks ─────────────────────
+// Moving a text block pulls its left edge, centre or right edge onto the
+// same line of another text block on the page once within PE_TEXT_SNAP_PX,
+// and a guide line shows which. Alt held while dragging moves freely.
+// Rotated blocks neither snap nor attract: their box is not their text's.
+const PE_TEXT_SNAP_PX = 6;
+
+/** Stage-space box of a text block as drawn (left/centre/right, top/bottom). */
+function peTextBlockBox(o) {
+  if (!o || o.type !== 'text' || o.rot) return null;
+  const el = peGetTextOuterEl(o);
+  if (!el) return null;
+  const r = peStageRectOfEl(el);
+  if (!(r.right > r.left)) return null;
+  return { left: r.left, right: r.right, cx: (r.left + r.right) / 2, top: r.top, bottom: r.bottom };
+}
+
+function peOtherTextBlockBoxes(o) {
+  if (!peState) return [];
+  return peState.objects
+    .filter(x => x !== o && x.type === 'text' && !x.rot && peTextHasContent(x))
+    .map(x => ({ obj: x, box: peTextBlockBox(x) }))
+    .filter(x => x.box);
+}
+
+function peClearTextSnapGuides() {
+  document.querySelectorAll('#peStage > .pe-snap-guide').forEach(el => el.remove());
+}
+
+function peShowTextSnapGuide(x, top, bottom) {
+  // On the stage, beside #peObjLayer: redrawing the objects rebuilds that
+  // layer on every step of the drag.
+  const layer = document.getElementById('peStage');
+  if (!layer) return;
+  const g = document.createElement('div');
+  g.className = 'pe-snap-guide';
+  g.style.left = Math.round(x) + 'px';
+  g.style.top = Math.round(top) + 'px';
+  g.style.height = Math.max(1, Math.round(bottom - top)) + 'px';
+  layer.appendChild(g);
+}
+
+/**
+ * For a text block being moved to fractional x (`fx`): the x that puts one
+ * of its edges exactly on the nearest matching edge of another text block,
+ * and draws the guide for it - or `fx` unchanged, with no guide.
+ * `box0`/`x0` are its box and o.x before this drag step, which give its
+ * width and how far its drawn left edge sits from o.x.
+ */
+function peSnapTextBlockX(o, fx, W, box0, x0, free) {
+  peClearTextSnapGuides();
+  if (free || !box0 || !(W > 0)) return fx;
+  const offset = box0.left - x0 * W;
+  const width = box0.right - box0.left;
+  const left = fx * W + offset;
+  const mine = { left, cx: left + width / 2, right: left + width };
+  let best = null;
+  peOtherTextBlockBoxes(o).forEach(({ box }) => {
+    ['left', 'cx', 'right'].forEach(k => {
+      const d = box[k] - mine[k];
+      if (Math.abs(d) <= PE_TEXT_SNAP_PX && (!best || Math.abs(d) < Math.abs(best.d))) best = { d, k, x: box[k], box };
+    });
+  });
+  if (!best) return fx;
+  // Every block lined up on that edge gets the guide, not only the nearest.
+  const at = best.x;
+  const dy = (box0.bottom - box0.top);
+  let top = box0.top, bottom = box0.top + dy;
+  peOtherTextBlockBoxes(o).forEach(({ box }) => {
+    if (Math.abs(box[best.k] - at) < 0.5) { top = Math.min(top, box.top); bottom = Math.max(bottom, box.bottom); }
+  });
+  const snapped = fx + best.d / W;
+  // The moved block's own top/bottom at its new place.
+  peShowTextSnapGuide(at, Math.min(top, box0.top), Math.max(bottom, box0.bottom));
+  return snapped;
+}
+window.addEventListener('pointerup', peClearTextSnapGuides);
+window.addEventListener('pointercancel', peClearTextSnapGuides);
+
+/** peSnapTextBlockX for the block a move drag carries (text blocks only). */
+function peDragTextSnapX(d, fx, W) {
+  if (!d || !d.obj || d.obj.type !== 'text' || d.obj.rot) return fx;
+  return peSnapTextBlockX(d.obj, fx, W, peTextBlockBox(d.obj), d.obj.x, !!d.altKey);
+}
+
+/** Text tool: a new block placed near another block's left edge starts on it. */
+function peSnapNewTextBlockX(fx, W) {
+  let best = null;
+  peOtherTextBlockBoxes(null).forEach(({ obj, box }) => {
+    const d = Math.abs(box.left - fx * W);
+    if (d <= PE_TEXT_SNAP_PX * 1.5 && (!best || d < best.d)) best = { d, x: obj.x };
+  });
+  return best ? best.x : fx;
+}
+
 function peProcessDrag(clientX, clientY) {
   if (!peState || !peState.drag) return;
   const d = peState.drag;
@@ -52562,7 +52666,7 @@ function peProcessDrag(clientX, clientY) {
     if (d.kind === 'callout-box-move') {
       // fall through below
     } else {
-      const c = peClampObjXY(d.obj, d.ox + dx / W, d.oy + dy / H);
+      const c = peClampObjXY(d.obj, peDragTextSnapX(d, d.ox + dx / W, W), d.oy + dy / H);
       const ndx = c.x - d.ox, ndy = c.y - d.oy;
       d.obj.x = c.x; d.obj.y = c.y;
       if (d.obj.type === 'callout') {
@@ -52599,7 +52703,7 @@ function peProcessDrag(clientX, clientY) {
     host.boxY = nby;
     peRedrawObjects();
   } else if (d.kind === 'move') {
-    const c = peClampObjXY(d.obj, d.ox + dx / W, d.oy + dy / H);
+    const c = peClampObjXY(d.obj, peDragTextSnapX(d, d.ox + dx / W, W), d.oy + dy / H);
     const ndx = c.x - d.ox, ndy = c.y - d.oy;
     d.obj.x = c.x; d.obj.y = c.y;
     if (d.obj.type === 'callout') {
@@ -54515,7 +54619,8 @@ function peObjMouseDown(e, o) {
       if (touchLike || (typeof isTouchDevice !== 'undefined' && isTouchDevice)) {
         peArmOskProxy(e.clientX, e.clientY);
       }
-      const o = { id: ++peState.seq, type: 'text', text: '', fontPt: 16, color: '#d90000', x: pt.x / W, y: pt.y / H };
+      const o = { id: ++peState.seq, type: 'text', text: '', fontPt: 16, color: '#d90000',
+        x: e.altKey ? pt.x / W : peSnapNewTextBlockX(pt.x / W, W), y: pt.y / H };
       peState.objects.push(o);
       peState.draftTextId = o.id;
       peBeginInlineEdit(o, { isNewDraft: true });
@@ -54568,6 +54673,7 @@ function peObjMouseDown(e, o) {
     }
     if (!peState || !peState.drag) return;
     peState.drag.shiftKey = e.shiftKey;
+    peState.drag.altKey = e.altKey;
     peState.drag.lastClientX = e.clientX;
     peState.drag.lastClientY = e.clientY;
     peProcessDrag(e.clientX, e.clientY);
