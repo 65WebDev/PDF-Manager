@@ -2603,6 +2603,17 @@
     /*Visual separator between the color block and the L/C/H block*/
     .pe-props-sep { width: 1px; height: 20px; background: rgba(255,255,255,.22); flex-shrink: 0; }
     #pePropFormatWrap { display: inline-flex; align-items: center; gap: 4px; }
+    /*Font list: as wide as the size slider and its number above it, plus
+      the difference between the two rows' gaps (14px vs 10px), so its
+      separator lines up with the one after the size control.*/
+    #pePropFont {
+      width: 130px; height: 26px; box-sizing: border-box; flex-shrink: 0;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.25);
+      border-radius: 4px; color: #fff; font-size: 12px; padding: 0 4px; cursor: pointer;
+      text-overflow: ellipsis;
+    }
+    #pePropFont:focus-visible { outline: 2px solid #3498db; outline-offset: 1px; }
+    #pePropFont option { background: #2c3e50; color: #fff; font-size: 14px; }
     #pePropRowFormat { gap: 10px; }
     /* Opacity row width is locked in JS to #pePropShapeWrap so “100%”
        ends flush with the stroke-thickness control on the row above. */
@@ -7730,6 +7741,10 @@
           </span>
         </div>
         <div class="pe-props-row" id="pePropRowFormat" style="display:none">
+          <select id="pePropFont" title="Шрифт" data-i18n-title="peFont" aria-label="Шрифт" data-i18n-aria="peFont">
+            <option value="" data-i18n="peFontDefault">Стандартный</option>
+          </select>
+          <span class="pe-props-sep" id="pePropFontSep"></span>
           <span id="pePropFormatWrap">
             <button type="button" class="pe-fmt-btn" id="peFmtBold" title="Жирный" data-i18n-title="peBold"><span style="font-weight:800">Ж</span></button>
             <button type="button" class="pe-fmt-btn" id="peFmtItalic" title="Курсив" data-i18n-title="peItalic"><span style="font-style:italic;font-weight:600;transform:translateX(-1px);display:inline-block">К</span></button>
@@ -9282,6 +9297,7 @@
         peStrokeThicker: 'Толще на 1 px',
         peStrokeThinner: 'Тоньше на 1 px',
         peOpacity: 'Прозрачность',
+        peFont: 'Шрифт', peFontDefault: 'Стандартный',
         peBold: 'Жирный',
         peItalic: 'Курсив',
         peUnderline: 'Подчёркнутый',
@@ -9702,6 +9718,7 @@
         peStrokeThicker: 'Thicker by 1 px',
         peStrokeThinner: 'Thinner by 1 px',
         peOpacity: 'Opacity',
+        peFont: 'Font', peFontDefault: 'Default',
         peBold: 'Bold',
         peItalic: 'Italic',
         peUnderline: 'Underline',
@@ -10122,6 +10139,7 @@
         peStrokeThicker: 'Aumentar 1 px',
         peStrokeThinner: 'Reducir 1 px',
         peOpacity: 'Opacidad',
+        peFont: 'Fuente', peFontDefault: 'Predeterminada',
         peBold: 'Negrita',
         peItalic: 'Cursiva',
         peUnderline: 'Subrayado',
@@ -10608,6 +10626,7 @@
         peStrokeThicker: '加粗 1 像素',
         peStrokeThinner: '变细 1 像素',
         peOpacity: '不透明度',
+        peFont: '字体', peFontDefault: '默认',
         peBold: '粗体',
         peItalic: '斜体',
         peUnderline: '下划线',
@@ -43661,6 +43680,7 @@ function peRedrawObjects() {
       inner.style.color = o.color;
       inner.style.fontWeight = o.bold ? 'bold' : 'normal';
       inner.style.fontStyle = o.italic ? 'italic' : 'normal';
+      if (o.fontFamily) inner.style.fontFamily = peTextFontStack(o);
       // Text background - only via hiliteColor (span in o.html), not on the container.
       inner.style.backgroundColor = 'transparent';
       peNormalizeTextAlign(o);
@@ -48634,10 +48654,72 @@ function peApplyWholeFormatToObj(o, kind, value) {
   }
 }
 
+// The default text font of a block; o.fontFamily (a family name from the
+// font list, see peFillFontSelect) replaces it, with the default kept as the
+// fallback for a font this system does not have.
+const PE_TEXT_FONT_DEFAULT = '"Segoe UI", Arial, sans-serif';
+function peTextFontStack(o) {
+  return (o && o.fontFamily) ? pmWmFontCss(o.fontFamily) + ', ' + PE_TEXT_FONT_DEFAULT : PE_TEXT_FONT_DEFAULT;
+}
+
+/** Fonts are drawn on canvases too; the bundled Roboto must be loaded first. */
+async function peEnsureTextFonts(objects) {
+  if (!(objects || []).some(o => o && o.fontFamily)) return;
+  try { await pmWmLoadFonts(); } catch (_) {}
+  try { await document.fonts.ready; } catch (_) {}
+}
+
+/** The font list, filled once the installed fonts are known. */
+async function peFillFontSelect() {
+  const sel = document.getElementById('pePropFont');
+  if (!sel || sel.dataset.filled === '1') return;
+  let list = [];
+  try { list = await pmWmLoadFonts(); } catch (_) {}
+  if (sel.dataset.filled === '1') return;
+  sel.dataset.filled = '1';
+  list.forEach(f => {
+    const opt = document.createElement('option');
+    opt.value = f.family;
+    opt.textContent = f.label;
+    opt.style.fontFamily = pmWmFontCss(f.family) + ', ' + PE_TEXT_FONT_DEFAULT;
+    sel.appendChild(opt);
+  });
+  if (peState) peUpdateProps();
+}
+
+/** Show the block's font in the list (one this system lacks still shows, by name). */
+function peSyncFontSelect(o) {
+  const sel = document.getElementById('pePropFont');
+  if (!sel) return;
+  if (sel.dataset.filled !== '1') void peFillFontSelect();
+  const v = (o && o.fontFamily) || '';
+  if (v && !Array.from(sel.options).some(op => op.value === v)) {
+    const opt = document.createElement('option');
+    opt.value = v;
+    opt.textContent = v === PM_WM_ROBOTO_FAMILY ? 'Roboto' : v;
+    sel.appendChild(opt);
+  }
+  if (document.activeElement !== sel || sel.value !== v) sel.value = v;
+}
+
 function peApplyTextFormat(kind, value) {
   const info = peFormatTargetInfo();
   const o = info.obj;
   if (!o) return;
+
+  // The font, like the size, is the whole block's - with several blocks
+  // selected, each one's.
+  if (kind === 'font') {
+    const targets = info.mode === 'multi' ? info.objs : [o];
+    targets.forEach(ob => {
+      if (value) ob.fontFamily = value; else delete ob.fontFamily;
+    });
+    peRedrawObjects();
+    peUpdateProps();
+    peCommitEditorHistory(true);
+    if (value) peEnsureTextFonts(targets).then(() => { if (peState) peRedrawObjects(); });
+    return;
+  }
 
   // Font size is always for the entire block, even if it is currently highlighted
   // specific section of text (the point size of individual letters was removed according to
@@ -48916,6 +48998,7 @@ function peUpdateProps() {
     if (bgW) bgW.style.display = '';
     if (fRow) fRow.style.display = '';
     peSyncPropsSizeUi(o.fontPt, info.mode === 'multi' ? info.objs.map(x => x.id).join(',') : o.id);
+    peSyncFontSelect(o);
     // Programmatically overwriting .value of the active (in focus) input[type=color] —
     // precisely when its native pop-up palette is open - in a number of cases
     // browsers immediately closes this popup. We just recorded it there anyway
@@ -55701,6 +55784,11 @@ function peObjMouseDown(e, o) {
     peApplyTextFormat('color', e.target.value);
     peState.inlineEditFocusPending = false;
   });
+  document.getElementById('pePropFont')?.addEventListener('change', (e) => {
+    if (!peState) return;
+    peApplyTextFormat('font', e.target.value);
+    peState.inlineEditFocusPending = false;
+  });
   document.getElementById('pePropBg').addEventListener('input', (e) => {
     peApplyTextFormat('bg', e.target.value);
     peState.inlineEditFocusPending = false;
@@ -58072,7 +58160,7 @@ function peMeasureTextBoxOffDom(o) {
   const htmlItalic = /<(i|em)\b|font-style:\s*italic/i.test(htmlStr);
   inner.style.fontWeight = (o.bold || htmlBold) ? 'bold' : 'normal';
   inner.style.fontStyle = (o.italic || htmlItalic) ? 'italic' : 'normal';
-  inner.style.fontFamily = '"Segoe UI", Arial, sans-serif';
+  inner.style.fontFamily = peTextFontStack(o);
   inner.style.lineHeight = '1.25';
   inner.style.padding = '1px 2px';
   inner.style.whiteSpace = 'pre-wrap';
@@ -58684,6 +58772,7 @@ async function peCompositeEditorObjectsOnCanvas(ctx, pageIdx, canvasW, canvasH) 
     .filter(o => o && o.type !== 'redact');
   if (!objects.length) return;
   await pePreloadEditorImages(objects);
+  await peEnsureTextFonts(objects);
   // Stage size must be the page's PDF-point (scale=1) size, NOT the canvas
   // pixel size. peDrawEditorObjects uses S = canvasW/stageW to scale fonts
   // and strokes; passing canvasW as stage made S=1 at every render scale, so
@@ -58809,7 +58898,7 @@ function peExtractTextRunsFromHtml(html, o) {
   inner.style.textDecoration = (o && o.underline) ? 'underline' : 'none';
   inner.style.color = (o && o.color) || '#000';
   if (o && o.bg && o.bg !== 'transparent') inner.style.backgroundColor = o.bg;
-  inner.style.fontFamily = '"Segoe UI", Arial, sans-serif';
+  inner.style.fontFamily = peTextFontStack(o);
   inner.style.lineHeight = '1.25';
   inner.style.whiteSpace = 'pre-wrap';
   inner.innerHTML = String(html);
@@ -59099,8 +59188,9 @@ function peBakeFontStr(run, o, S) {
   let fontStr = '';
   if (run.italic) fontStr += 'italic ';
   if (run.bold) fontStr += 'bold ';
-  // Segoe UI / Arial — Cyrillic-capable (Helvetica/WinAnsi is not).
-  fontStr += fpx + 'px "Segoe UI", Arial, sans-serif';
+  // The block's font; Segoe UI / Arial (Cyrillic-capable, unlike
+  // Helvetica/WinAnsi) when it has none or this system lacks it.
+  fontStr += fpx + 'px ' + peTextFontStack(o);
   return fontStr;
 }
 
@@ -62658,6 +62748,7 @@ function pePageHasEditorVisuals(objects) {
 }
 
 async function peBakeObjectsOverlayPng(objects, rot, cb) {
+  await peEnsureTextFonts(objects);
   const visW = (rot % 180) ? cb.height : cb.width;
   const visH = (rot % 180) ? cb.width : cb.height;
   const S = 2;
