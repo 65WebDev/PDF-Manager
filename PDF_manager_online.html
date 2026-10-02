@@ -43640,6 +43640,7 @@ function peRedrawObjects() {
           inner.contentEditable = 'true';
           inner.setAttribute('draggable', 'false');
           inner.addEventListener('dragstart', pePreventTextDragGhost);
+          inner.addEventListener('paste', pePasteAsPlainText);
           inner.addEventListener('input', () => {
             o.html = inner.innerHTML;
             o.text = peEditablePlainText(inner);
@@ -44375,6 +44376,7 @@ function peAppendCalloutBox(layer, o, W, H) {
       textEl.classList.add('pe-mobile-overlay-host');
     } else {
       textEl.contentEditable = 'true';
+      textEl.addEventListener('paste', pePasteAsPlainText);
       textEl.addEventListener('input', () => {
         o.html = textEl.innerHTML;
         o.text = peEditablePlainText(textEl);
@@ -44543,6 +44545,7 @@ function peAppendShapeCommentBox(layer, o, W, H) {
       textEl.classList.add('pe-mobile-overlay-host');
     } else {
       textEl.contentEditable = 'true';
+      textEl.addEventListener('paste', pePasteAsPlainText);
       textEl.addEventListener('input', () => {
         c.html = textEl.innerHTML;
         c.text = peEditablePlainText(textEl);
@@ -44874,6 +44877,40 @@ function peSyncShapePropsUi(o, opts) {
   }
   wrap.classList.add('visible');
   peSyncShapeOpacityRowWidth();
+}
+
+/**
+ * Paste into a text block or callout being edited: only the plain text
+ * goes in, typed in at the caret, so it takes the block's own font, size,
+ * colour and whatever inline style surrounds the caret - not the formatting
+ * it was copied with from another editor (or an image, which a text block
+ * cannot hold). Line breaks are kept.
+ */
+function pePasteAsPlainText(e) {
+  const dt = e.clipboardData;
+  if (!dt) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const text = (dt.getData('text/plain') || '').replace(/\r\n?/g, '\n');
+  if (!text) return;
+  // insertText keeps the paste a single native edit (and fires input, which
+  // syncs o.html/o.text); the manual insert is a fallback only.
+  let ok = false;
+  try { ok = document.execCommand('insertText', false, text); } catch (_) {}
+  if (ok) return;
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return;
+  const range = sel.getRangeAt(0);
+  range.deleteContents();
+  const frag = document.createDocumentFragment();
+  text.split('\n').forEach((line, i) => {
+    if (i) frag.appendChild(document.createElement('br'));
+    if (line) frag.appendChild(document.createTextNode(line));
+  });
+  const last = frag.lastChild;
+  range.insertNode(frag);
+  if (last) { range.setStartAfter(last); range.collapse(true); sel.removeAllRanges(); sel.addRange(range); }
+  e.target.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertFromPaste' }));
 }
 
 function peEditablePlainText(el) {
