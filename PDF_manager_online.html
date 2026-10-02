@@ -21532,13 +21532,21 @@
           // back different (decrypted) bytes and this early start is dropped.
           earlyPdfjsTask = openPdfjsForThumbs(pdfBytes);
           earlyPdfjsTask.promise.catch(() => {});   // a locked file rejects here; handled below
-          const prepared = await preparePdfBytes(pdfBytes, file.name);
+          let prepared = await preparePdfBytes(pdfBytes, file.name);
           if (prepared === null) {
             try { earlyPdfjsTask.destroy(); } catch (_) {}
             historyPushSuspended = false;
             hideLoading();
             wasCreatingNewDocument = false;
             return;
+          }
+          // Saved by this app with editor objects: the drawn copy of them
+          // comes out, so the editor shows each object once (and the early
+          // pdf.js parse, of the bytes with that copy, is dropped below).
+          const unbaked = await peStripEditorOverlaysFromBytes(preparedPdfLibDoc);
+          if (unbaked) {
+            prepared = unbaked.bytes;
+            preparedPdfLibDoc = unbaked.doc;
           }
           if (prepared !== pdfBytes) {
             try { earlyPdfjsTask.destroy(); } catch (_) {}
@@ -27682,6 +27690,9 @@
         const srcDoc = await PDFLib.PDFDocument.load(bytes);
         const srcCount = srcDoc.getPageCount();
         if (!srcCount) return 0;
+        // Its editor objects come along as objects (below), so their drawn
+        // copy from an earlier save must not.
+        if (typeof peStripEditorOverlaysInDoc === 'function') peStripEditorOverlaysInDoc(srcDoc);
 
         insertAt = Math.max(0, Math.min(pdfDoc.getPageCount(), insertAt | 0));
         const copied = await pdfDoc.copyPages(srcDoc, srcDoc.getPageIndices());
@@ -62482,6 +62493,127 @@ async function peBakeObjectsOverlayPng(objects, rot, cb) {
 // Bakes editor objects (from metadata) into a PDF copy - for exporting/saving to disk.
 // sourcePageIndices[targetIdx] - page index in the source pdfDoc for the targetIdx page in the targetDoc.
 // Returns the (possibly reloaded) PDFLib document — callers must use the return value.
+// Marks what a save draws or adds for objects that also stay editable in
+// the editor meta: the overlay's content stream and the comment annotations.
+const PE_OVERLAY_MARK = 'PMEditorOverlay';
+const PE_LEGACY_OVERLAY_RE = /^q\s+(?:(?:[-+\d.eE]+\s+){6}cm\s+|\/[^\s\/]+\s+gs\s+)*\/Image-\d+(?:-\d+)?\s+Do\s+Q$/;
+
+/** Make the next draw on `page` start a content stream of its own (pdf-lib reuses the last one). */
+function peBeginOwnContentStream(page) {
+  page.contentStream = undefined;
+  page.contentStreamRef = undefined;
+}
+
+/** Mark the content stream the last draws went into, and stop drawing into it. */
+function peMarkOwnContentStream(page) {
+  const cs = page.contentStream;
+  if (cs && cs.dict) cs.dict.set(PDFLib.PDFName.of(PE_OVERLAY_MARK), PDFLib.PDFBool.True);
+  peBeginOwnContentStream(page);
+}
+
+function peAnnotRefs(page) {
+  const annots = page.node.lookup(PDFLib.PDFName.of('Annots'));
+  return annots instanceof PDFLib.PDFArray ? annots.asArray() : [];
+}
+
+function peHasOverlayMark(obj) {
+  const dict = obj && (obj.dict || obj);
+  if (!dict || typeof dict.get !== 'function') return false;
+  const v = dict.get(PDFLib.PDFName.of(PE_OVERLAY_MARK));
+  return !!(v && (v === PDFLib.PDFBool.True || (typeof v.asBoolean === 'function' && v.asBoolean())));
+}
+
+/**
+ * Undo, in a document opened from a file this app saved, what that save
+ * drew for objects it also kept editable: the marked overlay content
+ * stream (with the images it paints) and the marked comment annotations.
+ * Only on pages whose objects are in the meta - without them the drawing is
+ * all that is left of the objects, and stays. Returns how many pages changed.
+ */
+function peStripEditorOverlaysInDoc(doc) {
+  if (!doc || !doc.catalog.get(PDFLib.PDFName.of(PE_EDITOR_META_KEY))) return 0;
+  const meta = peReadAllEditorMetaFromDoc(doc);
+  const ctx = doc.context;
+  let changed = 0;
+  doc.getPages().forEach((page, idx) => {
+    const objs = meta.pages && meta.pages[String(idx)];
+    if (!objs || !objs.length) return;
+    const node = page.node;
+    const CONTENTS = PDFLib.PDFName.of('Contents');
+    const contents = node.get(CONTENTS);
+    const arr = contents instanceof PDFLib.PDFArray ? contents
+      : (contents && ctx.lookup(contents) instanceof PDFLib.PDFArray ? ctx.lookup(contents) : null);
+    let pageChanged = false;
+    const streamText = (stream) => {
+      try {
+        const raw = PDFLib.decodePDFRawStream(stream).decode();
+        let str = '';
+        for (let k = 0; k < raw.length; k++) str += String.fromCharCode(raw[k]);
+        return str;
+      } catch (_) { return null; }
+    };
+    if (arr) {
+      const marked = [];
+      for (let i = 0; i < arr.size(); i++) if (peHasOverlayMark(ctx.lookup(arr.get(i)))) marked.push(i);
+      // Saved before the overlay was marked: the drawing is then the page's
+      // last content stream, and it is exactly what pdf-lib writes for one
+      // drawImage - "q, transforms, /Image-<id> Do, Q" - nothing else.
+      if (!marked.length && arr.size() > 1) {
+        const last = streamText(ctx.lookup(arr.get(arr.size() - 1)));
+        if (last && PE_LEGACY_OVERLAY_RE.test(last.trim())) marked.push(arr.size() - 1);
+      }
+      for (let j = marked.length - 1; j >= 0; j--) {
+        const i = marked[j];
+        const ref = arr.get(i);
+        const stream = ctx.lookup(ref);
+        // The images it paints are its own; drop them with it.
+        const str = streamText(stream) || '';
+        const names = Array.from(str.matchAll(/\/([^\s\/\[\]()<>{}%]+)\s+Do\b/g), m => m[1]);
+        const xobjs = node.Resources() && node.Resources().lookup(PDFLib.PDFName.of('XObject'));
+        names.forEach(n => {
+          if (!(xobjs instanceof PDFLib.PDFDict)) return;
+          const key = PDFLib.PDFName.of(n);
+          const imgRef = xobjs.get(key);
+          xobjs.delete(key);
+          const img = imgRef instanceof PDFLib.PDFRef ? ctx.lookup(imgRef) : null;
+          const smask = img && img.dict ? img.dict.get(PDFLib.PDFName.of('SMask')) : null;
+          if (smask instanceof PDFLib.PDFRef) ctx.delete(smask);
+          if (imgRef instanceof PDFLib.PDFRef) ctx.delete(imgRef);
+        });
+        arr.remove(i);
+        if (ref instanceof PDFLib.PDFRef) ctx.delete(ref);
+        pageChanged = true;
+      }
+    } else if (contents && peHasOverlayMark(ctx.lookup(contents))) {
+      node.set(CONTENTS, ctx.obj([]));
+      pageChanged = true;
+    }
+    const annots = node.lookup(PDFLib.PDFName.of('Annots'));
+    if (annots instanceof PDFLib.PDFArray) {
+      for (let i = annots.size() - 1; i >= 0; i--) {
+        const ref = annots.get(i);
+        if (!peHasOverlayMark(ctx.lookup(ref))) continue;
+        annots.remove(i);
+        if (ref instanceof PDFLib.PDFRef) ctx.delete(ref);
+        pageChanged = true;
+      }
+    }
+    if (pageChanged) changed++;
+  });
+  return changed;
+}
+
+/**
+ * peStripEditorOverlaysInDoc for bytes about to be opened: the bytes both
+ * libraries will read, and a pdf-lib document parsed from them. Returns
+ * null when there is nothing to undo (the usual case: no editor meta).
+ */
+async function peStripEditorOverlaysFromBytes(doc) {
+  if (!doc || !peStripEditorOverlaysInDoc(doc)) return null;
+  const bytes = new Uint8Array(await doc.save());
+  return { bytes, doc: await PDFLib.PDFDocument.load(bytes) };
+}
+
 async function peFlattenEditorObjectsIntoDoc(targetDoc, sourcePageIndices) {
   if (!targetDoc || !sourcePageIndices || !sourcePageIndices.length) return targetDoc;
   let workDoc = targetDoc;
@@ -62525,15 +62657,27 @@ async function peFlattenEditorObjectsIntoDoc(targetDoc, sourcePageIndices) {
       if (pePageHasEditorVisuals(objects)) {
         await pePreloadEditorImages(objects);
         const baked = await peBakeObjectsOverlayPng(objects, rot, cb);
+        // These objects also go into the editor meta below, so the drawing
+        // gets a content stream of its own, marked: opening the file again
+        // removes it (peStripEditorOverlaysInDoc) and the objects come back
+        // editable instead of on top of a copy of themselves.
+        peBeginOwnContentStream(page);
         await peDrawCroppedOverlay(workDoc, page, baked, rot, cb);
+        peMarkOwnContentStream(page);
       }
       const pjPage = await pjDoc.getPage(targetIdx + 1);
       const pjRot = typeof pjPage.rotate === 'number' ? pjPage.rotate : rot;
       const vp = pjPage.getViewport({ scale: 1, rotation: pjRot });
       const commented = objects.filter(o => o.type === 'highlight' && peHighlightHasComment(o));
+      const annotsBefore = peAnnotRefs(page).length;
       for (const o of commented) {
         await peAddHighlightCommentAnnotsOnDoc(workDoc, page, o, vp);
       }
+      // Same for the comment annotations: the highlight carries its comment.
+      peAnnotRefs(page).slice(annotsBefore).forEach(ref => {
+        const a = workDoc.context.lookup(ref);
+        if (a && a.set) a.set(PDFLib.PDFName.of(PE_OVERLAY_MARK), PDFLib.PDFBool.True);
+      });
     }
     const pagesMeta = {};
     sourcePageIndices.forEach((sourceIdx, targetIdx) => {
