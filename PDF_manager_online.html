@@ -30210,6 +30210,124 @@
       if (pmTabsEnabled() && pmActiveId != null) pmCaptureActive();
     }
 
+    // Print resolution for the in-page path below: sharp text on paper while
+    // a page stays a few hundred KB.
+    const PM_PRINT_DPI = 200;
+
+    /**
+     * Print a finished PDF. In a browser the PDF opens in a new tab and its
+     * own viewer prints it (vector, as before). The desktop app (Tauri) has
+     * no second window to open - WebView2 returns null from window.open -
+     * and a browser may block the tab as a popup; there the pages are
+     * rendered into a hidden iframe, one sheet per page at the page's own
+     * size, and that frame is printed with the webview's own print dialog.
+     * Only if that fails too is the file downloaded for printing by hand.
+     */
+    async function pmPrintPdfBytes(pdfBytes, fallbackFileName) {
+      if (!isTauriDesktopApp()) {
+        const url = URL.createObjectURL(new Blob([pdfBytes], { type: 'application/pdf' }));
+        const printWindow = window.open(url, '_blank');
+        if (printWindow) {
+          printWindow.addEventListener('load', () => {
+            // A slight delay lets the PDF viewer finish loading.
+            setTimeout(() => {
+              try {
+                printWindow.print();
+              } catch (e) {
+                console.warn('Не удалось автоматически вызвать печать:', e);
+              }
+              setTimeout(() => URL.revokeObjectURL(url), 2000);
+            }, 600);
+          });
+          return;
+        }
+        URL.revokeObjectURL(url);
+      }
+      try {
+        await pmPrintPdfInPage(pdfBytes);
+      } catch (e) {
+        console.error(e);
+        const url = URL.createObjectURL(new Blob([pdfBytes], { type: 'application/pdf' }));
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fallbackFileName;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+        hideLoading();
+        alert(t('alertPrintWindowFailed'));
+      }
+    }
+
+    /** Build the print frame for pmPrintPdfBytes and open the print dialog. */
+    async function pmPrintPdfInPage(pdfBytes) {
+      const old = document.getElementById('pmPrintFrame');
+      if (old) old.remove();
+      const urls = [];
+      const sheets = [];
+      const doc = await pdfjsLib.getDocument({ data: pdfBytes.slice(0) }).promise;
+      try {
+        const scale = PM_PRINT_DPI / 72;
+        for (let i = 1; i <= doc.numPages; i++) {
+          showLoading(`${t('loadingPreparingPrint')} ${i} ${t('ofCount')} ${doc.numPages}`);
+          const page = await doc.getPage(i);
+          const vp1 = page.getViewport({ scale: 1 });
+          const viewport = page.getViewport({ scale });
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.ceil(viewport.width);
+          canvas.height = Math.ceil(viewport.height);
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          await page.render({ canvasContext: ctx, viewport }).promise;
+          const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.95));
+          canvas.width = canvas.height = 0;
+          const url = URL.createObjectURL(blob);
+          urls.push(url);
+          sheets.push({ url, w: +vp1.width.toFixed(2), h: +vp1.height.toFixed(2) });
+        }
+      } finally {
+        pmDestroyPdfjsDoc(doc);
+      }
+      // One sheet per page, fitted to the paper chosen in the print dialog,
+      // the way PDF viewers print: the first page's size is offered as the
+      // default paper, every page is scaled to fit the sheet whole, and a
+      // page whose orientation differs from the sheet's is turned to fill
+      // it. (Named @page sizes per page are not used: a printer feeds one
+      // paper size anyway, and Chromium applies them unreliably.)
+      const first = sheets[0];
+      const body = sheets.map(s => '<div class="sheet ' + (s.w > s.h ? 'l' : 'p') + '"><img src="' + s.url + '"></div>').join('');
+      const css = '@page{size:' + first.w + 'pt ' + first.h + 'pt;margin:0}'
+        + 'html,body{margin:0;padding:0;background:#fff}'
+        + '.sheet{width:100vw;height:100vh;overflow:hidden;display:flex;align-items:center;justify-content:center;break-after:page;break-inside:avoid}'
+        + '.sheet:last-child{break-after:auto}'
+        + '.sheet img{display:block;width:100vw;height:100vh;object-fit:contain;flex:none}'
+        + '@media (orientation:portrait){.sheet.l img{width:100vh;height:100vw;transform:rotate(90deg)}}'
+        + '@media (orientation:landscape){.sheet.p img{width:100vh;height:100vw;transform:rotate(90deg)}}';
+      const frame = document.createElement('iframe');
+      frame.id = 'pmPrintFrame';
+      frame.setAttribute('aria-hidden', 'true');
+      frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+      document.body.appendChild(frame);
+      const fdoc = frame.contentDocument;
+      fdoc.open();
+      fdoc.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + escapeHtml(currentFileName || '') + '</title><style>'
+        + css + '</style></head><body>' + body + '</body></html>');
+      fdoc.close();
+      await Promise.all(Array.from(fdoc.images).map(img => img.decode().catch(() => {})));
+      const cleanup = () => {
+        if (!frame.isConnected) return;
+        frame.remove();
+        urls.forEach(u => URL.revokeObjectURL(u));
+      };
+      frame.contentWindow.addEventListener('afterprint', () => setTimeout(cleanup, 0));
+      hideLoading();
+      frame.contentWindow.focus();
+      frame.contentWindow.print();
+      // Some webviews return from print() before the dialog is done and never
+      // fire afterprint; the frame is also replaced by the next print.
+      setTimeout(cleanup, 10 * 60 * 1000);
+    }
+
     // Printing only the selected pages - the same scheme as printPDF(), but we take
     // pages via getOperableSelectedIndices() (same order as when exporting
     // selections) and not the entire document.
@@ -30230,30 +30348,8 @@
         outPrintDoc = await peApplyPendingShapeRasterization(outPrintDoc);
 
         const pdfBytes = await outPrintDoc.save();
-        const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-        const url = URL.createObjectURL(blob);
-
-        const printWindow = window.open(url, '_blank');
-
-        if (printWindow) {
-          printWindow.addEventListener('load', () => {
-            setTimeout(() => {
-              try {
-                printWindow.print();
-              } catch (e) {
-                console.warn('Не удалось автоматически вызвать печать:', e);
-              }
-              setTimeout(() => URL.revokeObjectURL(url), 2000);
-            }, 600);
-          });
-        } else {
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `${t('printSelectedFilePrefix')}${currentFileName || t('docWordFallback')}.pdf`;
-          a.click();
-          URL.revokeObjectURL(url);
-          alert(t('alertPrintWindowFailed'));
-        }
+        await pmPrintPdfBytes(pdfBytes,
+          `${t('printSelectedFilePrefix')}${currentFileName || t('docWordFallback')}.pdf`);
       } catch (e) {
         console.error(e);
         alert(t('alertPreparePrintSelectedError'));
@@ -30289,36 +30385,8 @@
         outPrintDoc = await peApplyPendingShapeRasterization(outPrintDoc);
 
         const pdfBytes = await outPrintDoc.save();
-
-        // Creating a Blob and URL
-        const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-        const url = URL.createObjectURL(blob);
-
-        // Open in a new window and start printing
-        const printWindow = window.open(url, '_blank');
-
-        if (printWindow) {
-          printWindow.addEventListener('load', () => {
-            // There is a slight delay to allow the PDF reader to load
-            setTimeout(() => {
-              try {
-                printWindow.print();
-              } catch (e) {
-                console.warn('Не удалось автоматически вызвать печать:', e);
-              }
-              // Release the URL after some time
-              setTimeout(() => URL.revokeObjectURL(url), 2000);
-            }, 600);
-          });
-        } else {
-          // Fallback - download the file
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `${t('printAllFilePrefix')}${currentFileName || t('docWordFallback')}.pdf`;
-          a.click();
-          URL.revokeObjectURL(url);
-          alert(t('alertPrintWindowFailed'));
-        }
+        await pmPrintPdfBytes(pdfBytes,
+          `${t('printAllFilePrefix')}${currentFileName || t('docWordFallback')}.pdf`);
       } catch (e) {
         console.error(e);
         alert(t('alertPreparePrintAllError'));
