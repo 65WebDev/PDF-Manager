@@ -2610,6 +2610,17 @@
     /*Visual separator between the color block and the L/C/H block*/
     .pe-props-sep { width: 1px; height: 20px; background: rgba(255,255,255,.22); flex-shrink: 0; }
     #pePropFormatWrap { display: inline-flex; align-items: center; gap: 4px; }
+    /*Font list: as wide as the size slider and its number above it, plus
+      the difference between the two rows' gaps (14px vs 10px), so its
+      separator lines up with the one after the size control.*/
+    #pePropFont {
+      width: 130px; height: 26px; box-sizing: border-box; flex-shrink: 0;
+      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.25);
+      border-radius: 4px; color: #fff; font-size: 12px; padding: 0 4px; cursor: pointer;
+      text-overflow: ellipsis;
+    }
+    #pePropFont:focus-visible { outline: 2px solid #3498db; outline-offset: 1px; }
+    #pePropFont option { background: #2c3e50; color: #fff; font-size: 14px; }
     #pePropRowFormat { gap: 10px; }
     /* Opacity row width is locked in JS to #pePropShapeWrap so “100%”
        ends flush with the stroke-thickness control on the row above. */
@@ -3582,6 +3593,15 @@
        Redact tools) made the pdf.js textLayer participate in document flow
        under the canvas and roughly doubled #peStagePad height — a vertical
        scrollbar appeared on #peStageWrap even though the page still fit. */
+    /*Guide line while a text block snaps to another one's edge (peSnapTextBlockX).*/
+    #peStage > .pe-snap-guide {
+      position: absolute;
+      width: 0;
+      border-left: 1px dashed #e0368f;
+      margin-left: -0.5px;
+      pointer-events: none;
+      z-index: 50;
+    }
     #peTextLayer {
       pointer-events: none;
       position: absolute;
@@ -7600,7 +7620,7 @@
         <button class="pe-btn pe-btn-square" id="peToolRedact" type="button" title="Затереть информацию" data-i18n-title="peRedact">
           <svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><g transform="translate(0 -2.25) translate(10 21) scale(0.85 1) translate(-10 -21)"><defs><clipPath id="peRedactEraserClip"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21z"/></clipPath></defs><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21z" fill="#1584E5"/><path d="M 0 5.5 L 18.5 24 L 0 24 Z" fill="#A9B0B7" clip-path="url(#peRedactEraserClip)"/><g fill="none" stroke="#161212" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21z"/><path d="m5 11 9 9"/></g></g><g fill="none" stroke="#161212" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M18 21H3"/></g></svg>
         </button>
-        <button class="pe-btn pe-btn-square" id="peToolText" title="Вставить текст" data-i18n-title="peInsertText">
+        <button class="pe-btn pe-btn-square" id="peToolText" title="Вставить текст&#10;F2 или Enter — редактировать текст выбранного блока" data-i18n-title="peInsertTextHint">
           <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="#e74c3c" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
         </button>
         <button class="pe-btn pe-btn-square" id="peToolImage" title="Вставить изображение" data-i18n-title="peInsertImage">
@@ -7729,6 +7749,10 @@
           </span>
         </div>
         <div class="pe-props-row" id="pePropRowFormat" style="display:none">
+          <select id="pePropFont" title="Шрифт" data-i18n-title="peFont" aria-label="Шрифт" data-i18n-aria="peFont">
+            <option value="" data-i18n="peFontDefault">Стандартный</option>
+          </select>
+          <span class="pe-props-sep" id="pePropFontSep"></span>
           <span id="pePropFormatWrap">
             <button type="button" class="pe-fmt-btn" id="peFmtBold" title="Жирный" data-i18n-title="peBold"><span style="font-weight:800">Ж</span></button>
             <button type="button" class="pe-fmt-btn" id="peFmtItalic" title="Курсив" data-i18n-title="peItalic"><span style="font-style:italic;font-weight:600;transform:translateX(-1px);display:inline-block">К</span></button>
@@ -9191,6 +9215,7 @@
         wmApply: 'Применить', wmCancel: 'Отмена', wmApplying: 'Нанесение водяного знака...',
         wmNoText: 'Введите текст водяного знака', wmBadRange: 'Неверный диапазон страниц',
         wmApplyError: 'Не удалось нанести водяной знак',
+        peInsertTextHint: 'Вставить текст\nF2 или Enter — редактировать текст выбранного блока',
         peInsertText: 'Вставить текст', peInsertImage: 'Вставить изображение', peInsertSignature: 'Вставить подпись', peSignatureAddNew: 'Добавить новую подпись', peSignatureDefaultName: 'Подпись {n}', peSignatureRenameTitle: 'Переименовать подпись', peAddShapes: 'Добавить фигуры',
         peShapeRect: 'Прямоугольник', peShapeEllipse: 'Круг / овал', peShapeArrow: 'Стрелка',
         peShapeLine: 'Линия', peShapePlus: 'Плюс', peShapeFreehand: 'Свободная форма', peShapeStar: 'Звезда',
@@ -9286,6 +9311,7 @@
         peStrokeThicker: 'Толще на 1 px',
         peStrokeThinner: 'Тоньше на 1 px',
         peOpacity: 'Прозрачность',
+        peFont: 'Шрифт', peFontDefault: 'Стандартный',
         peBold: 'Жирный',
         peItalic: 'Курсив',
         peUnderline: 'Подчёркнутый',
@@ -9616,6 +9642,7 @@
         wmApply: 'Apply', wmCancel: 'Cancel', wmApplying: 'Applying watermark...',
         wmNoText: 'Enter the watermark text', wmBadRange: 'Invalid page range',
         wmApplyError: 'Could not apply the watermark',
+        peInsertTextHint: 'Insert text\nF2 or Enter — edit the text of the selected block',
         peInsertText: 'Insert text', peInsertImage: 'Insert image', peInsertSignature: 'Insert signature', peSignatureAddNew: 'Add new signature', peSignatureDefaultName: 'Signature {n}', peSignatureRenameTitle: 'Rename signature', peAddShapes: 'Add shapes',
         peShapeRect: 'Rectangle', peShapeEllipse: 'Circle / oval', peShapeArrow: 'Arrow',
         peShapeLine: 'Line', peShapePlus: 'Plus', peShapeFreehand: 'Freeform', peShapeStar: 'Star',
@@ -9711,6 +9738,7 @@
         peStrokeThicker: 'Thicker by 1 px',
         peStrokeThinner: 'Thinner by 1 px',
         peOpacity: 'Opacity',
+        peFont: 'Font', peFontDefault: 'Default',
         peBold: 'Bold',
         peItalic: 'Italic',
         peUnderline: 'Underline',
@@ -10041,6 +10069,7 @@
         wmApply: 'Aplicar', wmCancel: 'Cancelar', wmApplying: 'Aplicando marca de agua...',
         wmNoText: 'Introduzca el texto de la marca de agua', wmBadRange: 'Rango de páginas no válido',
         wmApplyError: 'No se pudo aplicar la marca de agua',
+        peInsertTextHint: 'Insertar texto\nF2 o Intro: editar el texto del bloque seleccionado',
         peInsertText: 'Insertar texto', peInsertImage: 'Insertar imagen', peInsertSignature: 'Insertar firma', peSignatureAddNew: 'Añadir nueva firma', peSignatureDefaultName: 'Firma {n}', peSignatureRenameTitle: 'Renombrar firma', peAddShapes: 'Añadir formas',
         peShapeRect: 'Rectángulo', peShapeEllipse: 'Círculo / óvalo', peShapeArrow: 'Flecha',
         peShapeLine: 'Línea', peShapePlus: 'Cruz', peShapeFreehand: 'Forma libre', peShapeStar: 'Estrella',
@@ -10136,6 +10165,7 @@
         peStrokeThicker: 'Aumentar 1 px',
         peStrokeThinner: 'Reducir 1 px',
         peOpacity: 'Opacidad',
+        peFont: 'Fuente', peFontDefault: 'Predeterminada',
         peBold: 'Negrita',
         peItalic: 'Cursiva',
         peUnderline: 'Subrayado',
@@ -10517,6 +10547,7 @@
         wmNoText: '请输入水印文本', wmBadRange: '页面范围无效',
         wmApplyError: '无法添加水印',
         tabRenameTitle: '重命名文档',
+        peInsertTextHint: '插入文字\nF2 或 Enter：编辑所选文本块的文字',
         peInsertText: '插入文字',
         peInsertImage: '插入图片',
         peInsertSignature: '插入签名',
@@ -10627,6 +10658,7 @@
         peStrokeThicker: '加粗 1 像素',
         peStrokeThinner: '变细 1 像素',
         peOpacity: '不透明度',
+        peFont: '字体', peFontDefault: '默认',
         peBold: '粗体',
         peItalic: '斜体',
         peUnderline: '下划线',
@@ -21564,13 +21596,21 @@
           // back different (decrypted) bytes and this early start is dropped.
           earlyPdfjsTask = openPdfjsForThumbs(pdfBytes);
           earlyPdfjsTask.promise.catch(() => {});   // a locked file rejects here; handled below
-          const prepared = await preparePdfBytes(pdfBytes, file.name);
+          let prepared = await preparePdfBytes(pdfBytes, file.name);
           if (prepared === null) {
             try { earlyPdfjsTask.destroy(); } catch (_) {}
             historyPushSuspended = false;
             hideLoading();
             wasCreatingNewDocument = false;
             return;
+          }
+          // Saved by this app with editor objects: the drawn copy of them
+          // comes out, so the editor shows each object once (and the early
+          // pdf.js parse, of the bytes with that copy, is dropped below).
+          const unbaked = await peStripEditorOverlaysFromBytes(preparedPdfLibDoc);
+          if (unbaked) {
+            prepared = unbaked.bytes;
+            preparedPdfLibDoc = unbaked.doc;
           }
           if (prepared !== pdfBytes) {
             try { earlyPdfjsTask.destroy(); } catch (_) {}
@@ -27714,6 +27754,9 @@
         const srcDoc = await PDFLib.PDFDocument.load(bytes);
         const srcCount = srcDoc.getPageCount();
         if (!srcCount) return 0;
+        // Its editor objects come along as objects (below), so their drawn
+        // copy from an earlier save must not.
+        if (typeof peStripEditorOverlaysInDoc === 'function') peStripEditorOverlaysInDoc(srcDoc);
 
         insertAt = Math.max(0, Math.min(pdfDoc.getPageCount(), insertAt | 0));
         const copied = await pdfDoc.copyPages(srcDoc, srcDoc.getPageIndices());
@@ -30305,6 +30348,124 @@
       if (pmTabsEnabled() && pmActiveId != null) pmCaptureActive();
     }
 
+    // Print resolution for the in-page path below: sharp text on paper while
+    // a page stays a few hundred KB.
+    const PM_PRINT_DPI = 200;
+
+    /**
+     * Print a finished PDF. In a browser the PDF opens in a new tab and its
+     * own viewer prints it (vector, as before). The desktop app (Tauri) has
+     * no second window to open - WebView2 returns null from window.open -
+     * and a browser may block the tab as a popup; there the pages are
+     * rendered into a hidden iframe, one sheet per page at the page's own
+     * size, and that frame is printed with the webview's own print dialog.
+     * Only if that fails too is the file downloaded for printing by hand.
+     */
+    async function pmPrintPdfBytes(pdfBytes, fallbackFileName) {
+      if (!isTauriDesktopApp()) {
+        const url = URL.createObjectURL(new Blob([pdfBytes], { type: 'application/pdf' }));
+        const printWindow = window.open(url, '_blank');
+        if (printWindow) {
+          printWindow.addEventListener('load', () => {
+            // A slight delay lets the PDF viewer finish loading.
+            setTimeout(() => {
+              try {
+                printWindow.print();
+              } catch (e) {
+                console.warn('Не удалось автоматически вызвать печать:', e);
+              }
+              setTimeout(() => URL.revokeObjectURL(url), 2000);
+            }, 600);
+          });
+          return;
+        }
+        URL.revokeObjectURL(url);
+      }
+      try {
+        await pmPrintPdfInPage(pdfBytes);
+      } catch (e) {
+        console.error(e);
+        const url = URL.createObjectURL(new Blob([pdfBytes], { type: 'application/pdf' }));
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fallbackFileName;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+        hideLoading();
+        alert(t('alertPrintWindowFailed'));
+      }
+    }
+
+    /** Build the print frame for pmPrintPdfBytes and open the print dialog. */
+    async function pmPrintPdfInPage(pdfBytes) {
+      const old = document.getElementById('pmPrintFrame');
+      if (old) old.remove();
+      const urls = [];
+      const sheets = [];
+      const doc = await pdfjsLib.getDocument({ data: pdfBytes.slice(0) }).promise;
+      try {
+        const scale = PM_PRINT_DPI / 72;
+        for (let i = 1; i <= doc.numPages; i++) {
+          showLoading(`${t('loadingPreparingPrint')} ${i} ${t('ofCount')} ${doc.numPages}`);
+          const page = await doc.getPage(i);
+          const vp1 = page.getViewport({ scale: 1 });
+          const viewport = page.getViewport({ scale });
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.ceil(viewport.width);
+          canvas.height = Math.ceil(viewport.height);
+          const ctx = canvas.getContext('2d');
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          await page.render({ canvasContext: ctx, viewport }).promise;
+          const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.95));
+          canvas.width = canvas.height = 0;
+          const url = URL.createObjectURL(blob);
+          urls.push(url);
+          sheets.push({ url, w: +vp1.width.toFixed(2), h: +vp1.height.toFixed(2) });
+        }
+      } finally {
+        pmDestroyPdfjsDoc(doc);
+      }
+      // One sheet per page, fitted to the paper chosen in the print dialog,
+      // the way PDF viewers print: the first page's size is offered as the
+      // default paper, every page is scaled to fit the sheet whole, and a
+      // page whose orientation differs from the sheet's is turned to fill
+      // it. (Named @page sizes per page are not used: a printer feeds one
+      // paper size anyway, and Chromium applies them unreliably.)
+      const first = sheets[0];
+      const body = sheets.map(s => '<div class="sheet ' + (s.w > s.h ? 'l' : 'p') + '"><img src="' + s.url + '"></div>').join('');
+      const css = '@page{size:' + first.w + 'pt ' + first.h + 'pt;margin:0}'
+        + 'html,body{margin:0;padding:0;background:#fff}'
+        + '.sheet{width:100vw;height:100vh;overflow:hidden;display:flex;align-items:center;justify-content:center;break-after:page;break-inside:avoid}'
+        + '.sheet:last-child{break-after:auto}'
+        + '.sheet img{display:block;width:100vw;height:100vh;object-fit:contain;flex:none}'
+        + '@media (orientation:portrait){.sheet.l img{width:100vh;height:100vw;transform:rotate(90deg)}}'
+        + '@media (orientation:landscape){.sheet.p img{width:100vh;height:100vw;transform:rotate(90deg)}}';
+      const frame = document.createElement('iframe');
+      frame.id = 'pmPrintFrame';
+      frame.setAttribute('aria-hidden', 'true');
+      frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+      document.body.appendChild(frame);
+      const fdoc = frame.contentDocument;
+      fdoc.open();
+      fdoc.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + escapeHtml(currentFileName || '') + '</title><style>'
+        + css + '</style></head><body>' + body + '</body></html>');
+      fdoc.close();
+      await Promise.all(Array.from(fdoc.images).map(img => img.decode().catch(() => {})));
+      const cleanup = () => {
+        if (!frame.isConnected) return;
+        frame.remove();
+        urls.forEach(u => URL.revokeObjectURL(u));
+      };
+      frame.contentWindow.addEventListener('afterprint', () => setTimeout(cleanup, 0));
+      hideLoading();
+      frame.contentWindow.focus();
+      frame.contentWindow.print();
+      // Some webviews return from print() before the dialog is done and never
+      // fire afterprint; the frame is also replaced by the next print.
+      setTimeout(cleanup, 10 * 60 * 1000);
+    }
+
     // Printing only the selected pages - the same scheme as printPDF(), but we take
     // pages via getOperableSelectedIndices() (same order as when exporting
     // selections) and not the entire document.
@@ -30325,30 +30486,8 @@
         outPrintDoc = await peApplyPendingShapeRasterization(outPrintDoc);
 
         const pdfBytes = await outPrintDoc.save();
-        const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-        const url = URL.createObjectURL(blob);
-
-        const printWindow = window.open(url, '_blank');
-
-        if (printWindow) {
-          printWindow.addEventListener('load', () => {
-            setTimeout(() => {
-              try {
-                printWindow.print();
-              } catch (e) {
-                console.warn('Не удалось автоматически вызвать печать:', e);
-              }
-              setTimeout(() => URL.revokeObjectURL(url), 2000);
-            }, 600);
-          });
-        } else {
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `${t('printSelectedFilePrefix')}${currentFileName || t('docWordFallback')}.pdf`;
-          a.click();
-          URL.revokeObjectURL(url);
-          alert(t('alertPrintWindowFailed'));
-        }
+        await pmPrintPdfBytes(pdfBytes,
+          `${t('printSelectedFilePrefix')}${currentFileName || t('docWordFallback')}.pdf`);
       } catch (e) {
         console.error(e);
         alert(t('alertPreparePrintSelectedError'));
@@ -30384,36 +30523,8 @@
         outPrintDoc = await peApplyPendingShapeRasterization(outPrintDoc);
 
         const pdfBytes = await outPrintDoc.save();
-
-        // Creating a Blob and URL
-        const blob = new Blob([pdfBytes], { type: 'application/pdf' });
-        const url = URL.createObjectURL(blob);
-
-        // Open in a new window and start printing
-        const printWindow = window.open(url, '_blank');
-
-        if (printWindow) {
-          printWindow.addEventListener('load', () => {
-            // There is a slight delay to allow the PDF reader to load
-            setTimeout(() => {
-              try {
-                printWindow.print();
-              } catch (e) {
-                console.warn('Не удалось автоматически вызвать печать:', e);
-              }
-              // Release the URL after some time
-              setTimeout(() => URL.revokeObjectURL(url), 2000);
-            }, 600);
-          });
-        } else {
-          // Fallback - download the file
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `${t('printAllFilePrefix')}${currentFileName || t('docWordFallback')}.pdf`;
-          a.click();
-          URL.revokeObjectURL(url);
-          alert(t('alertPrintWindowFailed'));
-        }
+        await pmPrintPdfBytes(pdfBytes,
+          `${t('printAllFilePrefix')}${currentFileName || t('docWordFallback')}.pdf`);
       } catch (e) {
         console.error(e);
         alert(t('alertPreparePrintAllError'));
@@ -43503,6 +43614,36 @@ function peOnKeyDown(e) {
     void pageEditClose(false);
     return;
   }
+  // F2 or Enter on a selected text block (or callout) starts editing its
+  // text, the same as a double-click, with the caret at the end of the text.
+  // Enter too, because some browsers keep F2 for themselves (Vivaldi's
+  // Quick Commands) and the page never sees it - but only with the focus on
+  // the page, so Enter still presses a focused button or link.
+  const editKey = e.key === 'F2'
+    || (e.key === 'Enter' && !e.shiftKey && (e.target === document.body || e.target === document.documentElement
+        || (e.target.closest && e.target.closest('#peStage'))));
+  if (editKey && !typing && !peState.inlineEditId && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const selected = peGetSelectedObjects();
+    const o = selected.length === 1 ? selected[0] : null;
+    if (o && (o.type === 'text' || peIsCalloutLike(o))) {
+      e.preventDefault(); e.stopPropagation();
+      peBeginInlineEdit(o);
+      const caretToEnd = () => {
+        const el = peInlineEditorDomEl();
+        if (!el || !el.isContentEditable) return;
+        el.focus();
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        range.collapse(false);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      };
+      caretToEnd();
+      requestAnimationFrame(caretToEnd);
+      return;
+    }
+  }
   if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && peState.sel) {
     e.preventDefault(); e.stopPropagation(); peDeleteSelected();
   }
@@ -43634,6 +43775,7 @@ function peRedrawObjects() {
       inner.style.color = o.color;
       inner.style.fontWeight = o.bold ? 'bold' : 'normal';
       inner.style.fontStyle = o.italic ? 'italic' : 'normal';
+      if (o.fontFamily) inner.style.fontFamily = peTextFontStack(o);
       // Text background - only via hiliteColor (span in o.html), not on the container.
       inner.style.backgroundColor = 'transparent';
       peNormalizeTextAlign(o);
@@ -43656,6 +43798,7 @@ function peRedrawObjects() {
           inner.contentEditable = 'true';
           inner.setAttribute('draggable', 'false');
           inner.addEventListener('dragstart', pePreventTextDragGhost);
+          inner.addEventListener('paste', pePasteAsPlainText);
           inner.addEventListener('input', () => {
             o.html = inner.innerHTML;
             o.text = peEditablePlainText(inner);
@@ -44391,6 +44534,7 @@ function peAppendCalloutBox(layer, o, W, H) {
       textEl.classList.add('pe-mobile-overlay-host');
     } else {
       textEl.contentEditable = 'true';
+      textEl.addEventListener('paste', pePasteAsPlainText);
       textEl.addEventListener('input', () => {
         o.html = textEl.innerHTML;
         o.text = peEditablePlainText(textEl);
@@ -44559,6 +44703,7 @@ function peAppendShapeCommentBox(layer, o, W, H) {
       textEl.classList.add('pe-mobile-overlay-host');
     } else {
       textEl.contentEditable = 'true';
+      textEl.addEventListener('paste', pePasteAsPlainText);
       textEl.addEventListener('input', () => {
         c.html = textEl.innerHTML;
         c.text = peEditablePlainText(textEl);
@@ -44890,6 +45035,40 @@ function peSyncShapePropsUi(o, opts) {
   }
   wrap.classList.add('visible');
   peSyncShapeOpacityRowWidth();
+}
+
+/**
+ * Paste into a text block or callout being edited: only the plain text
+ * goes in, typed in at the caret, so it takes the block's own font, size,
+ * colour and whatever inline style surrounds the caret - not the formatting
+ * it was copied with from another editor (or an image, which a text block
+ * cannot hold). Line breaks are kept.
+ */
+function pePasteAsPlainText(e) {
+  const dt = e.clipboardData;
+  if (!dt) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const text = (dt.getData('text/plain') || '').replace(/\r\n?/g, '\n');
+  if (!text) return;
+  // insertText keeps the paste a single native edit (and fires input, which
+  // syncs o.html/o.text); the manual insert is a fallback only.
+  let ok = false;
+  try { ok = document.execCommand('insertText', false, text); } catch (_) {}
+  if (ok) return;
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return;
+  const range = sel.getRangeAt(0);
+  range.deleteContents();
+  const frag = document.createDocumentFragment();
+  text.split('\n').forEach((line, i) => {
+    if (i) frag.appendChild(document.createElement('br'));
+    if (line) frag.appendChild(document.createTextNode(line));
+  });
+  const last = frag.lastChild;
+  range.insertNode(frag);
+  if (last) { range.setStartAfter(last); range.collapse(true); sel.removeAllRanges(); sel.addRange(range); }
+  e.target.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertFromPaste' }));
 }
 
 function peEditablePlainText(el) {
@@ -48379,13 +48558,20 @@ function peSetFormatBtnActive(id, active) {
   if (el) el.classList.toggle('active', !!active);
 }
 
-function peSyncPropsSizeUi(fontPt) {
+// `forKey` names the block(s) the size belongs to. The number field keeps
+// what is being typed into it while it has focus - but only for the same
+// block: typing a size leaves the focus in the field, and a click on another
+// text block does not take it away, so without the key the field went on
+// showing the previous block's size.
+function peSyncPropsSizeUi(fontPt, forKey) {
   const sizeEl = document.getElementById('pePropSize');
   const sizeNumEl = document.getElementById('pePropSizeNum');
   if (!sizeEl || !sizeNumEl || fontPt == null) return;
   const v = peRoundPt(fontPt);
   sizeEl.value = String(Math.max(parseInt(sizeEl.min, 10), Math.min(parseInt(sizeEl.max, 10), Math.round(v))));
-  if (document.activeElement !== sizeNumEl) sizeNumEl.value = v;
+  const key = forKey != null ? String(forKey) : (sizeNumEl.dataset.peFor || '');
+  if (document.activeElement !== sizeNumEl || sizeNumEl.dataset.peFor !== key) sizeNumEl.value = v;
+  sizeNumEl.dataset.peFor = key;
 }
 
 function peNormalizeTextAlign(o) {
@@ -48563,10 +48749,72 @@ function peApplyWholeFormatToObj(o, kind, value) {
   }
 }
 
+// The default text font of a block; o.fontFamily (a family name from the
+// font list, see peFillFontSelect) replaces it, with the default kept as the
+// fallback for a font this system does not have.
+const PE_TEXT_FONT_DEFAULT = '"Segoe UI", Arial, sans-serif';
+function peTextFontStack(o) {
+  return (o && o.fontFamily) ? pmWmFontCss(o.fontFamily) + ', ' + PE_TEXT_FONT_DEFAULT : PE_TEXT_FONT_DEFAULT;
+}
+
+/** Fonts are drawn on canvases too; the bundled Roboto must be loaded first. */
+async function peEnsureTextFonts(objects) {
+  if (!(objects || []).some(o => o && o.fontFamily)) return;
+  try { await pmWmLoadFonts(); } catch (_) {}
+  try { await document.fonts.ready; } catch (_) {}
+}
+
+/** The font list, filled once the installed fonts are known. */
+async function peFillFontSelect() {
+  const sel = document.getElementById('pePropFont');
+  if (!sel || sel.dataset.filled === '1') return;
+  let list = [];
+  try { list = await pmWmLoadFonts(); } catch (_) {}
+  if (sel.dataset.filled === '1') return;
+  sel.dataset.filled = '1';
+  list.forEach(f => {
+    const opt = document.createElement('option');
+    opt.value = f.family;
+    opt.textContent = f.label;
+    opt.style.fontFamily = pmWmFontCss(f.family) + ', ' + PE_TEXT_FONT_DEFAULT;
+    sel.appendChild(opt);
+  });
+  if (peState) peUpdateProps();
+}
+
+/** Show the block's font in the list (one this system lacks still shows, by name). */
+function peSyncFontSelect(o) {
+  const sel = document.getElementById('pePropFont');
+  if (!sel) return;
+  if (sel.dataset.filled !== '1') void peFillFontSelect();
+  const v = (o && o.fontFamily) || '';
+  if (v && !Array.from(sel.options).some(op => op.value === v)) {
+    const opt = document.createElement('option');
+    opt.value = v;
+    opt.textContent = v === PM_WM_ROBOTO_FAMILY ? 'Roboto' : v;
+    sel.appendChild(opt);
+  }
+  if (document.activeElement !== sel || sel.value !== v) sel.value = v;
+}
+
 function peApplyTextFormat(kind, value) {
   const info = peFormatTargetInfo();
   const o = info.obj;
   if (!o) return;
+
+  // The font, like the size, is the whole block's - with several blocks
+  // selected, each one's.
+  if (kind === 'font') {
+    const targets = info.mode === 'multi' ? info.objs : [o];
+    targets.forEach(ob => {
+      if (value) ob.fontFamily = value; else delete ob.fontFamily;
+    });
+    peRedrawObjects();
+    peUpdateProps();
+    peCommitEditorHistory(true);
+    if (value) peEnsureTextFonts(targets).then(() => { if (peState) peRedrawObjects(); });
+    return;
+  }
 
   // Font size is always for the entire block, even if it is currently highlighted
   // specific section of text (the point size of individual letters was removed according to
@@ -48844,7 +49092,8 @@ function peUpdateProps() {
     if (sSep) sSep.style.display = '';
     if (bgW) bgW.style.display = '';
     if (fRow) fRow.style.display = '';
-    peSyncPropsSizeUi(o.fontPt);
+    peSyncPropsSizeUi(o.fontPt, info.mode === 'multi' ? info.objs.map(x => x.id).join(',') : o.id);
+    peSyncFontSelect(o);
     // Programmatically overwriting .value of the active (in focus) input[type=color] —
     // precisely when its native pop-up palette is open - in a number of cases
     // browsers immediately closes this popup. We just recorded it there anyway
@@ -52460,6 +52709,101 @@ function peApplyGroupMove(d, pt, W, H) {
   peRedrawObjects();
 }
 
+// ── Aligning a text block with the other text blocks ─────────────────────
+// Moving a text block pulls its left edge, centre or right edge onto the
+// same line of another text block on the page once within PE_TEXT_SNAP_PX,
+// and a guide line shows which. Alt held while dragging moves freely.
+// Rotated blocks neither snap nor attract: their box is not their text's.
+const PE_TEXT_SNAP_PX = 6;
+
+/** Stage-space box of a text block as drawn (left/centre/right, top/bottom). */
+function peTextBlockBox(o) {
+  if (!o || o.type !== 'text' || o.rot) return null;
+  const el = peGetTextOuterEl(o);
+  if (!el) return null;
+  const r = peStageRectOfEl(el);
+  if (!(r.right > r.left)) return null;
+  return { left: r.left, right: r.right, cx: (r.left + r.right) / 2, top: r.top, bottom: r.bottom };
+}
+
+function peOtherTextBlockBoxes(o) {
+  if (!peState) return [];
+  return peState.objects
+    .filter(x => x !== o && x.type === 'text' && !x.rot && peTextHasContent(x))
+    .map(x => ({ obj: x, box: peTextBlockBox(x) }))
+    .filter(x => x.box);
+}
+
+function peClearTextSnapGuides() {
+  document.querySelectorAll('#peStage > .pe-snap-guide').forEach(el => el.remove());
+}
+
+function peShowTextSnapGuide(x, top, bottom) {
+  // On the stage, beside #peObjLayer: redrawing the objects rebuilds that
+  // layer on every step of the drag.
+  const layer = document.getElementById('peStage');
+  if (!layer) return;
+  const g = document.createElement('div');
+  g.className = 'pe-snap-guide';
+  g.style.left = Math.round(x) + 'px';
+  g.style.top = Math.round(top) + 'px';
+  g.style.height = Math.max(1, Math.round(bottom - top)) + 'px';
+  layer.appendChild(g);
+}
+
+/**
+ * For a text block being moved to fractional x (`fx`): the x that puts one
+ * of its edges exactly on the nearest matching edge of another text block,
+ * and draws the guide for it - or `fx` unchanged, with no guide.
+ * `box0`/`x0` are its box and o.x before this drag step, which give its
+ * width and how far its drawn left edge sits from o.x.
+ */
+function peSnapTextBlockX(o, fx, W, box0, x0, free) {
+  peClearTextSnapGuides();
+  if (free || !box0 || !(W > 0)) return fx;
+  const offset = box0.left - x0 * W;
+  const width = box0.right - box0.left;
+  const left = fx * W + offset;
+  const mine = { left, cx: left + width / 2, right: left + width };
+  let best = null;
+  peOtherTextBlockBoxes(o).forEach(({ box }) => {
+    ['left', 'cx', 'right'].forEach(k => {
+      const d = box[k] - mine[k];
+      if (Math.abs(d) <= PE_TEXT_SNAP_PX && (!best || Math.abs(d) < Math.abs(best.d))) best = { d, k, x: box[k], box };
+    });
+  });
+  if (!best) return fx;
+  // Every block lined up on that edge gets the guide, not only the nearest.
+  const at = best.x;
+  const dy = (box0.bottom - box0.top);
+  let top = box0.top, bottom = box0.top + dy;
+  peOtherTextBlockBoxes(o).forEach(({ box }) => {
+    if (Math.abs(box[best.k] - at) < 0.5) { top = Math.min(top, box.top); bottom = Math.max(bottom, box.bottom); }
+  });
+  const snapped = fx + best.d / W;
+  // The moved block's own top/bottom at its new place.
+  peShowTextSnapGuide(at, Math.min(top, box0.top), Math.max(bottom, box0.bottom));
+  return snapped;
+}
+window.addEventListener('pointerup', peClearTextSnapGuides);
+window.addEventListener('pointercancel', peClearTextSnapGuides);
+
+/** peSnapTextBlockX for the block a move drag carries (text blocks only). */
+function peDragTextSnapX(d, fx, W) {
+  if (!d || !d.obj || d.obj.type !== 'text' || d.obj.rot) return fx;
+  return peSnapTextBlockX(d.obj, fx, W, peTextBlockBox(d.obj), d.obj.x, !!d.altKey);
+}
+
+/** Text tool: a new block placed near another block's left edge starts on it. */
+function peSnapNewTextBlockX(fx, W) {
+  let best = null;
+  peOtherTextBlockBoxes(null).forEach(({ obj, box }) => {
+    const d = Math.abs(box.left - fx * W);
+    if (d <= PE_TEXT_SNAP_PX * 1.5 && (!best || d < best.d)) best = { d, x: obj.x };
+  });
+  return best ? best.x : fx;
+}
+
 function peProcessDrag(clientX, clientY) {
   if (!peState || !peState.drag) return;
   const d = peState.drag;
@@ -52541,7 +52885,7 @@ function peProcessDrag(clientX, clientY) {
     if (d.kind === 'callout-box-move') {
       // fall through below
     } else {
-      const c = peClampObjXY(d.obj, d.ox + dx / W, d.oy + dy / H);
+      const c = peClampObjXY(d.obj, peDragTextSnapX(d, d.ox + dx / W, W), d.oy + dy / H);
       const ndx = c.x - d.ox, ndy = c.y - d.oy;
       d.obj.x = c.x; d.obj.y = c.y;
       if (d.obj.type === 'callout') {
@@ -52578,7 +52922,7 @@ function peProcessDrag(clientX, clientY) {
     host.boxY = nby;
     peRedrawObjects();
   } else if (d.kind === 'move') {
-    const c = peClampObjXY(d.obj, d.ox + dx / W, d.oy + dy / H);
+    const c = peClampObjXY(d.obj, peDragTextSnapX(d, d.ox + dx / W, W), d.oy + dy / H);
     const ndx = c.x - d.ox, ndy = c.y - d.oy;
     d.obj.x = c.x; d.obj.y = c.y;
     if (d.obj.type === 'callout') {
@@ -52765,7 +53109,7 @@ function peProcessDrag(clientX, clientY) {
       peTextSetPosFromFixedCorner(d.obj, d.oppCorner, d.anchorX, d.anchorY, W, H);
       peRedrawObjects();
     }
-    if (peState.sel === d.obj) peSyncPropsSizeUi(d.obj.fontPt);
+    if (peState.sel === d.obj) peSyncPropsSizeUi(d.obj.fontPt, d.obj.id);
   } else if (d.kind === 'freehand-draw') {
     if (!d.obj || !d.points || !d.points.length) return;
     const last = d.points[d.points.length - 1];
@@ -54494,7 +54838,8 @@ function peObjMouseDown(e, o) {
       if (touchLike || (typeof isTouchDevice !== 'undefined' && isTouchDevice)) {
         peArmOskProxy(e.clientX, e.clientY);
       }
-      const o = { id: ++peState.seq, type: 'text', text: '', fontPt: 16, color: '#d90000', x: pt.x / W, y: pt.y / H };
+      const o = { id: ++peState.seq, type: 'text', text: '', fontPt: 16, color: '#d90000',
+        x: e.altKey ? pt.x / W : peSnapNewTextBlockX(pt.x / W, W), y: pt.y / H };
       peState.objects.push(o);
       peState.draftTextId = o.id;
       peBeginInlineEdit(o, { isNewDraft: true });
@@ -54547,6 +54892,7 @@ function peObjMouseDown(e, o) {
     }
     if (!peState || !peState.drag) return;
     peState.drag.shiftKey = e.shiftKey;
+    peState.drag.altKey = e.altKey;
     peState.drag.lastClientX = e.clientX;
     peState.drag.lastClientY = e.clientY;
     peProcessDrag(e.clientX, e.clientY);
@@ -55531,6 +55877,11 @@ function peObjMouseDown(e, o) {
   });
   document.getElementById('pePropColor').addEventListener('input', (e) => {
     peApplyTextFormat('color', e.target.value);
+    peState.inlineEditFocusPending = false;
+  });
+  document.getElementById('pePropFont')?.addEventListener('change', (e) => {
+    if (!peState) return;
+    peApplyTextFormat('font', e.target.value);
     peState.inlineEditFocusPending = false;
   });
   document.getElementById('pePropBg').addEventListener('input', (e) => {
@@ -57904,7 +58255,7 @@ function peMeasureTextBoxOffDom(o) {
   const htmlItalic = /<(i|em)\b|font-style:\s*italic/i.test(htmlStr);
   inner.style.fontWeight = (o.bold || htmlBold) ? 'bold' : 'normal';
   inner.style.fontStyle = (o.italic || htmlItalic) ? 'italic' : 'normal';
-  inner.style.fontFamily = '"Segoe UI", Arial, sans-serif';
+  inner.style.fontFamily = peTextFontStack(o);
   inner.style.lineHeight = '1.25';
   inner.style.padding = '1px 2px';
   inner.style.whiteSpace = 'pre-wrap';
@@ -58516,6 +58867,7 @@ async function peCompositeEditorObjectsOnCanvas(ctx, pageIdx, canvasW, canvasH) 
     .filter(o => o && o.type !== 'redact');
   if (!objects.length) return;
   await pePreloadEditorImages(objects);
+  await peEnsureTextFonts(objects);
   // Stage size must be the page's PDF-point (scale=1) size, NOT the canvas
   // pixel size. peDrawEditorObjects uses S = canvasW/stageW to scale fonts
   // and strokes; passing canvasW as stage made S=1 at every render scale, so
@@ -58641,7 +58993,7 @@ function peExtractTextRunsFromHtml(html, o) {
   inner.style.textDecoration = (o && o.underline) ? 'underline' : 'none';
   inner.style.color = (o && o.color) || '#000';
   if (o && o.bg && o.bg !== 'transparent') inner.style.backgroundColor = o.bg;
-  inner.style.fontFamily = '"Segoe UI", Arial, sans-serif';
+  inner.style.fontFamily = peTextFontStack(o);
   inner.style.lineHeight = '1.25';
   inner.style.whiteSpace = 'pre-wrap';
   inner.innerHTML = String(html);
@@ -58931,8 +59283,9 @@ function peBakeFontStr(run, o, S) {
   let fontStr = '';
   if (run.italic) fontStr += 'italic ';
   if (run.bold) fontStr += 'bold ';
-  // Segoe UI / Arial — Cyrillic-capable (Helvetica/WinAnsi is not).
-  fontStr += fpx + 'px "Segoe UI", Arial, sans-serif';
+  // The block's font; Segoe UI / Arial (Cyrillic-capable, unlike
+  // Helvetica/WinAnsi) when it has none or this system lacks it.
+  fontStr += fpx + 'px ' + peTextFontStack(o);
   return fontStr;
 }
 
@@ -62490,6 +62843,7 @@ function pePageHasEditorVisuals(objects) {
 }
 
 async function peBakeObjectsOverlayPng(objects, rot, cb) {
+  await peEnsureTextFonts(objects);
   const visW = (rot % 180) ? cb.height : cb.width;
   const visH = (rot % 180) ? cb.width : cb.height;
   const S = 2;
@@ -62509,6 +62863,127 @@ async function peBakeObjectsOverlayPng(objects, rot, cb) {
 // Bakes editor objects (from metadata) into a PDF copy - for exporting/saving to disk.
 // sourcePageIndices[targetIdx] - page index in the source pdfDoc for the targetIdx page in the targetDoc.
 // Returns the (possibly reloaded) PDFLib document — callers must use the return value.
+// Marks what a save draws or adds for objects that also stay editable in
+// the editor meta: the overlay's content stream and the comment annotations.
+const PE_OVERLAY_MARK = 'PMEditorOverlay';
+const PE_LEGACY_OVERLAY_RE = /^q\s+(?:(?:[-+\d.eE]+\s+){6}cm\s+|\/[^\s\/]+\s+gs\s+)*\/Image-\d+(?:-\d+)?\s+Do\s+Q$/;
+
+/** Make the next draw on `page` start a content stream of its own (pdf-lib reuses the last one). */
+function peBeginOwnContentStream(page) {
+  page.contentStream = undefined;
+  page.contentStreamRef = undefined;
+}
+
+/** Mark the content stream the last draws went into, and stop drawing into it. */
+function peMarkOwnContentStream(page) {
+  const cs = page.contentStream;
+  if (cs && cs.dict) cs.dict.set(PDFLib.PDFName.of(PE_OVERLAY_MARK), PDFLib.PDFBool.True);
+  peBeginOwnContentStream(page);
+}
+
+function peAnnotRefs(page) {
+  const annots = page.node.lookup(PDFLib.PDFName.of('Annots'));
+  return annots instanceof PDFLib.PDFArray ? annots.asArray() : [];
+}
+
+function peHasOverlayMark(obj) {
+  const dict = obj && (obj.dict || obj);
+  if (!dict || typeof dict.get !== 'function') return false;
+  const v = dict.get(PDFLib.PDFName.of(PE_OVERLAY_MARK));
+  return !!(v && (v === PDFLib.PDFBool.True || (typeof v.asBoolean === 'function' && v.asBoolean())));
+}
+
+/**
+ * Undo, in a document opened from a file this app saved, what that save
+ * drew for objects it also kept editable: the marked overlay content
+ * stream (with the images it paints) and the marked comment annotations.
+ * Only on pages whose objects are in the meta - without them the drawing is
+ * all that is left of the objects, and stays. Returns how many pages changed.
+ */
+function peStripEditorOverlaysInDoc(doc) {
+  if (!doc || !doc.catalog.get(PDFLib.PDFName.of(PE_EDITOR_META_KEY))) return 0;
+  const meta = peReadAllEditorMetaFromDoc(doc);
+  const ctx = doc.context;
+  let changed = 0;
+  doc.getPages().forEach((page, idx) => {
+    const objs = meta.pages && meta.pages[String(idx)];
+    if (!objs || !objs.length) return;
+    const node = page.node;
+    const CONTENTS = PDFLib.PDFName.of('Contents');
+    const contents = node.get(CONTENTS);
+    const arr = contents instanceof PDFLib.PDFArray ? contents
+      : (contents && ctx.lookup(contents) instanceof PDFLib.PDFArray ? ctx.lookup(contents) : null);
+    let pageChanged = false;
+    const streamText = (stream) => {
+      try {
+        const raw = PDFLib.decodePDFRawStream(stream).decode();
+        let str = '';
+        for (let k = 0; k < raw.length; k++) str += String.fromCharCode(raw[k]);
+        return str;
+      } catch (_) { return null; }
+    };
+    if (arr) {
+      const marked = [];
+      for (let i = 0; i < arr.size(); i++) if (peHasOverlayMark(ctx.lookup(arr.get(i)))) marked.push(i);
+      // Saved before the overlay was marked: the drawing is then the page's
+      // last content stream, and it is exactly what pdf-lib writes for one
+      // drawImage - "q, transforms, /Image-<id> Do, Q" - nothing else.
+      if (!marked.length && arr.size() > 1) {
+        const last = streamText(ctx.lookup(arr.get(arr.size() - 1)));
+        if (last && PE_LEGACY_OVERLAY_RE.test(last.trim())) marked.push(arr.size() - 1);
+      }
+      for (let j = marked.length - 1; j >= 0; j--) {
+        const i = marked[j];
+        const ref = arr.get(i);
+        const stream = ctx.lookup(ref);
+        // The images it paints are its own; drop them with it.
+        const str = streamText(stream) || '';
+        const names = Array.from(str.matchAll(/\/([^\s\/\[\]()<>{}%]+)\s+Do\b/g), m => m[1]);
+        const xobjs = node.Resources() && node.Resources().lookup(PDFLib.PDFName.of('XObject'));
+        names.forEach(n => {
+          if (!(xobjs instanceof PDFLib.PDFDict)) return;
+          const key = PDFLib.PDFName.of(n);
+          const imgRef = xobjs.get(key);
+          xobjs.delete(key);
+          const img = imgRef instanceof PDFLib.PDFRef ? ctx.lookup(imgRef) : null;
+          const smask = img && img.dict ? img.dict.get(PDFLib.PDFName.of('SMask')) : null;
+          if (smask instanceof PDFLib.PDFRef) ctx.delete(smask);
+          if (imgRef instanceof PDFLib.PDFRef) ctx.delete(imgRef);
+        });
+        arr.remove(i);
+        if (ref instanceof PDFLib.PDFRef) ctx.delete(ref);
+        pageChanged = true;
+      }
+    } else if (contents && peHasOverlayMark(ctx.lookup(contents))) {
+      node.set(CONTENTS, ctx.obj([]));
+      pageChanged = true;
+    }
+    const annots = node.lookup(PDFLib.PDFName.of('Annots'));
+    if (annots instanceof PDFLib.PDFArray) {
+      for (let i = annots.size() - 1; i >= 0; i--) {
+        const ref = annots.get(i);
+        if (!peHasOverlayMark(ctx.lookup(ref))) continue;
+        annots.remove(i);
+        if (ref instanceof PDFLib.PDFRef) ctx.delete(ref);
+        pageChanged = true;
+      }
+    }
+    if (pageChanged) changed++;
+  });
+  return changed;
+}
+
+/**
+ * peStripEditorOverlaysInDoc for bytes about to be opened: the bytes both
+ * libraries will read, and a pdf-lib document parsed from them. Returns
+ * null when there is nothing to undo (the usual case: no editor meta).
+ */
+async function peStripEditorOverlaysFromBytes(doc) {
+  if (!doc || !peStripEditorOverlaysInDoc(doc)) return null;
+  const bytes = new Uint8Array(await doc.save());
+  return { bytes, doc: await PDFLib.PDFDocument.load(bytes) };
+}
+
 async function peFlattenEditorObjectsIntoDoc(targetDoc, sourcePageIndices) {
   if (!targetDoc || !sourcePageIndices || !sourcePageIndices.length) return targetDoc;
   let workDoc = targetDoc;
@@ -62552,15 +63027,27 @@ async function peFlattenEditorObjectsIntoDoc(targetDoc, sourcePageIndices) {
       if (pePageHasEditorVisuals(objects)) {
         await pePreloadEditorImages(objects);
         const baked = await peBakeObjectsOverlayPng(objects, rot, cb);
+        // These objects also go into the editor meta below, so the drawing
+        // gets a content stream of its own, marked: opening the file again
+        // removes it (peStripEditorOverlaysInDoc) and the objects come back
+        // editable instead of on top of a copy of themselves.
+        peBeginOwnContentStream(page);
         await peDrawCroppedOverlay(workDoc, page, baked, rot, cb);
+        peMarkOwnContentStream(page);
       }
       const pjPage = await pjDoc.getPage(targetIdx + 1);
       const pjRot = typeof pjPage.rotate === 'number' ? pjPage.rotate : rot;
       const vp = pjPage.getViewport({ scale: 1, rotation: pjRot });
       const commented = objects.filter(o => o.type === 'highlight' && peHighlightHasComment(o));
+      const annotsBefore = peAnnotRefs(page).length;
       for (const o of commented) {
         await peAddHighlightCommentAnnotsOnDoc(workDoc, page, o, vp);
       }
+      // Same for the comment annotations: the highlight carries its comment.
+      peAnnotRefs(page).slice(annotsBefore).forEach(ref => {
+        const a = workDoc.context.lookup(ref);
+        if (a && a.set) a.set(PDFLib.PDFName.of(PE_OVERLAY_MARK), PDFLib.PDFBool.True);
+      });
     }
     const pagesMeta = {};
     sourcePageIndices.forEach((sourceIdx, targetIdx) => {
