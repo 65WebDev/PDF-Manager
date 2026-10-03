@@ -1795,6 +1795,24 @@
       border-top: 1px solid #e2e6ea;
       margin: 3px 0;
     }
+    /*Submenus of the page RMB menus (view mode, export): open on hover, to
+       the right of their item (to the left near the screen edge - see
+       pmCtxSubPlace), in the same box as the menu itself.*/
+    .ctx-sub { position: relative; }
+    .ctx-sub > .ctx-submenu {
+      position: absolute; left: calc(100% + 1px); top: -4px; display: none;
+      background: #fff; border: 1px solid #d5d9de; border-radius: 7px;
+      box-shadow: 0 6px 22px rgba(0,0,0,.18); padding: 3px; min-width: 196px;
+      z-index: 1;
+    }
+    .ctx-sub.ctx-sub--left > .ctx-submenu { left: auto; right: calc(100% + 1px); }
+    .ctx-sub.open > .ctx-submenu { display: block; }
+    .ctx-sub.open > .ctx-sub-root:not(:disabled) { background: #eef4fa; }
+    .ctx-sub-arrow {
+      flex: 0 0 12px; display: inline-flex; align-items: center; justify-content: center;
+      margin-right: -3px; opacity: .55;
+    }
+    .ctx-sub-arrow svg { display: block; }
 
     /* RMB menu on selected page text in the page editor, and in preview
        mode at >400% zoom (pageTextCopyMenu) - both share identical styling. */
@@ -7492,16 +7510,30 @@
   <!--"A new document will be created" prompt when moving pages into empty space-->
   <!--Page context menu (desktop): RMB on page card-->
   <div id="pageCtxMenu" aria-hidden="true">
-    <button type="button" data-action="nav"><span class="ctx-label" data-i18n="ctxNavMode">Режим навигации</span><span class="ctx-icon"><svg viewBox="0 0 69.0645142 89.838707" width="18" height="18" fill="currentColor" stroke="currentColor" stroke-width="0.8" stroke-linejoin="round" aria-hidden="true"><path d="M40.4849663,82.8033905  c-9.1123066,0-16.3754902-5.1455078-19.4277363-13.7636719c-0.1801758-0.5087891-0.3701172-1.015625-0.5893555-1.5087891  c-0.6171875-1.3886719-0.6171875-1.3886719-0.7412109-1.5224609l-0.015625,0.0146484  c-0.7080078-1.3291016-3.1923828-5.6308632-11.9047842-20.7168007c-0.909668-1.5717773-0.3686523-3.5917969,1.2021484-4.5014648  c0.7021484-0.4023438,1.5004883-0.6147461,2.3085938-0.6147461c1.6572266,0,3.1967773,0.8867188,4.0185547,2.315918  l6.8134756,11.7963867c0.2260742,0.3916016,0.6865234,0.5839844,1.125,0.4648438  c0.4370117-0.1171875,0.7407227-0.5136719,0.7407227-0.9658203V16.7179394c0-2.1977549,1.6191406-4.0249033,3.6865234-4.1601572  c1.1650391-0.0810547,2.2583008,0.3310547,3.0761719,1.1494141c0.7470703,0.7475586,1.1586914,1.7426758,1.1586914,2.802247  v24.2529278c0,0.5522461,0.4477558,1,1.0000019,1s1-0.4477539,1-1V10.9962587c0-2.184082,1.7768555-3.960937,3.9604492-3.960937  c1.0600586,0,2.0551758,0.4116211,2.8022461,1.1591792c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v5.5131845  v0.277832v23.9750957c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1V16.7872753v-0.277832  c0-2.184083,1.7773438-3.9609385,3.9609375-3.9609385c1.0595703,0,2.0546875,0.4116211,2.8027344,1.1586914  c0.7470703,0.7475586,1.1582031,1.7426758,1.1582031,2.802247v5.9462891v18.3066387c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1  V22.4557323c0-2.184082,1.7773438-3.9609375,3.9609375-3.9609375c1.0595703,0,2.0546875,0.4116211,2.8017578,1.1591797  c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v37.1074219  C61.69981,72.3776093,52.1832085,82.8033905,40.4849663,82.8033905z"/></svg></span></button>
-    <button type="button" data-action="read"><span class="ctx-label" data-i18n="ctxReadMode">Режим чтения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span></button>
-    <button type="button" data-action="loupe"><span class="ctx-label" data-i18n="ctxLoupeMode">Режим увеличения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20.5 20.5l-4.8-4.8"/></svg></span></button>
-    <button type="button" data-action="fit-width"><span class="ctx-label" data-i18n="ctxFitWidth">По ширине страницы</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M2 12h4M18 12h4M3.5 9.5 2 12l1.5 2.5M20.5 9.5 22 12l-1.5 2.5"/></svg></span></button>
+    <div class="ctx-sub ctx-sub--modes">
+      <button type="button" class="ctx-sub-root" aria-haspopup="true" title="Режим просмотра" data-i18n-title="ctxViewMode"><span class="ctx-label" data-i18n="ctxSelectMode">Режим выбора</span><span class="ctx-icon"><svg viewBox="-1 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M7 4 L7 19 L11 15.2 L13.7 21.2 L16 20.2 L13.4 14.4 L18 14 Z"/></svg></span><span class="ctx-sub-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></span></button>
+      <div class="ctx-submenu">
+        <button type="button" data-action="nav"><span class="ctx-label" data-i18n="ctxNavMode">Режим навигации</span><span class="ctx-icon"><svg viewBox="0 0 69.0645142 89.838707" width="18" height="18" fill="currentColor" stroke="currentColor" stroke-width="0.8" stroke-linejoin="round" aria-hidden="true"><path d="M40.4849663,82.8033905  c-9.1123066,0-16.3754902-5.1455078-19.4277363-13.7636719c-0.1801758-0.5087891-0.3701172-1.015625-0.5893555-1.5087891  c-0.6171875-1.3886719-0.6171875-1.3886719-0.7412109-1.5224609l-0.015625,0.0146484  c-0.7080078-1.3291016-3.1923828-5.6308632-11.9047842-20.7168007c-0.909668-1.5717773-0.3686523-3.5917969,1.2021484-4.5014648  c0.7021484-0.4023438,1.5004883-0.6147461,2.3085938-0.6147461c1.6572266,0,3.1967773,0.8867188,4.0185547,2.315918  l6.8134756,11.7963867c0.2260742,0.3916016,0.6865234,0.5839844,1.125,0.4648438  c0.4370117-0.1171875,0.7407227-0.5136719,0.7407227-0.9658203V16.7179394c0-2.1977549,1.6191406-4.0249033,3.6865234-4.1601572  c1.1650391-0.0810547,2.2583008,0.3310547,3.0761719,1.1494141c0.7470703,0.7475586,1.1586914,1.7426758,1.1586914,2.802247  v24.2529278c0,0.5522461,0.4477558,1,1.0000019,1s1-0.4477539,1-1V10.9962587c0-2.184082,1.7768555-3.960937,3.9604492-3.960937  c1.0600586,0,2.0551758,0.4116211,2.8022461,1.1591792c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v5.5131845  v0.277832v23.9750957c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1V16.7872753v-0.277832  c0-2.184083,1.7773438-3.9609385,3.9609375-3.9609385c1.0595703,0,2.0546875,0.4116211,2.8027344,1.1586914  c0.7470703,0.7475586,1.1582031,1.7426758,1.1582031,2.802247v5.9462891v18.3066387c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1  V22.4557323c0-2.184082,1.7773438-3.9609375,3.9609375-3.9609375c1.0595703,0,2.0546875,0.4116211,2.8017578,1.1591797  c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v37.1074219  C61.69981,72.3776093,52.1832085,82.8033905,40.4849663,82.8033905z"/></svg></span></button>
+        <button type="button" data-action="read"><span class="ctx-label" data-i18n="ctxReadMode">Режим чтения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span></button>
+        <button type="button" data-action="loupe"><span class="ctx-label" data-i18n="ctxLoupeMode">Режим увеличения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20.5 20.5l-4.8-4.8"/></svg></span></button>
+        <hr>
+        <button type="button" data-action="fit-width"><span class="ctx-label" data-i18n="ctxFitWidth">По ширине страницы</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M2 12h4M18 12h4M3.5 9.5 2 12l1.5 2.5M20.5 9.5 22 12l-1.5 2.5"/></svg></span></button>
+      </div>
+    </div>
     <hr>
     <button type="button" data-action="rot-left"><span class="ctx-label" data-i18n="ctxRotLeft">Повернуть против часовой стрелки</span><span class="ctx-icon"><span class="rotate-glyph" aria-hidden="true">↺</span></span></button>
     <button type="button" data-action="rot-right"><span class="ctx-label" data-i18n="ctxRotRight">Повернуть по часовой стрелке</span><span class="ctx-icon"><span class="rotate-glyph" aria-hidden="true">↻</span></span></button>
     <hr>
     <button type="button" data-action="edit"><span class="ctx-label" data-i18n="ctxEdit">Редактировать</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></span></button>
-    <button type="button" data-action="export"><span class="ctx-label" data-i18n="export">Экспорт</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span></button>
+    <div class="ctx-sub ctx-sub--export">
+      <button type="button" data-action="export" class="ctx-sub-root" aria-haspopup="true"><span class="ctx-label" data-i18n="export">Экспорт</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span><span class="ctx-sub-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></span></button>
+      <div class="ctx-submenu">
+        <button type="button" data-action="export-images"><span class="ctx-label" data-i18n="exportAsImages">Экспорт как изображения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></span></button>
+        <button type="button" data-action="export-split"><span class="ctx-label" data-i18n="exportSplitPages">Экспорт по страницам</span><span class="ctx-icon"><svg viewBox="0 0 100 100" width="18" height="18" fill="currentColor" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" aria-hidden="true"><path d="M88.44,0.65C88.42,0.55,88.38,0.45,88.32,0.36C88.17,0.14,87.92,0,87.64,0h-8.75H29.22c-0.45,0-0.82,0.37-0.82,0.82v4.98h-4.8c-0.45,0-0.82,0.37-0.82,0.82v4.98h-4.8c-0.45,0-0.82,0.37-0.82,0.82v4.98h-4.8c-0.45,0-0.82,0.37-0.82,0.82v80.96c0,0.45,0.37,0.82,0.82,0.82H70.78c0.45,0,0.82-0.37,0.82-0.82v-4.98h4.8c0.45,0,0.82-0.37,0.82-0.82v-4.98h4.8c0.45,0,0.82-0.37,0.82-0.82v-4.98h4.8c0.45,0,0.82-0.37,0.82-0.82V9.57v-8.75C88.46,0.76,88.45,0.71,88.44,0.65zM86.82,1.64v5.95l-5.95-5.95H86.82zM69.96,98.36H13.18V19.04h3.98v74.34c0,0.45,0.37,0.82,0.82,0.82h51.99V98.36zM75.58,92.56H18.8V13.24h3.98v74.34c0,0.45,0.37,0.82,0.82,0.82H75.58V92.56zM81.2,86.76H24.42V7.44h3.98v74.34c0,0.45,0.37,0.82,0.82,0.82h51.99V86.76zM30.04,80.96V1.64H78.55l8.27,8.27v71.05H30.04z"/><path d="M79.77,15.99H37.09c-0.45,0-0.82,0.37-0.82,0.82c0,0.45,0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82C80.59,16.36,80.22,15.99,79.77,15.99z"/><path d="M79.77,25.37H37.09c-0.45,0-0.82,0.37-0.82,0.82c0,0.45,0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82C80.59,25.73,80.22,25.37,79.77,25.37z"/><path d="M79.77,34.74H37.09c-0.45,0-0.82,0.37-0.82,0.82c0,0.45,0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82C80.59,35.11,80.22,34.74,79.77,34.74z"/><path d="M79.77,44.11H37.09c-0.45,0-0.82,0.37-0.82,0.82c0,0.45,0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82C80.59,44.48,80.22,44.11,79.77,44.11z"/><path d="M79.77,53.49H37.09c-0.45,0-0.82,0.37-0.82,0.82s0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82S80.22,53.49,79.77,53.49z"/></svg></span></button>
+        <button type="button" data-action="export-compress"><span class="ctx-label" data-i18n="compressPdf">Сжать PDF</span><span class="ctx-icon"><svg viewBox="0 0 48 48" width="18" height="18" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M8.92 8.714C8.495 7.39 9.476 6 10.867 6h26.266c1.391 0 2.372 1.39 1.947 2.714C37.9 12.4 36 19.09 36 24s1.9 11.6 3.08 15.286c.425 1.325-.556 2.714-1.947 2.714H10.867c-1.391 0-2.372-1.39-1.947-2.714C10.1 35.6 12 28.91 12 24S10.1 12.4 8.92 8.714ZM4 15c1.5 2 2 6 2 9s-.5 7-2 9"/><path d="M18 15.5h12M18 24h12m-12 8h4"/><path d="M44 15c-1.5 2-2 6-2 9s.5 6 2 9"/></svg></span></button>
+        <button type="button" data-action="export-encrypt"><span class="ctx-label" data-i18n="encryptFileTooltip">Зашифровать файл паролем</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span></button>
+      </div>
+    </div>
     <button type="button" data-action="replace"><span class="ctx-label" data-i18n="replace">Заменить</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></span></button>
     <hr>
     <button type="button" data-action="cut"><span class="ctx-label" data-i18n="ctxCut">Вырезать (Ctrl+X)</span><span class="ctx-icon">✂️</span></button>
@@ -7516,10 +7548,25 @@
 
   <!--RMB menu in reading mode (single page under cursor)-->
   <div id="readModeCtxMenu" aria-hidden="true">
-    <button type="button" data-action="exit-read"><span class="ctx-label" data-i18n="ctxExitRead">Выйти из режима чтения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span></button>
+    <div class="ctx-sub ctx-sub--modes">
+      <button type="button" class="ctx-sub-root" aria-haspopup="true" title="Режим просмотра" data-i18n-title="ctxViewMode"><span class="ctx-label" data-i18n="ctxReadMode">Режим чтения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span><span class="ctx-sub-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></span></button>
+      <div class="ctx-submenu">
+        <button type="button" data-action="select"><span class="ctx-label" data-i18n="ctxSelectMode">Режим выбора</span><span class="ctx-icon"><svg viewBox="-1 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M7 4 L7 19 L11 15.2 L13.7 21.2 L16 20.2 L13.4 14.4 L18 14 Z"/></svg></span></button>
+        <button type="button" data-action="nav"><span class="ctx-label" data-i18n="ctxNavMode">Режим навигации</span><span class="ctx-icon"><svg viewBox="0 0 69.0645142 89.838707" width="18" height="18" fill="currentColor" stroke="currentColor" stroke-width="0.8" stroke-linejoin="round" aria-hidden="true"><path d="M40.4849663,82.8033905  c-9.1123066,0-16.3754902-5.1455078-19.4277363-13.7636719c-0.1801758-0.5087891-0.3701172-1.015625-0.5893555-1.5087891  c-0.6171875-1.3886719-0.6171875-1.3886719-0.7412109-1.5224609l-0.015625,0.0146484  c-0.7080078-1.3291016-3.1923828-5.6308632-11.9047842-20.7168007c-0.909668-1.5717773-0.3686523-3.5917969,1.2021484-4.5014648  c0.7021484-0.4023438,1.5004883-0.6147461,2.3085938-0.6147461c1.6572266,0,3.1967773,0.8867188,4.0185547,2.315918  l6.8134756,11.7963867c0.2260742,0.3916016,0.6865234,0.5839844,1.125,0.4648438  c0.4370117-0.1171875,0.7407227-0.5136719,0.7407227-0.9658203V16.7179394c0-2.1977549,1.6191406-4.0249033,3.6865234-4.1601572  c1.1650391-0.0810547,2.2583008,0.3310547,3.0761719,1.1494141c0.7470703,0.7475586,1.1586914,1.7426758,1.1586914,2.802247  v24.2529278c0,0.5522461,0.4477558,1,1.0000019,1s1-0.4477539,1-1V10.9962587c0-2.184082,1.7768555-3.960937,3.9604492-3.960937  c1.0600586,0,2.0551758,0.4116211,2.8022461,1.1591792c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v5.5131845  v0.277832v23.9750957c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1V16.7872753v-0.277832  c0-2.184083,1.7773438-3.9609385,3.9609375-3.9609385c1.0595703,0,2.0546875,0.4116211,2.8027344,1.1586914  c0.7470703,0.7475586,1.1582031,1.7426758,1.1582031,2.802247v5.9462891v18.3066387c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1  V22.4557323c0-2.184082,1.7773438-3.9609375,3.9609375-3.9609375c1.0595703,0,2.0546875,0.4116211,2.8017578,1.1591797  c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v37.1074219  C61.69981,72.3776093,52.1832085,82.8033905,40.4849663,82.8033905z"/></svg></span></button>
+        <button type="button" data-action="loupe"><span class="ctx-label" data-i18n="ctxLoupeMode">Режим увеличения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20.5 20.5l-4.8-4.8"/></svg></span></button>
+      </div>
+    </div>
     <hr>
     <button type="button" data-action="edit"><span class="ctx-label" data-i18n="ctxEdit">Редактировать</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></span></button>
-    <button type="button" data-action="export"><span class="ctx-label" data-i18n="export">Экспорт</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span></button>
+    <div class="ctx-sub ctx-sub--export">
+      <button type="button" data-action="export" class="ctx-sub-root" aria-haspopup="true"><span class="ctx-label" data-i18n="export">Экспорт</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span><span class="ctx-sub-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></span></button>
+      <div class="ctx-submenu">
+        <button type="button" data-action="export-images"><span class="ctx-label" data-i18n="exportAsImages">Экспорт как изображения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></span></button>
+        <button type="button" data-action="export-split"><span class="ctx-label" data-i18n="exportSplitPages">Экспорт по страницам</span><span class="ctx-icon"><svg viewBox="0 0 100 100" width="18" height="18" fill="currentColor" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" aria-hidden="true"><path d="M88.44,0.65C88.42,0.55,88.38,0.45,88.32,0.36C88.17,0.14,87.92,0,87.64,0h-8.75H29.22c-0.45,0-0.82,0.37-0.82,0.82v4.98h-4.8c-0.45,0-0.82,0.37-0.82,0.82v4.98h-4.8c-0.45,0-0.82,0.37-0.82,0.82v4.98h-4.8c-0.45,0-0.82,0.37-0.82,0.82v80.96c0,0.45,0.37,0.82,0.82,0.82H70.78c0.45,0,0.82-0.37,0.82-0.82v-4.98h4.8c0.45,0,0.82-0.37,0.82-0.82v-4.98h4.8c0.45,0,0.82-0.37,0.82-0.82v-4.98h4.8c0.45,0,0.82-0.37,0.82-0.82V9.57v-8.75C88.46,0.76,88.45,0.71,88.44,0.65zM86.82,1.64v5.95l-5.95-5.95H86.82zM69.96,98.36H13.18V19.04h3.98v74.34c0,0.45,0.37,0.82,0.82,0.82h51.99V98.36zM75.58,92.56H18.8V13.24h3.98v74.34c0,0.45,0.37,0.82,0.82,0.82H75.58V92.56zM81.2,86.76H24.42V7.44h3.98v74.34c0,0.45,0.37,0.82,0.82,0.82h51.99V86.76zM30.04,80.96V1.64H78.55l8.27,8.27v71.05H30.04z"/><path d="M79.77,15.99H37.09c-0.45,0-0.82,0.37-0.82,0.82c0,0.45,0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82C80.59,16.36,80.22,15.99,79.77,15.99z"/><path d="M79.77,25.37H37.09c-0.45,0-0.82,0.37-0.82,0.82c0,0.45,0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82C80.59,25.73,80.22,25.37,79.77,25.37z"/><path d="M79.77,34.74H37.09c-0.45,0-0.82,0.37-0.82,0.82c0,0.45,0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82C80.59,35.11,80.22,34.74,79.77,34.74z"/><path d="M79.77,44.11H37.09c-0.45,0-0.82,0.37-0.82,0.82c0,0.45,0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82C80.59,44.48,80.22,44.11,79.77,44.11z"/><path d="M79.77,53.49H37.09c-0.45,0-0.82,0.37-0.82,0.82s0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82S80.22,53.49,79.77,53.49z"/></svg></span></button>
+        <button type="button" data-action="export-compress"><span class="ctx-label" data-i18n="compressPdf">Сжать PDF</span><span class="ctx-icon"><svg viewBox="0 0 48 48" width="18" height="18" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M8.92 8.714C8.495 7.39 9.476 6 10.867 6h26.266c1.391 0 2.372 1.39 1.947 2.714C37.9 12.4 36 19.09 36 24s1.9 11.6 3.08 15.286c.425 1.325-.556 2.714-1.947 2.714H10.867c-1.391 0-2.372-1.39-1.947-2.714C10.1 35.6 12 28.91 12 24S10.1 12.4 8.92 8.714ZM4 15c1.5 2 2 6 2 9s-.5 7-2 9"/><path d="M18 15.5h12M18 24h12m-12 8h4"/><path d="M44 15c-1.5 2-2 6-2 9s.5 6 2 9"/></svg></span></button>
+        <button type="button" data-action="export-encrypt"><span class="ctx-label" data-i18n="encryptFileTooltip">Зашифровать файл паролем</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span></button>
+      </div>
+    </div>
     <button type="button" data-action="replace"><span class="ctx-label" data-i18n="replace">Заменить</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></span></button>
     <hr>
     <button type="button" data-action="print"><span class="ctx-label" data-i18n="ctxPrintPage">Печать страницы</span><span class="ctx-icon">🖨️</span></button>
@@ -7527,18 +7574,30 @@
 
   <!--RMB menu in document navigation (Hand) mode-->
   <div id="navModeCtxMenu" aria-hidden="true">
-    <button type="button" data-action="select"><span class="ctx-label" data-i18n="ctxSelectMode">Режим выбора</span><span class="ctx-icon"><svg viewBox="-1 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M7 4 L7 19 L11 15.2 L13.7 21.2 L16 20.2 L13.4 14.4 L18 14 Z"/></svg></span></button>
-    <button type="button" data-action="loupe"><span class="ctx-label" data-i18n="ctxLoupeMode">Режим увеличения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20.5 20.5l-4.8-4.8"/></svg></span></button>
-    <button type="button" data-action="read"><span class="ctx-label" data-i18n="ctxReadMode">Режим чтения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span></button>
-    <button type="button" data-action="fit-width"><span class="ctx-label" data-i18n="ctxFitWidth">По ширине страницы</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M2 12h4M18 12h4M3.5 9.5 2 12l1.5 2.5M20.5 9.5 22 12l-1.5 2.5"/></svg></span></button>
+    <div class="ctx-sub ctx-sub--modes">
+      <button type="button" class="ctx-sub-root" aria-haspopup="true" title="Режим просмотра" data-i18n-title="ctxViewMode"><span class="ctx-label" data-i18n="ctxNavMode">Режим навигации</span><span class="ctx-icon"><svg viewBox="0 0 69.0645142 89.838707" width="18" height="18" fill="currentColor" stroke="currentColor" stroke-width="0.8" stroke-linejoin="round" aria-hidden="true"><path d="M40.4849663,82.8033905  c-9.1123066,0-16.3754902-5.1455078-19.4277363-13.7636719c-0.1801758-0.5087891-0.3701172-1.015625-0.5893555-1.5087891  c-0.6171875-1.3886719-0.6171875-1.3886719-0.7412109-1.5224609l-0.015625,0.0146484  c-0.7080078-1.3291016-3.1923828-5.6308632-11.9047842-20.7168007c-0.909668-1.5717773-0.3686523-3.5917969,1.2021484-4.5014648  c0.7021484-0.4023438,1.5004883-0.6147461,2.3085938-0.6147461c1.6572266,0,3.1967773,0.8867188,4.0185547,2.315918  l6.8134756,11.7963867c0.2260742,0.3916016,0.6865234,0.5839844,1.125,0.4648438  c0.4370117-0.1171875,0.7407227-0.5136719,0.7407227-0.9658203V16.7179394c0-2.1977549,1.6191406-4.0249033,3.6865234-4.1601572  c1.1650391-0.0810547,2.2583008,0.3310547,3.0761719,1.1494141c0.7470703,0.7475586,1.1586914,1.7426758,1.1586914,2.802247  v24.2529278c0,0.5522461,0.4477558,1,1.0000019,1s1-0.4477539,1-1V10.9962587c0-2.184082,1.7768555-3.960937,3.9604492-3.960937  c1.0600586,0,2.0551758,0.4116211,2.8022461,1.1591792c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v5.5131845  v0.277832v23.9750957c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1V16.7872753v-0.277832  c0-2.184083,1.7773438-3.9609385,3.9609375-3.9609385c1.0595703,0,2.0546875,0.4116211,2.8027344,1.1586914  c0.7470703,0.7475586,1.1582031,1.7426758,1.1582031,2.802247v5.9462891v18.3066387c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1  V22.4557323c0-2.184082,1.7773438-3.9609375,3.9609375-3.9609375c1.0595703,0,2.0546875,0.4116211,2.8017578,1.1591797  c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v37.1074219  C61.69981,72.3776093,52.1832085,82.8033905,40.4849663,82.8033905z"/></svg></span><span class="ctx-sub-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></span></button>
+      <div class="ctx-submenu">
+        <button type="button" data-action="select"><span class="ctx-label" data-i18n="ctxSelectMode">Режим выбора</span><span class="ctx-icon"><svg viewBox="-1 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M7 4 L7 19 L11 15.2 L13.7 21.2 L16 20.2 L13.4 14.4 L18 14 Z"/></svg></span></button>
+        <button type="button" data-action="read"><span class="ctx-label" data-i18n="ctxReadMode">Режим чтения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span></button>
+        <button type="button" data-action="loupe"><span class="ctx-label" data-i18n="ctxLoupeMode">Режим увеличения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20.5 20.5l-4.8-4.8"/></svg></span></button>
+        <hr>
+        <button type="button" data-action="fit-width"><span class="ctx-label" data-i18n="ctxFitWidth">По ширине страницы</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M2 12h4M18 12h4M3.5 9.5 2 12l1.5 2.5M20.5 9.5 22 12l-1.5 2.5"/></svg></span></button>
+      </div>
+    </div>
   </div>
 
   <!--RMB menu in page magnification (loupe) mode-->
   <div id="loupeModeCtxMenu" aria-hidden="true">
-    <button type="button" data-action="select"><span class="ctx-label" data-i18n="ctxSelectMode">Режим выбора</span><span class="ctx-icon"><svg viewBox="-1 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M7 4 L7 19 L11 15.2 L13.7 21.2 L16 20.2 L13.4 14.4 L18 14 Z"/></svg></span></button>
-    <button type="button" data-action="nav"><span class="ctx-label" data-i18n="ctxNavMode">Режим навигации</span><span class="ctx-icon"><svg viewBox="0 0 69.0645142 89.838707" width="18" height="18" fill="currentColor" stroke="currentColor" stroke-width="0.8" stroke-linejoin="round" aria-hidden="true"><path d="M40.4849663,82.8033905  c-9.1123066,0-16.3754902-5.1455078-19.4277363-13.7636719c-0.1801758-0.5087891-0.3701172-1.015625-0.5893555-1.5087891  c-0.6171875-1.3886719-0.6171875-1.3886719-0.7412109-1.5224609l-0.015625,0.0146484  c-0.7080078-1.3291016-3.1923828-5.6308632-11.9047842-20.7168007c-0.909668-1.5717773-0.3686523-3.5917969,1.2021484-4.5014648  c0.7021484-0.4023438,1.5004883-0.6147461,2.3085938-0.6147461c1.6572266,0,3.1967773,0.8867188,4.0185547,2.315918  l6.8134756,11.7963867c0.2260742,0.3916016,0.6865234,0.5839844,1.125,0.4648438  c0.4370117-0.1171875,0.7407227-0.5136719,0.7407227-0.9658203V16.7179394c0-2.1977549,1.6191406-4.0249033,3.6865234-4.1601572  c1.1650391-0.0810547,2.2583008,0.3310547,3.0761719,1.1494141c0.7470703,0.7475586,1.1586914,1.7426758,1.1586914,2.802247  v24.2529278c0,0.5522461,0.4477558,1,1.0000019,1s1-0.4477539,1-1V10.9962587c0-2.184082,1.7768555-3.960937,3.9604492-3.960937  c1.0600586,0,2.0551758,0.4116211,2.8022461,1.1591792c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v5.5131845  v0.277832v23.9750957c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1V16.7872753v-0.277832  c0-2.184083,1.7773438-3.9609385,3.9609375-3.9609385c1.0595703,0,2.0546875,0.4116211,2.8027344,1.1586914  c0.7470703,0.7475586,1.1582031,1.7426758,1.1582031,2.802247v5.9462891v18.3066387c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1  V22.4557323c0-2.184082,1.7773438-3.9609375,3.9609375-3.9609375c1.0595703,0,2.0546875,0.4116211,2.8017578,1.1591797  c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v37.1074219  C61.69981,72.3776093,52.1832085,82.8033905,40.4849663,82.8033905z"/></svg></span></button>
-    <button type="button" data-action="read"><span class="ctx-label" data-i18n="ctxReadMode">Режим чтения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span></button>
-    <button type="button" data-action="fit-width"><span class="ctx-label" data-i18n="ctxFitWidth">По ширине страницы</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M2 12h4M18 12h4M3.5 9.5 2 12l1.5 2.5M20.5 9.5 22 12l-1.5 2.5"/></svg></span></button>
+    <div class="ctx-sub ctx-sub--modes">
+      <button type="button" class="ctx-sub-root" aria-haspopup="true" title="Режим просмотра" data-i18n-title="ctxViewMode"><span class="ctx-label" data-i18n="ctxLoupeMode">Режим увеличения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20.5 20.5l-4.8-4.8"/></svg></span><span class="ctx-sub-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></span></button>
+      <div class="ctx-submenu">
+        <button type="button" data-action="select"><span class="ctx-label" data-i18n="ctxSelectMode">Режим выбора</span><span class="ctx-icon"><svg viewBox="-1 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M7 4 L7 19 L11 15.2 L13.7 21.2 L16 20.2 L13.4 14.4 L18 14 Z"/></svg></span></button>
+        <button type="button" data-action="nav"><span class="ctx-label" data-i18n="ctxNavMode">Режим навигации</span><span class="ctx-icon"><svg viewBox="0 0 69.0645142 89.838707" width="18" height="18" fill="currentColor" stroke="currentColor" stroke-width="0.8" stroke-linejoin="round" aria-hidden="true"><path d="M40.4849663,82.8033905  c-9.1123066,0-16.3754902-5.1455078-19.4277363-13.7636719c-0.1801758-0.5087891-0.3701172-1.015625-0.5893555-1.5087891  c-0.6171875-1.3886719-0.6171875-1.3886719-0.7412109-1.5224609l-0.015625,0.0146484  c-0.7080078-1.3291016-3.1923828-5.6308632-11.9047842-20.7168007c-0.909668-1.5717773-0.3686523-3.5917969,1.2021484-4.5014648  c0.7021484-0.4023438,1.5004883-0.6147461,2.3085938-0.6147461c1.6572266,0,3.1967773,0.8867188,4.0185547,2.315918  l6.8134756,11.7963867c0.2260742,0.3916016,0.6865234,0.5839844,1.125,0.4648438  c0.4370117-0.1171875,0.7407227-0.5136719,0.7407227-0.9658203V16.7179394c0-2.1977549,1.6191406-4.0249033,3.6865234-4.1601572  c1.1650391-0.0810547,2.2583008,0.3310547,3.0761719,1.1494141c0.7470703,0.7475586,1.1586914,1.7426758,1.1586914,2.802247  v24.2529278c0,0.5522461,0.4477558,1,1.0000019,1s1-0.4477539,1-1V10.9962587c0-2.184082,1.7768555-3.960937,3.9604492-3.960937  c1.0600586,0,2.0551758,0.4116211,2.8022461,1.1591792c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v5.5131845  v0.277832v23.9750957c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1V16.7872753v-0.277832  c0-2.184083,1.7773438-3.9609385,3.9609375-3.9609385c1.0595703,0,2.0546875,0.4116211,2.8027344,1.1586914  c0.7470703,0.7475586,1.1582031,1.7426758,1.1582031,2.802247v5.9462891v18.3066387c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1  V22.4557323c0-2.184082,1.7773438-3.9609375,3.9609375-3.9609375c1.0595703,0,2.0546875,0.4116211,2.8017578,1.1591797  c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v37.1074219  C61.69981,72.3776093,52.1832085,82.8033905,40.4849663,82.8033905z"/></svg></span></button>
+        <button type="button" data-action="read"><span class="ctx-label" data-i18n="ctxReadMode">Режим чтения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span></button>
+        <hr>
+        <button type="button" data-action="fit-width"><span class="ctx-label" data-i18n="ctxFitWidth">По ширине страницы</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M2 12h4M18 12h4M3.5 9.5 2 12l1.5 2.5M20.5 9.5 22 12l-1.5 2.5"/></svg></span></button>
+      </div>
+    </div>
   </div>
 
   <!--Context menu for selected page text in preview mode (desktop, >400% zoom) - same options as the page editor's-->
@@ -9244,6 +9303,7 @@
         ctxNavMode: 'Режим навигации',
         ctxReadMode: 'Режим чтения',
         ctxLoupeMode: 'Режим увеличения',
+        ctxViewMode: 'Режим просмотра',
         ctxSelectMode: 'Режим выбора',
         ctxFitWidth: 'По ширине страницы',
         ctxRotLeft: 'Повернуть против часовой стрелки',
@@ -9671,6 +9731,7 @@
         ctxNavMode: 'Navigation mode',
         ctxReadMode: 'Reading mode',
         ctxLoupeMode: 'Magnifier mode',
+        ctxViewMode: 'View mode',
         ctxSelectMode: 'Selection mode',
         ctxFitWidth: 'Fit page width',
         ctxRotLeft: 'Rotate counter-clockwise',
@@ -10098,6 +10159,7 @@
         ctxNavMode: 'Modo navegación',
         ctxReadMode: 'Modo lectura',
         ctxLoupeMode: 'Modo lupa',
+        ctxViewMode: 'Modo de vista',
         ctxSelectMode: 'Modo selección',
         ctxFitWidth: 'Ajustar al ancho de página',
         ctxRotLeft: 'Girar en sentido antihorario',
@@ -10591,6 +10653,7 @@
         ctxNavMode: '导航模式',
         ctxReadMode: '阅读模式',
         ctxLoupeMode: '放大镜模式',
+        ctxViewMode: '查看模式',
         ctxSelectMode: '选择模式',
         ctxFitWidth: '适应页面宽度',
         ctxRotLeft: '逆时针旋转',
@@ -40941,6 +41004,7 @@ function editSelectedPage() {
     if (readMenu) readMenu.classList.remove('visible');
     if (navMenu) navMenu.classList.remove('visible');
     if (loupeMenu) loupeMenu.classList.remove('visible');
+    pmCtxSubCloseAll();
     clearCtxMenuTargetHighlight();
     ctxPageIdx = null;
     pageCtxSelectionSnapshot = null;
@@ -40957,6 +41021,70 @@ function editSelectedPage() {
     el.style.left = x + 'px';
     el.style.top = y + 'px';
   }
+
+  // The Export submenu's items: the same exports as the top menu's Export popup.
+  const PM_CTX_EXPORT_MODES = {
+    'export-images': 'images', 'export-split': 'split',
+    'export-compress': 'compress', 'export-encrypt': 'encrypt'
+  };
+
+  // ── Submenus (view mode, export) ──
+  // Opened by hovering their item and kept open for a moment after the
+  // pointer leaves, so a diagonal move towards the submenu across the next
+  // item does not close it. The item itself keeps its own click (Export
+  // still exports); the view-mode item has none and just shows the modes.
+  const PM_CTX_SUB_CLOSE_MS = 280;
+  function pmCtxSubCloseAll(except) {
+    document.querySelectorAll('.ctx-sub.open').forEach(sub => {
+      if (sub === except) return;
+      clearTimeout(sub._pmCloseT);
+      sub.classList.remove('open', 'ctx-sub--left');
+      const box = sub.querySelector(':scope > .ctx-submenu');
+      if (box) box.style.top = '';
+    });
+  }
+  // Right of the item; left of it when the screen ends first; moved up as
+  // far as needed to stay on screen.
+  function pmCtxSubPlace(sub) {
+    const box = sub.querySelector(':scope > .ctx-submenu');
+    if (!box) return;
+    sub.classList.remove('ctx-sub--left');
+    box.style.top = '';
+    let r = box.getBoundingClientRect();
+    if (r.right > window.innerWidth - 6) {
+      sub.classList.add('ctx-sub--left');
+      r = box.getBoundingClientRect();
+    }
+    const over = r.bottom - (window.innerHeight - 6);
+    if (over > 0) box.style.top = (-4 - over) + 'px';
+  }
+  function pmCtxSubOpen(sub) {
+    const root = sub.querySelector(':scope > .ctx-sub-root');
+    if (root && root.disabled) return;
+    clearTimeout(sub._pmCloseT);
+    pmCtxSubCloseAll(sub);
+    if (sub.classList.contains('open')) return;
+    sub.classList.add('open');
+    pmCtxSubPlace(sub);
+  }
+  [menu, readMenu, navMenu, loupeMenu].forEach(m => {
+    if (!m) return;
+    m.querySelectorAll('.ctx-sub').forEach(sub => {
+      sub.addEventListener('mouseenter', () => pmCtxSubOpen(sub));
+      sub.addEventListener('mouseleave', () => {
+        clearTimeout(sub._pmCloseT);
+        sub._pmCloseT = setTimeout(() => {
+          sub.classList.remove('open', 'ctx-sub--left');
+        }, PM_CTX_SUB_CLOSE_MS);
+      });
+      // A plain menu item hovered next closes an open submenu at once.
+    });
+    m.addEventListener('mouseover', (e) => {
+      const item = e.target.closest('button');
+      if (!item || item.closest('.ctx-sub')) return;
+      pmCtxSubCloseAll();
+    });
+  });
 
   // Hit-test pages even when pointer-events:none (nav / reading mode).
   function findPageAtPoint(clientX, clientY) {
@@ -41022,8 +41150,15 @@ function editSelectedPage() {
     const pageOk = ctxPageIdx != null && !markedForDeletion.has(ctxPageIdx);
     const states = {
       'exit-read': false,
+      select: baseDisabled,
+      nav: baseDisabled,
+      loupe: baseDisabled,
       edit: baseDisabled || !pageOk || !pageEditAvailable(),
       export: baseDisabled || !pageOk,
+      'export-images': baseDisabled || !pageOk,
+      'export-split': baseDisabled || !pageOk,
+      'export-compress': baseDisabled || !pageOk,
+      'export-encrypt': baseDisabled || !pageOk,
       replace: baseDisabled || !pageOk,
       print: baseDisabled || !pageOk
     };
@@ -41446,6 +41581,10 @@ function editSelectedPage() {
       'rot-left': baseDisabled || targets.length === 0,
       edit: baseDisabled || !pageEditAvailable() || editIdx == null || markedForDeletion.has(editIdx),
       export: baseDisabled || targets.length === 0,
+      'export-images': baseDisabled || targets.length === 0,
+      'export-split': baseDisabled || targets.length === 0,
+      'export-compress': baseDisabled || targets.length === 0,
+      'export-encrypt': baseDisabled || targets.length === 0,
       replace: baseDisabled || targets.length === 0 || !ctxMenuTargetsContiguous(targets),
       cut: baseDisabled || targets.length === 0,
       copy: baseDisabled || targets.length === 0,
@@ -41716,7 +41855,7 @@ function editSelectedPage() {
     let selOk = true;
     if (action === 'replace' || action === 'cut') {
       selOk = syncSelectionToCtxTargets();
-    } else if (action === 'export' || action === 'copy' || action === 'print') {
+    } else if (action === 'export' || action.indexOf('export-') === 0 || action === 'copy' || action === 'print') {
       selOk = syncSelectionToCtxTargets({ notify: true });
     }
 
@@ -41782,6 +41921,12 @@ function editSelectedPage() {
       case 'export':
         if (selOk) exportSelectedPages();
         break;
+      case 'export-images':
+      case 'export-split':
+      case 'export-compress':
+      case 'export-encrypt':
+        if (selOk) exportSelectedPages(PM_CTX_EXPORT_MODES[action]);
+        break;
       case 'replace':
         if (selOk) replaceSelectedPages();
         break;
@@ -41843,6 +41988,24 @@ function editSelectedPage() {
           break;
         case 'export':
           void runOnSinglePage(anchorIdx, () => exportSelectedPages());
+          break;
+        case 'export-images':
+        case 'export-split':
+        case 'export-compress':
+        case 'export-encrypt':
+          void runOnSinglePage(anchorIdx, () => exportSelectedPages(PM_CTX_EXPORT_MODES[action]));
+          break;
+        // The view-mode submenu: reading gives way to the chosen mode.
+        case 'select':
+          exitReadMode();
+          setMode('select');
+          break;
+        case 'nav':
+          exitReadMode();
+          setMode('nav');
+          break;
+        case 'loupe':
+          toggleLoupeMode();   // leaves reading itself
           break;
         case 'replace':
           void runOnSinglePage(anchorIdx, () => replaceSelectedPages());
