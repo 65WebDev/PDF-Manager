@@ -7353,6 +7353,56 @@
       color: #ff8b7a !important;
     }
   </style>
+  <script>
+    // A smartphone browser set to "Desktop site" (Chrome) / "Request Desktop
+    // Website" (Safari) asks for the desktop version: it sends a desktop user
+    // agent and lays the page out desktop-wide - but the screen is still
+    // touch-only, and that is what both the stylesheet (@media pointer/hover)
+    // and the code (isTouchDevice, matchMedia) went by, so the phone layout
+    // came up, only smaller. Here the phone is taken at its word: pointer and
+    // hover queries answer as on a computer with a mouse, in the stylesheet
+    // and in matchMedia alike, so the desktop interface comes up.
+    // Phones only (short screen side under 600 CSS px): a tablet asks for the
+    // desktop site by default (iPad Safari, large Android tablets) and keeps
+    // its touch interface.
+    (function pmDesktopSiteOnPhone() {
+      try {
+        if (!window.matchMedia) return;
+        const mm = window.matchMedia.bind(window);
+        const touchOnly = (('ontouchstart' in window) || navigator.maxTouchPoints > 0 || mm('(pointer: coarse)').matches)
+          && !mm('(any-pointer: fine)').matches;
+        if (!touchOnly) return;
+        const uad = navigator.userAgentData;
+        const mobileUa = (uad && typeof uad.mobile === 'boolean')
+          ? uad.mobile
+          : /Mobi|Android|iPhone|iPod|iPad/i.test(navigator.userAgent || '');
+        if (mobileUa) return;
+        const shortSide = Math.min(screen.width || 0, screen.height || 0);
+        if (!(shortSide > 0 && shortSide < 600)) return;
+        window.PM_DESKTOP_SITE_ON_PHONE = true;
+        document.documentElement.classList.add('pm-desktop-site-on-phone');
+        const YES = '(min-width: 0px)';
+        const NO = '(max-width: 0px) and (min-width: 1px)';
+        const asDesktop = (q) => String(q)
+          .replace(/\(\s*(any-)?pointer\s*:\s*(coarse|fine|none)\s*\)/gi,
+            (m, any, v) => v.toLowerCase() === 'fine' ? YES : (any ? m : NO))
+          .replace(/\(\s*(any-)?hover\s*:\s*(hover|none)\s*\)/gi,
+            (m, any, v) => v.toLowerCase() === 'hover' ? YES : NO);
+        window.matchMedia = (q) => mm(asDesktop(q));
+        const fix = (rules) => {
+          Array.from(rules || []).forEach(r => {
+            if (r.media && r.cssRules) {
+              const was = r.media.mediaText;
+              const now = asDesktop(was);
+              if (now !== was) r.media.mediaText = now;
+            }
+            if (r.cssRules) fix(r.cssRules);
+          });
+        };
+        Array.from(document.styleSheets).forEach(sh => { try { fix(sh.cssRules); } catch (_) {} });
+      } catch (_) { /* leave the interface as detected */ }
+    })();
+  </script>
 </head>
 <body>
 
