@@ -7520,6 +7520,14 @@
         <button type="button" data-action="fit-width"><span class="ctx-label" data-i18n="ctxFitWidth">По ширине страницы</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M2 12h4M18 12h4M3.5 9.5 2 12l1.5 2.5M20.5 9.5 22 12l-1.5 2.5"/></svg></span></button>
       </div>
     </div>
+    <div class="ctx-sub ctx-sub--select">
+      <button type="button" class="ctx-sub-root" aria-haspopup="true"><span class="ctx-label" data-i18n="ctxSelectPages">Выбрать страницы</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><polyline points="8 12.5 11 15.5 16.5 9"/></svg></span><span class="ctx-sub-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></span></button>
+      <div class="ctx-submenu">
+        <button type="button" data-action="select-all"><span class="ctx-label" data-i18n="ctxSelectAll">Выбрать все (Ctrl+A)</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="5" width="8" height="13" rx="1" fill="currentColor"/><rect x="13.5" y="5" width="8" height="13" rx="1" fill="currentColor"/></svg></span></button>
+        <button type="button" data-action="select-even"><span class="ctx-label" data-i18n="ctxSelectEven">Выбрать чётные</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="5" width="8" height="13" rx="1" fill="none"/><rect x="13.5" y="5" width="8" height="13" rx="1" fill="currentColor"/></svg></span></button>
+        <button type="button" data-action="select-odd"><span class="ctx-label" data-i18n="ctxSelectOdd">Выбрать нечётные</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="5" width="8" height="13" rx="1" fill="currentColor"/><rect x="13.5" y="5" width="8" height="13" rx="1" fill="none"/></svg></span></button>
+      </div>
+    </div>
     <hr>
     <button type="button" data-action="rot-left"><span class="ctx-label" data-i18n="ctxRotLeft">Повернуть против часовой стрелки</span><span class="ctx-icon"><span class="rotate-glyph" aria-hidden="true">↺</span></span></button>
     <button type="button" data-action="rot-right"><span class="ctx-label" data-i18n="ctxRotRight">Повернуть по часовой стрелке</span><span class="ctx-icon"><span class="rotate-glyph" aria-hidden="true">↻</span></span></button>
@@ -9304,6 +9312,7 @@
         ctxReadMode: 'Режим чтения',
         ctxLoupeMode: 'Режим увеличения',
         ctxViewMode: 'Режим просмотра',
+        ctxSelectPages: 'Выбрать страницы', ctxSelectAll: 'Выбрать все (Ctrl+A)', ctxSelectEven: 'Выбрать чётные', ctxSelectOdd: 'Выбрать нечётные',
         ctxSelectMode: 'Режим выбора',
         ctxFitWidth: 'По ширине страницы',
         ctxRotLeft: 'Повернуть против часовой стрелки',
@@ -9732,6 +9741,7 @@
         ctxReadMode: 'Reading mode',
         ctxLoupeMode: 'Magnifier mode',
         ctxViewMode: 'View mode',
+        ctxSelectPages: 'Select pages', ctxSelectAll: 'Select all (Ctrl+A)', ctxSelectEven: 'Select even', ctxSelectOdd: 'Select odd',
         ctxSelectMode: 'Selection mode',
         ctxFitWidth: 'Fit page width',
         ctxRotLeft: 'Rotate counter-clockwise',
@@ -10160,6 +10170,7 @@
         ctxReadMode: 'Modo lectura',
         ctxLoupeMode: 'Modo lupa',
         ctxViewMode: 'Modo de vista',
+        ctxSelectPages: 'Seleccionar páginas', ctxSelectAll: 'Seleccionar todas (Ctrl+A)', ctxSelectEven: 'Seleccionar pares', ctxSelectOdd: 'Seleccionar impares',
         ctxSelectMode: 'Modo selección',
         ctxFitWidth: 'Ajustar al ancho de página',
         ctxRotLeft: 'Girar en sentido antihorario',
@@ -10654,6 +10665,7 @@
         ctxReadMode: '阅读模式',
         ctxLoupeMode: '放大镜模式',
         ctxViewMode: '查看模式',
+        ctxSelectPages: '选择页面', ctxSelectAll: '全选 (Ctrl+A)', ctxSelectEven: '选择偶数页', ctxSelectOdd: '选择奇数页',
         ctxSelectMode: '选择模式',
         ctxFitWidth: '适应页面宽度',
         ctxRotLeft: '逆时针旋转',
@@ -21440,6 +21452,29 @@
         page.classList.add('selected');
       });
       lastSelectedIndex = null;
+      refreshCheckboxes();
+      updateUIState();
+      notifySelectionChanged();
+    }
+
+    // Select every other page by the number it shows (its place in the grid,
+    // 1-based): parity 0 = even, 1 = odd. Pages marked for deletion are
+    // skipped, as by selectAllPages. Page RMB menu → "Выбрать страницы".
+    function selectPagesByParity(parity) {
+      if (!pdfDoc) return;
+      selectedPages.clear();
+      let last = null;
+      Array.from(pagesContainer.querySelectorAll('.page')).forEach((page, pos) => {
+        page.classList.remove('selected');
+        if (page.style.display === 'none') return;
+        const idx = parseInt(page.dataset.index, 10);
+        if (Number.isNaN(idx) || markedForDeletion.has(idx)) return;
+        if ((pos + 1) % 2 !== parity) return;
+        selectedPages.add(idx);
+        page.classList.add('selected');
+        last = idx;
+      });
+      lastSelectedIndex = last;
       refreshCheckboxes();
       updateUIState();
       notifySelectionChanged();
@@ -41035,6 +41070,7 @@ function editSelectedPage() {
   // still exports); the view-mode item has none and just shows the modes.
   const PM_CTX_SUB_CLOSE_MS = 280;
   function pmCtxSubCloseAll(except) {
+    if (!except) clearTimeout(pmCtxSubSwitchT);
     document.querySelectorAll('.ctx-sub.open').forEach(sub => {
       if (sub === except) return;
       clearTimeout(sub._pmCloseT);
@@ -41067,22 +41103,40 @@ function editSelectedPage() {
     sub.classList.add('open');
     pmCtxSubPlace(sub);
   }
+  // While a submenu is open, the pointer on its way there may cross the
+  // next item (another submenu's, or a plain one): switching right away
+  // would pull the open submenu from under it. Such a switch waits
+  // PM_CTX_SUB_SWITCH_MS and is dropped if the pointer reaches the open
+  // submenu first.
+  const PM_CTX_SUB_SWITCH_MS = 250;
+  let pmCtxSubSwitchT = null;
+  const pmCtxSubAnyOpen = () => !!document.querySelector('.ctx-sub.open');
+  function pmCtxSubSwitchLater(fn) {
+    clearTimeout(pmCtxSubSwitchT);
+    pmCtxSubSwitchT = setTimeout(fn, PM_CTX_SUB_SWITCH_MS);
+  }
   [menu, readMenu, navMenu, loupeMenu].forEach(m => {
     if (!m) return;
     m.querySelectorAll('.ctx-sub').forEach(sub => {
-      sub.addEventListener('mouseenter', () => pmCtxSubOpen(sub));
+      sub.addEventListener('mouseenter', () => {
+        clearTimeout(sub._pmCloseT);
+        if (sub.classList.contains('open')) { clearTimeout(pmCtxSubSwitchT); return; }
+        if (pmCtxSubAnyOpen()) pmCtxSubSwitchLater(() => pmCtxSubOpen(sub));
+        else pmCtxSubOpen(sub);
+      });
       sub.addEventListener('mouseleave', () => {
+        clearTimeout(pmCtxSubSwitchT);
         clearTimeout(sub._pmCloseT);
         sub._pmCloseT = setTimeout(() => {
           sub.classList.remove('open', 'ctx-sub--left');
         }, PM_CTX_SUB_CLOSE_MS);
       });
-      // A plain menu item hovered next closes an open submenu at once.
     });
+    // A plain menu item rested on closes an open submenu.
     m.addEventListener('mouseover', (e) => {
       const item = e.target.closest('button');
-      if (!item || item.closest('.ctx-sub')) return;
-      pmCtxSubCloseAll();
+      if (!item || item.closest('.ctx-sub') || !pmCtxSubAnyOpen()) return;
+      pmCtxSubSwitchLater(() => pmCtxSubCloseAll());
     });
   });
 
@@ -41577,6 +41631,9 @@ function editSelectedPage() {
       read: baseDisabled,
       loupe: baseDisabled,
       'fit-width': baseDisabled,
+      'select-all': baseDisabled,
+      'select-even': baseDisabled,
+      'select-odd': baseDisabled,
       'rot-right': baseDisabled || targets.length === 0,
       'rot-left': baseDisabled || targets.length === 0,
       edit: baseDisabled || !pageEditAvailable() || editIdx == null || markedForDeletion.has(editIdx),
@@ -41918,6 +41975,15 @@ function editSelectedPage() {
         }
         break;
       }
+      case 'select-all':
+        selectAllPages();
+        break;
+      case 'select-even':
+        selectPagesByParity(0);
+        break;
+      case 'select-odd':
+        selectPagesByParity(1);
+        break;
       case 'export':
         if (selOk) exportSelectedPages();
         break;
