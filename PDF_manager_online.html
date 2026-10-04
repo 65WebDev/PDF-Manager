@@ -1846,6 +1846,12 @@
       margin-right: -3px; opacity: .55;
     }
     .ctx-sub-arrow svg { display: block; }
+    /*"Сжать PDF" in the Export submenu: dimmed but still hoverable (for the
+       tooltip) when nothing is worth compressing - see pmCtxCompressRefresh.*/
+    #pageCtxMenu button.pm-compress-unavailable { opacity: .45; cursor: not-allowed; }
+    #pageCtxMenu button.pm-compress-unavailable:hover { background: transparent; }
+    #pageCtxMenu button.pm-compress-calculating .ctx-icon { opacity: .5; }
+    #pageCtxMenu button.pm-compress-notable .ctx-icon { color: #27ae60; }
     /*Plain items of a menu that has submenu items reserve the arrow's column,
        so every icon lines up with the submenu items' icons (the menu widens
        to fit the longest label).*/
@@ -8692,8 +8698,9 @@
     // at that first call and throw, aborting the rest of this script (see
     // the full pmCompressEstimateIsFresh/pmComputeCompressEstimate/etc.
     // implementation much further down).
-    let pmCompressEstimateCache = { save: null, export: null };
-    let pmCompressEstimateInFlight = { save: null, export: null };
+    let pmCompressEstimateCache = { save: null, export: null, ctx: null };
+    let pmCompressEstimateInFlight = { save: null, export: null, ctx: null };
+    let pmCompressEstimateInFlightKey = { save: null, export: null, ctx: null };
     const PM_COMPRESS_ESTIMATE_TTL_MS = 20000;
     const PM_COMPRESS_HIGHLIGHT_RATIO = 0.30;
     // Same reasoning as pmCompressEstimateCache above: updateUIState() calls
@@ -41234,6 +41241,27 @@ function editSelectedPage() {
     if (sub.classList.contains('open')) return;
     sub.classList.add('open');
     pmCtxSubPlace(sub);
+    if (sub.classList.contains('ctx-sub--export') && menu.contains(sub)) pmCtxCompressRefresh();
+  }
+  // "Сжать PDF" in the Export submenu behaves like the top menu's: the
+  // expected size reduction for the pages the menu acts on is estimated in
+  // the background, and with nothing worth compressing the item is dimmed,
+  // does nothing and says why in its tooltip.
+  function pmCtxCompressReset() {
+    const btn = menu.querySelector('button[data-action="export-compress"]');
+    if (!btn) return;
+    btn.classList.remove('pm-compress-unavailable', 'pm-compress-calculating', 'pm-compress-notable');
+    btn.removeAttribute('title');
+    delete btn.dataset.pmCompressKey;
+  }
+  function pmCtxCompressRefresh() {
+    const btn = menu.querySelector('button[data-action="export-compress"]');
+    if (!btn || btn.disabled || typeof pmRefreshCompressEstimateTooltip !== 'function') return;
+    const want = new Set(ctxMenuTargetPages());
+    const pages = Array.from(pagesContainer.querySelectorAll('.page'))
+      .map(p => parseInt(p.dataset.index, 10))
+      .filter(i => want.has(i)); // in document order, as exported
+    pmRefreshCompressEstimateTooltip('ctx', btn, pages);
   }
   // While a submenu is open, the pointer on its way there may cross the
   // next item (another submenu's, or a plain one): switching right away
@@ -41943,6 +41971,7 @@ function editSelectedPage() {
       if (navMenu) navMenu.classList.remove('visible');
       if (loupeMenu) loupeMenu.classList.remove('visible');
       updatePageCtxMenuState();
+      pmCtxCompressReset();
       positionCtxMenu(menu, e.clientX, e.clientY);
       return;
     }
@@ -42024,6 +42053,7 @@ function editSelectedPage() {
     if (navMenu) navMenu.classList.remove('visible');
     if (loupeMenu) loupeMenu.classList.remove('visible');
     updatePageCtxMenuState();
+    pmCtxCompressReset();
     positionCtxMenu(menu, e.clientX, e.clientY);
     clearCtxMenuTargetHighlight();
     pageDiv.classList.add('ctx-menu-target');
@@ -42031,7 +42061,7 @@ function editSelectedPage() {
 
   menu.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-action]');
-    if (!btn || btn.disabled) return;
+    if (!btn || btn.disabled || btn.classList.contains('pm-compress-unavailable')) return;
     const action = btn.dataset.action;
     const anchorIdx = ctxPageIdx;
     const selSnapshot = pageCtxSelectionSnapshot;
@@ -62917,6 +62947,9 @@ async function compressPdfImagesBytes(bytes, progressLabel) {
 //   'export' - only the currently SELECTED pages (Export never sends the
 //              whole document) - keyed to pdfDoc + the exact selection, so
 //              toggling which pages are checked invalidates it correctly.
+//   'ctx'    - the pages the preview RMB menu acts on (its Export submenu),
+//              which need not be the selection - keyed like 'export' to the
+//              exact pages, passed in by the caller.
 // (pmCompressEstimateCache/InFlight and the PM_COMPRESS_* consts are
 // declared near pdfDoc, far above - updateUIState() calls into this code
 // on the very first, synchronous "no document yet" pass, long before
@@ -62928,27 +62961,29 @@ function pmCompressEstimateIsFresh(scope, selKey) {
   const c = pmCompressEstimateCache[scope];
   if (!c || typeof pdfDoc === 'undefined' || !pdfDoc) return false;
   if (c.forDoc !== pdfDoc) return false;
-  if (scope === 'export') { if (c.forSelKey !== selKey) return false; }
+  if (scope !== 'save') { if (c.forSelKey !== selKey) return false; }
   else if (c.forPageCount !== pdfDoc.getPageCount()) return false;
   return (Date.now() - c.computedAt) < PM_COMPRESS_ESTIMATE_TTL_MS;
 }
 
-async function pmComputeCompressEstimate(scope) {
+async function pmComputeCompressEstimate(scope, ctxIndices) {
   if (typeof pdfDoc === 'undefined' || !pdfDoc) return null;
   let selKey = null, indices = null;
-  if (scope === 'export') {
-    indices = (typeof getExportSelectedIndices === 'function') ? getExportSelectedIndices() : [];
+  if (scope !== 'save') {
+    indices = scope === 'ctx' ? (ctxIndices || [])
+      : ((typeof getExportSelectedIndices === 'function') ? getExportSelectedIndices() : []);
     if (!indices.length) return null;
     selKey = indices.join(',');
   }
   if (pmCompressEstimateIsFresh(scope, selKey)) return pmCompressEstimateCache[scope];
-  if (pmCompressEstimateInFlight[scope]) return pmCompressEstimateInFlight[scope];
+  if (pmCompressEstimateInFlight[scope] && pmCompressEstimateInFlightKey[scope] === selKey) return pmCompressEstimateInFlight[scope];
   const targetDoc = pdfDoc;
   const targetPageCount = pdfDoc.getPageCount();
-  pmCompressEstimateInFlight[scope] = (async () => {
+  pmCompressEstimateInFlightKey[scope] = selKey;
+  const run = (async () => {
     try {
       let bytes;
-      if (scope === 'export') {
+      if (scope !== 'save') {
         bytes = await buildExportPdfBytes(indices);
       } else if (peDocumentHasEditorObjects() || peDocumentHasPendingShapeRaster(pdfDoc) || peDocumentHasRedactedPages(pdfDoc)) {
         bytes = await peBuildFlattenedPdfBytes(pdfDoc);
@@ -62966,10 +63001,15 @@ async function pmComputeCompressEstimate(scope) {
       console.warn('compress estimate failed', e);
       return null;
     } finally {
-      pmCompressEstimateInFlight[scope] = null;
+      // A newer request (other pages) may have taken the slot meanwhile.
+      if (pmCompressEstimateInFlight[scope] === run) {
+        pmCompressEstimateInFlight[scope] = null;
+        pmCompressEstimateInFlightKey[scope] = null;
+      }
     }
   })();
-  return pmCompressEstimateInFlight[scope];
+  pmCompressEstimateInFlight[scope] = run;
+  return run;
 }
 
 function pmApplyCompressEstimateToButton(btn, entry) {
@@ -63013,13 +63053,15 @@ function pmSyncCompressButtonsUnavailable() {
 }
 
 // Fire-and-forget: safe to call on every hover - internally cached/deduped.
-// scope: 'save' | 'export'; btn: that specific wrapper's own compress button
-// (each scope has its own button element - never shared).
-function pmRefreshCompressEstimateTooltip(scope, btn) {
+// scope: 'save' | 'export' | 'ctx'; btn: that scope's own compress button
+// (each scope has its own button element - never shared); ctxIndices: the
+// pages for 'ctx'.
+function pmRefreshCompressEstimateTooltip(scope, btn, ctxIndices) {
   if (typeof pdfDoc === 'undefined' || !pdfDoc || !btn) return;
   let selKey = null;
-  if (scope === 'export') {
-    const indices = (typeof getExportSelectedIndices === 'function') ? getExportSelectedIndices() : [];
+  if (scope !== 'save') {
+    const indices = scope === 'ctx' ? (ctxIndices || [])
+      : ((typeof getExportSelectedIndices === 'function') ? getExportSelectedIndices() : []);
     if (!indices.length) {
       pmApplyCompressEstimateToButton(btn, null);
       pmApplyCompressHighlight(btn, null);
@@ -63028,10 +63070,14 @@ function pmRefreshCompressEstimateTooltip(scope, btn) {
     }
     selKey = indices.join(',');
   }
+  btn.dataset.pmCompressKey = selKey || '';
   const apply = (entry) => {
+    // The RMB menu was reopened for other pages meanwhile - theirs wins.
+    if (scope === 'ctx' && btn.dataset.pmCompressKey !== selKey) return;
     btn.classList.remove('pm-compress-calculating');
     pmApplyCompressEstimateToButton(btn, entry);
     pmApplyCompressHighlight(btn, entry);
+    if (scope === 'ctx') btn.classList.toggle('pm-compress-unavailable', !!(entry && entry.changedCount === 0));
     pmSyncCompressButtonsUnavailable();
   };
   if (pmCompressEstimateIsFresh(scope, selKey)) { apply(pmCompressEstimateCache[scope]); return; }
@@ -63045,7 +63091,7 @@ function pmRefreshCompressEstimateTooltip(scope, btn) {
   btn.title = t('compressPdfEstimating');
   btn.classList.remove('pm-compress-unavailable', 'pm-compress-notable');
   btn.classList.add('pm-compress-calculating');
-  pmComputeCompressEstimate(scope).then(entry => apply(entry));
+  pmComputeCompressEstimate(scope, ctxIndices).then(entry => apply(entry));
 }
 
 // Re-applies whatever's already cached for both buttons (e.g. after
