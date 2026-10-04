@@ -4908,11 +4908,12 @@
       position: relative;
     }
 
-    /* Internal-document-link hotzones - clickable rectangles over a page's
-       PDF Link annotations, active in select mode at any zoom (unlike the
-       text-selection layer, not gated to a high-zoom threshold). Hidden
-       during nav/read mode the same way the text layer is - setMode('nav')
-       and enterReadMode() both set body.nav-mode-active. */
+    /* Link hotzones - clickable rectangles over a page's links, active at
+       any zoom (unlike the text-selection layer, not gated to a high-zoom
+       threshold). Internal links (jump to a page) work in select mode only -
+       hidden during nav/read mode like the text layer (setMode('nav') and
+       enterReadMode() both set body.nav-mode-active); web links
+       (.pm-link-hotzone--url, a new browser tab) work in every mode. */
     .pm-link-layer {
       position: absolute;
       overflow: hidden;
@@ -4941,10 +4942,13 @@
     body.pm-links-multi-column .pm-link-hotzone {
       pointer-events: none !important;
     }
-    body.nav-mode-active .pm-link-layer {
+    body.nav-mode-active .pm-link-hotzone:not(.pm-link-hotzone--url) {
       display: none !important;
       pointer-events: none !important;
     }
+    /* Web links (pmLinksMakeWebZone) also work in navigation and reading
+       mode, where the pages themselves take no pointer events. */
+    a.pm-link-hotzone--url { display: block; }
 
     /* Fill-form overlay - real HTML controls over a page's AcroForm widgets.
        Available directly in select mode, no dedicated mode. The controls are
@@ -9394,6 +9398,7 @@
         ctxReadMode: 'Режим чтения',
         ctxLoupeMode: 'Режим увеличения',
         ctxViewMode: 'Режим просмотра',
+        linkFollow: 'Перейти по ссылке',
         popCapLang: 'Язык интерфейса', popCapRestoreHelp: 'Вернуть подсказку', popCapDeletedHidden: 'Удалённые скрыты (Shift+H)', popCapDeletedShown: 'Удалённые показаны (Shift+H)',
         ctxSelectPages: 'Выбрать страницы', ctxSelectAll: 'Выбрать все (Ctrl+A)', ctxSelectEven: 'Выбрать чётные', ctxSelectOdd: 'Выбрать нечётные',
         ctxSelectMode: 'Режим выбора',
@@ -9825,6 +9830,7 @@
         ctxReadMode: 'Reading mode',
         ctxLoupeMode: 'Magnifier mode',
         ctxViewMode: 'View mode',
+        linkFollow: 'Open link',
         popCapLang: 'Interface language', popCapRestoreHelp: 'Restore hints', popCapDeletedHidden: 'Deleted hidden (Shift+H)', popCapDeletedShown: 'Deleted shown (Shift+H)',
         ctxSelectPages: 'Select pages', ctxSelectAll: 'Select all (Ctrl+A)', ctxSelectEven: 'Select even', ctxSelectOdd: 'Select odd',
         ctxSelectMode: 'Selection mode',
@@ -10256,6 +10262,7 @@
         ctxReadMode: 'Modo lectura',
         ctxLoupeMode: 'Modo lupa',
         ctxViewMode: 'Modo de vista',
+        linkFollow: 'Abrir enlace',
         popCapLang: 'Idioma de la interfaz', popCapRestoreHelp: 'Restaurar ayuda', popCapDeletedHidden: 'Eliminadas ocultas (Shift+H)', popCapDeletedShown: 'Eliminadas visibles (Shift+H)',
         ctxSelectPages: 'Seleccionar páginas', ctxSelectAll: 'Seleccionar todas (Ctrl+A)', ctxSelectEven: 'Seleccionar pares', ctxSelectOdd: 'Seleccionar impares',
         ctxSelectMode: 'Modo selección',
@@ -10753,6 +10760,7 @@
         ctxReadMode: '阅读模式',
         ctxLoupeMode: '放大镜模式',
         ctxViewMode: '查看模式',
+        linkFollow: '打开链接',
         popCapLang: '界面语言', popCapRestoreHelp: '恢复提示', popCapDeletedHidden: '已隐藏删除页 (Shift+H)', popCapDeletedShown: '已显示删除页 (Shift+H)',
         ctxSelectPages: '选择页面', ctxSelectAll: '全选 (Ctrl+A)', ctxSelectEven: '选择偶数页', ctxSelectOdd: '选择奇数页',
         ctxSelectMode: '选择模式',
@@ -15920,10 +15928,12 @@
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    // INTERNAL DOCUMENT LINKS (select mode, any zoom)
+    // DOCUMENT LINKS (any zoom)
     // Clickable hotzones over a page's PDF Link annotations, jumping to
     // their target page - common in manuals/instructions authored with
-    // an embedded table of contents or cross-references.
+    // an embedded table of contents or cross-references - and over web
+    // links (URI link annotations, and http(s)/www addresses found in the
+    // page text), which open in a new browser tab.
     // ═══════════════════════════════════════════════════════════════════
     let pmLinksPageCache = new Map();
 
@@ -15941,6 +15951,58 @@
     // with left/top/width/height as 0..1 fractions of the page's own
     // (rotation-applied) box, ready to place as percentage-positioned
     // hotzones inside the box getPageImgDisplayMetrics computes for it.
+    // Only web pages: http(s) addresses, and www. ones taken as https.
+    function pmLinksWebUrl(raw) {
+      if (!raw || typeof raw !== 'string') return null;
+      const u = raw.trim();
+      if (/^https?:\/\/[^\s]+$/i.test(u)) return u;
+      if (/^www\.[^\s]+\.[^\s]+$/i.test(u)) return 'https://' + u;
+      return null;
+    }
+    // Trailing punctuation belongs to the sentence, not the address; a
+    // closing bracket stays only when the address opened one itself.
+    function pmLinksTrimUrl(u) {
+      for (;;) {
+        const last = u.slice(-1);
+        if (/[.,;:!?'"»…]/.test(last)) { u = u.slice(0, -1); continue; }
+        const pair = { ')': '(', ']': '[', '}': '{' }[last];
+        if (pair && u.split(pair).length <= u.split(last).length - 1) { u = u.slice(0, -1); continue; }
+        return u;
+      }
+    }
+    let pmLinksMeasureCtx = null;
+    // Web addresses in a page's text items -> [{ url, rect }] with rect in
+    // PDF space. Horizontal runs only; an address's span inside its run is
+    // estimated from proportional glyph widths.
+    function pmLinksFindTextUrls(textContent) {
+      const out = [];
+      if (!textContent || !textContent.items) return out;
+      const re = /(?:https?:\/\/|www\.)[^\s<>"'«»]+/gi;
+      for (const item of textContent.items) {
+        const str = item && item.str;
+        if (!str || str.length < 8 || !item.transform) continue;
+        re.lastIndex = 0;
+        let m;
+        while ((m = re.exec(str))) {
+          const text = pmLinksTrimUrl(m[0]);
+          const url = pmLinksWebUrl(text);
+          if (!url) continue;
+          const tr = item.transform;
+          if (Math.abs(tr[1]) > 1e-6 || Math.abs(tr[2]) > 1e-6 || !(tr[0] > 0) || !(item.width > 0)) continue;
+          if (!pmLinksMeasureCtx) {
+            pmLinksMeasureCtx = document.createElement('canvas').getContext('2d');
+            pmLinksMeasureCtx.font = '100px Arial, sans-serif';
+          }
+          const full = pmLinksMeasureCtx.measureText(str).width || 1;
+          const f1 = pmLinksMeasureCtx.measureText(str.slice(0, m.index)).width / full;
+          const f2 = pmLinksMeasureCtx.measureText(str.slice(0, m.index + text.length)).width / full;
+          const h = Math.abs(tr[3]) || item.height || 10;
+          out.push({ url, rect: [tr[4] + item.width * f1, tr[5] - 0.22 * h, tr[4] + item.width * f2, tr[5] + 0.9 * h] });
+        }
+      }
+      return out;
+    }
+
     async function pmLinksLoadPage(pageIdx) {
       const token = hqPdfjsToken;
       const cacheKey = pageIdx + ':' + token;
@@ -15959,7 +16021,21 @@
           const annots = await page.getAnnotations({ intent: 'display' });
           if (token !== hqPdfjsToken) return { aspectRatio, links: [] };
           const links = [];
+          const pushRect = (pdfRect, extra) => {
+            // pmViewportRect maps PDF-space corners into the rotated viewport
+            // pairwise without re-sorting them - hence min/max.
+            const r = pmViewportRect(viewport, pdfRect);
+            const left = Math.min(r[0], r[2]) / viewport.width;
+            const top = Math.min(r[1], r[3]) / viewport.height;
+            const width = Math.abs(r[2] - r[0]) / viewport.width;
+            const height = Math.abs(r[3] - r[1]) / viewport.height;
+            if (!(width > 0) || !(height > 0)) return;
+            links.push(Object.assign({ left, top, width, height }, extra));
+          };
           for (const a of annots) {
+            // Web links: open in a new browser tab.
+            const webUrl = a.subtype === 'Link' ? pmLinksWebUrl(a.url || a.unsafeUrl) : null;
+            if (webUrl) { pushRect(a.rect, { url: webUrl }); continue; }
             if (a.subtype !== 'Link' || a.dest == null) continue;
             let dest = a.dest;
             let targetPageIndex;
@@ -15984,6 +16060,26 @@
             if (!(width > 0) || !(height > 0)) continue;
             links.push({ pageIndex: targetPageIndex, left, top, width, height });
           }
+          // Web addresses written in the page text itself (no link annotation).
+          try {
+            let textContent = await page.getTextContent();
+            if (token !== hqPdfjsToken) return { aspectRatio, links: [] };
+            if (typeof peFilterRedactedTextItems === 'function') {
+              textContent = peFilterRedactedTextItems(textContent, pageIdx, viewport);
+            }
+            const annotated = links.slice();
+            pmLinksFindTextUrls(textContent).forEach(({ url, rect }) => {
+              const before = links.length;
+              pushRect(rect, { url });
+              const z = links[links.length - 1];
+              if (links.length === before) return;
+              // Already covered by a link annotation: keep just that one.
+              const cx = z.left + z.width / 2, cy = z.top + z.height / 2;
+              if (annotated.some(o => cx >= o.left && cx <= o.left + o.width && cy >= o.top && cy <= o.top + o.height)) links.pop();
+            });
+          } catch (err) {
+            console.warn('pmLinksLoadPage text urls', pageIdx, err);
+          }
           return { aspectRatio, links };
         } catch (err) {
           console.warn('pmLinksLoadPage', pageIdx, err);
@@ -16003,7 +16099,7 @@
 
     // Builds (or removes, if the page has no links) the .pm-link-layer for
     // one page card. Visibility/interactivity itself is CSS-only
-    // (body.nav-mode-active hides it) so this can run unconditionally
+    // (body.nav-mode-active hides internal links) so this can run unconditionally
     // whenever page content might have changed, without tracking mode
     // switches - switching into select mode shows an already-built layer
     // with no extra delay.
@@ -16035,6 +16131,7 @@
       layer.style.height = metrics.height + 'px';
       layer.innerHTML = '';
       links.forEach((link) => {
+        if (link.url) { layer.appendChild(pmLinksMakeWebZone(link)); return; }
         const zone = document.createElement('div');
         zone.className = 'pm-link-hotzone';
         zone.style.left = (link.left * 100) + '%';
@@ -16048,6 +16145,34 @@
         });
         layer.appendChild(zone);
       });
+    }
+
+    // A web link's hotzone: a real link opening a new browser tab. Works in
+    // navigation and reading mode too (see the CSS); a press that turned into
+    // a drag (panning the page) does not open it.
+    function pmLinksMakeWebZone(link) {
+      const a = document.createElement('a');
+      a.className = 'pm-link-hotzone pm-link-hotzone--url';
+      a.href = link.url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.draggable = false;
+      a.style.left = (link.left * 100) + '%';
+      a.style.top = (link.top * 100) + '%';
+      a.style.width = (link.width * 100) + '%';
+      a.style.height = (link.height * 100) + '%';
+      let down = null;
+      a.addEventListener('mouseenter', () => { a.title = t('linkFollow') + '\n' + link.url; });
+      a.addEventListener('mousedown', (e) => { down = { x: e.clientX, y: e.clientY }; });
+      a.addEventListener('dragstart', (e) => e.preventDefault());
+      a.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const moved = down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4;
+        down = null;
+        if (moved || e.button !== 0) e.preventDefault();
+      });
+      a.addEventListener('dblclick', (e) => e.stopPropagation());
+      return a;
     }
 
     let pmLinksBuildTimer = null;
@@ -41239,6 +41364,7 @@ function editSelectedPage() {
     const root = sub.querySelector(':scope > .ctx-sub-root');
     if (root && root.disabled) return;
     clearTimeout(sub._pmCloseT);
+    clearTimeout(pmCtxSubSwitchT); // a pending close must not hit this one
     pmCtxSubCloseAll(sub);
     if (sub.classList.contains('open')) return;
     sub.classList.add('open');
@@ -41265,12 +41391,11 @@ function editSelectedPage() {
       .filter(i => want.has(i)); // in document order, as exported
     pmRefreshCompressEstimateTooltip('ctx', btn, pages);
   }
-  // While a submenu is open, the pointer heading for it may cross the next
-  // item (another submenu's, or a plain one): switching right away would
-  // pull the open submenu from under it. Only then - the pointer moving
-  // towards the open submenu - the switch waits PM_CTX_SUB_SWITCH_MS and is
-  // dropped if the pointer reaches the submenu first; any other move to
-  // another item switches at once.
+  // Another item with a submenu takes over at once: its submenu opens and
+  // the open one closes in the same instant. A plain item closes the open
+  // submenu at once too, unless the pointer is heading into that submenu
+  // across it - then the close waits PM_CTX_SUB_SWITCH_MS and is dropped if
+  // the pointer reaches the submenu first.
   const PM_CTX_SUB_SWITCH_MS = 250;
   let pmCtxSubSwitchT = null;
   const pmCtxSubAnyOpen = () => !!document.querySelector('.ctx-sub.open');
@@ -41310,8 +41435,7 @@ function editSelectedPage() {
       sub.addEventListener('mouseenter', () => {
         clearTimeout(sub._pmCloseT);
         if (sub.classList.contains('open')) { clearTimeout(pmCtxSubSwitchT); return; }
-        if (pmCtxSubAnyOpen()) pmCtxSubSwitch(() => pmCtxSubOpen(sub));
-        else pmCtxSubOpen(sub);
+        pmCtxSubOpen(sub);
       });
       sub.addEventListener('mouseleave', () => {
         clearTimeout(pmCtxSubSwitchT);
