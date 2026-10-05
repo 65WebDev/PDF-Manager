@@ -9435,7 +9435,7 @@
         hfHelpVars: 'Переменные пишутся прямо в тексте в фигурных скобках — их можно переставлять и окружать любым текстом. Кнопки «Вставить» добавляют их туда, где стоит курсор.',
         hfHelpPage: 'номер страницы и число страниц',
         hfHelpDate: 'дата; D, DD — день, M, MM — месяц числом, MMM, MMMM — месяц словом, YY, YYYY — год',
-        hfHelpBates: 'номер Бейтса: префикс, номер с заданным числом цифр, суффикс',
+        hfHelpBates: 'номер Бейтса: перед скобками — префикс, в квадратных скобках — начальный номер (сколько цифр — такой длины номер), после них — суффикс',
         hfNoText: 'Введите текст хотя бы одного колонтитула',
         hfApplying: 'Добавление колонтитулов…', hfApplyError: 'Не удалось добавить колонтитулы',
         watermarkTitle: 'Водяной знак', watermarkDefaultText: 'КОНФИДЕНЦИАЛЬНО',
@@ -9879,7 +9879,7 @@
         hfHelpVars: 'Variables are written right in the text in curly braces — move them and surround them with any text. The Insert buttons add them where the cursor is.',
         hfHelpPage: 'page number and page count',
         hfHelpDate: 'date; D, DD — day, M, MM — month as a number, MMM, MMMM — month as a word, YY, YYYY — year',
-        hfHelpBates: 'Bates number: prefix, number with the set count of digits, suffix',
+        hfHelpBates: 'Bates number: the prefix before the brackets, the start number in square brackets (as many digits as the number should have), the suffix after them',
         hfNoText: 'Enter the text of at least one header or footer',
         hfApplying: 'Adding headers and footers…', hfApplyError: 'Could not add headers and footers',
         watermarkTitle: 'Watermark', watermarkDefaultText: 'CONFIDENTIAL',
@@ -10323,7 +10323,7 @@
         hfHelpVars: 'Las variables se escriben en el propio texto entre llaves: puedes moverlas y rodearlas de cualquier texto. Los botones Insertar las añaden donde está el cursor.',
         hfHelpPage: 'número de página y número de páginas',
         hfHelpDate: 'fecha; D, DD — día, M, MM — mes en número, MMM, MMMM — mes en letras, YY, YYYY — año',
-        hfHelpBates: 'número Bates: prefijo, número con la cantidad de dígitos indicada, sufijo',
+        hfHelpBates: 'número Bates: el prefijo antes de los corchetes, el número inicial entre corchetes (con tantas cifras como deba tener el número), el sufijo después',
         hfNoText: 'Escribe el texto de al menos un encabezado o pie',
         hfApplying: 'Añadiendo encabezados y pies…', hfApplyError: 'No se pudieron añadir los encabezados y pies',
         watermarkTitle: 'Marca de agua', watermarkDefaultText: 'CONFIDENCIAL',
@@ -10817,7 +10817,7 @@
         hfHelpVars: '变量直接以花括号写在文本中，可以移动并在其前后添加任意文字。“插入”按钮会将其插入光标所在位置。',
         hfHelpPage: '页码和总页数',
         hfHelpDate: '日期；D、DD — 日，M、MM — 数字月份，MMM、MMMM — 文字月份，YY、YYYY — 年',
-        hfHelpBates: '贝茨编号：前缀、指定位数的编号、后缀',
+        hfHelpBates: '贝茨编号：方括号前为前缀，方括号内为起始编号（位数即编号长度），方括号后为后缀',
         hfNoText: '请至少输入一个页眉或页脚的文本',
         hfApplying: '正在添加页眉和页脚…', hfApplyError: '无法添加页眉和页脚',
         watermarkTitle: '水印', watermarkDefaultText: '机密',
@@ -65258,8 +65258,19 @@ function pmHfFormatDate(date, fmt) {
     }
   });
 }
-function pmHfBates(s, k) {
-  return s.bates.prefix + String(s.bates.start + k).padStart(s.bates.digits, '0') + s.bates.suffix;
+// Bates settings written into the code itself: {bates:ABC-[000001]-X} -
+// prefix, then the start number in square brackets (as many digits as the
+// number should have), then the suffix. Bare {bates} uses the dialog's.
+function pmHfParseBatesArg(arg) {
+  const m = /^([^\[\]]*)\[(\d{1,12})\]([^\[\]]*)$/.exec(String(arg));
+  return m ? { prefix: m[1], start: parseInt(m[2], 10), digits: m[2].length, suffix: m[3] } : null;
+}
+function pmHfBatesCode(b) {
+  const clean = (v) => String(v || '').replace(/[[\]{}]/g, '');
+  return '{bates:' + clean(b.prefix) + '[' + String(b.start).padStart(b.digits, '0') + ']' + clean(b.suffix) + '}';
+}
+function pmHfBates(b, k) {
+  return b.prefix + String(b.start + k).padStart(b.digits, '0') + b.suffix;
 }
 // The variables of one line for one page; anything unknown stays as typed.
 // ctx: { page, pages, batesIndex, date }
@@ -65267,7 +65278,10 @@ function pmHfExpand(text, s, ctx) {
   return String(text || '').replace(/\{(page|pages|bates|date)(?::([^}]*))?\}/g, (all, name, arg) => {
     if (name === 'page') return String(ctx.page);
     if (name === 'pages') return String(ctx.pages);
-    if (name === 'bates') return pmHfBates(s, ctx.batesIndex);
+    if (name === 'bates') {
+      const b = arg == null ? s.bates : pmHfParseBatesArg(arg);
+      return b ? pmHfBates(b, ctx.batesIndex) : all;   // malformed: left as typed
+    }
     return pmHfFormatDate(ctx.date, arg || 'DD.MM.YYYY');
   });
 }
@@ -65279,9 +65293,11 @@ function pmHfExpand(text, s, ctx) {
 function pmHfTextFont(s, px) {
   return (s.italic ? 'italic ' : '') + (s.bold ? 'bold ' : '') + px + 'px ' + pmWmFontCss(s.font) + ', sans-serif';
 }
+let pmHfMeasureCtx = null;
 function pmHfMetrics(s, text) {
   const k = PM_WM_PX_PER_PT;
-  const ctx = document.createElement('canvas').getContext('2d');
+  if (!pmHfMeasureCtx) pmHfMeasureCtx = document.createElement('canvas').getContext('2d');
+  const ctx = pmHfMeasureCtx;
   ctx.font = pmHfTextFont(s, s.size * k);
   const m = ctx.measureText(text);
   const fin = (v, dflt) => (Number.isFinite(v) && v > 0 ? v : dflt);
@@ -65460,7 +65476,7 @@ function pmHfRunDialog() {
         <div>${esc(t('hfHelpVars'))}</div>
         <div><code>{page}</code>, <code>{pages}</code> — ${esc(t('hfHelpPage'))}</div>
         <div><code>{date:DD.MM.YYYY}</code> — ${esc(t('hfHelpDate'))}</div>
-        <div><code>{bates}</code> — ${esc(t('hfHelpBates'))}</div>
+        <div><code>{bates:ABC-[000001]}</code> — ${esc(t('hfHelpBates'))}</div>
       </div>
       <div class="pm-wm-controls pm-hf-controls">
         <div class="pm-hf-grid">
@@ -65576,82 +65592,128 @@ function pmHfRunDialog() {
     // ---- preview: the top and the bottom band of the page -----------------
     // Each band reaches a little past the farther of its text and margin, so
     // the space the text keeps from the edge shows; the middle is cut out.
+    // Drawn in two layers so typing stays instant: the page bands with the
+    // margin guides (redrawn only when the page, zoom, size or margins
+    // change) and the texts on top (each line rendered once per look).
     const GAP_CSS = 22;
+    // Canvas pixels the preview and the page raster may take (zoomed in on a
+    // large page with a HiDPI screen they would otherwise run to tens of
+    // millions of pixels, and every keystroke paid for all of them).
+    const PREVIEW_MAX_PX = 3e6, RASTER_MAX_PX = 9e6;
     function frameFor(idx) {
       try { return pmWmPageFrame(pdfDoc.getPage(idx)); } catch (_) { return null; }
     }
+    // Grows in 36pt steps rather than with every millimetre of margin: a
+    // new height means new canvases, which would make each step of a
+    // margin arrow redraw everything.
     function bandHeights(fr) {
       const mm = PM_HF_PT_PER_MM;
       const lineH = s.size * 1.2;
-      const head = Math.min(fr.H / 2, Math.max(48, s.margins.top * mm + lineH + 18));
-      const foot = Math.min(fr.H / 2, Math.max(48, s.margins.bottom * mm + lineH + 18));
-      return { head, foot };
+      const fit = (need) => Math.min(fr.H / 2, Math.max(72, Math.ceil(need / 36) * 36));
+      return { head: fit(s.margins.top * mm + lineH + 18), foot: fit(s.margins.bottom * mm + lineH + 18) };
     }
     let zoom = 1;
+    let boxW = 0;   // the preview box's inner width, read on open and on resize only
+    function readBoxWidth() { boxW = Math.max(200, pvBox.getBoundingClientRect().width - 26); }
     function cssPerPt(fr) {
-      const w = Math.max(200, pvBox.getBoundingClientRect().width - 26);
-      return w / fr.W * zoom;
+      if (!boxW) readBoxWidth();
+      return boxW / fr.W * zoom;
     }
-    function draw() {
-      const ctx = pv.getContext('2d');
-      const fr = previewIdx >= 0 ? frameFor(previewIdx) : null;
-      if (!fr) { pv.width = 1; pv.height = 1; return; }
+    function geometry(fr) {
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       const css = cssPerPt(fr);
-      const k = css * dpr;                       // canvas px per pt
       const { head, foot } = bandHeights(fr);
-      const gap = GAP_CSS * dpr;
+      let k = css * dpr;                           // canvas px per pt
+      const area = fr.W * (head + foot) * k * k;
+      if (area > PREVIEW_MAX_PX) k *= Math.sqrt(PREVIEW_MAX_PX / area);
+      const gap = Math.round(GAP_CSS * k / css);
       const w = Math.round(fr.W * k), hh = Math.round(head * k), fh = Math.round(foot * k);
-      pv.width = w; pv.height = hh + gap + fh;
-      pv.style.width = Math.round(fr.W * css) + 'px';
-      pv.style.height = Math.round((hh + gap + fh) / dpr) + 'px';
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, pv.width, pv.height);
-      const band = (y0, srcTopPt, hPt) => {
+      return { css, k, head, foot, gap, w, hh, fh, cssW: Math.round(fr.W * css), cssH: Math.round((head + foot) * css + GAP_CSS) };
+    }
+    let base = null;   // { key, canvas } - page bands and guides
+    function baseLayer(fr, g) {
+      const rasterId = (previewRaster && previewRaster.idx === previewIdx) ? previewRaster.pxPerPt : 0;
+      const key = [previewIdx, rasterId, g.w, g.hh, g.gap, g.fh, g.k].join('|');
+      if (base && base.key === key) return base.canvas;
+      const c = (base && base.canvas.width === g.w && base.canvas.height === g.hh + g.gap + g.fh)
+        ? base.canvas : document.createElement('canvas');
+      c.width = g.w; c.height = g.hh + g.gap + g.fh;
+      const ctx = c.getContext('2d');
+      const unit = Math.max(1, g.k / g.css);
+      const band = (y0, srcTopPt, hPt, hPx) => {
         ctx.fillStyle = '#fff';
-        ctx.fillRect(0, y0, w, Math.round(hPt * k));
-        if (previewRaster && previewRaster.idx === previewIdx) {
+        ctx.fillRect(0, y0, g.w, hPx);
+        if (rasterId) {
           const rk = previewRaster.pxPerPt;
-          ctx.drawImage(previewRaster.canvas, 0, srcTopPt * rk, fr.W * rk, hPt * rk, 0, y0, w, Math.round(hPt * k));
+          ctx.drawImage(previewRaster.canvas, 0, srcTopPt * rk, fr.W * rk, hPt * rk, 0, y0, g.w, hPx);
         }
       };
-      band(0, 0, head);
-      band(hh + gap, fr.H - foot, foot);
+      band(0, 0, g.head, g.hh);
+      band(g.hh + g.gap, fr.H - g.foot, g.foot, g.fh);
+      ctx.save();
+      ctx.lineWidth = unit;
       // The cut between the bands.
-      ctx.save();
       ctx.strokeStyle = 'rgba(120,130,145,0.65)';
-      ctx.lineWidth = 1 * dpr;
-      ctx.setLineDash([4 * dpr, 4 * dpr]);
-      [hh + 0.5, hh + gap - 0.5].forEach(y => { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); });
+      ctx.setLineDash([4 * unit, 4 * unit]);
+      [g.hh + 0.5, g.hh + g.gap - 0.5].forEach(y => { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(g.w, y); ctx.stroke(); });
       ctx.restore();
-      // Margin guides.
-      const mm = PM_HF_PT_PER_MM;
+      base = { key, canvas: c };
+      return c;
+    }
+    // Margin guides, straight onto the preview (cheap lines, no new layer).
+    function drawGuides(ctx, fr, g) {
+      const mm = PM_HF_PT_PER_MM, k = g.k, m = s.margins, unit = Math.max(1, g.k / g.css);
       ctx.save();
+      ctx.lineWidth = unit;
       ctx.strokeStyle = 'rgba(52,152,219,0.55)';
-      ctx.lineWidth = 1 * dpr;
-      ctx.setLineDash([3 * dpr, 3 * dpr]);
-      const vline = (xPt) => {
+      ctx.setLineDash([3 * unit, 3 * unit]);
+      ctx.beginPath();
+      [m.left * mm, fr.W - m.right * mm].forEach(xPt => {
         const x = Math.round(xPt * k) + 0.5;
-        [[0, hh], [hh + gap, hh + gap + fh]].forEach(([a, b]) => { ctx.beginPath(); ctx.moveTo(x, a); ctx.lineTo(x, b); ctx.stroke(); });
-      };
-      vline(s.margins.left * mm);
-      vline(fr.W - s.margins.right * mm);
-      const hline = (y) => { ctx.beginPath(); ctx.moveTo(0, Math.round(y) + 0.5); ctx.lineTo(w, Math.round(y) + 0.5); ctx.stroke(); };
-      hline(s.margins.top * mm * k);
-      hline(hh + gap + (foot - s.margins.bottom * mm) * k);
+        ctx.moveTo(x, 0); ctx.lineTo(x, g.hh);
+        ctx.moveTo(x, g.hh + g.gap); ctx.lineTo(x, g.hh + g.gap + g.fh);
+      });
+      [m.top * mm * k, g.hh + g.gap + (g.foot - m.bottom * mm) * k].forEach(y => {
+        ctx.moveTo(0, Math.round(y) + 0.5); ctx.lineTo(g.w, Math.round(y) + 0.5);
+      });
+      ctx.stroke();
       ctx.restore();
+    }
+    // Rendered lines at the preview density, kept while the look stays.
+    const lineCache = new Map();
+    function lineAt(text, k) {
+      const key = [text, s.font, s.size, s.bold, s.italic, s.underline, s.color, Math.round(k * 100)].join('|');
+      let r = lineCache.get(key);
+      if (r === undefined) {
+        r = pmHfRenderLine(s, text, k);
+        lineCache.set(key, r);
+        if (lineCache.size > 80) lineCache.delete(lineCache.keys().next().value);
+      }
+      return r;
+    }
+    function draw() {
+      const fr = previewIdx >= 0 ? frameFor(previewIdx) : null;
+      if (!fr) { if (pv.width !== 1) { pv.width = 1; pv.height = 1; } return; }
+      const g = geometry(fr);
+      // Resizing a canvas clears and reallocates it: only when the size changes.
+      if (pv.width !== g.w || pv.height !== g.hh + g.gap + g.fh) { pv.width = g.w; pv.height = g.hh + g.gap + g.fh; }
+      const cw = g.cssW + 'px', ch = g.cssH + 'px';
+      if (pv.style.width !== cw) pv.style.width = cw;
+      if (pv.style.height !== ch) pv.style.height = ch;
+      const ctx = pv.getContext('2d');
+      ctx.drawImage(baseLayer(fr, g), 0, 0);
+      drawGuides(ctx, fr, g);
       // The texts, as they will be on this page.
-      const ctxs = pmHfPageContexts(targetIndices(), s, dateOf());
-      const pctx = ctxs.get(previewIdx);
+      const pctx = pmHfPageContexts(targetIndices(), s, dateOf()).get(previewIdx);
       if (!pctx) return;
       PM_HF_SLOTS.forEach(slot => {
         const text = pmHfExpand(s.texts[slot], s, pctx).replace(/\s+$/, '');
         if (!text.trim()) return;
-        const r = pmHfRenderLine(s, text, k);
+        const r = lineAt(text, g.k);
         if (!r) return;
         const p = pmHfPlace(slot, r, fr.W, fr.H, s);
-        const y = slot[0] === 'h' ? p.y * k : hh + gap + (p.y - (fr.H - foot)) * k;
-        ctx.drawImage(r.canvas, p.x * k, y, r.wPt * k, r.hPt * k);
+        const y = slot[0] === 'h' ? p.y * g.k : g.hh + g.gap + (p.y - (fr.H - g.foot)) * g.k;
+        ctx.drawImage(r.canvas, p.x * g.k, y, r.wPt * g.k, r.hPt * g.k);
       });
     }
     let drawRaf = 0;
@@ -65675,25 +65737,28 @@ function pmHfRunDialog() {
       pvBox.scrollLeft += (r1.left + fx * r1.width) - e.clientX;
       pvBox.scrollTop += (r1.top + fy * r1.height) - e.clientY;
       clearTimeout(zoomTimer);
-      zoomTimer = setTimeout(ensureRaster, 180);
+      zoomTimer = setTimeout(ensureRaster, 250);
     }, { passive: false });
+    // Page raster for the bands, sharp enough for the current zoom (capped).
     async function ensureRaster() {
       const idx = previewIdx;
       const fr = idx >= 0 ? frameFor(idx) : null;
       if (!fr) return;
-      const k = cssPerPt(fr) * Math.min(2, window.devicePixelRatio || 1);
+      let k = geometry(fr).k;
+      const area = fr.W * fr.H * k * k;
+      if (area > RASTER_MAX_PX) k *= Math.sqrt(RASTER_MAX_PX / area);
       const hit = rasterCache.get(idx);
-      if (hit && hit.pxPerPt >= k * 0.9) { previewRaster = hit; draw(); return; }
+      if (hit && hit.pxPerPt >= k * 0.9) { if (previewRaster !== hit) { previewRaster = hit; drawSoon(); } return; }
       const token = ++previewToken;
       let canvas = null;
       try { canvas = await pmWmRenderPagePreview(idx, k); } catch (e) { console.warn('header/footer preview', e); }
       if (!overlay.isConnected || !canvas) return;
       const data = { idx, canvas, pxPerPt: k };
       rasterCache.set(idx, data);
-      while (rasterCache.size > 6) rasterCache.delete(rasterCache.keys().next().value);
+      while (rasterCache.size > 4) rasterCache.delete(rasterCache.keys().next().value);
       if (token !== previewToken || idx !== previewIdx) return;
       previewRaster = data;
-      draw();
+      drawSoon();
     }
     function loadPreviewPage() {
       const targets = targetIndices();
@@ -65759,10 +65824,42 @@ function pmHfRunDialog() {
       });
     });
 
+    // The Bates fields and the Bates codes in the texts follow each other:
+    // editing a field rewrites every code, editing a code fills the fields.
+    const BATES_RE = /\{bates(?::([^}]*))?\}/g;
+    function batesFromTexts() {
+      for (const k of PM_HF_SLOTS) {
+        for (const m of String(s.texts[k] || '').matchAll(BATES_RE)) {
+          const b = m[1] == null ? null : pmHfParseBatesArg(m[1]);
+          if (b) return b;
+        }
+      }
+      return null;
+    }
+    function syncBatesFields() {
+      const b = batesFromTexts();
+      if (!b) return;
+      s.bates = b;
+      if (document.activeElement !== batesPrefixIn) batesPrefixIn.value = b.prefix;
+      if (document.activeElement !== batesSuffixIn) batesSuffixIn.value = b.suffix;
+      if (document.activeElement !== batesStartIn) batesStartIn.value = String(b.start);
+      if (document.activeElement !== batesDigitsIn) batesDigitsIn.value = String(b.digits);
+    }
+    function rewriteBatesCodes() {
+      const code = pmHfBatesCode(s.bates);
+      PM_HF_SLOTS.forEach(k => {
+        const v = String(s.texts[k] || '');
+        if (!BATES_RE.test(v)) return;
+        BATES_RE.lastIndex = 0;
+        s.texts[k] = v.replace(BATES_RE, code);
+        slotEls[k].value = s.texts[k];
+      });
+      BATES_RE.lastIndex = 0;
+    }
     PM_HF_SLOTS.forEach(slot => {
       const el = slotEls[slot];
       el.value = s.texts[slot];
-      el.addEventListener('input', () => { s.texts[slot] = el.value; errEl.textContent = ''; drawSoon(); });
+      el.addEventListener('input', () => { s.texts[slot] = el.value; errEl.textContent = ''; syncBatesFields(); drawSoon(); });
       el.addEventListener('focus', () => { lastSlot = slot; syncControls(); });
     });
     // A variable goes where the caret is in the last text field used.
@@ -65780,7 +65877,7 @@ function pmHfRunDialog() {
     }
     $('pmHfInsPage').addEventListener('click', () => insertVar(pmHfPageFormats()[s.pageFormat]));
     $('pmHfInsDate').addEventListener('click', () => insertVar('{date:' + s.dateFormat + '}'));
-    $('pmHfInsBates').addEventListener('click', () => insertVar('{bates}'));
+    $('pmHfInsBates').addEventListener('click', () => insertVar(pmHfBatesCode(s.bates)));
     pageFmtSel.addEventListener('change', () => { s.pageFormat = Number(pageFmtSel.value) || 0; });
     dateFmtSel.addEventListener('change', () => { s.dateFormat = dateFmtSel.value; });
     dateIn.value = dateIso;
@@ -65796,10 +65893,11 @@ function pmHfRunDialog() {
     Object.keys(mIn).forEach(k => bindNumber(mIn[k], 0, 200, () => s.margins[k], v => { s.margins[k] = v; }));
     batesPrefixIn.value = s.bates.prefix;
     batesSuffixIn.value = s.bates.suffix;
-    batesPrefixIn.addEventListener('input', () => { s.bates.prefix = batesPrefixIn.value; drawSoon(); });
-    batesSuffixIn.addEventListener('input', () => { s.bates.suffix = batesSuffixIn.value; drawSoon(); });
-    bindNumber(batesStartIn, 0, 999999999, () => s.bates.start, v => { s.bates.start = Math.round(v); });
-    bindNumber(batesDigitsIn, 1, 12, () => s.bates.digits, v => { s.bates.digits = Math.round(v); });
+    batesPrefixIn.addEventListener('input', () => { s.bates.prefix = batesPrefixIn.value.replace(/[[\]{}]/g, ''); rewriteBatesCodes(); drawSoon(); });
+    batesSuffixIn.addEventListener('input', () => { s.bates.suffix = batesSuffixIn.value.replace(/[[\]{}]/g, ''); rewriteBatesCodes(); drawSoon(); });
+    bindNumber(batesStartIn, 0, 999999999, () => s.bates.start, v => { s.bates.start = Math.round(v); rewriteBatesCodes(); });
+    bindNumber(batesDigitsIn, 1, 12, () => s.bates.digits, v => { s.bates.digits = Math.round(v); rewriteBatesCodes(); });
+    syncBatesFields();
 
     box.querySelectorAll('input[name="pmHfPages"]').forEach(r => r.addEventListener('change', () => {
       if (!r.checked) return;
@@ -65870,7 +65968,7 @@ function pmHfRunDialog() {
     let resizeTimer = null;
     const onResize = () => {
       clearTimeout(resizeTimer);
-      resizeTimer = setTimeout(() => { draw(); ensureRaster(); }, 200);
+      resizeTimer = setTimeout(() => { readBoxWidth(); draw(); ensureRaster(); }, 200);
     };
     window.addEventListener('resize', onResize);
 
