@@ -917,7 +917,8 @@
        above (fixed, coordinates from JS). Shown whenever a document with pages is
        open: it does not depend on the selection the way "Edit page" does.*/
     .edit-wrapper { position: relative; display: inline-flex; }
-    #watermarkBtn {
+    #watermarkBtn,
+    #headerFooterBtn {
       position: fixed;
       top: 0;
       left: 0;
@@ -927,21 +928,23 @@
       pointer-events: none;
       transition: opacity 0.15s, transform 0.15s, background 0.15s;
     }
-    #watermarkBtn.show::before {
+    #watermarkBtn.show::before,
+    #headerFooterBtn.show::before {
       content: '';
       position: absolute;
       left: 0; right: 0;
       top: -10px; height: 10px;
     }
-    #watermarkBtn.show {
+    #watermarkBtn.show,
+    #headerFooterBtn.show {
       opacity: 1;
       transform: translateY(0);
       pointer-events: auto;
     }
-    #watermarkBtn.show:disabled { opacity: 0.4; }
-    #watermarkBtn:hover:not(:disabled) { background: #3498db; }
-    #watermarkBtn svg { display: block; }
-    @media (pointer: coarse) { #watermarkBtn { display: none !important; } }
+    #watermarkBtn.show:disabled, #headerFooterBtn.show:disabled { opacity: 0.4; }
+    #watermarkBtn:hover:not(:disabled), #headerFooterBtn:hover:not(:disabled) { background: #3498db; }
+    #watermarkBtn svg, #headerFooterBtn svg { display: block; }
+    @media (pointer: coarse) { #watermarkBtn, #headerFooterBtn { display: none !important; } }
 
     /*Watermark dialog*/
     .pm-wm-overlay {
@@ -1083,6 +1086,54 @@
     .pm-wm-ok { border: none; background: #3498db; color: #fff; font-weight: bold; }
     .pm-wm-ok:hover { background: #2d86c3; }
     .pm-wm-cancel { border: 1px solid #ccc; background: #fff; color: #333; }
+    /*Header/footer dialog: options on top, the page's top and bottom
+       bands below (pmHfRunDialog). Reuses the watermark dialog's controls.*/
+    .pm-hf-box { width: 960px; }
+    .pm-hf-controls { width: auto; }
+    .pm-hf-box .pm-wm-label { width: 128px; }
+    .pm-hf-box .pm-hf-col-right .pm-wm-label { width: 96px; }
+    .pm-hf-grid { display: grid; grid-template-columns: 128px 1fr 1fr 1fr; gap: 6px; align-items: center; }
+    .pm-hf-colhead { color: #777; font-size: 12px; text-align: center; }
+    .pm-hf-grid .pm-hf-slot { width: 100%; min-width: 0; }
+    .pm-hf-controls input.pm-hf-slot.pm-hf-target { border-color: #3498db; box-shadow: 0 0 0 1px rgba(52,152,219,0.35); }
+    .pm-hf-fmt { width: 28px; min-width: 28px; padding: 0; }
+    #pmHfFont { flex: 1; min-width: 120px; }
+    .pm-hf-cols { display: flex; gap: 18px; }
+    .pm-hf-col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+    .pm-hf-col-left { flex: 1.45; }
+    .pm-hf-grow { flex: 1; min-width: 0; }
+    .pm-hf-controls input[type=date] {
+      border: 1px solid #bbb; border-radius: 6px; padding: 2px 6px; height: 28px; font-size: 13px;
+      box-sizing: border-box; background: #fff; color: #2c3e50;
+    }
+    /*Bates and margins: label / field pairs in a two-column grid.*/
+    .pm-hf-bates, .pm-hf-margins {
+      display: grid; grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr);
+      gap: 6px 8px; flex: 1; min-width: 0; align-items: center;
+    }
+    .pm-hf-bates label, .pm-hf-margins label { display: contents; }
+    .pm-hf-bates label > span, .pm-hf-margins label > span { color: #555; font-size: 13px; white-space: nowrap; }
+    #pmHfBatesPrefix, #pmHfBatesSuffix { width: 100%; min-width: 0; }
+    .pm-hf-bates .pm-wm-num, .pm-hf-margins .pm-wm-num { width: 100%; }
+    .pm-hf-bates .pm-wm-num input[type=number], .pm-hf-margins .pm-wm-num input[type=number] { flex: 1; width: 0; min-width: 0; }
+    .pm-hf-ins { align-self: center; }
+    #pmHfDateFmt { flex: 1.3; }
+    #pmHfRange { flex: 1; width: 0; min-width: 0; }
+    .pm-hf-col-right .pm-wm-pages label:last-child { display: flex; min-width: 0; }
+    .pm-hf-preview.zoomed { justify-content: flex-start; }
+    .pm-hf-preview {
+      background: rgba(120,130,145,0.14); border-radius: 8px; padding: 12px; box-sizing: border-box;
+      display: flex; justify-content: center; max-height: 46vh; overflow: auto;
+    }
+    .pm-hf-preview canvas { display: block; box-shadow: 0 2px 10px rgba(0,0,0,0.25); }
+    .pm-hf-nav { justify-content: center; }
+    .pm-hf-help-pop { max-width: 420px; }
+    .pm-hf-help-pop code { background: rgba(52,152,219,0.12); border-radius: 4px; padding: 0 4px; }
+    html[data-theme="dark"] .pm-wm-box .pm-hf-controls input[type=date] { background: #1c2128 !important; border-color: #4a5058 !important; color-scheme: dark; }
+    @media (max-width: 900px) {
+      .pm-hf-cols { flex-direction: column; }
+      .pm-hf-box { width: auto; }
+    }
     @media (max-width: 900px) {
       .pm-wm-body { flex-direction: column; overflow-y: auto; }
       .pm-wm-controls { width: auto; overflow: visible; }
@@ -1232,6 +1283,7 @@
     #toggleDeletedBtn,
     #printSelectedBtn,
     #watermarkBtn,
+    #headerFooterBtn,
     .readmode-wrapper .mode-btn.rl-slot-popup {
       width: 42px;
       height: 42px;
@@ -7044,7 +7096,7 @@
       }
       /* Beat .top-menu button / .icon-btn / .icons-mode .compact-btn fixed 42px.
          Ratios = natural size / 42 (22→0.524, 30→0.714, 26→0.619, 18→0.429). */
-      .top-menu .main-row.menu-shrink button:not(#fitWidthBtn):not(.img-save-btn):not(#printSelectedBtn):not(#watermarkBtn):not(#toggleDeletedBtn):not(.rl-slot-popup),
+      .top-menu .main-row.menu-shrink button:not(#fitWidthBtn):not(.img-save-btn):not(#printSelectedBtn):not(#watermarkBtn):not(#headerFooterBtn):not(#toggleDeletedBtn):not(.rl-slot-popup),
       .top-menu .main-row.menu-shrink label.icon-btn,
       .main-row.menu-shrink .compact-btn,
       .main-row.menu-shrink button.icon-btn,
@@ -7091,6 +7143,7 @@
       .top-menu .main-row.menu-shrink #toggleDeletedBtn,
       .top-menu .main-row.menu-shrink #printSelectedBtn,
       .top-menu .main-row.menu-shrink #watermarkBtn,
+      .top-menu .main-row.menu-shrink #headerFooterBtn,
       .top-menu .main-row.menu-shrink .readmode-wrapper .mode-btn.rl-slot-popup {
         width: var(--pm-menu-ctrl-h);
         height: var(--pm-menu-ctrl-h);
@@ -7533,6 +7586,15 @@
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
               <polyline points="14 2 14 8 20 8"/>
               <path d="M12 10.2c-2 2.5-3 4.2-3 5.5a3 3 0 0 0 6 0c0-1.3-1-3-3-5.5z" fill="#5dade2" stroke="none"/>
+            </svg>
+          </button>
+          <button id="headerFooterBtn" class="icon-btn" onclick="openHeaderFooterDialog()" disabled title="Колонтитулы" data-i18n-title="hfTitle">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="4" y="2" width="16" height="20" rx="2"/>
+              <line x1="7.5" y1="6" x2="16.5" y2="6" stroke="#5dade2" stroke-width="2.4"/>
+              <line x1="7.5" y1="18" x2="16.5" y2="18" stroke="#5dade2" stroke-width="2.4"/>
+              <line x1="8" y1="10.5" x2="16" y2="10.5" stroke-width="1.3" opacity="0.5"/>
+              <line x1="8" y1="13.5" x2="13" y2="13.5" stroke-width="1.3" opacity="0.5"/>
             </svg>
           </button>
         </div>
@@ -9364,6 +9426,18 @@
         newDocumentHint: 'Будет создан новый документ', openInNewTabs: 'Откроется в новых вкладках',
         tabClose: 'Закрыть вкладку', tabCloseOthers: 'Закрыть другие вкладки', tabCloseRight: 'Закрыть вкладки справа',
         tabRename: 'Переименовать', tabRenameTitle: 'Переименовать документ',
+        hfTitle: 'Колонтитулы', hfHeader: 'Верхний', hfFooter: 'Нижний',
+        hfLeft: 'Слева', hfCenter: 'По центру', hfRight: 'Справа',
+        hfPageNumber: 'Номер страницы', hfDate: 'Дата', hfBates: 'Нумерация Бейтса', hfInsert: 'Вставить',
+        hfBatesPrefix: 'Префикс', hfBatesSuffix: 'Суффикс', hfBatesStart: 'С номера', hfBatesDigits: 'Цифр',
+        hfMargins: 'Отступы, мм', hfMarginTop: 'Сверху', hfMarginBottom: 'Снизу', hfMarginLeft: 'Слева', hfMarginRight: 'Справа',
+        hfFmtPage: 'Страница {page}', hfFmtPageOf: 'Страница {page} из {pages}', hfFmtNumOf: '{page} из {pages}',
+        hfHelpVars: 'Переменные пишутся прямо в тексте в фигурных скобках — их можно переставлять и окружать любым текстом. Кнопки «Вставить» добавляют их туда, где стоит курсор.',
+        hfHelpPage: 'номер страницы и число страниц',
+        hfHelpDate: 'дата; D, DD — день, M, MM — месяц числом, MMM, MMMM — месяц словом, YY, YYYY — год',
+        hfHelpBates: 'номер Бейтса: префикс, номер с заданным числом цифр, суффикс',
+        hfNoText: 'Введите текст хотя бы одного колонтитула',
+        hfApplying: 'Добавление колонтитулов…', hfApplyError: 'Не удалось добавить колонтитулы',
         watermarkTitle: 'Водяной знак', watermarkDefaultText: 'КОНФИДЕНЦИАЛЬНО',
         wmText: 'Текст', wmFont: 'Шрифт', wmBold: 'Жирный', wmItalic: 'Курсив', wmColor: 'Цвет',
         wmSize: 'Размер', wmTransparency: 'Прозрачность', wmRotation: 'Поворот',
@@ -9796,6 +9870,18 @@
         newDocumentHint: 'A new document will be created', openInNewTabs: 'Open in new tabs',
         tabClose: 'Close tab', tabCloseOthers: 'Close other tabs', tabCloseRight: 'Close tabs to the right',
         tabRename: 'Rename', tabRenameTitle: 'Rename document',
+        hfTitle: 'Header & footer', hfHeader: 'Header', hfFooter: 'Footer',
+        hfLeft: 'Left', hfCenter: 'Center', hfRight: 'Right',
+        hfPageNumber: 'Page number', hfDate: 'Date', hfBates: 'Bates numbering', hfInsert: 'Insert',
+        hfBatesPrefix: 'Prefix', hfBatesSuffix: 'Suffix', hfBatesStart: 'Start at', hfBatesDigits: 'Digits',
+        hfMargins: 'Margins, mm', hfMarginTop: 'Top', hfMarginBottom: 'Bottom', hfMarginLeft: 'Left', hfMarginRight: 'Right',
+        hfFmtPage: 'Page {page}', hfFmtPageOf: 'Page {page} of {pages}', hfFmtNumOf: '{page} of {pages}',
+        hfHelpVars: 'Variables are written right in the text in curly braces — move them and surround them with any text. The Insert buttons add them where the cursor is.',
+        hfHelpPage: 'page number and page count',
+        hfHelpDate: 'date; D, DD — day, M, MM — month as a number, MMM, MMMM — month as a word, YY, YYYY — year',
+        hfHelpBates: 'Bates number: prefix, number with the set count of digits, suffix',
+        hfNoText: 'Enter the text of at least one header or footer',
+        hfApplying: 'Adding headers and footers…', hfApplyError: 'Could not add headers and footers',
         watermarkTitle: 'Watermark', watermarkDefaultText: 'CONFIDENTIAL',
         wmText: 'Text', wmFont: 'Font', wmBold: 'Bold', wmItalic: 'Italic', wmColor: 'Color',
         wmSize: 'Size', wmTransparency: 'Transparency', wmRotation: 'Rotation',
@@ -10228,6 +10314,18 @@
         newDocumentHint: 'Se creará un nuevo documento', openInNewTabs: 'Se abrirá en nuevas pestañas',
         tabClose: 'Cerrar pestaña', tabCloseOthers: 'Cerrar otras pestañas', tabCloseRight: 'Cerrar pestañas a la derecha',
         tabRename: 'Cambiar nombre', tabRenameTitle: 'Cambiar el nombre del documento',
+        hfTitle: 'Encabezado y pie', hfHeader: 'Encabezado', hfFooter: 'Pie',
+        hfLeft: 'Izquierda', hfCenter: 'Centro', hfRight: 'Derecha',
+        hfPageNumber: 'Número de página', hfDate: 'Fecha', hfBates: 'Numeración Bates', hfInsert: 'Insertar',
+        hfBatesPrefix: 'Prefijo', hfBatesSuffix: 'Sufijo', hfBatesStart: 'Empezar en', hfBatesDigits: 'Dígitos',
+        hfMargins: 'Márgenes, mm', hfMarginTop: 'Arriba', hfMarginBottom: 'Abajo', hfMarginLeft: 'Izquierda', hfMarginRight: 'Derecha',
+        hfFmtPage: 'Página {page}', hfFmtPageOf: 'Página {page} de {pages}', hfFmtNumOf: '{page} de {pages}',
+        hfHelpVars: 'Las variables se escriben en el propio texto entre llaves: puedes moverlas y rodearlas de cualquier texto. Los botones Insertar las añaden donde está el cursor.',
+        hfHelpPage: 'número de página y número de páginas',
+        hfHelpDate: 'fecha; D, DD — día, M, MM — mes en número, MMM, MMMM — mes en letras, YY, YYYY — año',
+        hfHelpBates: 'número Bates: prefijo, número con la cantidad de dígitos indicada, sufijo',
+        hfNoText: 'Escribe el texto de al menos un encabezado o pie',
+        hfApplying: 'Añadiendo encabezados y pies…', hfApplyError: 'No se pudieron añadir los encabezados y pies',
         watermarkTitle: 'Marca de agua', watermarkDefaultText: 'CONFIDENCIAL',
         wmText: 'Texto', wmFont: 'Fuente', wmBold: 'Negrita', wmItalic: 'Cursiva', wmColor: 'Color',
         wmSize: 'Tamaño', wmTransparency: 'Transparencia', wmRotation: 'Rotación',
@@ -10710,6 +10808,18 @@
         tabCloseOthers: '关闭其他标签页',
         tabCloseRight: '关闭右侧标签页',
         tabRename: '重命名',
+        hfTitle: '页眉和页脚', hfHeader: '页眉', hfFooter: '页脚',
+        hfLeft: '左', hfCenter: '中', hfRight: '右',
+        hfPageNumber: '页码', hfDate: '日期', hfBates: '贝茨编号', hfInsert: '插入',
+        hfBatesPrefix: '前缀', hfBatesSuffix: '后缀', hfBatesStart: '起始号', hfBatesDigits: '位数',
+        hfMargins: '边距（毫米）', hfMarginTop: '上', hfMarginBottom: '下', hfMarginLeft: '左', hfMarginRight: '右',
+        hfFmtPage: '第 {page} 页', hfFmtPageOf: '第 {page} 页，共 {pages} 页', hfFmtNumOf: '{page} / {pages}',
+        hfHelpVars: '变量直接以花括号写在文本中，可以移动并在其前后添加任意文字。“插入”按钮会将其插入光标所在位置。',
+        hfHelpPage: '页码和总页数',
+        hfHelpDate: '日期；D、DD — 日，M、MM — 数字月份，MMM、MMMM — 文字月份，YY、YYYY — 年',
+        hfHelpBates: '贝茨编号：前缀、指定位数的编号、后缀',
+        hfNoText: '请至少输入一个页眉或页脚的文本',
+        hfApplying: '正在添加页眉和页脚…', hfApplyError: '无法添加页眉和页脚',
         watermarkTitle: '水印', watermarkDefaultText: '机密',
         wmText: '文本', wmFont: '字体', wmBold: '粗体', wmItalic: '斜体', wmColor: '颜色',
         wmSize: '大小', wmTransparency: '透明度', wmRotation: '旋转',
@@ -11915,6 +12025,8 @@
       }
       const watermarkBtnEl = document.getElementById('watermarkBtn');
       if (watermarkBtnEl) watermarkBtnEl.disabled = baseDisabled || pdfDoc.getPageCount() === 0;
+      const headerFooterBtnEl = document.getElementById('headerFooterBtn');
+      if (headerFooterBtnEl) headerFooterBtnEl.disabled = baseDisabled || pdfDoc.getPageCount() === 0;
       saveBtn.disabled = baseDisabled;
       scaleSlider.disabled = baseDisabled;
       const fitWidthBtnEl = document.getElementById('fitWidthBtn');
@@ -12354,6 +12466,7 @@
         case 'restoreHelpBtn': return t('popCapRestoreHelp');
         case 'aboutBtn': return t('about');
         case 'watermarkBtn': return t('watermarkTitle');
+        case 'headerFooterBtn': return t('hfTitle');
         case 'printSelectedBtn': return t('printSelectedPages');
         case 'toggleDeletedBtn':
           return t(deletedPagesHidden ? 'popCapDeletedHidden' : 'popCapDeletedShown');
@@ -12381,7 +12494,7 @@
     }
     function pmPopCapsInit() {
       const btns = document.querySelectorAll(
-        '#logoMenuArea > button, .readmode-wrapper .mode-btn, #watermarkBtn, ' +
+        '#logoMenuArea > button, .readmode-wrapper .mode-btn, #watermarkBtn, #headerFooterBtn, ' +
         '#toggleDeletedBtn, #printSelectedBtn, .top-menu .img-save-btn');
       const mo = new MutationObserver((recs) => {
         new Set(recs.map(r => r.target)).forEach(pmPopCapUpdate);
@@ -34285,39 +34398,44 @@
       });
     })();
 
-    // "Watermark" under "Edit page" - the same pop-up as print-selected above.
+    // "Watermark" and "Headers and footers" under "Edit page" - the same
+    // pop-up as print-selected above, stacked one under the other.
     (function initWatermarkToggle() {
       if (isTouchDevice) return;
       const wrapper = document.querySelector('.edit-wrapper');
-      const btn = document.getElementById('watermarkBtn');
-      if (!wrapper || !btn || !editPageBtn) return;
+      const btns = ['watermarkBtn', 'headerFooterBtn'].map(id => document.getElementById(id)).filter(Boolean);
+      if (!wrapper || !btns.length || !editPageBtn) return;
       let hideTimer = null;
 
-      function positionWatermarkBtn() {
+      function positionPopupBtns() {
         const r = editPageBtn.getBoundingClientRect();
-        btn.style.left = Math.round(r.left) + 'px';
-        btn.style.top = Math.round(r.bottom + 6) + 'px';
+        let top = r.bottom + 6;
+        btns.forEach(btn => {
+          btn.style.left = Math.round(r.left) + 'px';
+          btn.style.top = Math.round(top) + 'px';
+          top += (btn.offsetHeight || r.height) + 6;
+        });
       }
       function show() {
         if (!pdfDoc) return;
         clearTimeout(hideTimer);
         pmTopPopupShowing(hideNow);
-        positionWatermarkBtn();
-        btn.classList.add('show');
+        positionPopupBtns();
+        btns.forEach(btn => btn.classList.add('show'));
       }
       function scheduleHide() {
         clearTimeout(hideTimer);
-        hideTimer = setTimeout(() => btn.classList.remove('show'), POPUP_BTN_HIDE_MS);
+        hideTimer = setTimeout(() => btns.forEach(btn => btn.classList.remove('show')), POPUP_BTN_HIDE_MS);
       }
-      function hideNow() { clearTimeout(hideTimer); btn.classList.remove('show'); }
+      function hideNow() { clearTimeout(hideTimer); btns.forEach(btn => btn.classList.remove('show')); }
       pmTopPopupHiders.add(hideNow);
-      [wrapper, editPageBtn, btn].forEach(el => {
+      [wrapper, editPageBtn, ...btns].forEach(el => {
         el.addEventListener('mouseenter', show);
         el.addEventListener('mouseleave', scheduleHide);
       });
-      btn.addEventListener('click', () => btn.classList.remove('show'));
+      btns.forEach(btn => btn.addEventListener('click', hideNow));
       window.addEventListener('resize', () => {
-        if (btn.classList.contains('show')) positionWatermarkBtn();
+        if (btns.some(btn => btn.classList.contains('show'))) positionPopupBtns();
       });
     })();
 
@@ -65026,6 +65144,751 @@ function pmWmRunDialog() {
     loadPreviewPage();
     textIn.focus();
     textIn.select();
+  });
+}
+// ============================================================
+// HEADERS AND FOOTERS: up to three texts above the page content (left,
+// centre, right) and three below it. A text may hold variables written
+// right into it, so they can be moved and surrounded by any wording:
+//   {page} {pages} {date:DD.MM.YYYY} {bates}
+// Every distinct line is rendered once to a transparent PNG (any installed
+// font, as the watermark does) and drawn at the margins; lines that repeat
+// on several pages share one image. Coordinates are visual, as for the
+// watermark (pmWmPageFrame): the page as seen, in pt, y down.
+// ============================================================
+const PM_HF_STORAGE_KEY = 'pmHeaderFooterSettings';
+const PM_HF_SLOTS = ['hl', 'hc', 'hr', 'fl', 'fc', 'fr'];
+const PM_HF_SWATCHES = ['#000000', '#555555', '#1f4e8c', '#c0392b'];
+const PM_HF_PT_PER_MM = 72 / 25.4;
+const PM_HF_DATE_FORMATS = ['DD.MM.YYYY', 'D.M.YYYY', 'DD.MM.YY', 'DD.MM', 'M/D', 'M.D', 'M-D-YY',
+  'MM/DD/YYYY', 'YYYY-MM-DD', 'D MMMM YYYY', 'D MMM YYYY', 'MMMM YYYY'];
+let pmHfDialogOpen = false;
+
+function pmHfPageFormats() {
+  return [t('hfFmtPage'), t('hfFmtPageOf'), '{page}', t('hfFmtNumOf'), '{page}/{pages}', '- {page} -'];
+}
+
+function pmHfDefaults() {
+  return {
+    texts: { hl: '', hc: '', hr: '', fl: '', fc: t('hfFmtPageOf'), fr: '' },
+    font: PM_WM_ROBOTO_FAMILY,
+    size: 10,
+    bold: false,
+    italic: false,
+    underline: false,
+    color: '#000000',
+    margins: { top: 10, bottom: 10, left: 15, right: 15 },   // mm
+    bates: { prefix: '', suffix: '', start: 1, digits: 6 },
+    pageFormat: 1,
+    dateFormat: 'DD.MM.YYYY'
+  };
+}
+
+function pmHfSanitize(s) {
+  const d = pmHfDefaults();
+  const out = Object.assign({}, d, s || {});
+  const texts = Object.assign({}, d.texts, (s && s.texts) || {});
+  out.texts = {};
+  PM_HF_SLOTS.forEach(k => { out.texts[k] = typeof texts[k] === 'string' ? texts[k] : ''; });
+  out.font = typeof out.font === 'string' && out.font ? out.font : d.font;
+  out.size = pmWmClampNum(out.size, 4, 72, d.size);
+  out.bold = !!out.bold;
+  out.italic = !!out.italic;
+  out.underline = !!out.underline;
+  out.color = /^#[0-9a-f]{6}$/i.test(out.color || '') ? out.color : d.color;
+  const m = Object.assign({}, d.margins, (s && s.margins) || {});
+  out.margins = {
+    top: pmWmClampNum(m.top, 0, 200, d.margins.top), bottom: pmWmClampNum(m.bottom, 0, 200, d.margins.bottom),
+    left: pmWmClampNum(m.left, 0, 200, d.margins.left), right: pmWmClampNum(m.right, 0, 200, d.margins.right)
+  };
+  const b = Object.assign({}, d.bates, (s && s.bates) || {});
+  out.bates = {
+    prefix: typeof b.prefix === 'string' ? b.prefix : '', suffix: typeof b.suffix === 'string' ? b.suffix : '',
+    start: Math.round(pmWmClampNum(b.start, 0, 999999999, 1)), digits: Math.round(pmWmClampNum(b.digits, 1, 12, 6))
+  };
+  out.pageFormat = Math.round(pmWmClampNum(out.pageFormat, 0, pmHfPageFormats().length - 1, d.pageFormat));
+  out.dateFormat = PM_HF_DATE_FORMATS.includes(out.dateFormat) ? out.dateFormat : d.dateFormat;
+  return out;
+}
+
+function pmHfLoadSettings() {
+  try {
+    const raw = localStorage.getItem(PM_HF_STORAGE_KEY);
+    if (raw) return pmHfSanitize(JSON.parse(raw));
+  } catch (_) {}
+  return pmHfSanitize(null);
+}
+function pmHfStoreSettings(s) {
+  try { localStorage.setItem(PM_HF_STORAGE_KEY, JSON.stringify(s)); } catch (_) {}
+}
+
+function pmHfIntlLocale() {
+  return { ru: 'ru-RU', en: 'en-US', es: 'es-ES', zh: 'zh-CN' }[pmLocale] || 'ru-RU';
+}
+// A month name as it reads in this format: next to a day number in the
+// form a date takes ("5 октября"), alone in the standalone one ("октябрь").
+function pmHfMonthName(date, long, withDay) {
+  const loc = pmHfIntlLocale();
+  const month = long ? 'long' : 'short';
+  try {
+    if (withDay) {
+      const part = new Intl.DateTimeFormat(loc, { day: 'numeric', month }).formatToParts(date).find(p => p.type === 'month');
+      if (part) return part.value;
+    }
+    return new Intl.DateTimeFormat(loc, { month }).format(date);
+  } catch (_) {
+    return String(date.getMonth() + 1);
+  }
+}
+// D DD - day, M MM - month as a number, MMM MMMM - month as a word,
+// YY YYYY - year; anything else is kept as written.
+function pmHfFormatDate(date, fmt) {
+  const pad = (n) => String(n).padStart(2, '0');
+  const withDay = /D/.test(fmt);
+  return String(fmt).replace(/YYYY|YY|MMMM|MMM|MM|M|DD|D/g, (tok) => {
+    switch (tok) {
+      case 'YYYY': return String(date.getFullYear());
+      case 'YY': return pad(date.getFullYear() % 100);
+      case 'MMMM': return pmHfMonthName(date, true, withDay);
+      case 'MMM': return pmHfMonthName(date, false, withDay);
+      case 'MM': return pad(date.getMonth() + 1);
+      case 'M': return String(date.getMonth() + 1);
+      case 'DD': return pad(date.getDate());
+      default: return String(date.getDate());
+    }
+  });
+}
+function pmHfBates(s, k) {
+  return s.bates.prefix + String(s.bates.start + k).padStart(s.bates.digits, '0') + s.bates.suffix;
+}
+// The variables of one line for one page; anything unknown stays as typed.
+// ctx: { page, pages, batesIndex, date }
+function pmHfExpand(text, s, ctx) {
+  return String(text || '').replace(/\{(page|pages|bates|date)(?::([^}]*))?\}/g, (all, name, arg) => {
+    if (name === 'page') return String(ctx.page);
+    if (name === 'pages') return String(ctx.pages);
+    if (name === 'bates') return pmHfBates(s, ctx.batesIndex);
+    return pmHfFormatDate(ctx.date, arg || 'DD.MM.YYYY');
+  });
+}
+
+// One line of text as a transparent canvas. The box spans the font's own
+// ascent and descent (not the glyphs'), so the left, centre and right texts
+// of a row share one baseline. wPt is the advance width; padPt of spare
+// room each side keeps italic overhangs.
+function pmHfTextFont(s, px) {
+  return (s.italic ? 'italic ' : '') + (s.bold ? 'bold ' : '') + px + 'px ' + pmWmFontCss(s.font) + ', sans-serif';
+}
+function pmHfMetrics(s, text) {
+  const k = PM_WM_PX_PER_PT;
+  const ctx = document.createElement('canvas').getContext('2d');
+  ctx.font = pmHfTextFont(s, s.size * k);
+  const m = ctx.measureText(text);
+  const fin = (v, dflt) => (Number.isFinite(v) && v > 0 ? v : dflt);
+  return {
+    w: m.width / k,
+    asc: fin(m.fontBoundingBoxAscent, s.size * k * 0.92) / k,
+    desc: fin(m.fontBoundingBoxDescent, s.size * k * 0.24) / k,
+    pad: s.size * 0.25
+  };
+}
+function pmHfRenderLine(s, text, pxPerPt) {
+  if (!text) return null;
+  const mt = pmHfMetrics(s, text);
+  const wPt = mt.w + mt.pad * 2, hPt = mt.asc + mt.desc;
+  let k = pxPerPt;
+  const fit = Math.min(1, 8192 / (wPt * k), 4096 / (hPt * k));
+  if (fit < 1) k *= fit;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.ceil(wPt * k));
+  canvas.height = Math.max(1, Math.ceil(hPt * k));
+  const ctx = canvas.getContext('2d');
+  ctx.font = pmHfTextFont(s, s.size * k);
+  ctx.fillStyle = s.color;
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText(text, mt.pad * k, mt.asc * k, mt.w * k);
+  if (s.underline) {
+    const th = Math.max(1, s.size * 0.06 * k);
+    ctx.fillRect(mt.pad * k, mt.asc * k + s.size * 0.1 * k, mt.w * k, th);
+  }
+  return { canvas, wPt, hPt, padPt: mt.pad, ascPt: mt.asc, textWPt: mt.w };
+}
+// Where a line's box goes on a W x H page: top-left corner, visual pt.
+function pmHfPlace(slot, r, W, H, s) {
+  const mm = PM_HF_PT_PER_MM;
+  const left = s.margins.left * mm, right = s.margins.right * mm;
+  let x;
+  if (slot[1] === 'l') x = left - r.padPt;
+  else if (slot[1] === 'r') x = W - right - r.textWPt - r.padPt;
+  else x = (left + (W - right)) / 2 - r.textWPt / 2 - r.padPt;
+  const y = slot[0] === 'h' ? s.margins.top * mm : H - s.margins.bottom * mm - r.hPt;
+  return { x, y };
+}
+
+// Page numbers count the pages that stay (those marked for deletion are
+// dropped on save); Bates numbers count the pages the texts go on.
+function pmHfPageContexts(indices, s, date) {
+  const count = pdfDoc.getPageCount();
+  const kept = [];
+  for (let i = 0; i < count; i++) if (!markedForDeletion.has(i)) kept.push(i);
+  const pos = new Map(kept.map((idx, i) => [idx, i + 1]));
+  const out = new Map();
+  indices.forEach((idx, k) => out.set(idx, { page: pos.get(idx) || idx + 1, pages: kept.length, batesIndex: k, date }));
+  return out;
+}
+
+async function pmHfApply(s, indices, date) {
+  if (!pdfDoc || !indices.length) return false;
+  const ctxs = pmHfPageContexts(indices, s, date);
+  // Lines per page, then one PNG per distinct line.
+  const plan = [];
+  const lines = new Map();
+  for (const idx of indices) {
+    const items = [];
+    PM_HF_SLOTS.forEach(slot => {
+      const text = pmHfExpand(s.texts[slot], s, ctxs.get(idx)).replace(/\s+$/, '');
+      if (!text.trim()) return;
+      if (!lines.has(text)) lines.set(text, null);
+      items.push({ slot, text });
+    });
+    if (items.length) plan.push({ idx, items });
+  }
+  if (!plan.length) return false;
+  showLoadingDeferred(t('hfApplying'), 300);
+  let claimed = false;
+  let bytes = null;
+  const done = [];
+  try {
+    for (const text of lines.keys()) {
+      const r = pmHfRenderLine(s, text, PM_WM_PX_PER_PT);
+      lines.set(text, r ? { r, png: await pmWmCanvasToBytes(r.canvas, 'image/png') } : null);
+    }
+    claimed = await peClaimLivePdfDocWriter();
+    const docRef = pdfDoc;
+    if (!docRef) return false;
+    const embedded = new Map();
+    const count = docRef.getPageCount();
+    for (const { idx, items } of plan) {
+      if (idx < 0 || idx >= count) continue;
+      const page = docRef.getPage(idx);
+      const { rot, full, W, H } = pmWmPageFrame(page);
+      peFreshContentStream(page);
+      for (const { slot, text } of items) {
+        const line = lines.get(text);
+        if (!line) continue;
+        if (!embedded.has(text)) embedded.set(text, await docRef.embedPng(line.png));
+        const p = pmHfPlace(slot, line.r, W, H, s);
+        const lx = full.x + p.x, ly = full.y + (H - p.y - line.r.hPt);
+        const a = peRotatePointAround(lx, ly, full.x, full.y, rot);
+        page.drawImage(embedded.get(text), {
+          x: a.x, y: a.y, width: line.r.wPt, height: line.r.hPt, rotate: PDFLib.degrees(rot)
+        });
+      }
+      done.push(idx);
+    }
+    if (pdfDoc !== docRef || !done.length) return false;
+    bytes = new Uint8Array(await docRef.save());
+  } catch (err) {
+    console.error(err);
+    alert(t('hfApplyError') + ': ' + (err && err.message || err));
+    return false;
+  } finally {
+    if (claimed) pdfDocCriticalWriterActive = false;
+    hideLoading();
+  }
+
+  originalFileBytes = bytes;
+  const marked = [...markedForDeletion].sort((x, y) => x - y);
+  const historyBytes = bytes.slice();
+  historyCommitChain = historyCommitChain
+    .then(() => commitHistoryStep(Promise.resolve(historyBytes), marked, done, { lazyPages: true }))
+    .catch(e => console.warn('history commit error', e));
+  documentDirty = true;
+  if (typeof updateInfo === 'function') updateInfo();
+  if (typeof updateStickyFileBar === 'function') updateStickyFileBar();
+  if (typeof pmOnDocumentDirtyChanged === 'function') pmOnDocumentDirtyChanged();
+  await pmWmRefreshPageImages(bytes, done);
+  return true;
+}
+
+async function openHeaderFooterDialog() {
+  if (pmHfDialogOpen || pmWmDialogOpen || !pdfDoc || isLoading || pdfDoc.getPageCount() === 0) return;
+  if (typeof pmPageEditorOpen === 'function' && pmPageEditorOpen()) return;
+  pmHfDialogOpen = true;
+  try {
+    await pmHfRunDialog();
+  } finally {
+    pmHfDialogOpen = false;
+  }
+}
+
+function pmHfTodayIso() {
+  const d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+function pmHfRunDialog() {
+  return new Promise((resolve) => {
+    const s = pmHfLoadSettings();
+    const pageCount = pdfDoc.getPageCount();
+    const selected = [...selectedPages].filter(i => !markedForDeletion.has(i) && i < pageCount).sort((a, b) => a - b);
+    let pagesMode = 'all';
+    let rangeText = '';
+    let dateIso = pmHfTodayIso();
+    let previewPos = 0;
+    let previewIdx = -1;
+    let previewRaster = null;      // { idx, canvas, pxPerPt }
+    let previewToken = 0;
+    const rasterCache = new Map();
+    let lastSlot = 'fc';            // where "Insert" puts a variable
+    let busy = false;
+    const esc = escapeHtml;
+    const dateOf = () => { const [y, m, d] = dateIso.split('-').map(Number); return (y && m && d) ? new Date(y, m - 1, d) : new Date(); };
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay-active pm-wm-overlay';
+    const box = document.createElement('div');
+    box.className = 'pm-modal-box pm-wm-box pm-hf-box';
+    box.setAttribute('role', 'dialog');
+    const slotInput = (k, ph) => `<input type="text" class="pm-hf-slot" data-slot="${k}" placeholder="${esc(ph)}" spellcheck="false" autocomplete="off">`;
+    box.innerHTML = `
+      <div class="pm-wm-head">
+        <div class="pm-wm-title">${esc(t('hfTitle'))}</div>
+        <button type="button" class="pm-wm-help" id="pmHfHelp" aria-expanded="false">?</button>
+      </div>
+      <div class="pm-wm-help-pop pm-hf-help-pop" id="pmHfHelpPop" hidden>
+        <div>${esc(t('hfHelpVars'))}</div>
+        <div><code>{page}</code>, <code>{pages}</code> — ${esc(t('hfHelpPage'))}</div>
+        <div><code>{date:DD.MM.YYYY}</code> — ${esc(t('hfHelpDate'))}</div>
+        <div><code>{bates}</code> — ${esc(t('hfHelpBates'))}</div>
+      </div>
+      <div class="pm-wm-controls pm-hf-controls">
+        <div class="pm-hf-grid">
+          <span></span><span class="pm-hf-colhead">${esc(t('hfLeft'))}</span><span class="pm-hf-colhead">${esc(t('hfCenter'))}</span><span class="pm-hf-colhead">${esc(t('hfRight'))}</span>
+          <span class="pm-wm-label">${esc(t('hfHeader'))}</span>${slotInput('hl', t('hfHeader'))}${slotInput('hc', t('hfHeader'))}${slotInput('hr', t('hfHeader'))}
+          <span class="pm-wm-label">${esc(t('hfFooter'))}</span>${slotInput('fl', t('hfFooter'))}${slotInput('fc', t('hfFooter'))}${slotInput('fr', t('hfFooter'))}
+        </div>
+        <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('wmFont'))}</span>
+          <select id="pmHfFont"></select>
+          <span class="pm-wm-size-num" title="pt">${pmWmNumField('pmHfSize', 4, 72, 0.5)}</span><span class="pm-wm-unit">pt</span>
+          <button type="button" class="pm-wm-tbtn pm-hf-fmt" id="pmHfBold" title="${esc(t('wmBold'))}"><b>${esc(t('peBoldLetter'))}</b></button>
+          <button type="button" class="pm-wm-tbtn pm-hf-fmt" id="pmHfItalic" title="${esc(t('wmItalic'))}"><i>${esc(t('peItalicLetter'))}</i></button>
+          <button type="button" class="pm-wm-tbtn pm-hf-fmt" id="pmHfUnderline" title="${esc(t('peUnderline'))}"><u>${esc(t('peUnderlineLetter'))}</u></button>
+          <input type="color" id="pmHfColor" title="${esc(t('wmColor'))}">
+          ${PM_HF_SWATCHES.map(c => `<button type="button" class="pm-wm-swatch" data-color="${c}" style="background:${c}" title="${c}"></button>`).join('')}
+        </div>
+        <hr class="pm-wm-sep">
+        <div class="pm-hf-cols">
+          <div class="pm-hf-col pm-hf-col-left">
+            <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('hfPageNumber'))}</span>
+              <select id="pmHfPageFmt" class="pm-hf-grow"></select>
+              <button type="button" class="pm-wm-tbtn" id="pmHfInsPage">${esc(t('hfInsert'))}</button>
+            </div>
+            <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('hfDate'))}</span>
+              <input type="date" id="pmHfDate">
+              <select id="pmHfDateFmt" class="pm-hf-grow"></select>
+              <button type="button" class="pm-wm-tbtn" id="pmHfInsDate">${esc(t('hfInsert'))}</button>
+            </div>
+            <div class="pm-wm-row pm-wm-row-top"><span class="pm-wm-label">${esc(t('hfBates'))}</span>
+              <div class="pm-hf-bates">
+                <label><span>${esc(t('hfBatesPrefix'))}</span><input type="text" id="pmHfBatesPrefix" spellcheck="false" autocomplete="off"></label>
+                <label><span>${esc(t('hfBatesStart'))}</span>${pmWmNumField('pmHfBatesStart', 0, 999999999, 1)}</label>
+                <label><span>${esc(t('hfBatesSuffix'))}</span><input type="text" id="pmHfBatesSuffix" spellcheck="false" autocomplete="off"></label>
+                <label><span>${esc(t('hfBatesDigits'))}</span>${pmWmNumField('pmHfBatesDigits', 1, 12, 1)}</label>
+              </div>
+              <button type="button" class="pm-wm-tbtn pm-hf-ins" id="pmHfInsBates">${esc(t('hfInsert'))}</button>
+            </div>
+          </div>
+          <div class="pm-hf-col pm-hf-col-right">
+            <div class="pm-wm-row pm-wm-row-top"><span class="pm-wm-label">${esc(t('hfMargins'))}</span>
+              <div class="pm-hf-margins">
+                <label><span>${esc(t('hfMarginTop'))}</span>${pmWmNumField('pmHfMTop', 0, 200, 1)}</label>
+                <label><span>${esc(t('hfMarginBottom'))}</span>${pmWmNumField('pmHfMBottom', 0, 200, 1)}</label>
+                <label><span>${esc(t('hfMarginLeft'))}</span>${pmWmNumField('pmHfMLeft', 0, 200, 1)}</label>
+                <label><span>${esc(t('hfMarginRight'))}</span>${pmWmNumField('pmHfMRight', 0, 200, 1)}</label>
+              </div>
+            </div>
+            <div class="pm-wm-row pm-wm-row-top"><span class="pm-wm-label">${esc(t('wmPages'))}</span>
+              <div class="pm-wm-pages">
+                <div class="pm-wm-pages-line">
+                  <label><input type="radio" name="pmHfPages" value="all"> ${esc(t('wmPagesAll', { n: pageCount }))}</label>
+                  <label><input type="radio" name="pmHfPages" value="selected"${selected.length ? '' : ' disabled'}> ${esc(t('wmPagesSelected', { n: selected.length }))}</label>
+                </div>
+                <label><input type="radio" name="pmHfPages" value="range"> ${esc(t('wmPagesRange'))}
+                  <input type="text" id="pmHfRange" placeholder="${esc(t('wmRangePlaceholder'))}" spellcheck="false" autocomplete="off"></label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="pm-hf-preview" id="pmHfPreviewBox"><canvas id="pmHfPreview"></canvas></div>
+      <div class="pm-wm-nav pm-hf-nav">
+        <button type="button" class="pm-wm-tbtn" id="pmHfPrev">◀</button>
+        <span id="pmHfNavLabel"></span>
+        <button type="button" class="pm-wm-tbtn" id="pmHfNext">▶</button>
+      </div>
+      <div class="pm-wm-error" id="pmHfError"></div>
+      <div class="pm-wm-actions">
+        <button type="button" class="pm-wm-ok" id="pmHfOk">${esc(t('wmApply'))}</button>
+        <button type="button" class="pm-wm-cancel" id="pmHfCancel">${esc(t('wmCancel'))}</button>
+      </div>`;
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    const $ = (id) => box.querySelector('#' + id);
+    const slotEls = {};
+    box.querySelectorAll('.pm-hf-slot').forEach(el => { slotEls[el.dataset.slot] = el; });
+    const fontSel = $('pmHfFont'), sizeIn = $('pmHfSize');
+    const boldBtn = $('pmHfBold'), italicBtn = $('pmHfItalic'), underBtn = $('pmHfUnderline'), colorIn = $('pmHfColor');
+    const pageFmtSel = $('pmHfPageFmt'), dateIn = $('pmHfDate'), dateFmtSel = $('pmHfDateFmt');
+    const batesPrefixIn = $('pmHfBatesPrefix'), batesSuffixIn = $('pmHfBatesSuffix');
+    const batesStartIn = $('pmHfBatesStart'), batesDigitsIn = $('pmHfBatesDigits');
+    const mIn = { top: $('pmHfMTop'), bottom: $('pmHfMBottom'), left: $('pmHfMLeft'), right: $('pmHfMRight') };
+    const rangeIn = $('pmHfRange'), errEl = $('pmHfError');
+    const pv = $('pmHfPreview'), pvBox = $('pmHfPreviewBox');
+    const navLabel = $('pmHfNavLabel'), prevBtn = $('pmHfPrev'), nextBtn = $('pmHfNext');
+    const helpBtn = $('pmHfHelp'), helpPop = $('pmHfHelpPop');
+
+    // ---- page targets --------------------------------------------------
+    function targetIndices() {
+      let list;
+      if (pagesMode === 'selected') list = selected.slice();
+      else if (pagesMode === 'range') list = pmWmParseRange(rangeText, pageCount) || [];
+      else { list = []; for (let i = 0; i < pageCount; i++) list.push(i); }
+      return list.filter(i => !markedForDeletion.has(i));
+    }
+    function startPreviewPos() {
+      if (!selected.length) return 0;
+      return Math.max(0, targetIndices().indexOf(selected[0]));
+    }
+
+    // ---- option lists showing what each format gives -----------------------
+    function fillFormatLists() {
+      const sample = { page: 1, pages: Math.max(1, pageCount - markedForDeletion.size), batesIndex: 0, date: dateOf() };
+      pageFmtSel.innerHTML = pmHfPageFormats().map((f, i) =>
+        `<option value="${i}">${esc(pmHfExpand(f, s, sample))}</option>`).join('');
+      pageFmtSel.value = String(s.pageFormat);
+      dateFmtSel.innerHTML = PM_HF_DATE_FORMATS.map(f =>
+        `<option value="${esc(f)}" title="${esc(f)}">${esc(pmHfFormatDate(sample.date, f))}</option>`).join('');
+      dateFmtSel.value = s.dateFormat;
+    }
+
+    // ---- preview: the top and the bottom band of the page -----------------
+    // Each band reaches a little past the farther of its text and margin, so
+    // the space the text keeps from the edge shows; the middle is cut out.
+    const GAP_CSS = 22;
+    function frameFor(idx) {
+      try { return pmWmPageFrame(pdfDoc.getPage(idx)); } catch (_) { return null; }
+    }
+    function bandHeights(fr) {
+      const mm = PM_HF_PT_PER_MM;
+      const lineH = s.size * 1.2;
+      const head = Math.min(fr.H / 2, Math.max(48, s.margins.top * mm + lineH + 18));
+      const foot = Math.min(fr.H / 2, Math.max(48, s.margins.bottom * mm + lineH + 18));
+      return { head, foot };
+    }
+    let zoom = 1;
+    function cssPerPt(fr) {
+      const w = Math.max(200, pvBox.getBoundingClientRect().width - 26);
+      return w / fr.W * zoom;
+    }
+    function draw() {
+      const ctx = pv.getContext('2d');
+      const fr = previewIdx >= 0 ? frameFor(previewIdx) : null;
+      if (!fr) { pv.width = 1; pv.height = 1; return; }
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const css = cssPerPt(fr);
+      const k = css * dpr;                       // canvas px per pt
+      const { head, foot } = bandHeights(fr);
+      const gap = GAP_CSS * dpr;
+      const w = Math.round(fr.W * k), hh = Math.round(head * k), fh = Math.round(foot * k);
+      pv.width = w; pv.height = hh + gap + fh;
+      pv.style.width = Math.round(fr.W * css) + 'px';
+      pv.style.height = Math.round((hh + gap + fh) / dpr) + 'px';
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.clearRect(0, 0, pv.width, pv.height);
+      const band = (y0, srcTopPt, hPt) => {
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, y0, w, Math.round(hPt * k));
+        if (previewRaster && previewRaster.idx === previewIdx) {
+          const rk = previewRaster.pxPerPt;
+          ctx.drawImage(previewRaster.canvas, 0, srcTopPt * rk, fr.W * rk, hPt * rk, 0, y0, w, Math.round(hPt * k));
+        }
+      };
+      band(0, 0, head);
+      band(hh + gap, fr.H - foot, foot);
+      // The cut between the bands.
+      ctx.save();
+      ctx.strokeStyle = 'rgba(120,130,145,0.65)';
+      ctx.lineWidth = 1 * dpr;
+      ctx.setLineDash([4 * dpr, 4 * dpr]);
+      [hh + 0.5, hh + gap - 0.5].forEach(y => { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); });
+      ctx.restore();
+      // Margin guides.
+      const mm = PM_HF_PT_PER_MM;
+      ctx.save();
+      ctx.strokeStyle = 'rgba(52,152,219,0.55)';
+      ctx.lineWidth = 1 * dpr;
+      ctx.setLineDash([3 * dpr, 3 * dpr]);
+      const vline = (xPt) => {
+        const x = Math.round(xPt * k) + 0.5;
+        [[0, hh], [hh + gap, hh + gap + fh]].forEach(([a, b]) => { ctx.beginPath(); ctx.moveTo(x, a); ctx.lineTo(x, b); ctx.stroke(); });
+      };
+      vline(s.margins.left * mm);
+      vline(fr.W - s.margins.right * mm);
+      const hline = (y) => { ctx.beginPath(); ctx.moveTo(0, Math.round(y) + 0.5); ctx.lineTo(w, Math.round(y) + 0.5); ctx.stroke(); };
+      hline(s.margins.top * mm * k);
+      hline(hh + gap + (foot - s.margins.bottom * mm) * k);
+      ctx.restore();
+      // The texts, as they will be on this page.
+      const ctxs = pmHfPageContexts(targetIndices(), s, dateOf());
+      const pctx = ctxs.get(previewIdx);
+      if (!pctx) return;
+      PM_HF_SLOTS.forEach(slot => {
+        const text = pmHfExpand(s.texts[slot], s, pctx).replace(/\s+$/, '');
+        if (!text.trim()) return;
+        const r = pmHfRenderLine(s, text, k);
+        if (!r) return;
+        const p = pmHfPlace(slot, r, fr.W, fr.H, s);
+        const y = slot[0] === 'h' ? p.y * k : hh + gap + (p.y - (fr.H - foot)) * k;
+        ctx.drawImage(r.canvas, p.x * k, y, r.wPt * k, r.hPt * k);
+      });
+    }
+    let drawRaf = 0;
+    function drawSoon() {
+      if (!drawRaf) drawRaf = requestAnimationFrame(() => { drawRaf = 0; draw(); });
+    }
+    // The wheel over the preview zooms in at the cursor (1x - 4x).
+    let zoomTimer = null;
+    pvBox.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+      const z = Math.min(4, Math.max(1, zoom * Math.exp(-dy * 0.0015)));
+      if (Math.abs(z - zoom) < 1e-3) return;
+      const r0 = pv.getBoundingClientRect();
+      const fx = r0.width ? (e.clientX - r0.left) / r0.width : 0.5;
+      const fy = r0.height ? (e.clientY - r0.top) / r0.height : 0.5;
+      zoom = z;
+      pvBox.classList.toggle('zoomed', zoom > 1.001);
+      draw();
+      const r1 = pv.getBoundingClientRect();
+      pvBox.scrollLeft += (r1.left + fx * r1.width) - e.clientX;
+      pvBox.scrollTop += (r1.top + fy * r1.height) - e.clientY;
+      clearTimeout(zoomTimer);
+      zoomTimer = setTimeout(ensureRaster, 180);
+    }, { passive: false });
+    async function ensureRaster() {
+      const idx = previewIdx;
+      const fr = idx >= 0 ? frameFor(idx) : null;
+      if (!fr) return;
+      const k = cssPerPt(fr) * Math.min(2, window.devicePixelRatio || 1);
+      const hit = rasterCache.get(idx);
+      if (hit && hit.pxPerPt >= k * 0.9) { previewRaster = hit; draw(); return; }
+      const token = ++previewToken;
+      let canvas = null;
+      try { canvas = await pmWmRenderPagePreview(idx, k); } catch (e) { console.warn('header/footer preview', e); }
+      if (!overlay.isConnected || !canvas) return;
+      const data = { idx, canvas, pxPerPt: k };
+      rasterCache.set(idx, data);
+      while (rasterCache.size > 6) rasterCache.delete(rasterCache.keys().next().value);
+      if (token !== previewToken || idx !== previewIdx) return;
+      previewRaster = data;
+      draw();
+    }
+    function loadPreviewPage() {
+      const targets = targetIndices();
+      if (previewPos > targets.length - 1) previewPos = Math.max(0, targets.length - 1);
+      const idx = targets.length ? targets[previewPos] : -1;
+      navLabel.textContent = idx >= 0 ? t('wmPreviewPage', { n: idx + 1, total: pageCount }) : '—';
+      prevBtn.disabled = previewPos <= 0 || !targets.length;
+      nextBtn.disabled = previewPos >= targets.length - 1 || !targets.length;
+      if (idx !== previewIdx) {
+        previewIdx = idx;
+        previewRaster = idx >= 0 ? (rasterCache.get(idx) || null) : null;
+      }
+      draw();
+      ensureRaster();
+    }
+
+    // ---- controls <-> settings -----------------------------------------
+    function syncControls() {
+      boldBtn.classList.toggle('active', s.bold);
+      italicBtn.classList.toggle('active', s.italic);
+      underBtn.classList.toggle('active', s.underline);
+      colorIn.value = s.color;
+      box.querySelectorAll('.pm-wm-swatch').forEach(b => b.classList.toggle('active', b.dataset.color.toLowerCase() === s.color.toLowerCase()));
+      if (document.activeElement !== sizeIn) sizeIn.value = String(s.size);
+      Object.keys(mIn).forEach(k => { if (document.activeElement !== mIn[k]) mIn[k].value = String(s.margins[k]); });
+      if (document.activeElement !== batesStartIn) batesStartIn.value = String(s.bates.start);
+      if (document.activeElement !== batesDigitsIn) batesDigitsIn.value = String(s.bates.digits);
+      box.querySelectorAll('input[name="pmHfPages"]').forEach(r => { r.checked = r.value === pagesMode; });
+      box.querySelectorAll('.pm-hf-slot').forEach(el => el.classList.toggle('pm-hf-target', el.dataset.slot === lastSlot));
+    }
+    function changed() { syncControls(); drawSoon(); }
+
+    function bindNumber(el, lo, hi, get, set) {
+      el.addEventListener('input', () => {
+        const v = Number(el.value);
+        if (el.value !== '' && Number.isFinite(v) && v >= lo && v <= hi) { set(v); changed(); }
+      });
+      el.addEventListener('change', () => { set(pmWmClampNum(el.value, lo, hi, get())); el.value = String(get()); changed(); });
+    }
+    box.querySelectorAll('.pm-wm-num').forEach(wrap => {
+      const input = wrap.querySelector('input');
+      wrap.querySelectorAll('.pm-wm-spin button').forEach(btn => {
+        let hold = null;
+        const stepOnce = () => {
+          if (input.disabled) return;
+          if (btn.dataset.dir === '1') input.stepUp(); else input.stepDown();
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        };
+        const stop = () => {
+          if (!hold) return;
+          clearTimeout(hold.t); clearInterval(hold.i); hold = null;
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        };
+        btn.addEventListener('pointerdown', (e) => {
+          if (e.button !== 0 || input.disabled) return;
+          e.preventDefault();
+          stepOnce();
+          hold = { t: setTimeout(() => { if (hold) hold.i = setInterval(stepOnce, 60); }, 400), i: null };
+        });
+        btn.addEventListener('pointerup', stop);
+        btn.addEventListener('pointerleave', stop);
+        btn.addEventListener('pointercancel', stop);
+      });
+    });
+
+    PM_HF_SLOTS.forEach(slot => {
+      const el = slotEls[slot];
+      el.value = s.texts[slot];
+      el.addEventListener('input', () => { s.texts[slot] = el.value; errEl.textContent = ''; drawSoon(); });
+      el.addEventListener('focus', () => { lastSlot = slot; syncControls(); });
+    });
+    // A variable goes where the caret is in the last text field used.
+    function insertVar(code) {
+      const el = slotEls[lastSlot];
+      const a = el.selectionStart != null ? el.selectionStart : el.value.length;
+      const b = el.selectionEnd != null ? el.selectionEnd : a;
+      const before = el.value.slice(0, a);
+      const sep = before && !/\s$/.test(before) ? ' ' : '';
+      el.setRangeText(sep + code, a, b, 'end');
+      s.texts[lastSlot] = el.value;
+      errEl.textContent = '';
+      el.focus();
+      changed();
+    }
+    $('pmHfInsPage').addEventListener('click', () => insertVar(pmHfPageFormats()[s.pageFormat]));
+    $('pmHfInsDate').addEventListener('click', () => insertVar('{date:' + s.dateFormat + '}'));
+    $('pmHfInsBates').addEventListener('click', () => insertVar('{bates}'));
+    pageFmtSel.addEventListener('change', () => { s.pageFormat = Number(pageFmtSel.value) || 0; });
+    dateFmtSel.addEventListener('change', () => { s.dateFormat = dateFmtSel.value; });
+    dateIn.value = dateIso;
+    dateIn.addEventListener('change', () => { if (dateIn.value) dateIso = dateIn.value; fillFormatLists(); drawSoon(); });
+
+    fontSel.addEventListener('change', () => { s.font = fontSel.value; changed(); });
+    bindNumber(sizeIn, 4, 72, () => s.size, v => { s.size = v; });
+    boldBtn.addEventListener('click', () => { s.bold = !s.bold; changed(); });
+    italicBtn.addEventListener('click', () => { s.italic = !s.italic; changed(); });
+    underBtn.addEventListener('click', () => { s.underline = !s.underline; changed(); });
+    colorIn.addEventListener('input', () => { s.color = colorIn.value; changed(); });
+    box.querySelectorAll('.pm-wm-swatch').forEach(b => b.addEventListener('click', () => { s.color = b.dataset.color; changed(); }));
+    Object.keys(mIn).forEach(k => bindNumber(mIn[k], 0, 200, () => s.margins[k], v => { s.margins[k] = v; }));
+    batesPrefixIn.value = s.bates.prefix;
+    batesSuffixIn.value = s.bates.suffix;
+    batesPrefixIn.addEventListener('input', () => { s.bates.prefix = batesPrefixIn.value; drawSoon(); });
+    batesSuffixIn.addEventListener('input', () => { s.bates.suffix = batesSuffixIn.value; drawSoon(); });
+    bindNumber(batesStartIn, 0, 999999999, () => s.bates.start, v => { s.bates.start = Math.round(v); });
+    bindNumber(batesDigitsIn, 1, 12, () => s.bates.digits, v => { s.bates.digits = Math.round(v); });
+
+    box.querySelectorAll('input[name="pmHfPages"]').forEach(r => r.addEventListener('change', () => {
+      if (!r.checked) return;
+      pagesMode = r.value;
+      previewPos = startPreviewPos();
+      errEl.textContent = '';
+      syncControls();
+      if (pagesMode === 'range') rangeIn.focus();
+      loadPreviewPage();
+    }));
+    rangeIn.addEventListener('input', () => { rangeText = rangeIn.value; previewPos = startPreviewPos(); errEl.textContent = ''; loadPreviewPage(); });
+    rangeIn.addEventListener('focus', () => {
+      if (pagesMode !== 'range') { pagesMode = 'range'; syncControls(); loadPreviewPage(); }
+    });
+    prevBtn.addEventListener('click', () => { if (previewPos > 0) { previewPos--; loadPreviewPage(); } });
+    nextBtn.addEventListener('click', () => { previewPos++; loadPreviewPage(); });
+
+    const setHelp = (open) => { helpPop.hidden = !open; helpBtn.setAttribute('aria-expanded', String(open)); };
+    helpBtn.addEventListener('click', (e) => { e.stopPropagation(); setHelp(helpPop.hidden); });
+    overlay.addEventListener('pointerdown', (e) => {
+      if (!helpPop.hidden && e.target !== helpBtn && !helpPop.contains(e.target)) setHelp(false);
+    }, true);
+
+    // ---- close / apply ---------------------------------------------------
+    let settled = false;
+    function close(result) {
+      if (settled) return;
+      settled = true;
+      cancelAnimationFrame(drawRaf);
+      document.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('resize', onResize);
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      resolve(result);
+    }
+    async function apply() {
+      if (busy) return;
+      clearTimeout(zoomTimer);
+      errEl.textContent = '';
+      if (!PM_HF_SLOTS.some(k => String(s.texts[k] || '').trim())) {
+        errEl.textContent = t('hfNoText'); slotEls[lastSlot].focus(); return;
+      }
+      if (pagesMode === 'range' && !pmWmParseRange(rangeText, pageCount)) {
+        errEl.textContent = t('wmBadRange'); rangeIn.focus(); return;
+      }
+      const targets = targetIndices();
+      if (!targets.length) { errEl.textContent = t('wmBadRange'); return; }
+      busy = true;
+      pmHfStoreSettings(s);
+      const date = dateOf();
+      close(true);
+      await pmHfApply(s, targets, date);
+    }
+    $('pmHfOk').addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); apply(); });
+    $('pmHfCancel').addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); close(false); });
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) e.preventDefault(); });
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault(); e.stopPropagation();
+        if (!helpPop.hidden) setHelp(false); else close(false);
+        return;
+      }
+      if (e.key === 'Enter' && e.target && e.target.tagName === 'INPUT' && ['text', 'number'].includes(e.target.type)) {
+        e.preventDefault(); e.stopPropagation(); apply(); return;
+      }
+      e.stopPropagation();
+    };
+    document.addEventListener('keydown', onKey, true);
+    let resizeTimer = null;
+    const onResize = () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => { draw(); ensureRaster(); }, 200);
+    };
+    window.addEventListener('resize', onResize);
+
+    fillFormatLists();
+    syncControls();
+    pmWmLoadFonts().then(list => {
+      if (!overlay.isConnected) return;
+      if (!list.some(f => f.family === s.font)) s.font = PM_WM_ROBOTO_FAMILY;
+      fontSel.innerHTML = list.map(f =>
+        `<option value="${esc(f.family)}" style="font-family:${esc(pmWmFontCss(f.family))}">${esc(f.label)}</option>`).join('');
+      fontSel.value = s.font;
+      draw();
+    });
+    previewPos = startPreviewPos();
+    loadPreviewPage();
+    slotEls[lastSlot].focus();
+    const end = slotEls[lastSlot].value.length;
+    slotEls[lastSlot].setSelectionRange(end, end);
   });
 }
   </script>
