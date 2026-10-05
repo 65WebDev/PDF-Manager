@@ -1120,13 +1120,11 @@
     #pmHfDateFmt { flex: 1.3; }
     #pmHfRange { flex: 1; width: 0; min-width: 0; }
     .pm-hf-col-right .pm-wm-pages label:last-child { display: flex; min-width: 0; }
-    .pm-hf-preview.zoomed { justify-content: flex-start; }
     .pm-hf-preview {
       background: rgba(120,130,145,0.14); border-radius: 8px; padding: 12px; box-sizing: border-box;
       display: flex; justify-content: center; max-height: 46vh; overflow: auto;
     }
     .pm-hf-preview canvas { display: block; box-shadow: 0 2px 10px rgba(0,0,0,0.25); }
-    .pm-hf-nav { justify-content: center; }
     .pm-hf-help-pop { max-width: 420px; }
     .pm-hf-help-pop code { background: rgba(52,152,219,0.12); border-radius: 4px; padding: 0 4px; }
     html[data-theme="dark"] .pm-wm-box .pm-hf-controls input[type=date] { background: #1c2128 !important; border-color: #4a5058 !important; color-scheme: dark; }
@@ -1436,7 +1434,9 @@
        top menu for as long as the button itself is shown; the tooltip keeps
        the long text. Text and side come from pmPopCapsInit (data-pm-caption;
        .pm-pop-cap--left where the right side would run off the screen).
-       Inherits the button's fade-in, never takes the pointer.*/
+       Being part of the button, it fades in with it and takes the pointer
+       exactly as the button does (pointer-events inherited): pointing at it
+       keeps the popup open, clicking it clicks the button.*/
     .pm-pop-cap::after {
       content: attr(data-pm-caption);
       display: none;
@@ -1455,7 +1455,8 @@
       letter-spacing: normal;
       white-space: nowrap;
       box-shadow: 0 3px 10px rgba(0,0,0,0.35);
-      pointer-events: none;
+      pointer-events: inherit;
+      cursor: inherit;
     }
     .pm-pop-cap.pm-pop-cap--left::after { left: auto; right: calc(100% + 8px); }
     .pm-pop-cap.show:not(.rl-slot-main)::after { display: block; }
@@ -65438,11 +65439,6 @@ async function openHeaderFooterDialog() {
   }
 }
 
-function pmHfTodayIso() {
-  const d = new Date();
-  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-}
-
 function pmHfRunDialog() {
   return new Promise((resolve) => {
     const s = pmHfLoadSettings();
@@ -65450,8 +65446,6 @@ function pmHfRunDialog() {
     const selected = [...selectedPages].filter(i => !markedForDeletion.has(i) && i < pageCount).sort((a, b) => a - b);
     let pagesMode = 'all';
     let rangeText = '';
-    let dateIso = pmHfTodayIso();
-    let previewPos = 0;
     let previewIdx = -1;
     let previewRaster = null;      // { idx, canvas, pxPerPt }
     let previewToken = 0;
@@ -65459,7 +65453,8 @@ function pmHfRunDialog() {
     let lastSlot = 'fc';            // where "Insert" puts a variable
     let busy = false;
     const esc = escapeHtml;
-    const dateOf = () => { const [y, m, d] = dateIso.split('-').map(Number); return (y && m && d) ? new Date(y, m - 1, d) : new Date(); };
+    // A date variable always gives the current date.
+    const dateOf = () => new Date();
 
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay-active pm-wm-overlay';
@@ -65479,11 +65474,6 @@ function pmHfRunDialog() {
         <div><code>{bates:ABC-[000001]}</code> — ${esc(t('hfHelpBates'))}</div>
       </div>
       <div class="pm-wm-controls pm-hf-controls">
-        <div class="pm-hf-grid">
-          <span></span><span class="pm-hf-colhead">${esc(t('hfLeft'))}</span><span class="pm-hf-colhead">${esc(t('hfCenter'))}</span><span class="pm-hf-colhead">${esc(t('hfRight'))}</span>
-          <span class="pm-wm-label">${esc(t('hfHeader'))}</span>${slotInput('hl', t('hfHeader'))}${slotInput('hc', t('hfHeader'))}${slotInput('hr', t('hfHeader'))}
-          <span class="pm-wm-label">${esc(t('hfFooter'))}</span>${slotInput('fl', t('hfFooter'))}${slotInput('fc', t('hfFooter'))}${slotInput('fr', t('hfFooter'))}
-        </div>
         <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('wmFont'))}</span>
           <select id="pmHfFont"></select>
           <span class="pm-wm-size-num" title="pt">${pmWmNumField('pmHfSize', 4, 72, 0.5)}</span><span class="pm-wm-unit">pt</span>
@@ -65501,7 +65491,6 @@ function pmHfRunDialog() {
               <button type="button" class="pm-wm-tbtn" id="pmHfInsPage">${esc(t('hfInsert'))}</button>
             </div>
             <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('hfDate'))}</span>
-              <input type="date" id="pmHfDate">
               <select id="pmHfDateFmt" class="pm-hf-grow"></select>
               <button type="button" class="pm-wm-tbtn" id="pmHfInsDate">${esc(t('hfInsert'))}</button>
             </div>
@@ -65536,13 +65525,14 @@ function pmHfRunDialog() {
             </div>
           </div>
         </div>
+        <hr class="pm-wm-sep">
+        <div class="pm-hf-grid">
+          <span></span><span class="pm-hf-colhead">${esc(t('hfLeft'))}</span><span class="pm-hf-colhead">${esc(t('hfCenter'))}</span><span class="pm-hf-colhead">${esc(t('hfRight'))}</span>
+          <span class="pm-wm-label">${esc(t('hfHeader'))}</span>${slotInput('hl', t('hfHeader'))}${slotInput('hc', t('hfHeader'))}${slotInput('hr', t('hfHeader'))}
+          <span class="pm-wm-label">${esc(t('hfFooter'))}</span>${slotInput('fl', t('hfFooter'))}${slotInput('fc', t('hfFooter'))}${slotInput('fr', t('hfFooter'))}
+        </div>
       </div>
       <div class="pm-hf-preview" id="pmHfPreviewBox"><canvas id="pmHfPreview"></canvas></div>
-      <div class="pm-wm-nav pm-hf-nav">
-        <button type="button" class="pm-wm-tbtn" id="pmHfPrev">◀</button>
-        <span id="pmHfNavLabel"></span>
-        <button type="button" class="pm-wm-tbtn" id="pmHfNext">▶</button>
-      </div>
       <div class="pm-wm-error" id="pmHfError"></div>
       <div class="pm-wm-actions">
         <button type="button" class="pm-wm-ok" id="pmHfOk">${esc(t('wmApply'))}</button>
@@ -65556,13 +65546,12 @@ function pmHfRunDialog() {
     box.querySelectorAll('.pm-hf-slot').forEach(el => { slotEls[el.dataset.slot] = el; });
     const fontSel = $('pmHfFont'), sizeIn = $('pmHfSize');
     const boldBtn = $('pmHfBold'), italicBtn = $('pmHfItalic'), underBtn = $('pmHfUnderline'), colorIn = $('pmHfColor');
-    const pageFmtSel = $('pmHfPageFmt'), dateIn = $('pmHfDate'), dateFmtSel = $('pmHfDateFmt');
+    const pageFmtSel = $('pmHfPageFmt'), dateFmtSel = $('pmHfDateFmt');
     const batesPrefixIn = $('pmHfBatesPrefix'), batesSuffixIn = $('pmHfBatesSuffix');
     const batesStartIn = $('pmHfBatesStart'), batesDigitsIn = $('pmHfBatesDigits');
     const mIn = { top: $('pmHfMTop'), bottom: $('pmHfMBottom'), left: $('pmHfMLeft'), right: $('pmHfMRight') };
     const rangeIn = $('pmHfRange'), errEl = $('pmHfError');
     const pv = $('pmHfPreview'), pvBox = $('pmHfPreviewBox');
-    const navLabel = $('pmHfNavLabel'), prevBtn = $('pmHfPrev'), nextBtn = $('pmHfNext');
     const helpBtn = $('pmHfHelp'), helpPop = $('pmHfHelpPop');
 
     // ---- page targets --------------------------------------------------
@@ -65572,10 +65561,6 @@ function pmHfRunDialog() {
       else if (pagesMode === 'range') list = pmWmParseRange(rangeText, pageCount) || [];
       else { list = []; for (let i = 0; i < pageCount; i++) list.push(i); }
       return list.filter(i => !markedForDeletion.has(i));
-    }
-    function startPreviewPos() {
-      if (!selected.length) return 0;
-      return Math.max(0, targetIndices().indexOf(selected[0]));
     }
 
     // ---- option lists showing what each format gives -----------------------
@@ -65593,7 +65578,7 @@ function pmHfRunDialog() {
     // Each band reaches a little past the farther of its text and margin, so
     // the space the text keeps from the edge shows; the middle is cut out.
     // Drawn in two layers so typing stays instant: the page bands with the
-    // margin guides (redrawn only when the page, zoom, size or margins
+    // margin guides (redrawn only when the page, size or margins
     // change) and the texts on top (each line rendered once per look).
     const GAP_CSS = 22;
     // Canvas pixels the preview and the page raster may take (zoomed in on a
@@ -65612,12 +65597,11 @@ function pmHfRunDialog() {
       const fit = (need) => Math.min(fr.H / 2, Math.max(72, Math.ceil(need / 36) * 36));
       return { head: fit(s.margins.top * mm + lineH + 18), foot: fit(s.margins.bottom * mm + lineH + 18) };
     }
-    let zoom = 1;
     let boxW = 0;   // the preview box's inner width, read on open and on resize only
     function readBoxWidth() { boxW = Math.max(200, pvBox.getBoundingClientRect().width - 26); }
     function cssPerPt(fr) {
       if (!boxW) readBoxWidth();
-      return boxW / fr.W * zoom;
+      return boxW / fr.W;
     }
     function geometry(fr) {
       const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -65720,26 +65704,7 @@ function pmHfRunDialog() {
     function drawSoon() {
       if (!drawRaf) drawRaf = requestAnimationFrame(() => { drawRaf = 0; draw(); });
     }
-    // The wheel over the preview zooms in at the cursor (1x - 4x).
-    let zoomTimer = null;
-    pvBox.addEventListener('wheel', (e) => {
-      e.preventDefault();
-      const dy = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
-      const z = Math.min(4, Math.max(1, zoom * Math.exp(-dy * 0.0015)));
-      if (Math.abs(z - zoom) < 1e-3) return;
-      const r0 = pv.getBoundingClientRect();
-      const fx = r0.width ? (e.clientX - r0.left) / r0.width : 0.5;
-      const fy = r0.height ? (e.clientY - r0.top) / r0.height : 0.5;
-      zoom = z;
-      pvBox.classList.toggle('zoomed', zoom > 1.001);
-      draw();
-      const r1 = pv.getBoundingClientRect();
-      pvBox.scrollLeft += (r1.left + fx * r1.width) - e.clientX;
-      pvBox.scrollTop += (r1.top + fy * r1.height) - e.clientY;
-      clearTimeout(zoomTimer);
-      zoomTimer = setTimeout(ensureRaster, 250);
-    }, { passive: false });
-    // Page raster for the bands, sharp enough for the current zoom (capped).
+    // Page raster for the bands at the preview's density (capped).
     async function ensureRaster() {
       const idx = previewIdx;
       const fr = idx >= 0 ? frameFor(idx) : null;
@@ -65761,12 +65726,9 @@ function pmHfRunDialog() {
       drawSoon();
     }
     function loadPreviewPage() {
+      // Always the first page the texts go on.
       const targets = targetIndices();
-      if (previewPos > targets.length - 1) previewPos = Math.max(0, targets.length - 1);
-      const idx = targets.length ? targets[previewPos] : -1;
-      navLabel.textContent = idx >= 0 ? t('wmPreviewPage', { n: idx + 1, total: pageCount }) : '—';
-      prevBtn.disabled = previewPos <= 0 || !targets.length;
-      nextBtn.disabled = previewPos >= targets.length - 1 || !targets.length;
+      const idx = targets.length ? targets[0] : -1;
       if (idx !== previewIdx) {
         previewIdx = idx;
         previewRaster = idx >= 0 ? (rasterCache.get(idx) || null) : null;
@@ -65880,8 +65842,6 @@ function pmHfRunDialog() {
     $('pmHfInsBates').addEventListener('click', () => insertVar(pmHfBatesCode(s.bates)));
     pageFmtSel.addEventListener('change', () => { s.pageFormat = Number(pageFmtSel.value) || 0; });
     dateFmtSel.addEventListener('change', () => { s.dateFormat = dateFmtSel.value; });
-    dateIn.value = dateIso;
-    dateIn.addEventListener('change', () => { if (dateIn.value) dateIso = dateIn.value; fillFormatLists(); drawSoon(); });
 
     fontSel.addEventListener('change', () => { s.font = fontSel.value; changed(); });
     bindNumber(sizeIn, 4, 72, () => s.size, v => { s.size = v; });
@@ -65902,18 +65862,15 @@ function pmHfRunDialog() {
     box.querySelectorAll('input[name="pmHfPages"]').forEach(r => r.addEventListener('change', () => {
       if (!r.checked) return;
       pagesMode = r.value;
-      previewPos = startPreviewPos();
       errEl.textContent = '';
       syncControls();
       if (pagesMode === 'range') rangeIn.focus();
       loadPreviewPage();
     }));
-    rangeIn.addEventListener('input', () => { rangeText = rangeIn.value; previewPos = startPreviewPos(); errEl.textContent = ''; loadPreviewPage(); });
+    rangeIn.addEventListener('input', () => { rangeText = rangeIn.value; errEl.textContent = ''; loadPreviewPage(); });
     rangeIn.addEventListener('focus', () => {
       if (pagesMode !== 'range') { pagesMode = 'range'; syncControls(); loadPreviewPage(); }
     });
-    prevBtn.addEventListener('click', () => { if (previewPos > 0) { previewPos--; loadPreviewPage(); } });
-    nextBtn.addEventListener('click', () => { previewPos++; loadPreviewPage(); });
 
     const setHelp = (open) => { helpPop.hidden = !open; helpBtn.setAttribute('aria-expanded', String(open)); };
     helpBtn.addEventListener('click', (e) => { e.stopPropagation(); setHelp(helpPop.hidden); });
@@ -65934,7 +65891,6 @@ function pmHfRunDialog() {
     }
     async function apply() {
       if (busy) return;
-      clearTimeout(zoomTimer);
       errEl.textContent = '';
       if (!PM_HF_SLOTS.some(k => String(s.texts[k] || '').trim())) {
         errEl.textContent = t('hfNoText'); slotEls[lastSlot].focus(); return;
@@ -65982,7 +65938,6 @@ function pmHfRunDialog() {
       fontSel.value = s.font;
       draw();
     });
-    previewPos = startPreviewPos();
     loadPreviewPage();
     slotEls[lastSlot].focus();
     const end = slotEls[lastSlot].value.length;
