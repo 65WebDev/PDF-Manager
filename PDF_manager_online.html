@@ -66047,7 +66047,7 @@ function pmHfRunDialog() {
     }
     // ---- editing a header/footer right in the preview --------------------
     // The band is split in thirds between the side margins: left, centre and
-    // right text. Pointing at one outlines it; a click opens a field over it
+    // right text. Pointing inside one's box outlines it; a click opens a field over it
     // with that text as written (variables as codes), synced with the field
     // above. Enter or a click elsewhere keeps it, Escape takes it back.
     let lineBoxes = {};     // slot -> { x0, w } (pt) of its line in the last draw
@@ -66076,16 +66076,12 @@ function pmHfRunDialog() {
       if (!rect.width) return null;
       const f = pv.width / rect.width;
       const x = (e.clientX - rect.left) * f, y = (e.clientY - rect.top) * f;
-      const row = y >= 0 && y <= g.hh ? 'h' : (y >= g.hh + g.gap && y <= g.hh + g.gap + g.fh) ? 'f' : null;
-      if (!row) return null;
-      // The whole band row answers; the nearest third wins.
-      let best = null, bestD = Infinity;
-      ['l', 'c', 'r'].forEach(c => {
-        const z = slotZone(row + c, fr, g);
-        const d = x < z.x ? z.x - x : x > z.x + z.w ? x - (z.x + z.w) : 0;
-        if (d < bestD) { bestD = d; best = row + c; }
-      });
-      return best;
+      // Only inside a slot's outlined box (where a text goes or already is).
+      for (const slot of PM_HF_SLOTS) {
+        const z = slotZone(slot, fr, g);
+        if (x >= z.x && x <= z.x + z.w && y >= z.y && y <= z.y + z.h) return slot;
+      }
+      return null;
     }
     function openInlineEditor(slot) {
       closeInlineEditor(true);
