@@ -34203,6 +34203,16 @@
       }
     })();
 
+    // ─── Desktop: top menu popup groups, one at a time ───
+    // Each group (logo column, view modes, delete, print, edit, export, save)
+    // hides a moment after the pointer leaves it, so the pointer can reach
+    // its popup buttons. Reaching another group must not leave the previous
+    // one hanging for that moment: showing a group hides the others at once.
+    const pmTopPopupHiders = new Set();
+    function pmTopPopupShowing(hideSelf) {
+      pmTopPopupHiders.forEach(hide => { if (hide !== hideSelf) hide(); });
+    }
+
     // ─── Desktop: show hide menu button when hovering over logo ───
     // We control visibility via JS so that the user can move the cursor from
     // the logo onto the popup buttons. Leaving the column hides after 300ms.
@@ -34226,6 +34236,7 @@
         if (menu && menu.classList.contains('collapsed')) return;
         clearTimeout(hideTimer);
         hideTimer = null;
+        pmTopPopupShowing(hideNow);
         btn.classList.add('show');
         if (themeBtn) themeBtn.classList.add('show');
         if (langBtn) langBtn.classList.add('show');
@@ -34248,6 +34259,12 @@
         clearTimeout(hideTimer);
         hideTimer = setTimeout(hide, LOGO_MENU_HIDE_MS);
       }
+      function hideNow() {
+        if (!hideTimer && !area.classList.contains('expanded')) return;
+        clearTimeout(hideTimer);
+        hide();
+      }
+      pmTopPopupHiders.add(hideNow);
 
       area.addEventListener('mouseenter', show);
       area.addEventListener('mouseleave', scheduleHide);
@@ -34326,12 +34343,15 @@
       function show() {
         if (!pdfDoc) return;   // nothing to act on yet - "see the opportunity" only makes sense once a document is open
         clearTimeout(hideTimer);
+        pmTopPopupShowing(hideNow);
         btn.classList.add('show');
       }
       function scheduleHide() {
         clearTimeout(hideTimer);
         hideTimer = setTimeout(() => btn.classList.remove('show'), POPUP_BTN_HIDE_MS);
       }
+      function hideNow() { clearTimeout(hideTimer); btn.classList.remove('show'); }
+      pmTopPopupHiders.add(hideNow);
 
       [wrapper, deleteBtn, btn].forEach(el => {
         el.addEventListener('mouseenter', show);
@@ -34354,6 +34374,7 @@
 
       function show() {
         clearTimeout(hideTimer);
+        pmTopPopupShowing(hideNow);
         // Unlike the cart/print, we don’t show these pop-up buttons,
         // while they are disabled (the document is not yet open): enable zoom mode
         // there’s still nothing, and the translucent “nothing” button looks like a bug.
@@ -34367,6 +34388,11 @@
           wrapper.querySelectorAll('.rl-slot-popup.show').forEach(el => el.classList.remove('show'));
         }, POPUP_BTN_HIDE_MS);
       }
+      function hideNow() {
+        clearTimeout(hideTimer);
+        wrapper.querySelectorAll('.rl-slot-popup.show').forEach(el => el.classList.remove('show'));
+      }
+      pmTopPopupHiders.add(hideNow);
 
       [wrapper, selectBtn, navBtn, readBtn, loupeBtn].filter(Boolean).forEach(el => {
         el.addEventListener('mouseenter', show);
@@ -34397,6 +34423,7 @@
       function show() {
         if (!pdfDoc) return;   // nothing to act on yet - "see the opportunity" only makes sense once a document is open
         clearTimeout(hideTimer);
+        pmTopPopupShowing(hideNow);
         positionPrintSelectedBtn();
         btn.classList.add('show');
       }
@@ -34404,6 +34431,8 @@
         clearTimeout(hideTimer);
         hideTimer = setTimeout(() => btn.classList.remove('show'), POPUP_BTN_HIDE_MS);
       }
+      function hideNow() { clearTimeout(hideTimer); btn.classList.remove('show'); }
+      pmTopPopupHiders.add(hideNow);
 
       [wrapper, printBtn, btn].forEach(el => {
         el.addEventListener('mouseenter', show);
@@ -34431,6 +34460,7 @@
       function show() {
         if (!pdfDoc) return;
         clearTimeout(hideTimer);
+        pmTopPopupShowing(hideNow);
         positionWatermarkBtn();
         btn.classList.add('show');
       }
@@ -34438,6 +34468,8 @@
         clearTimeout(hideTimer);
         hideTimer = setTimeout(() => btn.classList.remove('show'), POPUP_BTN_HIDE_MS);
       }
+      function hideNow() { clearTimeout(hideTimer); btn.classList.remove('show'); }
+      pmTopPopupHiders.add(hideNow);
       [wrapper, editPageBtn, btn].forEach(el => {
         el.addEventListener('mouseenter', show);
         el.addEventListener('mouseleave', scheduleHide);
@@ -34464,6 +34496,7 @@
         const show = () => {
           if (!pdfDoc) return;   // nothing to act on yet - "see the opportunity" only makes sense once a document is open
           clearTimeout(hideTimer);
+          pmTopPopupShowing(hideNow);
           popBtns.forEach(b => { if (!b.disabled) b.classList.add('show'); });
           const compressBtn = wrapper.querySelector('.img-save-btn--compress');
           if (compressBtn && typeof pmRefreshCompressEstimateTooltip === 'function') {
@@ -34480,6 +34513,8 @@
             popBtns.forEach(b => b.classList.remove('show'));
           }, POPUP_BTN_HIDE_MS);
         };
+        const hideNow = () => { clearTimeout(hideTimer); popBtns.forEach(b => b.classList.remove('show')); };
+        pmTopPopupHiders.add(hideNow);
 
         const hoverTargets = [wrapper, ...popBtns];
         if (mainBtn) hoverTargets.push(mainBtn);
