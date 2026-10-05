@@ -1091,7 +1091,7 @@
        bands below (pmHfRunDialog). Reuses the watermark dialog's controls.*/
     .pm-hf-box { width: 960px; }
     .pm-hf-controls { width: auto; }
-    .pm-hf-box .pm-wm-label { width: 128px; }
+    .pm-hf-box .pm-wm-label { width: 128px; text-align: right; padding-right: 6px; box-sizing: border-box; }
     .pm-hf-box .pm-hf-col-right .pm-wm-label { width: 96px; }
     .pm-hf-grid { display: grid; grid-template-columns: 128px 1fr 1fr 1fr; gap: 6px; align-items: center; }
     .pm-hf-colhead { color: #777; font-size: 12px; text-align: center; }
@@ -1118,6 +1118,9 @@
     .pm-hf-fmt { width: 28px; min-width: 28px; padding: 0; }
     #pmHfFont { flex: 1; min-width: 120px; }
     .pm-hf-cols { display: flex; gap: 18px; }
+    /*One rule between the column with the Insert buttons and the right one.*/
+    .pm-hf-col-right { border-left: 1px solid #e3e6ea; padding-left: 14px; }
+    html[data-theme="dark"] .pm-wm-box .pm-hf-col-right { border-left-color: #3a4048; }
     .pm-hf-col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
     .pm-hf-col-left { flex: 1.45; }
     .pm-hf-grow { flex: 1; min-width: 0; }
@@ -1140,8 +1143,16 @@
     #pmHfRange { flex: 1; width: 0; min-width: 0; }
     .pm-hf-col-right .pm-wm-pages label:last-child { display: flex; min-width: 0; }
     .pm-hf-preview {
+      position: relative;
       background: rgba(120,130,145,0.14); border-radius: 8px; padding: 12px; box-sizing: border-box;
       display: flex; justify-content: center; flex: none;
+    }
+    /*Editing a header/footer right in the preview (pmHfRunDialog).*/
+    .pm-hf-inline {
+      position: absolute; z-index: 3; box-sizing: border-box; margin: 0;
+      padding: 0 4px; border: 1px solid #3498db; border-radius: 3px;
+      background: rgba(255,255,255,0.97); outline: none;
+      box-shadow: 0 0 0 3px rgba(52,152,219,0.25), 0 2px 8px rgba(0,0,0,0.2);
     }
     .pm-hf-preview canvas { display: block; box-shadow: 0 2px 10px rgba(0,0,0,0.25); }
     .pm-hf-help-pop { max-width: 420px; }
@@ -1149,6 +1160,7 @@
     html[data-theme="dark"] .pm-wm-box .pm-hf-controls input[type=date] { background: #1c2128 !important; border-color: #4a5058 !important; color-scheme: dark; }
     @media (max-width: 900px) {
       .pm-hf-cols { flex-direction: column; }
+      .pm-hf-col-right { border-left: none; padding-left: 0; }
       .pm-hf-box { width: auto; }
     }
     @media (max-width: 900px) {
@@ -9496,7 +9508,7 @@
         hfHelpPage: 'номер страницы и число страниц',
         hfHelpDate: 'дата; D, DD — день, M, MM — месяц числом, MMM, MMMM — месяц словом, YY, YYYY — год',
         hfHelpBates: 'номер Бейтса: перед скобками — префикс, в квадратных скобках — начальный номер (сколько цифр — такой длины номер), после них — суффикс',
-        hfMm: 'мм', hfHelpDrag: 'Линии отступов в превью можно перетаскивать мышью; с Shift — точнее.',
+        hfMm: 'мм', hfHelpInline: 'Щёлкните по колонтитулу в превью, чтобы изменить его прямо там: Enter — готово, Esc — отмена.', hfHelpDrag: 'Линии отступов в превью можно перетаскивать мышью; с Shift — точнее.',
         hfNoText: 'Введите текст хотя бы одного колонтитула',
         hfApplying: 'Добавление колонтитулов…', hfApplyError: 'Не удалось добавить колонтитулы',
         watermarkTitle: 'Водяной знак', watermarkDefaultText: 'КОНФИДЕНЦИАЛЬНО',
@@ -9943,7 +9955,7 @@
         hfHelpPage: 'page number and page count',
         hfHelpDate: 'date; D, DD — day, M, MM — month as a number, MMM, MMMM — month as a word, YY, YYYY — year',
         hfHelpBates: 'Bates number: the prefix before the brackets, the start number in square brackets (as many digits as the number should have), the suffix after them',
-        hfMm: 'mm', hfHelpDrag: 'Drag the margin lines in the preview with the mouse; hold Shift for finer steps.',
+        hfMm: 'mm', hfHelpInline: 'Click a header or footer in the preview to edit it right there: Enter to finish, Esc to undo.', hfHelpDrag: 'Drag the margin lines in the preview with the mouse; hold Shift for finer steps.',
         hfNoText: 'Enter the text of at least one header or footer',
         hfApplying: 'Adding headers and footers…', hfApplyError: 'Could not add headers and footers',
         watermarkTitle: 'Watermark', watermarkDefaultText: 'CONFIDENTIAL',
@@ -10390,7 +10402,7 @@
         hfHelpPage: 'número de página y número de páginas',
         hfHelpDate: 'fecha; D, DD — día, M, MM — mes en número, MMM, MMMM — mes en letras, YY, YYYY — año',
         hfHelpBates: 'número Bates: el prefijo antes de los corchetes, el número inicial entre corchetes (con tantas cifras como deba tener el número), el sufijo después',
-        hfMm: 'mm', hfHelpDrag: 'Arrastra las líneas de margen en la vista previa con el ratón; con Shift, con más precisión.',
+        hfMm: 'mm', hfHelpInline: 'Haz clic en un encabezado o pie de la vista previa para editarlo allí mismo: Enter para terminar, Esc para deshacer.', hfHelpDrag: 'Arrastra las líneas de margen en la vista previa con el ratón; con Shift, con más precisión.',
         hfNoText: 'Escribe el texto de al menos un encabezado o pie',
         hfApplying: 'Añadiendo encabezados y pies…', hfApplyError: 'No se pudieron añadir los encabezados y pies',
         watermarkTitle: 'Marca de agua', watermarkDefaultText: 'CONFIDENCIAL',
@@ -10887,7 +10899,7 @@
         hfHelpPage: '页码和总页数',
         hfHelpDate: '日期；D、DD — 日，M、MM — 数字月份，MMM、MMMM — 文字月份，YY、YYYY — 年',
         hfHelpBates: '贝茨编号：方括号前为前缀，方括号内为起始编号（位数即编号长度），方括号后为后缀',
-        hfMm: '毫米', hfHelpDrag: '可用鼠标拖动预览中的边距线；按住 Shift 可更精确地移动。',
+        hfMm: '毫米', hfHelpInline: '单击预览中的页眉或页脚即可直接编辑：Enter 完成，Esc 取消。', hfHelpDrag: '可用鼠标拖动预览中的边距线；按住 Shift 可更精确地移动。',
         hfNoText: '请至少输入一个页眉或页脚的文本',
         hfApplying: '正在添加页眉和页脚…', hfApplyError: '无法添加页眉和页脚',
         watermarkTitle: '水印', watermarkDefaultText: '机密',
@@ -65757,6 +65769,7 @@ function pmHfRunDialog() {
         <div><code>{page}</code>, <code>{pages}</code> — ${esc(t('hfHelpPage'))}</div>
         <div><code>{date:DD.MM.YYYY}</code> — ${esc(t('hfHelpDate'))}</div>
         <div><code>{bates:ABC-[000001]}</code> — ${esc(t('hfHelpBates'))}</div>
+        <div>${esc(t('hfHelpInline'))}</div>
         <div>${esc(t('hfHelpDrag'))}</div>
       </div>
       <div class="pm-wm-controls pm-hf-controls">
@@ -65801,6 +65814,7 @@ function pmHfRunDialog() {
                   <input type="text" id="pmHfRange" placeholder="${esc(t('wmRangePlaceholder'))}" spellcheck="false" autocomplete="off"></label>
               </div>
             </div>
+            <hr class="pm-wm-sep">
             <div class="pm-wm-row pm-wm-row-top"><span class="pm-wm-label">${esc(t('hfMargins'))}</span>
               <div class="pm-hf-margins">
                 <label><span>${esc(t('hfMarginTop'))}</span>${pmWmNumField('pmHfMTop', 0, 200, 1)}</label>
@@ -66001,10 +66015,24 @@ function pmHfRunDialog() {
       // Laid out exactly as pmHfApply draws them.
       const mt = pmHfMetrics(s, '0');
       const boxH = mt.asc + mt.desc;
+      lineBoxes = {};
+      if (hotSlot && !(inlineEd && inlineEd.slot === hotSlot)) {
+        const z = slotZone(hotSlot, fr, g);
+        ctx.save();
+        const unit = Math.max(1, g.k / g.css);
+        ctx.lineWidth = unit;
+        ctx.strokeStyle = 'rgba(52,152,219,0.8)';
+        ctx.fillStyle = 'rgba(52,152,219,0.07)';
+        ctx.setLineDash([4 * unit, 3 * unit]);
+        ctx.fillRect(z.x, z.y, z.w, z.h);
+        ctx.strokeRect(z.x + 0.5, z.y + 0.5, z.w - 1, z.h - 1);
+        ctx.restore();
+      }
       PM_HF_SLOTS.forEach(slot => {
         const L = pmHfLayoutLine(s.texts[slot], s, pctx, previewWidths);
         if (!L) return;
         const x0 = pmHfLineX(slot, L.w, fr.W, s);
+        lineBoxes[slot] = { x0, w: L.w };
         const top = pmHfLineTop(slot, boxH, fr.H, s);
         const y = slot[0] === 'h' ? top * g.k : g.hh + g.gap + (top - (fr.H - g.foot)) * g.k;
         L.pieces.forEach(p => {
@@ -66017,6 +66045,105 @@ function pmHfRunDialog() {
     function drawSoon() {
       if (!drawRaf) drawRaf = requestAnimationFrame(() => { drawRaf = 0; draw(); });
     }
+    // ---- editing a header/footer right in the preview --------------------
+    // The band is split in thirds between the side margins: left, centre and
+    // right text. Pointing inside one's box outlines it; a click opens a field over it
+    // with that text as written (variables as codes), synced with the field
+    // above. Enter or a click elsewhere keeps it, Escape takes it back.
+    let lineBoxes = {};     // slot -> { x0, w } (pt) of its line in the last draw
+    let hotSlot = null;
+    let inlineEd = null;    // { slot, input, before }
+    // A slot's line area in canvas px: its third of the band (wider if its
+    // text runs over), as tall as a line plus a little air.
+    function slotZone(slot, fr, g) {
+      const mm = PM_HF_PT_PER_MM, k = g.k;
+      const L = s.margins.left * mm, R = fr.W - s.margins.right * mm;
+      const third = Math.max(10, (R - L) / 3);
+      const col = slot[1] === 'l' ? 0 : slot[1] === 'c' ? 1 : 2;
+      let x1 = L + third * col, x2 = x1 + third;
+      const lb = lineBoxes[slot];
+      if (lb) { x1 = Math.min(x1, lb.x0); x2 = Math.max(x2, lb.x0 + lb.w); }
+      const mt = pmHfMetrics(s, '0'), boxH = mt.asc + mt.desc;
+      const top = pmHfLineTop(slot, boxH, fr.H, s);
+      const yPt = top - 4, hPt = boxH + 8;
+      const y = slot[0] === 'h' ? yPt * k : g.hh + g.gap + (yPt - (fr.H - g.foot)) * k;
+      return { x: Math.round((x1 - 3) * k), y: Math.round(y), w: Math.round((x2 - x1 + 6) * k), h: Math.round(hPt * k) };
+    }
+    function slotAt(e) {
+      if (!lastGeom) return null;
+      const { fr, g } = lastGeom;
+      const rect = pv.getBoundingClientRect();
+      if (!rect.width) return null;
+      const f = pv.width / rect.width;
+      const x = (e.clientX - rect.left) * f, y = (e.clientY - rect.top) * f;
+      // Only inside a slot's outlined box (where a text goes or already is).
+      for (const slot of PM_HF_SLOTS) {
+        const z = slotZone(slot, fr, g);
+        if (x >= z.x && x <= z.x + z.w && y >= z.y && y <= z.y + z.h) return slot;
+      }
+      return null;
+    }
+    function openInlineEditor(slot) {
+      closeInlineEditor(true);
+      if (!lastGeom) return;
+      const { fr, g } = lastGeom;
+      const z = slotZone(slot, fr, g);
+      const f = pv.width / pv.getBoundingClientRect().width;   // canvas px per CSS px
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'pm-hf-inline';
+      input.spellcheck = false;
+      input.autocomplete = 'off';
+      input.value = s.texts[slot] || '';
+      input.placeholder = t(slot[0] === 'h' ? 'hfHeader' : 'hfFooter');
+      const fontPx = Math.max(12, s.size * g.css);
+      input.style.font = (s.italic ? 'italic ' : '') + (s.bold ? 'bold ' : '') + fontPx + 'px ' + pmWmFontCss(s.font) + ', sans-serif';
+      input.style.color = s.color;
+      input.style.textDecoration = s.underline ? 'underline' : 'none';
+      input.style.textAlign = slot[1] === 'l' ? 'left' : slot[1] === 'c' ? 'center' : 'right';
+      const h = Math.max(24, z.h / f + 4);
+      input.style.left = (pv.offsetLeft + z.x / f) + 'px';
+      input.style.width = Math.max(140, z.w / f) + 'px';
+      input.style.top = (pv.offsetTop + z.y / f + z.h / f / 2 - h / 2) + 'px';
+      input.style.height = h + 'px';
+      pvBox.appendChild(input);
+      // A right-hand field that was widened to its minimum still ends at the margin.
+      if (slot[1] === 'r') input.style.left = (pv.offsetLeft + (z.x + z.w) / f - input.offsetWidth) + 'px';
+      if (slot[1] === 'c') input.style.left = (pv.offsetLeft + (z.x + z.w / 2) / f - input.offsetWidth / 2) + 'px';
+      inlineEd = { slot, input, before: input.value };
+      lastSlot = slot;
+      input.addEventListener('input', () => {
+        s.texts[slot] = input.value;
+        slotEls[slot].value = input.value;
+        errEl.textContent = '';
+        syncBatesFields();
+        drawSoon();
+      });
+      input.addEventListener('blur', () => closeInlineEditor(true));
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+      syncControls();
+      drawSoon();
+    }
+    // keep: true keeps the text, false puts back what was there before.
+    function closeInlineEditor(keep) {
+      if (!inlineEd) return;
+      const { slot, input, before } = inlineEd;
+      inlineEd = null;
+      if (!keep) {
+        s.texts[slot] = before;
+        slotEls[slot].value = before;
+        syncBatesFields();
+      }
+      // "Insert" then goes where the caret was in the preview.
+      const a = input.selectionStart, b = input.selectionEnd;
+      lastSlot = slot;
+      if (a != null) { try { slotEls[slot].setSelectionRange(keep ? a : before.length, keep ? b : before.length); } catch (_) {} }
+      if (input.parentNode) input.parentNode.removeChild(input);
+      syncControls();
+      drawSoon();
+    }
+
     // ---- margin guides: grab one and drag it --------------------------
     // The line follows the pointer (to 0.1 mm); with Shift held it moves
     // five times slower for fine steps. A tip next to the pointer shows the
@@ -66087,13 +66214,21 @@ function pmHfRunDialog() {
         return;
       }
       const which = guideAt(e);
-      pv.style.cursor = !which ? '' : (which === 'left' || which === 'right') ? 'ew-resize' : 'ns-resize';
-      if (which !== hotGuide) { hotGuide = which; drawSoon(); }
+      const slot = which ? null : slotAt(e);
+      pv.style.cursor = which ? ((which === 'left' || which === 'right') ? 'ew-resize' : 'ns-resize') : slot ? 'text' : '';
+      if (which !== hotGuide || slot !== hotSlot) { hotGuide = which; hotSlot = slot; drawSoon(); }
     });
     pv.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
       const which = guideAt(e);
-      if (!which) return;
+      if (!which) {
+        const slot = slotAt(e);
+        if (!slot) return;
+        e.preventDefault();
+        hotSlot = null;
+        openInlineEditor(slot);
+        return;
+      }
       e.preventDefault();
       // The preview keeps its size while dragging - a taller band would move
       // everything under the pointer (and on a small screen scroll the
@@ -66120,7 +66255,7 @@ function pmHfRunDialog() {
     pv.addEventListener('pointerleave', () => {
       if (guideDrag) return;
       pv.style.cursor = '';
-      if (hotGuide) { hotGuide = null; drawSoon(); }
+      if (hotGuide || hotSlot) { hotGuide = null; hotSlot = null; drawSoon(); }
     });
 
     // Page raster for the bands at the preview's density (capped).
@@ -66369,6 +66504,13 @@ function pmHfRunDialog() {
     $('pmHfCancel').addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); close(false); });
     overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) e.preventDefault(); });
     const onKey = (e) => {
+      // The field opened in the preview: Enter keeps, Escape takes back -
+      // neither closes the dialog.
+      if (inlineEd && e.target === inlineEd.input && (e.key === 'Enter' || e.key === 'Escape')) {
+        e.preventDefault(); e.stopPropagation();
+        closeInlineEditor(e.key === 'Enter');
+        return;
+      }
       if (e.key === 'Escape') {
         e.preventDefault(); e.stopPropagation();
         if (!helpPop.hidden) setHelp(false); else close(false);
@@ -66383,6 +66525,7 @@ function pmHfRunDialog() {
     let resizeTimer = null;
     const onResize = () => {
       clearTimeout(resizeTimer);
+      closeInlineEditor(true);
       resizeTimer = setTimeout(() => { readBoxWidth(); draw(); ensureRaster(); }, 200);
     };
     window.addEventListener('resize', onResize);
