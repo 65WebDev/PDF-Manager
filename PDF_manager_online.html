@@ -1094,7 +1094,25 @@
     .pm-hf-box .pm-hf-col-right .pm-wm-label { width: 96px; }
     .pm-hf-grid { display: grid; grid-template-columns: 128px 1fr 1fr 1fr; gap: 6px; align-items: center; }
     .pm-hf-colhead { color: #777; font-size: 12px; text-align: center; }
+    .pm-hf-slot-wrap { position: relative; display: block; min-width: 0; }
     .pm-hf-grid .pm-hf-slot { width: 100%; min-width: 0; }
+    /*Where "Insert" goes (updateInsertMarker): a blinking bar at the caret of
+       the target field while the focus is elsewhere; a band over a selection.*/
+    .pm-hf-caret {
+      display: none; position: absolute; top: 5px; bottom: 5px; width: 2px;
+      background: #3498db; border-radius: 1px; pointer-events: none;
+      animation: pm-hf-blink 1s steps(1) infinite;
+    }
+    .pm-hf-caret.pm-hf-caret-range { background: rgba(52,152,219,0.35); animation: none; }
+    .pm-hf-slot-wrap.pm-hf-marked .pm-hf-caret { display: block; }
+    @keyframes pm-hf-blink { 50% { opacity: 0; } }
+    .pm-hf-slot-wrap.pm-hf-hint .pm-hf-slot { box-shadow: 0 0 0 3px rgba(52,152,219,0.45); }
+    .pm-hf-slot-wrap.pm-hf-hint .pm-hf-caret { animation: none; width: 3px; }
+    .pm-hf-drag-tip {
+      position: absolute; z-index: 5; pointer-events: none; white-space: nowrap;
+      padding: 3px 8px; border-radius: 6px; font-size: 12.5px;
+      background: rgba(44,62,80,0.94); color: #fff; box-shadow: 0 3px 10px rgba(0,0,0,0.3);
+    }
     .pm-hf-controls input.pm-hf-slot.pm-hf-target { border-color: #3498db; box-shadow: 0 0 0 1px rgba(52,152,219,0.35); }
     .pm-hf-fmt { width: 28px; min-width: 28px; padding: 0; }
     #pmHfFont { flex: 1; min-width: 120px; }
@@ -9437,6 +9455,7 @@
         hfHelpPage: 'номер страницы и число страниц',
         hfHelpDate: 'дата; D, DD — день, M, MM — месяц числом, MMM, MMMM — месяц словом, YY, YYYY — год',
         hfHelpBates: 'номер Бейтса: перед скобками — префикс, в квадратных скобках — начальный номер (сколько цифр — такой длины номер), после них — суффикс',
+        hfMm: 'мм', hfHelpDrag: 'Линии отступов в превью можно перетаскивать мышью; с Shift — точнее.',
         hfNoText: 'Введите текст хотя бы одного колонтитула',
         hfApplying: 'Добавление колонтитулов…', hfApplyError: 'Не удалось добавить колонтитулы',
         watermarkTitle: 'Водяной знак', watermarkDefaultText: 'КОНФИДЕНЦИАЛЬНО',
@@ -9881,6 +9900,7 @@
         hfHelpPage: 'page number and page count',
         hfHelpDate: 'date; D, DD — day, M, MM — month as a number, MMM, MMMM — month as a word, YY, YYYY — year',
         hfHelpBates: 'Bates number: the prefix before the brackets, the start number in square brackets (as many digits as the number should have), the suffix after them',
+        hfMm: 'mm', hfHelpDrag: 'Drag the margin lines in the preview with the mouse; hold Shift for finer steps.',
         hfNoText: 'Enter the text of at least one header or footer',
         hfApplying: 'Adding headers and footers…', hfApplyError: 'Could not add headers and footers',
         watermarkTitle: 'Watermark', watermarkDefaultText: 'CONFIDENTIAL',
@@ -10325,6 +10345,7 @@
         hfHelpPage: 'número de página y número de páginas',
         hfHelpDate: 'fecha; D, DD — día, M, MM — mes en número, MMM, MMMM — mes en letras, YY, YYYY — año',
         hfHelpBates: 'número Bates: el prefijo antes de los corchetes, el número inicial entre corchetes (con tantas cifras como deba tener el número), el sufijo después',
+        hfMm: 'mm', hfHelpDrag: 'Arrastra las líneas de margen en la vista previa con el ratón; con Shift, con más precisión.',
         hfNoText: 'Escribe el texto de al menos un encabezado o pie',
         hfApplying: 'Añadiendo encabezados y pies…', hfApplyError: 'No se pudieron añadir los encabezados y pies',
         watermarkTitle: 'Marca de agua', watermarkDefaultText: 'CONFIDENCIAL',
@@ -10819,6 +10840,7 @@
         hfHelpPage: '页码和总页数',
         hfHelpDate: '日期；D、DD — 日，M、MM — 数字月份，MMM、MMMM — 文字月份，YY、YYYY — 年',
         hfHelpBates: '贝茨编号：方括号前为前缀，方括号内为起始编号（位数即编号长度），方括号后为后缀',
+        hfMm: '毫米', hfHelpDrag: '可用鼠标拖动预览中的边距线；按住 Shift 可更精确地移动。',
         hfNoText: '请至少输入一个页眉或页脚的文本',
         hfApplying: '正在添加页眉和页脚…', hfApplyError: '无法添加页眉和页脚',
         watermarkTitle: '水印', watermarkDefaultText: '机密',
@@ -65309,7 +65331,9 @@ function pmHfMetrics(s, text) {
     pad: s.size * 0.25
   };
 }
-function pmHfRenderLine(s, text, pxPerPt) {
+// cpu: a canvas kept in main memory - the pieces that get PNG-encoded are
+// read back at once, which from a GPU canvas costs a round trip each.
+function pmHfRenderLine(s, text, pxPerPt, cpu) {
   if (!text) return null;
   const mt = pmHfMetrics(s, text);
   const wPt = mt.w + mt.pad * 2, hPt = mt.asc + mt.desc;
@@ -65319,7 +65343,7 @@ function pmHfRenderLine(s, text, pxPerPt) {
   const canvas = document.createElement('canvas');
   canvas.width = Math.max(1, Math.ceil(wPt * k));
   canvas.height = Math.max(1, Math.ceil(hPt * k));
-  const ctx = canvas.getContext('2d');
+  const ctx = canvas.getContext('2d', cpu ? { willReadFrequently: true } : undefined);
   ctx.font = pmHfTextFont(s, s.size * k);
   ctx.fillStyle = s.color;
   ctx.textBaseline = 'alphabetic';
@@ -65330,16 +65354,57 @@ function pmHfRenderLine(s, text, pxPerPt) {
   }
   return { canvas, wPt, hPt, padPt: mt.pad, ascPt: mt.asc, textWPt: mt.w };
 }
-// Where a line's box goes on a W x H page: top-left corner, visual pt.
-function pmHfPlace(slot, r, W, H, s) {
+// A line split into pieces to draw: the wording that reads the same on
+// every page as one piece, the values that change from page to page
+// ({page}, {bates}) one character per piece - so a 300-page run needs a
+// few dozen images instead of one or two per page. dx: where a piece
+// starts, pt from the line's start; w: the line's advance width; null for
+// a line with nothing to show. widths: an optional cache of piece widths.
+function pmHfLayoutLine(template, s, ctx, widths) {
+  const re = /\{(page|pages|bates|date)(?::([^}]*))?\}/g;
+  const parts = [];
+  let buf = '', last = 0, m;
+  while ((m = re.exec(String(template || '')))) {
+    buf += template.slice(last, m.index);
+    last = re.lastIndex;
+    const val = pmHfExpand(m[0], s, ctx);
+    if (val === m[0] || (m[1] !== 'page' && m[1] !== 'bates')) { buf += val; continue; }
+    if (buf) parts.push(buf);
+    buf = '';
+    for (const ch of val) parts.push(ch);
+  }
+  buf += String(template || '').slice(last);
+  if (buf) parts.push(buf);
+  // Trailing spaces of the line do not count (nor move a right-aligned line).
+  while (parts.length && !parts[parts.length - 1].trim()) parts.pop();
+  if (parts.length) parts[parts.length - 1] = parts[parts.length - 1].replace(/\s+$/, '');
+  if (!parts.join('').trim()) return null;
+  const widthOf = (t) => {
+    if (!widths) return pmHfMetrics(s, t).w;
+    let w = widths.get(t);
+    if (w === undefined) { w = pmHfMetrics(s, t).w; widths.set(t, w); }
+    return w;
+  };
+  const pieces = [];
+  let x = 0;
+  for (const text of parts) {
+    // Blank pieces only matter for the underline.
+    if (text.trim() || s.underline) pieces.push({ text, dx: x });
+    x += widthOf(text);
+  }
+  return { pieces, w: x };
+}
+// Where a line starts (x of its text) and the top of its box, visual pt.
+function pmHfLineX(slot, w, W, s) {
   const mm = PM_HF_PT_PER_MM;
   const left = s.margins.left * mm, right = s.margins.right * mm;
-  let x;
-  if (slot[1] === 'l') x = left - r.padPt;
-  else if (slot[1] === 'r') x = W - right - r.textWPt - r.padPt;
-  else x = (left + (W - right)) / 2 - r.textWPt / 2 - r.padPt;
-  const y = slot[0] === 'h' ? s.margins.top * mm : H - s.margins.bottom * mm - r.hPt;
-  return { x, y };
+  if (slot[1] === 'l') return left;
+  if (slot[1] === 'r') return W - right - w;
+  return (left + (W - right)) / 2 - w / 2;
+}
+function pmHfLineTop(slot, hPt, H, s) {
+  const mm = PM_HF_PT_PER_MM;
+  return slot[0] === 'h' ? s.margins.top * mm : H - s.margins.bottom * mm - hPt;
 }
 
 // Page numbers count the pages that stay (those marked for deletion are
@@ -65357,16 +65422,17 @@ function pmHfPageContexts(indices, s, date) {
 async function pmHfApply(s, indices, date) {
   if (!pdfDoc || !indices.length) return false;
   const ctxs = pmHfPageContexts(indices, s, date);
-  // Lines per page, then one PNG per distinct line.
+  // Line layouts per page, then one PNG per distinct piece.
   const plan = [];
-  const lines = new Map();
+  const pieces = new Map();
+  const widths = new Map();
   for (const idx of indices) {
     const items = [];
     PM_HF_SLOTS.forEach(slot => {
-      const text = pmHfExpand(s.texts[slot], s, ctxs.get(idx)).replace(/\s+$/, '');
-      if (!text.trim()) return;
-      if (!lines.has(text)) lines.set(text, null);
-      items.push({ slot, text });
+      const L = pmHfLayoutLine(s.texts[slot], s, ctxs.get(idx), widths);
+      if (!L) return;
+      L.pieces.forEach(p => { if (!pieces.has(p.text)) pieces.set(p.text, null); });
+      items.push({ slot, L });
     });
     if (items.length) plan.push({ idx, items });
   }
@@ -65376,30 +65442,38 @@ async function pmHfApply(s, indices, date) {
   let bytes = null;
   const done = [];
   try {
-    for (const text of lines.keys()) {
-      const r = pmHfRenderLine(s, text, PM_WM_PX_PER_PT);
-      lines.set(text, r ? { r, png: await pmWmCanvasToBytes(r.canvas, 'image/png') } : null);
+    for (const text of pieces.keys()) {
+      const r = pmHfRenderLine(s, text, PM_WM_PX_PER_PT, true);
+      pieces.set(text, r ? { r, png: await pmWmCanvasToBytes(r.canvas, 'image/png') } : null);
     }
+    const hPt = pmHfMetrics(s, '0');
+    const boxH = hPt.asc + hPt.desc;
     claimed = await peClaimLivePdfDocWriter();
     const docRef = pdfDoc;
     if (!docRef) return false;
     const embedded = new Map();
+    for (const [text, piece] of pieces) {
+      if (piece) embedded.set(text, await docRef.embedPng(piece.png));
+    }
     const count = docRef.getPageCount();
     for (const { idx, items } of plan) {
       if (idx < 0 || idx >= count) continue;
       const page = docRef.getPage(idx);
       const { rot, full, W, H } = pmWmPageFrame(page);
       peFreshContentStream(page);
-      for (const { slot, text } of items) {
-        const line = lines.get(text);
-        if (!line) continue;
-        if (!embedded.has(text)) embedded.set(text, await docRef.embedPng(line.png));
-        const p = pmHfPlace(slot, line.r, W, H, s);
-        const lx = full.x + p.x, ly = full.y + (H - p.y - line.r.hPt);
-        const a = peRotatePointAround(lx, ly, full.x, full.y, rot);
-        page.drawImage(embedded.get(text), {
-          x: a.x, y: a.y, width: line.r.wPt, height: line.r.hPt, rotate: PDFLib.degrees(rot)
-        });
+      for (const { slot, L } of items) {
+        const x0 = pmHfLineX(slot, L.w, W, s);
+        const top = pmHfLineTop(slot, boxH, H, s);
+        for (const p of L.pieces) {
+          const piece = pieces.get(p.text);
+          if (!piece) continue;
+          const r = piece.r;
+          const lx = full.x + x0 + p.dx - r.padPt, ly = full.y + (H - top - r.hPt);
+          const a = peRotatePointAround(lx, ly, full.x, full.y, rot);
+          page.drawImage(embedded.get(p.text), {
+            x: a.x, y: a.y, width: r.wPt, height: r.hPt, rotate: PDFLib.degrees(rot)
+          });
+        }
       }
       done.push(idx);
     }
@@ -65461,7 +65535,7 @@ function pmHfRunDialog() {
     const box = document.createElement('div');
     box.className = 'pm-modal-box pm-wm-box pm-hf-box';
     box.setAttribute('role', 'dialog');
-    const slotInput = (k, ph) => `<input type="text" class="pm-hf-slot" data-slot="${k}" placeholder="${esc(ph)}" spellcheck="false" autocomplete="off">`;
+    const slotInput = (k, ph) => `<span class="pm-hf-slot-wrap" data-slot="${k}"><input type="text" class="pm-hf-slot" data-slot="${k}" placeholder="${esc(ph)}" spellcheck="false" autocomplete="off"><span class="pm-hf-caret" aria-hidden="true"></span></span>`;
     box.innerHTML = `
       <div class="pm-wm-head">
         <div class="pm-wm-title">${esc(t('hfTitle'))}</div>
@@ -65472,6 +65546,7 @@ function pmHfRunDialog() {
         <div><code>{page}</code>, <code>{pages}</code> — ${esc(t('hfHelpPage'))}</div>
         <div><code>{date:DD.MM.YYYY}</code> — ${esc(t('hfHelpDate'))}</div>
         <div><code>{bates:ABC-[000001]}</code> — ${esc(t('hfHelpBates'))}</div>
+        <div>${esc(t('hfHelpDrag'))}</div>
       </div>
       <div class="pm-wm-controls pm-hf-controls">
         <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('wmFont'))}</span>
@@ -65505,14 +65580,6 @@ function pmHfRunDialog() {
             </div>
           </div>
           <div class="pm-hf-col pm-hf-col-right">
-            <div class="pm-wm-row pm-wm-row-top"><span class="pm-wm-label">${esc(t('hfMargins'))}</span>
-              <div class="pm-hf-margins">
-                <label><span>${esc(t('hfMarginTop'))}</span>${pmWmNumField('pmHfMTop', 0, 200, 1)}</label>
-                <label><span>${esc(t('hfMarginBottom'))}</span>${pmWmNumField('pmHfMBottom', 0, 200, 1)}</label>
-                <label><span>${esc(t('hfMarginLeft'))}</span>${pmWmNumField('pmHfMLeft', 0, 200, 1)}</label>
-                <label><span>${esc(t('hfMarginRight'))}</span>${pmWmNumField('pmHfMRight', 0, 200, 1)}</label>
-              </div>
-            </div>
             <div class="pm-wm-row pm-wm-row-top"><span class="pm-wm-label">${esc(t('wmPages'))}</span>
               <div class="pm-wm-pages">
                 <div class="pm-wm-pages-line">
@@ -65521,6 +65588,14 @@ function pmHfRunDialog() {
                 </div>
                 <label><input type="radio" name="pmHfPages" value="range"> ${esc(t('wmPagesRange'))}
                   <input type="text" id="pmHfRange" placeholder="${esc(t('wmRangePlaceholder'))}" spellcheck="false" autocomplete="off"></label>
+              </div>
+            </div>
+            <div class="pm-wm-row pm-wm-row-top"><span class="pm-wm-label">${esc(t('hfMargins'))}</span>
+              <div class="pm-hf-margins">
+                <label><span>${esc(t('hfMarginTop'))}</span>${pmWmNumField('pmHfMTop', 0, 200, 1)}</label>
+                <label><span>${esc(t('hfMarginBottom'))}</span>${pmWmNumField('pmHfMBottom', 0, 200, 1)}</label>
+                <label><span>${esc(t('hfMarginLeft'))}</span>${pmWmNumField('pmHfMLeft', 0, 200, 1)}</label>
+                <label><span>${esc(t('hfMarginRight'))}</span>${pmWmNumField('pmHfMRight', 0, 200, 1)}</label>
               </div>
             </div>
           </div>
@@ -65591,7 +65666,9 @@ function pmHfRunDialog() {
     // Grows in 36pt steps rather than with every millimetre of margin: a
     // new height means new canvases, which would make each step of a
     // margin arrow redraw everything.
+    let frozenBands = null;   // kept while a margin guide is dragged
     function bandHeights(fr) {
+      if (frozenBands) return frozenBands;
       const mm = PM_HF_PT_PER_MM;
       const lineH = s.size * 1.2;
       const fit = (need) => Math.min(fr.H / 2, Math.max(72, Math.ceil(need / 36) * 36));
@@ -65614,6 +65691,7 @@ function pmHfRunDialog() {
       const w = Math.round(fr.W * k), hh = Math.round(head * k), fh = Math.round(foot * k);
       return { css, k, head, foot, gap, w, hh, fh, cssW: Math.round(fr.W * css), cssH: Math.round((head + foot) * css + GAP_CSS) };
     }
+    let lastGeom = null;   // { fr, g } of the last draw, for pointing at guides
     let base = null;   // { key, canvas } - page bands and guides
     function baseLayer(fr, g) {
       const rasterId = (previewRaster && previewRaster.idx === previewIdx) ? previewRaster.pxPerPt : 0;
@@ -65645,26 +65723,42 @@ function pmHfRunDialog() {
       return c;
     }
     // Margin guides, straight onto the preview (cheap lines, no new layer).
+    // The one under the pointer or being dragged turns solid and bolder.
+    let hotGuide = null;
     function drawGuides(ctx, fr, g) {
       const mm = PM_HF_PT_PER_MM, k = g.k, m = s.margins, unit = Math.max(1, g.k / g.css);
+      const lines = {
+        left: [['v', Math.round(m.left * mm * k) + 0.5]],
+        right: [['v', Math.round((fr.W - m.right * mm) * k) + 0.5]],
+        top: [['h', Math.round(m.top * mm * k) + 0.5]],
+        bottom: [['h', Math.round(g.hh + g.gap + (g.foot - m.bottom * mm) * k) + 0.5]]
+      };
+      const stroke = (which) => {
+        ctx.beginPath();
+        lines[which].forEach(([dir, p]) => {
+          if (dir === 'h') { ctx.moveTo(0, p); ctx.lineTo(g.w, p); return; }
+          ctx.moveTo(p, 0); ctx.lineTo(p, g.hh);
+          ctx.moveTo(p, g.hh + g.gap); ctx.lineTo(p, g.hh + g.gap + g.fh);
+        });
+        ctx.stroke();
+      };
       ctx.save();
       ctx.lineWidth = unit;
       ctx.strokeStyle = 'rgba(52,152,219,0.55)';
       ctx.setLineDash([3 * unit, 3 * unit]);
-      ctx.beginPath();
-      [m.left * mm, fr.W - m.right * mm].forEach(xPt => {
-        const x = Math.round(xPt * k) + 0.5;
-        ctx.moveTo(x, 0); ctx.lineTo(x, g.hh);
-        ctx.moveTo(x, g.hh + g.gap); ctx.lineTo(x, g.hh + g.gap + g.fh);
-      });
-      [m.top * mm * k, g.hh + g.gap + (g.foot - m.bottom * mm) * k].forEach(y => {
-        ctx.moveTo(0, Math.round(y) + 0.5); ctx.lineTo(g.w, Math.round(y) + 0.5);
-      });
-      ctx.stroke();
+      Object.keys(lines).forEach(w => { if (w !== hotGuide) stroke(w); });
+      if (hotGuide) {
+        ctx.setLineDash([]);
+        ctx.lineWidth = 2 * unit;
+        ctx.strokeStyle = 'rgba(41,128,185,0.95)';
+        stroke(hotGuide);
+      }
       ctx.restore();
     }
     // Rendered lines at the preview density, kept while the look stays.
     const lineCache = new Map();
+    // Piece widths for the current look (cleared when the look changes).
+    let previewWidths = new Map(), previewWidthsKey = '';
     function lineAt(text, k) {
       const key = [text, s.font, s.size, s.bold, s.italic, s.underline, s.color, Math.round(k * 100)].join('|');
       let r = lineCache.get(key);
@@ -65676,9 +65770,12 @@ function pmHfRunDialog() {
       return r;
     }
     function draw() {
+      const look = [s.font, s.size, s.bold, s.italic].join('|');
+      if (look !== previewWidthsKey) { previewWidths = new Map(); previewWidthsKey = look; }
       const fr = previewIdx >= 0 ? frameFor(previewIdx) : null;
       if (!fr) { if (pv.width !== 1) { pv.width = 1; pv.height = 1; } return; }
       const g = geometry(fr);
+      lastGeom = { fr, g };
       // Resizing a canvas clears and reallocates it: only when the size changes.
       if (pv.width !== g.w || pv.height !== g.hh + g.gap + g.fh) { pv.width = g.w; pv.height = g.hh + g.gap + g.fh; }
       const cw = g.cssW + 'px', ch = g.cssH + 'px';
@@ -65690,20 +65787,124 @@ function pmHfRunDialog() {
       // The texts, as they will be on this page.
       const pctx = pmHfPageContexts(targetIndices(), s, dateOf()).get(previewIdx);
       if (!pctx) return;
+      // Laid out exactly as pmHfApply draws them.
+      const mt = pmHfMetrics(s, '0');
+      const boxH = mt.asc + mt.desc;
       PM_HF_SLOTS.forEach(slot => {
-        const text = pmHfExpand(s.texts[slot], s, pctx).replace(/\s+$/, '');
-        if (!text.trim()) return;
-        const r = lineAt(text, g.k);
-        if (!r) return;
-        const p = pmHfPlace(slot, r, fr.W, fr.H, s);
-        const y = slot[0] === 'h' ? p.y * g.k : g.hh + g.gap + (p.y - (fr.H - g.foot)) * g.k;
-        ctx.drawImage(r.canvas, p.x * g.k, y, r.wPt * g.k, r.hPt * g.k);
+        const L = pmHfLayoutLine(s.texts[slot], s, pctx, previewWidths);
+        if (!L) return;
+        const x0 = pmHfLineX(slot, L.w, fr.W, s);
+        const top = pmHfLineTop(slot, boxH, fr.H, s);
+        const y = slot[0] === 'h' ? top * g.k : g.hh + g.gap + (top - (fr.H - g.foot)) * g.k;
+        L.pieces.forEach(p => {
+          const r = lineAt(p.text, g.k);
+          if (r) ctx.drawImage(r.canvas, (x0 + p.dx - r.padPt) * g.k, y, r.wPt * g.k, r.hPt * g.k);
+        });
       });
     }
     let drawRaf = 0;
     function drawSoon() {
       if (!drawRaf) drawRaf = requestAnimationFrame(() => { drawRaf = 0; draw(); });
     }
+    // ---- margin guides: grab one and drag it --------------------------
+    // The line follows the pointer (to 0.1 mm); with Shift held it moves
+    // five times slower for fine steps. A tip next to the pointer shows the
+    // distance from the page edge.
+    const tip = document.createElement('div');
+    tip.className = 'pm-hf-drag-tip';
+    tip.hidden = true;
+    box.appendChild(tip);
+    const GUIDE_LABEL = { left: 'hfMarginLeft', right: 'hfMarginRight', top: 'hfMarginTop', bottom: 'hfMarginBottom' };
+    function guideAt(e) {
+      if (!lastGeom) return null;
+      const { fr, g } = lastGeom;
+      const rect = pv.getBoundingClientRect();
+      if (!rect.width) return null;
+      const f = pv.width / rect.width;
+      const x = (e.clientX - rect.left) * f, y = (e.clientY - rect.top) * f;
+      const tol = 5 * f, mm = PM_HF_PT_PER_MM, m = s.margins;
+      const inHead = y >= 0 && y <= g.hh, inFoot = y >= g.hh + g.gap && y <= g.hh + g.gap + g.fh;
+      const near = [];
+      if (inHead) near.push(['top', Math.abs(y - m.top * mm * g.k)]);
+      if (inFoot) near.push(['bottom', Math.abs(y - (g.hh + g.gap + (g.foot - m.bottom * mm) * g.k))]);
+      if (inHead || inFoot) {
+        near.push(['left', Math.abs(x - m.left * mm * g.k)]);
+        near.push(['right', Math.abs(x - (fr.W - m.right * mm) * g.k)]);
+      }
+      const best = near.filter(n => n[1] <= tol).sort((a, b) => a[1] - b[1])[0];
+      return best ? best[0] : null;
+    }
+    function showTip(e, which) {
+      tip.textContent = t(GUIDE_LABEL[which]) + ': ' + (Math.round(s.margins[which] * 10) / 10).toFixed(1) + ' ' + t('hfMm');
+      tip.hidden = false;
+      // Beside the pointer, on the side where it fits inside the dialog.
+      const br = box.getBoundingClientRect();
+      let x = e.clientX - br.left + 14, y = e.clientY - br.top + 16;
+      if (x + tip.offsetWidth > box.clientWidth - 6) x = e.clientX - br.left - 14 - tip.offsetWidth;
+      if (y + tip.offsetHeight > box.clientHeight - 6) y = e.clientY - br.top - 12 - tip.offsetHeight;
+      tip.style.left = Math.max(6, x) + box.scrollLeft + 'px';
+      tip.style.top = Math.max(6, y) + box.scrollTop + 'px';
+    }
+    let guideDrag = null;
+    pv.addEventListener('pointermove', (e) => {
+      if (guideDrag && e.pointerId === guideDrag.id) {
+        const { fr, g } = lastGeom;
+        const rect = pv.getBoundingClientRect();
+        const f = pv.width / rect.width;
+        // Pointer travel since the press, in mm of the page.
+        const scale = (e.shiftKey ? 0.2 : 1) * f / g.k / PM_HF_PT_PER_MM;
+        const dx = (e.clientX - guideDrag.x) * scale, dy = (e.clientY - guideDrag.y) * scale;
+        const w = guideDrag.which;
+        const d = w === 'left' ? dx : w === 'right' ? -dx : w === 'top' ? dy : -dy;
+        // Fine moves add up: Shift changes the rate from here on.
+        if (e.shiftKey !== guideDrag.shift) {
+          guideDrag.start = s.margins[w]; guideDrag.x = e.clientX; guideDrag.y = e.clientY; guideDrag.shift = e.shiftKey;
+          return;
+        }
+        const wMm = fr.W / PM_HF_PT_PER_MM, hMm = fr.H / PM_HF_PT_PER_MM;
+        const other = w === 'left' ? s.margins.right : w === 'right' ? s.margins.left : 0;
+        const max = (w === 'left' || w === 'right') ? Math.max(0, wMm - other - 5) : Math.min(200, hMm / 2);
+        s.margins[w] = Math.round(Math.min(max, Math.max(0, guideDrag.start + d)) * 10) / 10;
+        syncControls();
+        drawSoon();
+        showTip(e, w);
+        return;
+      }
+      const which = guideAt(e);
+      pv.style.cursor = !which ? '' : (which === 'left' || which === 'right') ? 'ew-resize' : 'ns-resize';
+      if (which !== hotGuide) { hotGuide = which; drawSoon(); }
+    });
+    pv.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      const which = guideAt(e);
+      if (!which) return;
+      e.preventDefault();
+      // Bands keep their height while dragging (with room to grow), so the
+      // lines do not jump when a band would otherwise get taller.
+      const fr = lastGeom.fr, hb = bandHeights(fr);
+      frozenBands = { head: Math.min(fr.H / 2, hb.head + 72), foot: Math.min(fr.H / 2, hb.foot + 72) };
+      guideDrag = { id: e.pointerId, which, x: e.clientX, y: e.clientY, start: s.margins[which], shift: e.shiftKey };
+      try { pv.setPointerCapture(e.pointerId); } catch (_) {}
+      drawSoon();
+      showTip(e, which);
+    });
+    const endGuideDrag = (e) => {
+      if (!guideDrag || e.pointerId !== guideDrag.id) return;
+      guideDrag = null;
+      frozenBands = null;
+      tip.hidden = true;
+      hotGuide = guideAt(e);
+      try { pv.releasePointerCapture(e.pointerId); } catch (_) {}
+      drawSoon();
+    };
+    pv.addEventListener('pointerup', endGuideDrag);
+    pv.addEventListener('pointercancel', endGuideDrag);
+    pv.addEventListener('pointerleave', () => {
+      if (guideDrag) return;
+      pv.style.cursor = '';
+      if (hotGuide) { hotGuide = null; drawSoon(); }
+    });
+
     // Page raster for the bands at the preview's density (capped).
     async function ensureRaster() {
       const idx = previewIdx;
@@ -65750,6 +65951,7 @@ function pmHfRunDialog() {
       if (document.activeElement !== batesDigitsIn) batesDigitsIn.value = String(s.bates.digits);
       box.querySelectorAll('input[name="pmHfPages"]').forEach(r => { r.checked = r.value === pagesMode; });
       box.querySelectorAll('.pm-hf-slot').forEach(el => el.classList.toggle('pm-hf-target', el.dataset.slot === lastSlot));
+      updateInsertMarker();
     }
     function changed() { syncControls(); drawSoon(); }
 
@@ -65823,6 +66025,45 @@ function pmHfRunDialog() {
       el.value = s.texts[slot];
       el.addEventListener('input', () => { s.texts[slot] = el.value; errEl.textContent = ''; syncBatesFields(); drawSoon(); });
       el.addEventListener('focus', () => { lastSlot = slot; syncControls(); });
+      ['blur', 'keyup', 'mouseup', 'select', 'input'].forEach(ev => el.addEventListener(ev, updateInsertMarker));
+    });
+    // Where "Insert" will put a variable: the last text field used is
+    // outlined, and while the focus is elsewhere (a format list, a button)
+    // a blinking bar - or a band over selected text, which gets replaced -
+    // marks the exact spot in it.
+    let measureCtx = null;
+    function textX(el, upto) {
+      if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d');
+      const cs = getComputedStyle(el);
+      measureCtx.font = cs.font;
+      const w = measureCtx.measureText(el.value.slice(0, upto)).width;
+      return parseFloat(cs.paddingLeft) + parseFloat(cs.borderLeftWidth) + w - el.scrollLeft;
+    }
+    function updateInsertMarker() {
+      box.querySelectorAll('.pm-hf-slot-wrap').forEach(wrap => {
+        const el = wrap.querySelector('.pm-hf-slot'), mk = wrap.querySelector('.pm-hf-caret');
+        const on = wrap.dataset.slot === lastSlot && document.activeElement !== el;
+        wrap.classList.toggle('pm-hf-marked', on);
+        if (!on) return;
+        const a = el.selectionStart != null ? el.selectionStart : el.value.length;
+        const b = el.selectionEnd != null ? el.selectionEnd : a;
+        const maxX = el.clientWidth + parseFloat(getComputedStyle(el).borderLeftWidth) - 3;
+        const x1 = Math.min(maxX, Math.max(3, textX(el, a))), x2 = Math.min(maxX, Math.max(3, textX(el, b)));
+        mk.style.left = x1 + 'px';
+        mk.style.width = Math.max(2, x2 - x1) + 'px';
+        mk.classList.toggle('pm-hf-caret-range', b > a);
+      });
+    }
+    // Pointing at an inserter makes the target stand out.
+    function hintTarget(on) {
+      box.querySelectorAll('.pm-hf-slot-wrap').forEach(w => w.classList.toggle('pm-hf-hint', on && w.dataset.slot === lastSlot));
+    }
+    ['pmHfInsPage', 'pmHfInsDate', 'pmHfInsBates', 'pmHfPageFmt', 'pmHfDateFmt'].forEach(id => {
+      const el = $(id);
+      el.addEventListener('mouseenter', () => hintTarget(true));
+      el.addEventListener('mouseleave', () => hintTarget(false));
+      el.addEventListener('focus', () => hintTarget(true));
+      el.addEventListener('blur', () => hintTarget(false));
     });
     // A variable goes where the caret is in the last text field used.
     function insertVar(code) {
