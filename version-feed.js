@@ -1,15 +1,15 @@
 /* Auto-generated version feed for the About dialog. Do not edit by hand. */
 window.__PDF_MANAGER_VERSION_FEED__ = {
-  "build": "build-235",
-  "number": 235,
-  "commit": "c928472406dbe5b78a55c1661146a904fde4f491",
-  "shortCommit": "c928472",
-  "date": "2026-10-05T11:07:37Z",
+  "build": "build-236",
+  "number": 236,
+  "commit": "9f5f6eaf4f2b1acc74daf4ebeba0432c67af6cd5",
+  "shortCommit": "9f5f6ea",
+  "date": "2026-10-05T13:07:07Z",
   "downloadUrl": "https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_online.html",
   "offlineDownloadUrl": "https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_offline.html",
   "windowsVersion": "0.1.39",
   "windowsDownloadUrl": "https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.39",
   "linuxVersion": "0.1.39",
   "linuxDownloadUrl": "https://github.com/65WebDev/PDF-Manager/releases/tag/linux-v0.1.39",
-  "updatedAt": "2026-10-05T11:07:47.714Z"
+  "updatedAt": "2026-10-05T13:07:19.725Z"
 };
