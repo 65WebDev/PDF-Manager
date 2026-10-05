@@ -917,7 +917,8 @@
        above (fixed, coordinates from JS). Shown whenever a document with pages is
        open: it does not depend on the selection the way "Edit page" does.*/
     .edit-wrapper { position: relative; display: inline-flex; }
-    #watermarkBtn {
+    #watermarkBtn,
+    #headerFooterBtn {
       position: fixed;
       top: 0;
       left: 0;
@@ -927,21 +928,23 @@
       pointer-events: none;
       transition: opacity 0.15s, transform 0.15s, background 0.15s;
     }
-    #watermarkBtn.show::before {
+    #watermarkBtn.show::before,
+    #headerFooterBtn.show::before {
       content: '';
       position: absolute;
       left: 0; right: 0;
       top: -10px; height: 10px;
     }
-    #watermarkBtn.show {
+    #watermarkBtn.show,
+    #headerFooterBtn.show {
       opacity: 1;
       transform: translateY(0);
       pointer-events: auto;
     }
-    #watermarkBtn.show:disabled { opacity: 0.4; }
-    #watermarkBtn:hover:not(:disabled) { background: #3498db; }
-    #watermarkBtn svg { display: block; }
-    @media (pointer: coarse) { #watermarkBtn { display: none !important; } }
+    #watermarkBtn.show:disabled, #headerFooterBtn.show:disabled { opacity: 0.4; }
+    #watermarkBtn:hover:not(:disabled), #headerFooterBtn:hover:not(:disabled) { background: #3498db; }
+    #watermarkBtn svg, #headerFooterBtn svg { display: block; }
+    @media (pointer: coarse) { #watermarkBtn, #headerFooterBtn { display: none !important; } }
 
     /*Watermark dialog*/
     .pm-wm-overlay {
@@ -1083,6 +1086,70 @@
     .pm-wm-ok { border: none; background: #3498db; color: #fff; font-weight: bold; }
     .pm-wm-ok:hover { background: #2d86c3; }
     .pm-wm-cancel { border: 1px solid #ccc; background: #fff; color: #333; }
+    /*Header/footer dialog: options on top, the page's top and bottom
+       bands below (pmHfRunDialog). Reuses the watermark dialog's controls.*/
+    .pm-hf-box { width: 960px; }
+    .pm-hf-controls { width: auto; }
+    .pm-hf-box .pm-wm-label { width: 128px; }
+    .pm-hf-box .pm-hf-col-right .pm-wm-label { width: 96px; }
+    .pm-hf-grid { display: grid; grid-template-columns: 128px 1fr 1fr 1fr; gap: 6px; align-items: center; }
+    .pm-hf-colhead { color: #777; font-size: 12px; text-align: center; }
+    .pm-hf-slot-wrap { position: relative; display: block; min-width: 0; }
+    .pm-hf-grid .pm-hf-slot { width: 100%; min-width: 0; }
+    /*Where "Insert" goes (updateInsertMarker): a blinking bar at the caret of
+       the target field while the focus is elsewhere; a band over a selection.*/
+    .pm-hf-caret {
+      display: none; position: absolute; top: 5px; bottom: 5px; width: 2px;
+      background: #3498db; border-radius: 1px; pointer-events: none;
+      animation: pm-hf-blink 1s steps(1) infinite;
+    }
+    .pm-hf-caret.pm-hf-caret-range { background: rgba(52,152,219,0.35); animation: none; }
+    .pm-hf-slot-wrap.pm-hf-marked .pm-hf-caret { display: block; }
+    @keyframes pm-hf-blink { 50% { opacity: 0; } }
+    .pm-hf-slot-wrap.pm-hf-hint .pm-hf-slot { box-shadow: 0 0 0 3px rgba(52,152,219,0.45); }
+    .pm-hf-slot-wrap.pm-hf-hint .pm-hf-caret { animation: none; width: 3px; }
+    .pm-hf-drag-tip {
+      position: absolute; z-index: 5; pointer-events: none; white-space: nowrap;
+      padding: 3px 8px; border-radius: 6px; font-size: 12.5px;
+      background: rgba(44,62,80,0.94); color: #fff; box-shadow: 0 3px 10px rgba(0,0,0,0.3);
+    }
+    .pm-hf-controls input.pm-hf-slot.pm-hf-target { border-color: #3498db; box-shadow: 0 0 0 1px rgba(52,152,219,0.35); }
+    .pm-hf-fmt { width: 28px; min-width: 28px; padding: 0; }
+    #pmHfFont { flex: 1; min-width: 120px; }
+    .pm-hf-cols { display: flex; gap: 18px; }
+    .pm-hf-col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+    .pm-hf-col-left { flex: 1.45; }
+    .pm-hf-grow { flex: 1; min-width: 0; }
+    .pm-hf-controls input[type=date] {
+      border: 1px solid #bbb; border-radius: 6px; padding: 2px 6px; height: 28px; font-size: 13px;
+      box-sizing: border-box; background: #fff; color: #2c3e50;
+    }
+    /*Bates and margins: label / field pairs in a two-column grid.*/
+    .pm-hf-bates, .pm-hf-margins {
+      display: grid; grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr);
+      gap: 6px 8px; flex: 1; min-width: 0; align-items: center;
+    }
+    .pm-hf-bates label, .pm-hf-margins label { display: contents; }
+    .pm-hf-bates label > span, .pm-hf-margins label > span { color: #555; font-size: 13px; white-space: nowrap; }
+    #pmHfBatesPrefix, #pmHfBatesSuffix { width: 100%; min-width: 0; }
+    .pm-hf-bates .pm-wm-num, .pm-hf-margins .pm-wm-num { width: 100%; }
+    .pm-hf-bates .pm-wm-num input[type=number], .pm-hf-margins .pm-wm-num input[type=number] { flex: 1; width: 0; min-width: 0; }
+    .pm-hf-ins { align-self: center; }
+    #pmHfDateFmt { flex: 1.3; }
+    #pmHfRange { flex: 1; width: 0; min-width: 0; }
+    .pm-hf-col-right .pm-wm-pages label:last-child { display: flex; min-width: 0; }
+    .pm-hf-preview {
+      background: rgba(120,130,145,0.14); border-radius: 8px; padding: 12px; box-sizing: border-box;
+      display: flex; justify-content: center; flex: none;
+    }
+    .pm-hf-preview canvas { display: block; box-shadow: 0 2px 10px rgba(0,0,0,0.25); }
+    .pm-hf-help-pop { max-width: 420px; }
+    .pm-hf-help-pop code { background: rgba(52,152,219,0.12); border-radius: 4px; padding: 0 4px; }
+    html[data-theme="dark"] .pm-wm-box .pm-hf-controls input[type=date] { background: #1c2128 !important; border-color: #4a5058 !important; color-scheme: dark; }
+    @media (max-width: 900px) {
+      .pm-hf-cols { flex-direction: column; }
+      .pm-hf-box { width: auto; }
+    }
     @media (max-width: 900px) {
       .pm-wm-body { flex-direction: column; overflow-y: auto; }
       .pm-wm-controls { width: auto; overflow: visible; }
@@ -1232,6 +1299,7 @@
     #toggleDeletedBtn,
     #printSelectedBtn,
     #watermarkBtn,
+    #headerFooterBtn,
     .readmode-wrapper .mode-btn.rl-slot-popup {
       width: 42px;
       height: 42px;
@@ -1384,7 +1452,9 @@
        top menu for as long as the button itself is shown; the tooltip keeps
        the long text. Text and side come from pmPopCapsInit (data-pm-caption;
        .pm-pop-cap--left where the right side would run off the screen).
-       Inherits the button's fade-in, never takes the pointer.*/
+       Being part of the button, it fades in with it and takes the pointer
+       exactly as the button does (pointer-events inherited): pointing at it
+       keeps the popup open, clicking it clicks the button.*/
     .pm-pop-cap::after {
       content: attr(data-pm-caption);
       display: none;
@@ -1403,7 +1473,8 @@
       letter-spacing: normal;
       white-space: nowrap;
       box-shadow: 0 3px 10px rgba(0,0,0,0.35);
-      pointer-events: none;
+      pointer-events: inherit;
+      cursor: inherit;
     }
     .pm-pop-cap.pm-pop-cap--left::after { left: auto; right: calc(100% + 8px); }
     .pm-pop-cap.show:not(.rl-slot-main)::after { display: block; }
@@ -7044,7 +7115,7 @@
       }
       /* Beat .top-menu button / .icon-btn / .icons-mode .compact-btn fixed 42px.
          Ratios = natural size / 42 (22→0.524, 30→0.714, 26→0.619, 18→0.429). */
-      .top-menu .main-row.menu-shrink button:not(#fitWidthBtn):not(.img-save-btn):not(#printSelectedBtn):not(#watermarkBtn):not(#toggleDeletedBtn):not(.rl-slot-popup),
+      .top-menu .main-row.menu-shrink button:not(#fitWidthBtn):not(.img-save-btn):not(#printSelectedBtn):not(#watermarkBtn):not(#headerFooterBtn):not(#toggleDeletedBtn):not(.rl-slot-popup),
       .top-menu .main-row.menu-shrink label.icon-btn,
       .main-row.menu-shrink .compact-btn,
       .main-row.menu-shrink button.icon-btn,
@@ -7091,6 +7162,7 @@
       .top-menu .main-row.menu-shrink #toggleDeletedBtn,
       .top-menu .main-row.menu-shrink #printSelectedBtn,
       .top-menu .main-row.menu-shrink #watermarkBtn,
+      .top-menu .main-row.menu-shrink #headerFooterBtn,
       .top-menu .main-row.menu-shrink .readmode-wrapper .mode-btn.rl-slot-popup {
         width: var(--pm-menu-ctrl-h);
         height: var(--pm-menu-ctrl-h);
@@ -7533,6 +7605,15 @@
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
               <polyline points="14 2 14 8 20 8"/>
               <path d="M12 10.2c-2 2.5-3 4.2-3 5.5a3 3 0 0 0 6 0c0-1.3-1-3-3-5.5z" fill="#5dade2" stroke="none"/>
+            </svg>
+          </button>
+          <button id="headerFooterBtn" class="icon-btn" onclick="openHeaderFooterDialog()" disabled title="Колонтитулы" data-i18n-title="hfTitle">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="4" y="2" width="16" height="20" rx="2"/>
+              <line x1="7.5" y1="6" x2="16.5" y2="6" stroke="#5dade2" stroke-width="2.4"/>
+              <line x1="7.5" y1="18" x2="16.5" y2="18" stroke="#5dade2" stroke-width="2.4"/>
+              <line x1="8" y1="10.5" x2="16" y2="10.5" stroke-width="1.3" opacity="0.5"/>
+              <line x1="8" y1="13.5" x2="13" y2="13.5" stroke-width="1.3" opacity="0.5"/>
             </svg>
           </button>
         </div>
@@ -9364,6 +9445,19 @@
         newDocumentHint: 'Будет создан новый документ', openInNewTabs: 'Откроется в новых вкладках',
         tabClose: 'Закрыть вкладку', tabCloseOthers: 'Закрыть другие вкладки', tabCloseRight: 'Закрыть вкладки справа',
         tabRename: 'Переименовать', tabRenameTitle: 'Переименовать документ',
+        hfTitle: 'Колонтитулы', hfHeader: 'Верхний', hfFooter: 'Нижний',
+        hfLeft: 'Слева', hfCenter: 'По центру', hfRight: 'Справа',
+        hfPageNumber: 'Номер страницы', hfDate: 'Дата', hfBates: 'Нумерация Бейтса', hfInsert: 'Вставить',
+        hfBatesPrefix: 'Префикс', hfBatesSuffix: 'Суффикс', hfBatesStart: 'С номера', hfBatesDigits: 'Цифр',
+        hfMargins: 'Отступы, мм', hfMarginTop: 'Сверху', hfMarginBottom: 'Снизу', hfMarginLeft: 'Слева', hfMarginRight: 'Справа',
+        hfFmtPage: 'Страница {page}', hfFmtPageOf: 'Страница {page} из {pages}', hfFmtNumOf: '{page} из {pages}',
+        hfHelpVars: 'Переменные пишутся прямо в тексте в фигурных скобках — их можно переставлять и окружать любым текстом. Кнопки «Вставить» добавляют их туда, где стоит курсор.',
+        hfHelpPage: 'номер страницы и число страниц',
+        hfHelpDate: 'дата; D, DD — день, M, MM — месяц числом, MMM, MMMM — месяц словом, YY, YYYY — год',
+        hfHelpBates: 'номер Бейтса: перед скобками — префикс, в квадратных скобках — начальный номер (сколько цифр — такой длины номер), после них — суффикс',
+        hfMm: 'мм', hfHelpDrag: 'Линии отступов в превью можно перетаскивать мышью; с Shift — точнее.',
+        hfNoText: 'Введите текст хотя бы одного колонтитула',
+        hfApplying: 'Добавление колонтитулов…', hfApplyError: 'Не удалось добавить колонтитулы',
         watermarkTitle: 'Водяной знак', watermarkDefaultText: 'КОНФИДЕНЦИАЛЬНО',
         wmText: 'Текст', wmFont: 'Шрифт', wmBold: 'Жирный', wmItalic: 'Курсив', wmColor: 'Цвет',
         wmSize: 'Размер', wmTransparency: 'Прозрачность', wmRotation: 'Поворот',
@@ -9796,6 +9890,19 @@
         newDocumentHint: 'A new document will be created', openInNewTabs: 'Open in new tabs',
         tabClose: 'Close tab', tabCloseOthers: 'Close other tabs', tabCloseRight: 'Close tabs to the right',
         tabRename: 'Rename', tabRenameTitle: 'Rename document',
+        hfTitle: 'Header & footer', hfHeader: 'Header', hfFooter: 'Footer',
+        hfLeft: 'Left', hfCenter: 'Center', hfRight: 'Right',
+        hfPageNumber: 'Page number', hfDate: 'Date', hfBates: 'Bates numbering', hfInsert: 'Insert',
+        hfBatesPrefix: 'Prefix', hfBatesSuffix: 'Suffix', hfBatesStart: 'Start at', hfBatesDigits: 'Digits',
+        hfMargins: 'Margins, mm', hfMarginTop: 'Top', hfMarginBottom: 'Bottom', hfMarginLeft: 'Left', hfMarginRight: 'Right',
+        hfFmtPage: 'Page {page}', hfFmtPageOf: 'Page {page} of {pages}', hfFmtNumOf: '{page} of {pages}',
+        hfHelpVars: 'Variables are written right in the text in curly braces — move them and surround them with any text. The Insert buttons add them where the cursor is.',
+        hfHelpPage: 'page number and page count',
+        hfHelpDate: 'date; D, DD — day, M, MM — month as a number, MMM, MMMM — month as a word, YY, YYYY — year',
+        hfHelpBates: 'Bates number: the prefix before the brackets, the start number in square brackets (as many digits as the number should have), the suffix after them',
+        hfMm: 'mm', hfHelpDrag: 'Drag the margin lines in the preview with the mouse; hold Shift for finer steps.',
+        hfNoText: 'Enter the text of at least one header or footer',
+        hfApplying: 'Adding headers and footers…', hfApplyError: 'Could not add headers and footers',
         watermarkTitle: 'Watermark', watermarkDefaultText: 'CONFIDENTIAL',
         wmText: 'Text', wmFont: 'Font', wmBold: 'Bold', wmItalic: 'Italic', wmColor: 'Color',
         wmSize: 'Size', wmTransparency: 'Transparency', wmRotation: 'Rotation',
@@ -10228,6 +10335,19 @@
         newDocumentHint: 'Se creará un nuevo documento', openInNewTabs: 'Se abrirá en nuevas pestañas',
         tabClose: 'Cerrar pestaña', tabCloseOthers: 'Cerrar otras pestañas', tabCloseRight: 'Cerrar pestañas a la derecha',
         tabRename: 'Cambiar nombre', tabRenameTitle: 'Cambiar el nombre del documento',
+        hfTitle: 'Encabezado y pie', hfHeader: 'Encabezado', hfFooter: 'Pie',
+        hfLeft: 'Izquierda', hfCenter: 'Centro', hfRight: 'Derecha',
+        hfPageNumber: 'Número de página', hfDate: 'Fecha', hfBates: 'Numeración Bates', hfInsert: 'Insertar',
+        hfBatesPrefix: 'Prefijo', hfBatesSuffix: 'Sufijo', hfBatesStart: 'Empezar en', hfBatesDigits: 'Dígitos',
+        hfMargins: 'Márgenes, mm', hfMarginTop: 'Arriba', hfMarginBottom: 'Abajo', hfMarginLeft: 'Izquierda', hfMarginRight: 'Derecha',
+        hfFmtPage: 'Página {page}', hfFmtPageOf: 'Página {page} de {pages}', hfFmtNumOf: '{page} de {pages}',
+        hfHelpVars: 'Las variables se escriben en el propio texto entre llaves: puedes moverlas y rodearlas de cualquier texto. Los botones Insertar las añaden donde está el cursor.',
+        hfHelpPage: 'número de página y número de páginas',
+        hfHelpDate: 'fecha; D, DD — día, M, MM — mes en número, MMM, MMMM — mes en letras, YY, YYYY — año',
+        hfHelpBates: 'número Bates: el prefijo antes de los corchetes, el número inicial entre corchetes (con tantas cifras como deba tener el número), el sufijo después',
+        hfMm: 'mm', hfHelpDrag: 'Arrastra las líneas de margen en la vista previa con el ratón; con Shift, con más precisión.',
+        hfNoText: 'Escribe el texto de al menos un encabezado o pie',
+        hfApplying: 'Añadiendo encabezados y pies…', hfApplyError: 'No se pudieron añadir los encabezados y pies',
         watermarkTitle: 'Marca de agua', watermarkDefaultText: 'CONFIDENCIAL',
         wmText: 'Texto', wmFont: 'Fuente', wmBold: 'Negrita', wmItalic: 'Cursiva', wmColor: 'Color',
         wmSize: 'Tamaño', wmTransparency: 'Transparencia', wmRotation: 'Rotación',
@@ -10710,6 +10830,19 @@
         tabCloseOthers: '关闭其他标签页',
         tabCloseRight: '关闭右侧标签页',
         tabRename: '重命名',
+        hfTitle: '页眉和页脚', hfHeader: '页眉', hfFooter: '页脚',
+        hfLeft: '左', hfCenter: '中', hfRight: '右',
+        hfPageNumber: '页码', hfDate: '日期', hfBates: '贝茨编号', hfInsert: '插入',
+        hfBatesPrefix: '前缀', hfBatesSuffix: '后缀', hfBatesStart: '起始号', hfBatesDigits: '位数',
+        hfMargins: '边距（毫米）', hfMarginTop: '上', hfMarginBottom: '下', hfMarginLeft: '左', hfMarginRight: '右',
+        hfFmtPage: '第 {page} 页', hfFmtPageOf: '第 {page} 页，共 {pages} 页', hfFmtNumOf: '{page} / {pages}',
+        hfHelpVars: '变量直接以花括号写在文本中，可以移动并在其前后添加任意文字。“插入”按钮会将其插入光标所在位置。',
+        hfHelpPage: '页码和总页数',
+        hfHelpDate: '日期；D、DD — 日，M、MM — 数字月份，MMM、MMMM — 文字月份，YY、YYYY — 年',
+        hfHelpBates: '贝茨编号：方括号前为前缀，方括号内为起始编号（位数即编号长度），方括号后为后缀',
+        hfMm: '毫米', hfHelpDrag: '可用鼠标拖动预览中的边距线；按住 Shift 可更精确地移动。',
+        hfNoText: '请至少输入一个页眉或页脚的文本',
+        hfApplying: '正在添加页眉和页脚…', hfApplyError: '无法添加页眉和页脚',
         watermarkTitle: '水印', watermarkDefaultText: '机密',
         wmText: '文本', wmFont: '字体', wmBold: '粗体', wmItalic: '斜体', wmColor: '颜色',
         wmSize: '大小', wmTransparency: '透明度', wmRotation: '旋转',
@@ -11915,6 +12048,8 @@
       }
       const watermarkBtnEl = document.getElementById('watermarkBtn');
       if (watermarkBtnEl) watermarkBtnEl.disabled = baseDisabled || pdfDoc.getPageCount() === 0;
+      const headerFooterBtnEl = document.getElementById('headerFooterBtn');
+      if (headerFooterBtnEl) headerFooterBtnEl.disabled = baseDisabled || pdfDoc.getPageCount() === 0;
       saveBtn.disabled = baseDisabled;
       scaleSlider.disabled = baseDisabled;
       const fitWidthBtnEl = document.getElementById('fitWidthBtn');
@@ -12354,6 +12489,7 @@
         case 'restoreHelpBtn': return t('popCapRestoreHelp');
         case 'aboutBtn': return t('about');
         case 'watermarkBtn': return t('watermarkTitle');
+        case 'headerFooterBtn': return t('hfTitle');
         case 'printSelectedBtn': return t('printSelectedPages');
         case 'toggleDeletedBtn':
           return t(deletedPagesHidden ? 'popCapDeletedHidden' : 'popCapDeletedShown');
@@ -12381,7 +12517,7 @@
     }
     function pmPopCapsInit() {
       const btns = document.querySelectorAll(
-        '#logoMenuArea > button, .readmode-wrapper .mode-btn, #watermarkBtn, ' +
+        '#logoMenuArea > button, .readmode-wrapper .mode-btn, #watermarkBtn, #headerFooterBtn, ' +
         '#toggleDeletedBtn, #printSelectedBtn, .top-menu .img-save-btn');
       const mo = new MutationObserver((recs) => {
         new Set(recs.map(r => r.target)).forEach(pmPopCapUpdate);
@@ -34285,39 +34421,44 @@
       });
     })();
 
-    // "Watermark" under "Edit page" - the same pop-up as print-selected above.
+    // "Watermark" and "Headers and footers" under "Edit page" - the same
+    // pop-up as print-selected above, stacked one under the other.
     (function initWatermarkToggle() {
       if (isTouchDevice) return;
       const wrapper = document.querySelector('.edit-wrapper');
-      const btn = document.getElementById('watermarkBtn');
-      if (!wrapper || !btn || !editPageBtn) return;
+      const btns = ['watermarkBtn', 'headerFooterBtn'].map(id => document.getElementById(id)).filter(Boolean);
+      if (!wrapper || !btns.length || !editPageBtn) return;
       let hideTimer = null;
 
-      function positionWatermarkBtn() {
+      function positionPopupBtns() {
         const r = editPageBtn.getBoundingClientRect();
-        btn.style.left = Math.round(r.left) + 'px';
-        btn.style.top = Math.round(r.bottom + 6) + 'px';
+        let top = r.bottom + 6;
+        btns.forEach(btn => {
+          btn.style.left = Math.round(r.left) + 'px';
+          btn.style.top = Math.round(top) + 'px';
+          top += (btn.offsetHeight || r.height) + 6;
+        });
       }
       function show() {
         if (!pdfDoc) return;
         clearTimeout(hideTimer);
         pmTopPopupShowing(hideNow);
-        positionWatermarkBtn();
-        btn.classList.add('show');
+        positionPopupBtns();
+        btns.forEach(btn => btn.classList.add('show'));
       }
       function scheduleHide() {
         clearTimeout(hideTimer);
-        hideTimer = setTimeout(() => btn.classList.remove('show'), POPUP_BTN_HIDE_MS);
+        hideTimer = setTimeout(() => btns.forEach(btn => btn.classList.remove('show')), POPUP_BTN_HIDE_MS);
       }
-      function hideNow() { clearTimeout(hideTimer); btn.classList.remove('show'); }
+      function hideNow() { clearTimeout(hideTimer); btns.forEach(btn => btn.classList.remove('show')); }
       pmTopPopupHiders.add(hideNow);
-      [wrapper, editPageBtn, btn].forEach(el => {
+      [wrapper, editPageBtn, ...btns].forEach(el => {
         el.addEventListener('mouseenter', show);
         el.addEventListener('mouseleave', scheduleHide);
       });
-      btn.addEventListener('click', () => btn.classList.remove('show'));
+      btns.forEach(btn => btn.addEventListener('click', hideNow));
       window.addEventListener('resize', () => {
-        if (btn.classList.contains('show')) positionWatermarkBtn();
+        if (btns.some(btn => btn.classList.contains('show'))) positionPopupBtns();
       });
     })();
 
@@ -65026,6 +65167,1029 @@ function pmWmRunDialog() {
     loadPreviewPage();
     textIn.focus();
     textIn.select();
+  });
+}
+// ============================================================
+// HEADERS AND FOOTERS: up to three texts above the page content (left,
+// centre, right) and three below it. A text may hold variables written
+// right into it, so they can be moved and surrounded by any wording:
+//   {page} {pages} {date:DD.MM.YYYY} {bates}
+// Every distinct line is rendered once to a transparent PNG (any installed
+// font, as the watermark does) and drawn at the margins; lines that repeat
+// on several pages share one image. Coordinates are visual, as for the
+// watermark (pmWmPageFrame): the page as seen, in pt, y down.
+// ============================================================
+const PM_HF_STORAGE_KEY = 'pmHeaderFooterSettings';
+const PM_HF_SLOTS = ['hl', 'hc', 'hr', 'fl', 'fc', 'fr'];
+const PM_HF_SWATCHES = ['#000000', '#555555', '#1f4e8c', '#c0392b'];
+const PM_HF_PT_PER_MM = 72 / 25.4;
+const PM_HF_DATE_FORMATS = ['DD.MM.YYYY', 'D.M.YYYY', 'DD.MM.YY', 'DD.MM', 'M/D', 'M.D', 'M-D-YY',
+  'MM/DD/YYYY', 'YYYY-MM-DD', 'D MMMM YYYY', 'D MMM YYYY', 'MMMM YYYY'];
+let pmHfDialogOpen = false;
+
+function pmHfPageFormats() {
+  return [t('hfFmtPage'), t('hfFmtPageOf'), '{page}', t('hfFmtNumOf'), '{page}/{pages}', '- {page} -'];
+}
+
+function pmHfDefaults() {
+  return {
+    texts: { hl: '', hc: '', hr: '', fl: '', fc: t('hfFmtPageOf'), fr: '' },
+    font: PM_WM_ROBOTO_FAMILY,
+    size: 10,
+    bold: false,
+    italic: false,
+    underline: false,
+    color: '#000000',
+    margins: { top: 10, bottom: 10, left: 15, right: 15 },   // mm
+    bates: { prefix: '', suffix: '', start: 1, digits: 6 },
+    pageFormat: 1,
+    dateFormat: 'DD.MM.YYYY'
+  };
+}
+
+function pmHfSanitize(s) {
+  const d = pmHfDefaults();
+  const out = Object.assign({}, d, s || {});
+  const texts = Object.assign({}, d.texts, (s && s.texts) || {});
+  out.texts = {};
+  PM_HF_SLOTS.forEach(k => { out.texts[k] = typeof texts[k] === 'string' ? texts[k] : ''; });
+  out.font = typeof out.font === 'string' && out.font ? out.font : d.font;
+  out.size = pmWmClampNum(out.size, 4, 72, d.size);
+  out.bold = !!out.bold;
+  out.italic = !!out.italic;
+  out.underline = !!out.underline;
+  out.color = /^#[0-9a-f]{6}$/i.test(out.color || '') ? out.color : d.color;
+  const m = Object.assign({}, d.margins, (s && s.margins) || {});
+  out.margins = {
+    top: pmWmClampNum(m.top, 0, 200, d.margins.top), bottom: pmWmClampNum(m.bottom, 0, 200, d.margins.bottom),
+    left: pmWmClampNum(m.left, 0, 200, d.margins.left), right: pmWmClampNum(m.right, 0, 200, d.margins.right)
+  };
+  const b = Object.assign({}, d.bates, (s && s.bates) || {});
+  out.bates = {
+    prefix: typeof b.prefix === 'string' ? b.prefix : '', suffix: typeof b.suffix === 'string' ? b.suffix : '',
+    start: Math.round(pmWmClampNum(b.start, 0, 999999999, 1)), digits: Math.round(pmWmClampNum(b.digits, 1, 12, 6))
+  };
+  out.pageFormat = Math.round(pmWmClampNum(out.pageFormat, 0, pmHfPageFormats().length - 1, d.pageFormat));
+  out.dateFormat = PM_HF_DATE_FORMATS.includes(out.dateFormat) ? out.dateFormat : d.dateFormat;
+  return out;
+}
+
+function pmHfLoadSettings() {
+  try {
+    const raw = localStorage.getItem(PM_HF_STORAGE_KEY);
+    if (raw) return pmHfSanitize(JSON.parse(raw));
+  } catch (_) {}
+  return pmHfSanitize(null);
+}
+function pmHfStoreSettings(s) {
+  try { localStorage.setItem(PM_HF_STORAGE_KEY, JSON.stringify(s)); } catch (_) {}
+}
+
+function pmHfIntlLocale() {
+  return { ru: 'ru-RU', en: 'en-US', es: 'es-ES', zh: 'zh-CN' }[pmLocale] || 'ru-RU';
+}
+// A month name as it reads in this format: next to a day number in the
+// form a date takes ("5 октября"), alone in the standalone one ("октябрь").
+function pmHfMonthName(date, long, withDay) {
+  const loc = pmHfIntlLocale();
+  const month = long ? 'long' : 'short';
+  try {
+    if (withDay) {
+      const part = new Intl.DateTimeFormat(loc, { day: 'numeric', month }).formatToParts(date).find(p => p.type === 'month');
+      if (part) return part.value;
+    }
+    return new Intl.DateTimeFormat(loc, { month }).format(date);
+  } catch (_) {
+    return String(date.getMonth() + 1);
+  }
+}
+// D DD - day, M MM - month as a number, MMM MMMM - month as a word,
+// YY YYYY - year; anything else is kept as written.
+function pmHfFormatDate(date, fmt) {
+  const pad = (n) => String(n).padStart(2, '0');
+  const withDay = /D/.test(fmt);
+  return String(fmt).replace(/YYYY|YY|MMMM|MMM|MM|M|DD|D/g, (tok) => {
+    switch (tok) {
+      case 'YYYY': return String(date.getFullYear());
+      case 'YY': return pad(date.getFullYear() % 100);
+      case 'MMMM': return pmHfMonthName(date, true, withDay);
+      case 'MMM': return pmHfMonthName(date, false, withDay);
+      case 'MM': return pad(date.getMonth() + 1);
+      case 'M': return String(date.getMonth() + 1);
+      case 'DD': return pad(date.getDate());
+      default: return String(date.getDate());
+    }
+  });
+}
+// Bates settings written into the code itself: {bates:ABC-[000001]-X} -
+// prefix, then the start number in square brackets (as many digits as the
+// number should have), then the suffix. Bare {bates} uses the dialog's.
+function pmHfParseBatesArg(arg) {
+  const m = /^([^\[\]]*)\[(\d{1,12})\]([^\[\]]*)$/.exec(String(arg));
+  return m ? { prefix: m[1], start: parseInt(m[2], 10), digits: m[2].length, suffix: m[3] } : null;
+}
+function pmHfBatesCode(b) {
+  const clean = (v) => String(v || '').replace(/[[\]{}]/g, '');
+  return '{bates:' + clean(b.prefix) + '[' + String(b.start).padStart(b.digits, '0') + ']' + clean(b.suffix) + '}';
+}
+function pmHfBates(b, k) {
+  return b.prefix + String(b.start + k).padStart(b.digits, '0') + b.suffix;
+}
+// The variables of one line for one page; anything unknown stays as typed.
+// ctx: { page, pages, batesIndex, date }
+function pmHfExpand(text, s, ctx) {
+  return String(text || '').replace(/\{(page|pages|bates|date)(?::([^}]*))?\}/g, (all, name, arg) => {
+    if (name === 'page') return String(ctx.page);
+    if (name === 'pages') return String(ctx.pages);
+    if (name === 'bates') {
+      const b = arg == null ? s.bates : pmHfParseBatesArg(arg);
+      return b ? pmHfBates(b, ctx.batesIndex) : all;   // malformed: left as typed
+    }
+    return pmHfFormatDate(ctx.date, arg || 'DD.MM.YYYY');
+  });
+}
+
+// One line of text as a transparent canvas. The box spans the font's own
+// ascent and descent (not the glyphs'), so the left, centre and right texts
+// of a row share one baseline. wPt is the advance width; padPt of spare
+// room each side keeps italic overhangs.
+function pmHfTextFont(s, px) {
+  return (s.italic ? 'italic ' : '') + (s.bold ? 'bold ' : '') + px + 'px ' + pmWmFontCss(s.font) + ', sans-serif';
+}
+let pmHfMeasureCtx = null;
+function pmHfMetrics(s, text) {
+  const k = PM_WM_PX_PER_PT;
+  if (!pmHfMeasureCtx) pmHfMeasureCtx = document.createElement('canvas').getContext('2d');
+  const ctx = pmHfMeasureCtx;
+  ctx.font = pmHfTextFont(s, s.size * k);
+  const m = ctx.measureText(text);
+  const fin = (v, dflt) => (Number.isFinite(v) && v > 0 ? v : dflt);
+  return {
+    w: m.width / k,
+    asc: fin(m.fontBoundingBoxAscent, s.size * k * 0.92) / k,
+    desc: fin(m.fontBoundingBoxDescent, s.size * k * 0.24) / k,
+    pad: s.size * 0.25
+  };
+}
+// cpu: a canvas kept in main memory - the pieces that get PNG-encoded are
+// read back at once, which from a GPU canvas costs a round trip each.
+function pmHfRenderLine(s, text, pxPerPt, cpu) {
+  if (!text) return null;
+  const mt = pmHfMetrics(s, text);
+  const wPt = mt.w + mt.pad * 2, hPt = mt.asc + mt.desc;
+  let k = pxPerPt;
+  const fit = Math.min(1, 8192 / (wPt * k), 4096 / (hPt * k));
+  if (fit < 1) k *= fit;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.ceil(wPt * k));
+  canvas.height = Math.max(1, Math.ceil(hPt * k));
+  const ctx = canvas.getContext('2d', cpu ? { willReadFrequently: true } : undefined);
+  ctx.font = pmHfTextFont(s, s.size * k);
+  ctx.fillStyle = s.color;
+  ctx.textBaseline = 'alphabetic';
+  ctx.fillText(text, mt.pad * k, mt.asc * k, mt.w * k);
+  if (s.underline) {
+    const th = Math.max(1, s.size * 0.06 * k);
+    ctx.fillRect(mt.pad * k, mt.asc * k + s.size * 0.1 * k, mt.w * k, th);
+  }
+  return { canvas, wPt, hPt, padPt: mt.pad, ascPt: mt.asc, textWPt: mt.w };
+}
+// A line split into pieces to draw: the wording that reads the same on
+// every page as one piece, the values that change from page to page
+// ({page}, {bates}) one character per piece - so a 300-page run needs a
+// few dozen images instead of one or two per page. dx: where a piece
+// starts, pt from the line's start; w: the line's advance width; null for
+// a line with nothing to show. widths: an optional cache of piece widths.
+function pmHfLayoutLine(template, s, ctx, widths) {
+  const re = /\{(page|pages|bates|date)(?::([^}]*))?\}/g;
+  const parts = [];
+  let buf = '', last = 0, m;
+  while ((m = re.exec(String(template || '')))) {
+    buf += template.slice(last, m.index);
+    last = re.lastIndex;
+    const val = pmHfExpand(m[0], s, ctx);
+    if (val === m[0] || (m[1] !== 'page' && m[1] !== 'bates')) { buf += val; continue; }
+    if (buf) parts.push(buf);
+    buf = '';
+    for (const ch of val) parts.push(ch);
+  }
+  buf += String(template || '').slice(last);
+  if (buf) parts.push(buf);
+  // Trailing spaces of the line do not count (nor move a right-aligned line).
+  while (parts.length && !parts[parts.length - 1].trim()) parts.pop();
+  if (parts.length) parts[parts.length - 1] = parts[parts.length - 1].replace(/\s+$/, '');
+  if (!parts.join('').trim()) return null;
+  const widthOf = (t) => {
+    if (!widths) return pmHfMetrics(s, t).w;
+    let w = widths.get(t);
+    if (w === undefined) { w = pmHfMetrics(s, t).w; widths.set(t, w); }
+    return w;
+  };
+  const pieces = [];
+  let x = 0;
+  for (const text of parts) {
+    // Blank pieces only matter for the underline.
+    if (text.trim() || s.underline) pieces.push({ text, dx: x });
+    x += widthOf(text);
+  }
+  return { pieces, w: x };
+}
+// Where a line starts (x of its text) and the top of its box, visual pt.
+function pmHfLineX(slot, w, W, s) {
+  const mm = PM_HF_PT_PER_MM;
+  const left = s.margins.left * mm, right = s.margins.right * mm;
+  if (slot[1] === 'l') return left;
+  if (slot[1] === 'r') return W - right - w;
+  return (left + (W - right)) / 2 - w / 2;
+}
+function pmHfLineTop(slot, hPt, H, s) {
+  const mm = PM_HF_PT_PER_MM;
+  return slot[0] === 'h' ? s.margins.top * mm : H - s.margins.bottom * mm - hPt;
+}
+
+// Page numbers count the pages that stay (those marked for deletion are
+// dropped on save); Bates numbers count the pages the texts go on.
+function pmHfPageContexts(indices, s, date) {
+  const count = pdfDoc.getPageCount();
+  const kept = [];
+  for (let i = 0; i < count; i++) if (!markedForDeletion.has(i)) kept.push(i);
+  const pos = new Map(kept.map((idx, i) => [idx, i + 1]));
+  const out = new Map();
+  indices.forEach((idx, k) => out.set(idx, { page: pos.get(idx) || idx + 1, pages: kept.length, batesIndex: k, date }));
+  return out;
+}
+
+async function pmHfApply(s, indices, date) {
+  if (!pdfDoc || !indices.length) return false;
+  const ctxs = pmHfPageContexts(indices, s, date);
+  // Line layouts per page, then one PNG per distinct piece.
+  const plan = [];
+  const pieces = new Map();
+  const widths = new Map();
+  for (const idx of indices) {
+    const items = [];
+    PM_HF_SLOTS.forEach(slot => {
+      const L = pmHfLayoutLine(s.texts[slot], s, ctxs.get(idx), widths);
+      if (!L) return;
+      L.pieces.forEach(p => { if (!pieces.has(p.text)) pieces.set(p.text, null); });
+      items.push({ slot, L });
+    });
+    if (items.length) plan.push({ idx, items });
+  }
+  if (!plan.length) return false;
+  showLoadingDeferred(t('hfApplying'), 300);
+  let claimed = false;
+  let bytes = null;
+  const done = [];
+  try {
+    for (const text of pieces.keys()) {
+      const r = pmHfRenderLine(s, text, PM_WM_PX_PER_PT, true);
+      pieces.set(text, r ? { r, png: await pmWmCanvasToBytes(r.canvas, 'image/png') } : null);
+    }
+    const hPt = pmHfMetrics(s, '0');
+    const boxH = hPt.asc + hPt.desc;
+    claimed = await peClaimLivePdfDocWriter();
+    const docRef = pdfDoc;
+    if (!docRef) return false;
+    const embedded = new Map();
+    for (const [text, piece] of pieces) {
+      if (piece) embedded.set(text, await docRef.embedPng(piece.png));
+    }
+    const count = docRef.getPageCount();
+    for (const { idx, items } of plan) {
+      if (idx < 0 || idx >= count) continue;
+      const page = docRef.getPage(idx);
+      const { rot, full, W, H } = pmWmPageFrame(page);
+      peFreshContentStream(page);
+      for (const { slot, L } of items) {
+        const x0 = pmHfLineX(slot, L.w, W, s);
+        const top = pmHfLineTop(slot, boxH, H, s);
+        for (const p of L.pieces) {
+          const piece = pieces.get(p.text);
+          if (!piece) continue;
+          const r = piece.r;
+          const lx = full.x + x0 + p.dx - r.padPt, ly = full.y + (H - top - r.hPt);
+          const a = peRotatePointAround(lx, ly, full.x, full.y, rot);
+          page.drawImage(embedded.get(p.text), {
+            x: a.x, y: a.y, width: r.wPt, height: r.hPt, rotate: PDFLib.degrees(rot)
+          });
+        }
+      }
+      done.push(idx);
+    }
+    if (pdfDoc !== docRef || !done.length) return false;
+    bytes = new Uint8Array(await docRef.save());
+  } catch (err) {
+    console.error(err);
+    alert(t('hfApplyError') + ': ' + (err && err.message || err));
+    return false;
+  } finally {
+    if (claimed) pdfDocCriticalWriterActive = false;
+    hideLoading();
+  }
+
+  originalFileBytes = bytes;
+  const marked = [...markedForDeletion].sort((x, y) => x - y);
+  const historyBytes = bytes.slice();
+  historyCommitChain = historyCommitChain
+    .then(() => commitHistoryStep(Promise.resolve(historyBytes), marked, done, { lazyPages: true }))
+    .catch(e => console.warn('history commit error', e));
+  documentDirty = true;
+  if (typeof updateInfo === 'function') updateInfo();
+  if (typeof updateStickyFileBar === 'function') updateStickyFileBar();
+  if (typeof pmOnDocumentDirtyChanged === 'function') pmOnDocumentDirtyChanged();
+  await pmWmRefreshPageImages(bytes, done);
+  return true;
+}
+
+async function openHeaderFooterDialog() {
+  if (pmHfDialogOpen || pmWmDialogOpen || !pdfDoc || isLoading || pdfDoc.getPageCount() === 0) return;
+  if (typeof pmPageEditorOpen === 'function' && pmPageEditorOpen()) return;
+  pmHfDialogOpen = true;
+  try {
+    await pmHfRunDialog();
+  } finally {
+    pmHfDialogOpen = false;
+  }
+}
+
+function pmHfRunDialog() {
+  return new Promise((resolve) => {
+    const s = pmHfLoadSettings();
+    const pageCount = pdfDoc.getPageCount();
+    const selected = [...selectedPages].filter(i => !markedForDeletion.has(i) && i < pageCount).sort((a, b) => a - b);
+    let pagesMode = 'all';
+    let rangeText = '';
+    let previewIdx = -1;
+    let previewRaster = null;      // { idx, canvas, pxPerPt }
+    let previewToken = 0;
+    const rasterCache = new Map();
+    let lastSlot = 'fc';            // where "Insert" puts a variable
+    let busy = false;
+    const esc = escapeHtml;
+    // A date variable always gives the current date.
+    const dateOf = () => new Date();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay-active pm-wm-overlay';
+    const box = document.createElement('div');
+    box.className = 'pm-modal-box pm-wm-box pm-hf-box';
+    box.setAttribute('role', 'dialog');
+    const slotInput = (k, ph) => `<span class="pm-hf-slot-wrap" data-slot="${k}"><input type="text" class="pm-hf-slot" data-slot="${k}" placeholder="${esc(ph)}" spellcheck="false" autocomplete="off"><span class="pm-hf-caret" aria-hidden="true"></span></span>`;
+    box.innerHTML = `
+      <div class="pm-wm-head">
+        <div class="pm-wm-title">${esc(t('hfTitle'))}</div>
+        <button type="button" class="pm-wm-help" id="pmHfHelp" aria-expanded="false">?</button>
+      </div>
+      <div class="pm-wm-help-pop pm-hf-help-pop" id="pmHfHelpPop" hidden>
+        <div>${esc(t('hfHelpVars'))}</div>
+        <div><code>{page}</code>, <code>{pages}</code> — ${esc(t('hfHelpPage'))}</div>
+        <div><code>{date:DD.MM.YYYY}</code> — ${esc(t('hfHelpDate'))}</div>
+        <div><code>{bates:ABC-[000001]}</code> — ${esc(t('hfHelpBates'))}</div>
+        <div>${esc(t('hfHelpDrag'))}</div>
+      </div>
+      <div class="pm-wm-controls pm-hf-controls">
+        <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('wmFont'))}</span>
+          <select id="pmHfFont"></select>
+          <span class="pm-wm-size-num" title="pt">${pmWmNumField('pmHfSize', 4, 72, 0.5)}</span><span class="pm-wm-unit">pt</span>
+          <button type="button" class="pm-wm-tbtn pm-hf-fmt" id="pmHfBold" title="${esc(t('wmBold'))}"><b>${esc(t('peBoldLetter'))}</b></button>
+          <button type="button" class="pm-wm-tbtn pm-hf-fmt" id="pmHfItalic" title="${esc(t('wmItalic'))}"><i>${esc(t('peItalicLetter'))}</i></button>
+          <button type="button" class="pm-wm-tbtn pm-hf-fmt" id="pmHfUnderline" title="${esc(t('peUnderline'))}"><u>${esc(t('peUnderlineLetter'))}</u></button>
+          <input type="color" id="pmHfColor" title="${esc(t('wmColor'))}">
+          ${PM_HF_SWATCHES.map(c => `<button type="button" class="pm-wm-swatch" data-color="${c}" style="background:${c}" title="${c}"></button>`).join('')}
+        </div>
+        <hr class="pm-wm-sep">
+        <div class="pm-hf-cols">
+          <div class="pm-hf-col pm-hf-col-left">
+            <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('hfPageNumber'))}</span>
+              <select id="pmHfPageFmt" class="pm-hf-grow"></select>
+              <button type="button" class="pm-wm-tbtn" id="pmHfInsPage">${esc(t('hfInsert'))}</button>
+            </div>
+            <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('hfDate'))}</span>
+              <select id="pmHfDateFmt" class="pm-hf-grow"></select>
+              <button type="button" class="pm-wm-tbtn" id="pmHfInsDate">${esc(t('hfInsert'))}</button>
+            </div>
+            <div class="pm-wm-row pm-wm-row-top"><span class="pm-wm-label">${esc(t('hfBates'))}</span>
+              <div class="pm-hf-bates">
+                <label><span>${esc(t('hfBatesPrefix'))}</span><input type="text" id="pmHfBatesPrefix" spellcheck="false" autocomplete="off"></label>
+                <label><span>${esc(t('hfBatesStart'))}</span>${pmWmNumField('pmHfBatesStart', 0, 999999999, 1)}</label>
+                <label><span>${esc(t('hfBatesSuffix'))}</span><input type="text" id="pmHfBatesSuffix" spellcheck="false" autocomplete="off"></label>
+                <label><span>${esc(t('hfBatesDigits'))}</span>${pmWmNumField('pmHfBatesDigits', 1, 12, 1)}</label>
+              </div>
+              <button type="button" class="pm-wm-tbtn pm-hf-ins" id="pmHfInsBates">${esc(t('hfInsert'))}</button>
+            </div>
+          </div>
+          <div class="pm-hf-col pm-hf-col-right">
+            <div class="pm-wm-row pm-wm-row-top"><span class="pm-wm-label">${esc(t('wmPages'))}</span>
+              <div class="pm-wm-pages">
+                <div class="pm-wm-pages-line">
+                  <label><input type="radio" name="pmHfPages" value="all"> ${esc(t('wmPagesAll', { n: pageCount }))}</label>
+                  <label><input type="radio" name="pmHfPages" value="selected"${selected.length ? '' : ' disabled'}> ${esc(t('wmPagesSelected', { n: selected.length }))}</label>
+                </div>
+                <label><input type="radio" name="pmHfPages" value="range"> ${esc(t('wmPagesRange'))}
+                  <input type="text" id="pmHfRange" placeholder="${esc(t('wmRangePlaceholder'))}" spellcheck="false" autocomplete="off"></label>
+              </div>
+            </div>
+            <div class="pm-wm-row pm-wm-row-top"><span class="pm-wm-label">${esc(t('hfMargins'))}</span>
+              <div class="pm-hf-margins">
+                <label><span>${esc(t('hfMarginTop'))}</span>${pmWmNumField('pmHfMTop', 0, 200, 1)}</label>
+                <label><span>${esc(t('hfMarginBottom'))}</span>${pmWmNumField('pmHfMBottom', 0, 200, 1)}</label>
+                <label><span>${esc(t('hfMarginLeft'))}</span>${pmWmNumField('pmHfMLeft', 0, 200, 1)}</label>
+                <label><span>${esc(t('hfMarginRight'))}</span>${pmWmNumField('pmHfMRight', 0, 200, 1)}</label>
+              </div>
+            </div>
+          </div>
+        </div>
+        <hr class="pm-wm-sep">
+        <div class="pm-hf-grid">
+          <span></span><span class="pm-hf-colhead">${esc(t('hfLeft'))}</span><span class="pm-hf-colhead">${esc(t('hfCenter'))}</span><span class="pm-hf-colhead">${esc(t('hfRight'))}</span>
+          <span class="pm-wm-label">${esc(t('hfHeader'))}</span>${slotInput('hl', t('hfHeader'))}${slotInput('hc', t('hfHeader'))}${slotInput('hr', t('hfHeader'))}
+          <span class="pm-wm-label">${esc(t('hfFooter'))}</span>${slotInput('fl', t('hfFooter'))}${slotInput('fc', t('hfFooter'))}${slotInput('fr', t('hfFooter'))}
+        </div>
+      </div>
+      <div class="pm-hf-preview" id="pmHfPreviewBox"><canvas id="pmHfPreview"></canvas></div>
+      <div class="pm-wm-error" id="pmHfError"></div>
+      <div class="pm-wm-actions">
+        <button type="button" class="pm-wm-ok" id="pmHfOk">${esc(t('wmApply'))}</button>
+        <button type="button" class="pm-wm-cancel" id="pmHfCancel">${esc(t('wmCancel'))}</button>
+      </div>`;
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    const $ = (id) => box.querySelector('#' + id);
+    const slotEls = {};
+    box.querySelectorAll('.pm-hf-slot').forEach(el => { slotEls[el.dataset.slot] = el; });
+    const fontSel = $('pmHfFont'), sizeIn = $('pmHfSize');
+    const boldBtn = $('pmHfBold'), italicBtn = $('pmHfItalic'), underBtn = $('pmHfUnderline'), colorIn = $('pmHfColor');
+    const pageFmtSel = $('pmHfPageFmt'), dateFmtSel = $('pmHfDateFmt');
+    const batesPrefixIn = $('pmHfBatesPrefix'), batesSuffixIn = $('pmHfBatesSuffix');
+    const batesStartIn = $('pmHfBatesStart'), batesDigitsIn = $('pmHfBatesDigits');
+    const mIn = { top: $('pmHfMTop'), bottom: $('pmHfMBottom'), left: $('pmHfMLeft'), right: $('pmHfMRight') };
+    const rangeIn = $('pmHfRange'), errEl = $('pmHfError');
+    const pv = $('pmHfPreview'), pvBox = $('pmHfPreviewBox');
+    const helpBtn = $('pmHfHelp'), helpPop = $('pmHfHelpPop');
+
+    // ---- page targets --------------------------------------------------
+    function targetIndices() {
+      let list;
+      if (pagesMode === 'selected') list = selected.slice();
+      else if (pagesMode === 'range') list = pmWmParseRange(rangeText, pageCount) || [];
+      else { list = []; for (let i = 0; i < pageCount; i++) list.push(i); }
+      return list.filter(i => !markedForDeletion.has(i));
+    }
+
+    // ---- option lists showing what each format gives -----------------------
+    function fillFormatLists() {
+      const sample = { page: 1, pages: Math.max(1, pageCount - markedForDeletion.size), batesIndex: 0, date: dateOf() };
+      pageFmtSel.innerHTML = pmHfPageFormats().map((f, i) =>
+        `<option value="${i}">${esc(pmHfExpand(f, s, sample))}</option>`).join('');
+      pageFmtSel.value = String(s.pageFormat);
+      dateFmtSel.innerHTML = PM_HF_DATE_FORMATS.map(f =>
+        `<option value="${esc(f)}" title="${esc(f)}">${esc(pmHfFormatDate(sample.date, f))}</option>`).join('');
+      dateFmtSel.value = s.dateFormat;
+    }
+
+    // ---- preview: the top and the bottom band of the page -----------------
+    // Each band reaches a little past the farther of its text and margin, so
+    // the space the text keeps from the edge shows; the middle is cut out.
+    // Drawn in two layers so typing stays instant: the page bands with the
+    // margin guides (redrawn only when the page, size or margins
+    // change) and the texts on top (each line rendered once per look).
+    const GAP_CSS = 22;
+    // Canvas pixels the preview and the page raster may take (zoomed in on a
+    // large page with a HiDPI screen they would otherwise run to tens of
+    // millions of pixels, and every keystroke paid for all of them).
+    const PREVIEW_MAX_PX = 3e6, RASTER_MAX_PX = 9e6;
+    function frameFor(idx) {
+      try { return pmWmPageFrame(pdfDoc.getPage(idx)); } catch (_) { return null; }
+    }
+    // Grows in 36pt steps rather than with every millimetre of margin: a
+    // new height means new canvases, which would make each step of a
+    // margin arrow redraw everything.
+    let frozenBands = null;   // kept while a margin guide is dragged
+    function bandHeights(fr) {
+      if (frozenBands) return frozenBands;
+      const mm = PM_HF_PT_PER_MM;
+      const lineH = s.size * 1.2;
+      const fit = (need) => Math.min(fr.H / 2, Math.max(72, Math.ceil(need / 36) * 36));
+      return { head: fit(s.margins.top * mm + lineH + 18), foot: fit(s.margins.bottom * mm + lineH + 18) };
+    }
+    let boxW = 0;   // the preview box's inner width, read on open and on resize only
+    function readBoxWidth() { boxW = Math.max(200, pvBox.getBoundingClientRect().width - 26); }
+    function cssPerPt(fr) {
+      if (!boxW) readBoxWidth();
+      return boxW / fr.W;
+    }
+    function geometry(fr) {
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const css = cssPerPt(fr);
+      const { head, foot } = bandHeights(fr);
+      let k = css * dpr;                           // canvas px per pt
+      const area = fr.W * (head + foot) * k * k;
+      if (area > PREVIEW_MAX_PX) k *= Math.sqrt(PREVIEW_MAX_PX / area);
+      const gap = Math.round(GAP_CSS * k / css);
+      const w = Math.round(fr.W * k), hh = Math.round(head * k), fh = Math.round(foot * k);
+      return { css, k, head, foot, gap, w, hh, fh, cssW: Math.round(fr.W * css), cssH: Math.round((head + foot) * css + GAP_CSS) };
+    }
+    let lastGeom = null;   // { fr, g } of the last draw, for pointing at guides
+    let base = null;   // { key, canvas } - page bands and guides
+    function baseLayer(fr, g) {
+      const rasterId = (previewRaster && previewRaster.idx === previewIdx) ? previewRaster.pxPerPt : 0;
+      const key = [previewIdx, rasterId, g.w, g.hh, g.gap, g.fh, g.k].join('|');
+      if (base && base.key === key) return base.canvas;
+      const c = (base && base.canvas.width === g.w && base.canvas.height === g.hh + g.gap + g.fh)
+        ? base.canvas : document.createElement('canvas');
+      c.width = g.w; c.height = g.hh + g.gap + g.fh;
+      const ctx = c.getContext('2d');
+      const unit = Math.max(1, g.k / g.css);
+      const band = (y0, srcTopPt, hPt, hPx) => {
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, y0, g.w, hPx);
+        if (rasterId) {
+          const rk = previewRaster.pxPerPt;
+          ctx.drawImage(previewRaster.canvas, 0, srcTopPt * rk, fr.W * rk, hPt * rk, 0, y0, g.w, hPx);
+        }
+      };
+      band(0, 0, g.head, g.hh);
+      band(g.hh + g.gap, fr.H - g.foot, g.foot, g.fh);
+      ctx.save();
+      ctx.lineWidth = unit;
+      // The cut between the bands.
+      ctx.strokeStyle = 'rgba(120,130,145,0.65)';
+      ctx.setLineDash([4 * unit, 4 * unit]);
+      [g.hh + 0.5, g.hh + g.gap - 0.5].forEach(y => { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(g.w, y); ctx.stroke(); });
+      ctx.restore();
+      base = { key, canvas: c };
+      return c;
+    }
+    // Margin guides, straight onto the preview (cheap lines, no new layer).
+    // The one under the pointer or being dragged turns solid and bolder.
+    let hotGuide = null;
+    function drawGuides(ctx, fr, g) {
+      const mm = PM_HF_PT_PER_MM, k = g.k, m = s.margins, unit = Math.max(1, g.k / g.css);
+      const lines = {
+        left: [['v', Math.round(m.left * mm * k) + 0.5]],
+        right: [['v', Math.round((fr.W - m.right * mm) * k) + 0.5]],
+        top: [['h', Math.round(m.top * mm * k) + 0.5]],
+        bottom: [['h', Math.round(g.hh + g.gap + (g.foot - m.bottom * mm) * k) + 0.5]]
+      };
+      const stroke = (which) => {
+        ctx.beginPath();
+        lines[which].forEach(([dir, p]) => {
+          if (dir === 'h') { ctx.moveTo(0, p); ctx.lineTo(g.w, p); return; }
+          ctx.moveTo(p, 0); ctx.lineTo(p, g.hh);
+          ctx.moveTo(p, g.hh + g.gap); ctx.lineTo(p, g.hh + g.gap + g.fh);
+        });
+        ctx.stroke();
+      };
+      ctx.save();
+      ctx.lineWidth = unit;
+      ctx.strokeStyle = 'rgba(52,152,219,0.55)';
+      ctx.setLineDash([3 * unit, 3 * unit]);
+      Object.keys(lines).forEach(w => { if (w !== hotGuide) stroke(w); });
+      if (hotGuide) {
+        ctx.setLineDash([]);
+        ctx.lineWidth = 2 * unit;
+        ctx.strokeStyle = 'rgba(41,128,185,0.95)';
+        stroke(hotGuide);
+      }
+      ctx.restore();
+    }
+    // Rendered lines at the preview density, kept while the look stays.
+    const lineCache = new Map();
+    // Piece widths for the current look (cleared when the look changes).
+    let previewWidths = new Map(), previewWidthsKey = '';
+    function lineAt(text, k) {
+      const key = [text, s.font, s.size, s.bold, s.italic, s.underline, s.color, Math.round(k * 100)].join('|');
+      let r = lineCache.get(key);
+      if (r === undefined) {
+        r = pmHfRenderLine(s, text, k);
+        lineCache.set(key, r);
+        if (lineCache.size > 80) lineCache.delete(lineCache.keys().next().value);
+      }
+      return r;
+    }
+    function draw() {
+      const look = [s.font, s.size, s.bold, s.italic].join('|');
+      if (look !== previewWidthsKey) { previewWidths = new Map(); previewWidthsKey = look; }
+      const fr = previewIdx >= 0 ? frameFor(previewIdx) : null;
+      if (!fr) { if (pv.width !== 1) { pv.width = 1; pv.height = 1; } return; }
+      const g = geometry(fr);
+      lastGeom = { fr, g };
+      // Resizing a canvas clears and reallocates it: only when the size changes.
+      if (pv.width !== g.w || pv.height !== g.hh + g.gap + g.fh) { pv.width = g.w; pv.height = g.hh + g.gap + g.fh; }
+      const cw = g.cssW + 'px', ch = g.cssH + 'px';
+      if (pv.style.width !== cw) pv.style.width = cw;
+      if (pv.style.height !== ch) pv.style.height = ch;
+      const ctx = pv.getContext('2d');
+      ctx.drawImage(baseLayer(fr, g), 0, 0);
+      drawGuides(ctx, fr, g);
+      // The texts, as they will be on this page.
+      const pctx = pmHfPageContexts(targetIndices(), s, dateOf()).get(previewIdx);
+      if (!pctx) return;
+      // Laid out exactly as pmHfApply draws them.
+      const mt = pmHfMetrics(s, '0');
+      const boxH = mt.asc + mt.desc;
+      PM_HF_SLOTS.forEach(slot => {
+        const L = pmHfLayoutLine(s.texts[slot], s, pctx, previewWidths);
+        if (!L) return;
+        const x0 = pmHfLineX(slot, L.w, fr.W, s);
+        const top = pmHfLineTop(slot, boxH, fr.H, s);
+        const y = slot[0] === 'h' ? top * g.k : g.hh + g.gap + (top - (fr.H - g.foot)) * g.k;
+        L.pieces.forEach(p => {
+          const r = lineAt(p.text, g.k);
+          if (r) ctx.drawImage(r.canvas, (x0 + p.dx - r.padPt) * g.k, y, r.wPt * g.k, r.hPt * g.k);
+        });
+      });
+    }
+    let drawRaf = 0;
+    function drawSoon() {
+      if (!drawRaf) drawRaf = requestAnimationFrame(() => { drawRaf = 0; draw(); });
+    }
+    // ---- margin guides: grab one and drag it --------------------------
+    // The line follows the pointer (to 0.1 mm); with Shift held it moves
+    // five times slower for fine steps. A tip next to the pointer shows the
+    // distance from the page edge.
+    const tip = document.createElement('div');
+    tip.className = 'pm-hf-drag-tip';
+    tip.hidden = true;
+    box.appendChild(tip);
+    const GUIDE_LABEL = { left: 'hfMarginLeft', right: 'hfMarginRight', top: 'hfMarginTop', bottom: 'hfMarginBottom' };
+    function guideAt(e) {
+      if (!lastGeom) return null;
+      const { fr, g } = lastGeom;
+      const rect = pv.getBoundingClientRect();
+      if (!rect.width) return null;
+      const f = pv.width / rect.width;
+      const x = (e.clientX - rect.left) * f, y = (e.clientY - rect.top) * f;
+      const tol = 5 * f, mm = PM_HF_PT_PER_MM, m = s.margins;
+      const inHead = y >= 0 && y <= g.hh, inFoot = y >= g.hh + g.gap && y <= g.hh + g.gap + g.fh;
+      const near = [];
+      if (inHead) near.push(['top', Math.abs(y - m.top * mm * g.k)]);
+      if (inFoot) near.push(['bottom', Math.abs(y - (g.hh + g.gap + (g.foot - m.bottom * mm) * g.k))]);
+      if (inHead || inFoot) {
+        near.push(['left', Math.abs(x - m.left * mm * g.k)]);
+        near.push(['right', Math.abs(x - (fr.W - m.right * mm) * g.k)]);
+      }
+      const best = near.filter(n => n[1] <= tol).sort((a, b) => a[1] - b[1])[0];
+      return best ? best[0] : null;
+    }
+    function showTip(e, which) {
+      tip.textContent = t(GUIDE_LABEL[which]) + ': ' + (Math.round(s.margins[which] * 10) / 10).toFixed(1) + ' ' + t('hfMm');
+      tip.hidden = false;
+      // Beside the pointer, on the side where it fits inside the dialog.
+      const br = box.getBoundingClientRect();
+      let x = e.clientX - br.left + 14, y = e.clientY - br.top + 16;
+      if (x + tip.offsetWidth > box.clientWidth - 6) x = e.clientX - br.left - 14 - tip.offsetWidth;
+      if (y + tip.offsetHeight > box.clientHeight - 6) y = e.clientY - br.top - 12 - tip.offsetHeight;
+      tip.style.left = Math.max(6, x) + box.scrollLeft + 'px';
+      tip.style.top = Math.max(6, y) + box.scrollTop + 'px';
+    }
+    let guideDrag = null;
+    pv.addEventListener('pointermove', (e) => {
+      if (guideDrag && e.pointerId === guideDrag.id) {
+        const { fr, g } = lastGeom;
+        const rect = pv.getBoundingClientRect();
+        const f = pv.width / rect.width;
+        // Pointer travel since the press, in mm of the page.
+        const scale = (e.shiftKey ? 0.2 : 1) * f / g.k / PM_HF_PT_PER_MM;
+        const dx = (e.clientX - guideDrag.x) * scale, dy = (e.clientY - guideDrag.y) * scale;
+        const w = guideDrag.which;
+        const d = w === 'left' ? dx : w === 'right' ? -dx : w === 'top' ? dy : -dy;
+        // Fine moves add up: Shift changes the rate from here on.
+        if (e.shiftKey !== guideDrag.shift) {
+          guideDrag.start = s.margins[w]; guideDrag.x = e.clientX; guideDrag.y = e.clientY; guideDrag.shift = e.shiftKey;
+          return;
+        }
+        const wMm = fr.W / PM_HF_PT_PER_MM;
+        const other = w === 'left' ? s.margins.right : w === 'right' ? s.margins.left : 0;
+        // A top/bottom line stays inside its band with the text box under it.
+        const mt = pmHfMetrics(s, '0');
+        const band = w === 'top' ? frozenBands.head : frozenBands.foot;
+        const max = (w === 'left' || w === 'right')
+          ? Math.max(0, wMm - other - 5)
+          : Math.max(0, (band - mt.asc - mt.desc - 4) / PM_HF_PT_PER_MM);
+        s.margins[w] = Math.round(Math.min(max, Math.max(0, guideDrag.start + d)) * 10) / 10;
+        syncControls();
+        drawSoon();
+        showTip(e, w);
+        return;
+      }
+      const which = guideAt(e);
+      pv.style.cursor = !which ? '' : (which === 'left' || which === 'right') ? 'ew-resize' : 'ns-resize';
+      if (which !== hotGuide) { hotGuide = which; drawSoon(); }
+    });
+    pv.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      const which = guideAt(e);
+      if (!which) return;
+      e.preventDefault();
+      // The preview keeps its size while dragging - a taller band would move
+      // everything under the pointer (and on a small screen scroll the
+      // dialog) - so a top/bottom line goes as far as its band; after the
+      // drop the band refits and the line can be taken further.
+      const fr = lastGeom.fr;
+      frozenBands = Object.assign({}, bandHeights(fr));
+      guideDrag = { id: e.pointerId, which, x: e.clientX, y: e.clientY, start: s.margins[which], shift: e.shiftKey };
+      try { pv.setPointerCapture(e.pointerId); } catch (_) {}
+      drawSoon();
+      showTip(e, which);
+    });
+    const endGuideDrag = (e) => {
+      if (!guideDrag || e.pointerId !== guideDrag.id) return;
+      guideDrag = null;
+      frozenBands = null;
+      tip.hidden = true;
+      hotGuide = guideAt(e);
+      try { pv.releasePointerCapture(e.pointerId); } catch (_) {}
+      drawSoon();
+    };
+    pv.addEventListener('pointerup', endGuideDrag);
+    pv.addEventListener('pointercancel', endGuideDrag);
+    pv.addEventListener('pointerleave', () => {
+      if (guideDrag) return;
+      pv.style.cursor = '';
+      if (hotGuide) { hotGuide = null; drawSoon(); }
+    });
+
+    // Page raster for the bands at the preview's density (capped).
+    async function ensureRaster() {
+      const idx = previewIdx;
+      const fr = idx >= 0 ? frameFor(idx) : null;
+      if (!fr) return;
+      let k = geometry(fr).k;
+      const area = fr.W * fr.H * k * k;
+      if (area > RASTER_MAX_PX) k *= Math.sqrt(RASTER_MAX_PX / area);
+      const hit = rasterCache.get(idx);
+      if (hit && hit.pxPerPt >= k * 0.9) { if (previewRaster !== hit) { previewRaster = hit; drawSoon(); } return; }
+      const token = ++previewToken;
+      let canvas = null;
+      try { canvas = await pmWmRenderPagePreview(idx, k); } catch (e) { console.warn('header/footer preview', e); }
+      if (!overlay.isConnected || !canvas) return;
+      const data = { idx, canvas, pxPerPt: k };
+      rasterCache.set(idx, data);
+      while (rasterCache.size > 4) rasterCache.delete(rasterCache.keys().next().value);
+      if (token !== previewToken || idx !== previewIdx) return;
+      previewRaster = data;
+      drawSoon();
+    }
+    function loadPreviewPage() {
+      // Always the first page the texts go on.
+      const targets = targetIndices();
+      const idx = targets.length ? targets[0] : -1;
+      if (idx !== previewIdx) {
+        previewIdx = idx;
+        previewRaster = idx >= 0 ? (rasterCache.get(idx) || null) : null;
+      }
+      draw();
+      ensureRaster();
+    }
+
+    // ---- controls <-> settings -----------------------------------------
+    function syncControls() {
+      boldBtn.classList.toggle('active', s.bold);
+      italicBtn.classList.toggle('active', s.italic);
+      underBtn.classList.toggle('active', s.underline);
+      colorIn.value = s.color;
+      box.querySelectorAll('.pm-wm-swatch').forEach(b => b.classList.toggle('active', b.dataset.color.toLowerCase() === s.color.toLowerCase()));
+      if (document.activeElement !== sizeIn) sizeIn.value = String(s.size);
+      Object.keys(mIn).forEach(k => { if (document.activeElement !== mIn[k]) mIn[k].value = String(s.margins[k]); });
+      if (document.activeElement !== batesStartIn) batesStartIn.value = String(s.bates.start);
+      if (document.activeElement !== batesDigitsIn) batesDigitsIn.value = String(s.bates.digits);
+      box.querySelectorAll('input[name="pmHfPages"]').forEach(r => { r.checked = r.value === pagesMode; });
+      box.querySelectorAll('.pm-hf-slot').forEach(el => el.classList.toggle('pm-hf-target', el.dataset.slot === lastSlot));
+      updateInsertMarker();
+    }
+    function changed() { syncControls(); drawSoon(); }
+
+    function bindNumber(el, lo, hi, get, set) {
+      el.addEventListener('input', () => {
+        const v = Number(el.value);
+        if (el.value !== '' && Number.isFinite(v) && v >= lo && v <= hi) { set(v); changed(); }
+      });
+      el.addEventListener('change', () => { set(pmWmClampNum(el.value, lo, hi, get())); el.value = String(get()); changed(); });
+    }
+    box.querySelectorAll('.pm-wm-num').forEach(wrap => {
+      const input = wrap.querySelector('input');
+      wrap.querySelectorAll('.pm-wm-spin button').forEach(btn => {
+        let hold = null;
+        const stepOnce = () => {
+          if (input.disabled) return;
+          if (btn.dataset.dir === '1') input.stepUp(); else input.stepDown();
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        };
+        const stop = () => {
+          if (!hold) return;
+          clearTimeout(hold.t); clearInterval(hold.i); hold = null;
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        };
+        btn.addEventListener('pointerdown', (e) => {
+          if (e.button !== 0 || input.disabled) return;
+          e.preventDefault();
+          stepOnce();
+          hold = { t: setTimeout(() => { if (hold) hold.i = setInterval(stepOnce, 60); }, 400), i: null };
+        });
+        btn.addEventListener('pointerup', stop);
+        btn.addEventListener('pointerleave', stop);
+        btn.addEventListener('pointercancel', stop);
+      });
+    });
+
+    // The Bates fields and the Bates codes in the texts follow each other:
+    // editing a field rewrites every code, editing a code fills the fields.
+    const BATES_RE = /\{bates(?::([^}]*))?\}/g;
+    function batesFromTexts() {
+      for (const k of PM_HF_SLOTS) {
+        for (const m of String(s.texts[k] || '').matchAll(BATES_RE)) {
+          const b = m[1] == null ? null : pmHfParseBatesArg(m[1]);
+          if (b) return b;
+        }
+      }
+      return null;
+    }
+    function syncBatesFields() {
+      const b = batesFromTexts();
+      if (!b) return;
+      s.bates = b;
+      if (document.activeElement !== batesPrefixIn) batesPrefixIn.value = b.prefix;
+      if (document.activeElement !== batesSuffixIn) batesSuffixIn.value = b.suffix;
+      if (document.activeElement !== batesStartIn) batesStartIn.value = String(b.start);
+      if (document.activeElement !== batesDigitsIn) batesDigitsIn.value = String(b.digits);
+    }
+    function rewriteBatesCodes() {
+      const code = pmHfBatesCode(s.bates);
+      PM_HF_SLOTS.forEach(k => {
+        const v = String(s.texts[k] || '');
+        if (!BATES_RE.test(v)) return;
+        BATES_RE.lastIndex = 0;
+        s.texts[k] = v.replace(BATES_RE, code);
+        slotEls[k].value = s.texts[k];
+      });
+      BATES_RE.lastIndex = 0;
+    }
+    PM_HF_SLOTS.forEach(slot => {
+      const el = slotEls[slot];
+      el.value = s.texts[slot];
+      el.addEventListener('input', () => { s.texts[slot] = el.value; errEl.textContent = ''; syncBatesFields(); drawSoon(); });
+      el.addEventListener('focus', () => { lastSlot = slot; syncControls(); });
+      ['blur', 'keyup', 'mouseup', 'select', 'input'].forEach(ev => el.addEventListener(ev, updateInsertMarker));
+    });
+    // Where "Insert" will put a variable: the last text field used is
+    // outlined, and while the focus is elsewhere (a format list, a button)
+    // a blinking bar - or a band over selected text, which gets replaced -
+    // marks the exact spot in it.
+    let measureCtx = null;
+    function textX(el, upto) {
+      if (!measureCtx) measureCtx = document.createElement('canvas').getContext('2d');
+      const cs = getComputedStyle(el);
+      measureCtx.font = cs.font;
+      const w = measureCtx.measureText(el.value.slice(0, upto)).width;
+      return parseFloat(cs.paddingLeft) + parseFloat(cs.borderLeftWidth) + w - el.scrollLeft;
+    }
+    function updateInsertMarker() {
+      box.querySelectorAll('.pm-hf-slot-wrap').forEach(wrap => {
+        const el = wrap.querySelector('.pm-hf-slot'), mk = wrap.querySelector('.pm-hf-caret');
+        const on = wrap.dataset.slot === lastSlot && document.activeElement !== el;
+        wrap.classList.toggle('pm-hf-marked', on);
+        if (!on) return;
+        const a = el.selectionStart != null ? el.selectionStart : el.value.length;
+        const b = el.selectionEnd != null ? el.selectionEnd : a;
+        const maxX = el.clientWidth + parseFloat(getComputedStyle(el).borderLeftWidth) - 3;
+        const x1 = Math.min(maxX, Math.max(3, textX(el, a))), x2 = Math.min(maxX, Math.max(3, textX(el, b)));
+        mk.style.left = x1 + 'px';
+        mk.style.width = Math.max(2, x2 - x1) + 'px';
+        mk.classList.toggle('pm-hf-caret-range', b > a);
+      });
+    }
+    // Pointing at an inserter makes the target stand out.
+    function hintTarget(on) {
+      box.querySelectorAll('.pm-hf-slot-wrap').forEach(w => w.classList.toggle('pm-hf-hint', on && w.dataset.slot === lastSlot));
+    }
+    ['pmHfInsPage', 'pmHfInsDate', 'pmHfInsBates', 'pmHfPageFmt', 'pmHfDateFmt'].forEach(id => {
+      const el = $(id);
+      el.addEventListener('mouseenter', () => hintTarget(true));
+      el.addEventListener('mouseleave', () => hintTarget(false));
+      el.addEventListener('focus', () => hintTarget(true));
+      el.addEventListener('blur', () => hintTarget(false));
+    });
+    // A variable goes where the caret is in the last text field used.
+    function insertVar(code) {
+      const el = slotEls[lastSlot];
+      const a = el.selectionStart != null ? el.selectionStart : el.value.length;
+      const b = el.selectionEnd != null ? el.selectionEnd : a;
+      const before = el.value.slice(0, a);
+      const sep = before && !/\s$/.test(before) ? ' ' : '';
+      el.setRangeText(sep + code, a, b, 'end');
+      s.texts[lastSlot] = el.value;
+      errEl.textContent = '';
+      el.focus();
+      changed();
+    }
+    $('pmHfInsPage').addEventListener('click', () => insertVar(pmHfPageFormats()[s.pageFormat]));
+    $('pmHfInsDate').addEventListener('click', () => insertVar('{date:' + s.dateFormat + '}'));
+    $('pmHfInsBates').addEventListener('click', () => insertVar(pmHfBatesCode(s.bates)));
+    pageFmtSel.addEventListener('change', () => { s.pageFormat = Number(pageFmtSel.value) || 0; });
+    dateFmtSel.addEventListener('change', () => { s.dateFormat = dateFmtSel.value; });
+
+    fontSel.addEventListener('change', () => { s.font = fontSel.value; changed(); });
+    bindNumber(sizeIn, 4, 72, () => s.size, v => { s.size = v; });
+    boldBtn.addEventListener('click', () => { s.bold = !s.bold; changed(); });
+    italicBtn.addEventListener('click', () => { s.italic = !s.italic; changed(); });
+    underBtn.addEventListener('click', () => { s.underline = !s.underline; changed(); });
+    colorIn.addEventListener('input', () => { s.color = colorIn.value; changed(); });
+    box.querySelectorAll('.pm-wm-swatch').forEach(b => b.addEventListener('click', () => { s.color = b.dataset.color; changed(); }));
+    Object.keys(mIn).forEach(k => bindNumber(mIn[k], 0, 200, () => s.margins[k], v => { s.margins[k] = v; }));
+    batesPrefixIn.value = s.bates.prefix;
+    batesSuffixIn.value = s.bates.suffix;
+    batesPrefixIn.addEventListener('input', () => { s.bates.prefix = batesPrefixIn.value.replace(/[[\]{}]/g, ''); rewriteBatesCodes(); drawSoon(); });
+    batesSuffixIn.addEventListener('input', () => { s.bates.suffix = batesSuffixIn.value.replace(/[[\]{}]/g, ''); rewriteBatesCodes(); drawSoon(); });
+    bindNumber(batesStartIn, 0, 999999999, () => s.bates.start, v => { s.bates.start = Math.round(v); rewriteBatesCodes(); });
+    bindNumber(batesDigitsIn, 1, 12, () => s.bates.digits, v => { s.bates.digits = Math.round(v); rewriteBatesCodes(); });
+    syncBatesFields();
+
+    box.querySelectorAll('input[name="pmHfPages"]').forEach(r => r.addEventListener('change', () => {
+      if (!r.checked) return;
+      pagesMode = r.value;
+      errEl.textContent = '';
+      syncControls();
+      if (pagesMode === 'range') rangeIn.focus();
+      loadPreviewPage();
+    }));
+    rangeIn.addEventListener('input', () => { rangeText = rangeIn.value; errEl.textContent = ''; loadPreviewPage(); });
+    rangeIn.addEventListener('focus', () => {
+      if (pagesMode !== 'range') { pagesMode = 'range'; syncControls(); loadPreviewPage(); }
+    });
+
+    const setHelp = (open) => { helpPop.hidden = !open; helpBtn.setAttribute('aria-expanded', String(open)); };
+    helpBtn.addEventListener('click', (e) => { e.stopPropagation(); setHelp(helpPop.hidden); });
+    overlay.addEventListener('pointerdown', (e) => {
+      if (!helpPop.hidden && e.target !== helpBtn && !helpPop.contains(e.target)) setHelp(false);
+    }, true);
+
+    // ---- close / apply ---------------------------------------------------
+    let settled = false;
+    function close(result) {
+      if (settled) return;
+      settled = true;
+      cancelAnimationFrame(drawRaf);
+      document.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('resize', onResize);
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      resolve(result);
+    }
+    async function apply() {
+      if (busy) return;
+      errEl.textContent = '';
+      if (!PM_HF_SLOTS.some(k => String(s.texts[k] || '').trim())) {
+        errEl.textContent = t('hfNoText'); slotEls[lastSlot].focus(); return;
+      }
+      if (pagesMode === 'range' && !pmWmParseRange(rangeText, pageCount)) {
+        errEl.textContent = t('wmBadRange'); rangeIn.focus(); return;
+      }
+      const targets = targetIndices();
+      if (!targets.length) { errEl.textContent = t('wmBadRange'); return; }
+      busy = true;
+      pmHfStoreSettings(s);
+      const date = dateOf();
+      close(true);
+      await pmHfApply(s, targets, date);
+    }
+    $('pmHfOk').addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); apply(); });
+    $('pmHfCancel').addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); close(false); });
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) e.preventDefault(); });
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault(); e.stopPropagation();
+        if (!helpPop.hidden) setHelp(false); else close(false);
+        return;
+      }
+      if (e.key === 'Enter' && e.target && e.target.tagName === 'INPUT' && ['text', 'number'].includes(e.target.type)) {
+        e.preventDefault(); e.stopPropagation(); apply(); return;
+      }
+      e.stopPropagation();
+    };
+    document.addEventListener('keydown', onKey, true);
+    let resizeTimer = null;
+    const onResize = () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => { readBoxWidth(); draw(); ensureRaster(); }, 200);
+    };
+    window.addEventListener('resize', onResize);
+
+    fillFormatLists();
+    syncControls();
+    pmWmLoadFonts().then(list => {
+      if (!overlay.isConnected) return;
+      if (!list.some(f => f.family === s.font)) s.font = PM_WM_ROBOTO_FAMILY;
+      fontSel.innerHTML = list.map(f =>
+        `<option value="${esc(f.family)}" style="font-family:${esc(pmWmFontCss(f.family))}">${esc(f.label)}</option>`).join('');
+      fontSel.value = s.font;
+      draw();
+    });
+    loadPreviewPage();
+    slotEls[lastSlot].focus();
+    const end = slotEls[lastSlot].value.length;
+    slotEls[lastSlot].setSelectionRange(end, end);
   });
 }
   </script>
