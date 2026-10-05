@@ -1380,6 +1380,39 @@
     @media (pointer: coarse) {
       .img-save-btn { display: none !important; }
     }
+    /*Desktop: a short caption (name + hotkey) beside every popup button of the
+       top menu for as long as the button itself is shown; the tooltip keeps
+       the long text. Text and side come from pmPopCapsInit (data-pm-caption;
+       .pm-pop-cap--left where the right side would run off the screen).
+       Inherits the button's fade-in, never takes the pointer.*/
+    .pm-pop-cap::after {
+      content: attr(data-pm-caption);
+      display: none;
+      position: absolute;
+      top: 50%;
+      left: calc(100% + 8px);
+      transform: translateY(-50%);
+      height: 26px;
+      padding: 0 10px;
+      box-sizing: border-box;
+      border: 1px solid rgba(255,255,255,0.18);
+      border-radius: 6px;
+      background: rgba(44, 62, 80, 0.94);
+      color: #fff;
+      font: normal 12.5px/24px Arial, sans-serif;
+      letter-spacing: normal;
+      white-space: nowrap;
+      box-shadow: 0 3px 10px rgba(0,0,0,0.35);
+      pointer-events: none;
+    }
+    .pm-pop-cap.pm-pop-cap--left::after { left: auto; right: calc(100% + 8px); }
+    .pm-pop-cap.show:not(.rl-slot-main)::after { display: block; }
+    .pm-pop-cap.show:hover:not(:disabled)::after { background: rgba(52, 152, 219, 0.96); }
+    .top-menu.collapsed #desktopMenuToggleBtn.pm-pop-cap::after,
+    body:has(#pageEditModal.open) .pm-pop-cap::after { display: none !important; }
+    @media (pointer: coarse) {
+      .pm-pop-cap::after { display: none !important; }
+    }
     .save-btn:hover:not(:disabled) { background: #2ecc71 !important; }
 
     #multiSelectLabel { user-select: none; }
@@ -1761,6 +1794,8 @@
     }
     /* Trash emoji reads smaller than neighboring icons — bump ~30%.
        Keep the same 20px slot so it stays aligned with icons above/below. */
+    /* Rotate glyphs read small next to the SVG icons - ~15% bigger. */
+    #pageCtxMenu button[data-action^="rot-"] .ctx-icon { font-size: 18.5px; }
     #pageCtxMenu button[data-action="delete"] .ctx-icon {
       font-size: 16px;
       transform: scale(1.3);
@@ -1813,6 +1848,19 @@
       margin-right: -3px; opacity: .55;
     }
     .ctx-sub-arrow svg { display: block; }
+    /*"Сжать PDF" in the Export submenu: dimmed but still hoverable (for the
+       tooltip) when nothing is worth compressing - see pmCtxCompressRefresh.*/
+    #pageCtxMenu button.pm-compress-unavailable { opacity: .45; cursor: not-allowed; }
+    #pageCtxMenu button.pm-compress-unavailable:hover { background: transparent; }
+    #pageCtxMenu button.pm-compress-calculating .ctx-icon { opacity: .5; }
+    #pageCtxMenu button.pm-compress-notable .ctx-icon { color: #27ae60; }
+    /*Plain items of a menu that has submenu items reserve the arrow's column,
+       so every icon lines up with the submenu items' icons (the menu widens
+       to fit the longest label).*/
+    #pageCtxMenu > button::after,
+    #readModeCtxMenu > button::after {
+      content: ''; flex: 0 0 12px; margin-right: -3px;
+    }
 
     /* RMB menu on selected page text in the page editor, and in preview
        mode at >400% zoom (pageTextCopyMenu) - both share identical styling. */
@@ -3211,7 +3259,7 @@
     /*pe-empty instead of pure :empty - the element now always has children
        (corner anchors) so :empty never fires; class is exhibited
        from JS by actual text content (see peSyncTextEmptyClass).*/
-    .pe-obj-text.pe-inline-edit.pe-empty::before { content: 'Текст'; color: rgba(0,0,0,.35); pointer-events: none; }
+    .pe-obj-text.pe-inline-edit.pe-empty::before { content: var(--pm-hint-text, 'Текст'); color: rgba(0,0,0,.35); pointer-events: none; }
     .pe-obj-text.pe-inline-edit.pe-empty { min-width: 3.2em; }
     .pe-obj-comment { position: relative; }
     .pe-comment-icon { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; pointer-events: none; }
@@ -3221,7 +3269,7 @@
       font-size: 13px; line-height: 1.25; color: #2c3e50; white-space: pre-wrap;
       cursor: text; user-select: text; z-index: 3; box-shadow: 0 2px 8px rgba(0,0,0,.15);
     }
-    .pe-comment-edit:empty::before { content: 'Комментарий…'; color: rgba(0,0,0,.35); }
+    .pe-comment-edit:empty::before { content: var(--pm-hint-comment, 'Комментарий…'); color: rgba(0,0,0,.35); }
     .pe-obj-hl { opacity: .4; }
     .pe-obj-hl:hover:not(.sel) { outline: 1.5px dashed rgba(52,152,219,.55); outline-offset: 1px; }
     .pe-obj-callout-frame {
@@ -4860,11 +4908,12 @@
       position: relative;
     }
 
-    /* Internal-document-link hotzones - clickable rectangles over a page's
-       PDF Link annotations, active in select mode at any zoom (unlike the
-       text-selection layer, not gated to a high-zoom threshold). Hidden
-       during nav/read mode the same way the text layer is - setMode('nav')
-       and enterReadMode() both set body.nav-mode-active. */
+    /* Link hotzones - clickable rectangles over a page's links, active at
+       any zoom (unlike the text-selection layer, not gated to a high-zoom
+       threshold). Internal links (jump to a page) work in select mode only -
+       hidden during nav/read mode like the text layer (setMode('nav') and
+       enterReadMode() both set body.nav-mode-active); web links
+       (.pm-link-hotzone--url, a new browser tab) work in every mode. */
     .pm-link-layer {
       position: absolute;
       overflow: hidden;
@@ -4893,10 +4942,13 @@
     body.pm-links-multi-column .pm-link-hotzone {
       pointer-events: none !important;
     }
-    body.nav-mode-active .pm-link-layer {
+    body.nav-mode-active .pm-link-hotzone:not(.pm-link-hotzone--url) {
       display: none !important;
       pointer-events: none !important;
     }
+    /* Web links (pmLinksMakeWebZone) also work in navigation and reading
+       mode, where the pages themselves take no pointer events. */
+    a.pm-link-hotzone--url { display: block; }
 
     /* Fill-form overlay - real HTML controls over a page's AcroForm widgets.
        Available directly in select mode, no dedicated mode. The controls are
@@ -7408,14 +7460,14 @@
 
   <div class="top-menu" id="topMenu">
     <!--PDF logo in the top right corner (with gradient and border)-->
-    <span class="app-logo" title="Менеджер документов PDF"><svg width="42" height="42" role="img" aria-label="PDF" viewBox="0 0 42 42" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <span class="app-logo" title="Менеджер документов PDF" data-i18n-title="appTitle"><svg width="42" height="42" role="img" aria-label="PDF" viewBox="0 0 42 42" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <linearGradient id="blueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" style="stop-color:#1479e6;stop-opacity:1" />
       <stop offset="100%" style="stop-color:#003d80;stop-opacity:1" />
     </linearGradient>
   </defs>
-  <title>Менеджер документов PDF</title>
+  <title data-i18n="appTitle">Менеджер документов PDF</title>
   <rect width="42" height="42" rx="10" fill="url(#blueGrad)"/>
   <!-- Tuner: page x=-0.8 y=0 scale=1.09; text x=-0.6 y=0.8 size=10.7 -->
   <g transform="translate(21 21) scale(1.09) translate(-21.8 -21)">
@@ -7514,13 +7566,14 @@
           <button class="img-save-btn img-save-btn--images img-save-btn--left" onclick="exportSelectedPages(true)" title="Экспорт как изображения&#10;(экспорт выделенных страниц в PDF, где страницы сохранены как изображения)" aria-label="Экспорт как изображения" data-i18n-title="exportAsImagesHint" data-i18n-aria="exportAsImages"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></button>
           <button class="img-save-btn img-save-btn--split" onclick="exportSelectedPages('split')" title="Экспорт по страницам&#10;(каждая выделенная страница — отдельный PDF-файл)" aria-label="Экспорт по страницам" data-i18n-title="exportSplitPagesHint" data-i18n-aria="exportSplitPages"><svg viewBox="0 0 100 100" width="20" height="20" fill="currentColor" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" aria-hidden="true"><path d="M88.44,0.65C88.42,0.55,88.38,0.45,88.32,0.36C88.17,0.14,87.92,0,87.64,0h-8.75H29.22c-0.45,0-0.82,0.37-0.82,0.82v4.98h-4.8c-0.45,0-0.82,0.37-0.82,0.82v4.98h-4.8c-0.45,0-0.82,0.37-0.82,0.82v4.98h-4.8c-0.45,0-0.82,0.37-0.82,0.82v80.96c0,0.45,0.37,0.82,0.82,0.82H70.78c0.45,0,0.82-0.37,0.82-0.82v-4.98h4.8c0.45,0,0.82-0.37,0.82-0.82v-4.98h4.8c0.45,0,0.82-0.37,0.82-0.82v-4.98h4.8c0.45,0,0.82-0.37,0.82-0.82V9.57v-8.75C88.46,0.76,88.45,0.71,88.44,0.65zM86.82,1.64v5.95l-5.95-5.95H86.82zM69.96,98.36H13.18V19.04h3.98v74.34c0,0.45,0.37,0.82,0.82,0.82h51.99V98.36zM75.58,92.56H18.8V13.24h3.98v74.34c0,0.45,0.37,0.82,0.82,0.82H75.58V92.56zM81.2,86.76H24.42V7.44h3.98v74.34c0,0.45,0.37,0.82,0.82,0.82h51.99V86.76zM30.04,80.96V1.64H78.55l8.27,8.27v71.05H30.04z"/><path d="M79.77,15.99H37.09c-0.45,0-0.82,0.37-0.82,0.82c0,0.45,0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82C80.59,16.36,80.22,15.99,79.77,15.99z"/><path d="M79.77,25.37H37.09c-0.45,0-0.82,0.37-0.82,0.82c0,0.45,0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82C80.59,25.73,80.22,25.37,79.77,25.37z"/><path d="M79.77,34.74H37.09c-0.45,0-0.82,0.37-0.82,0.82c0,0.45,0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82C80.59,35.11,80.22,34.74,79.77,34.74z"/><path d="M79.77,44.11H37.09c-0.45,0-0.82,0.37-0.82,0.82c0,0.45,0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82C80.59,44.48,80.22,44.11,79.77,44.11z"/><path d="M79.77,53.49H37.09c-0.45,0-0.82,0.37-0.82,0.82s0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82S80.22,53.49,79.77,53.49z"/></svg></button>
           <button class="img-save-btn img-save-btn--compress img-save-btn--mid" onclick="if (!this.classList.contains('pm-compress-unavailable')) exportSelectedPages('compress')" title="Сжать PDF&#10;(уменьшить размер файла без потери качества)" aria-label="Сжать PDF" data-i18n-title="compressPdfHint" data-i18n-aria="compressPdf"><svg viewBox="0 0 48 48" width="20" height="20" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M8.92 8.714C8.495 7.39 9.476 6 10.867 6h26.266c1.391 0 2.372 1.39 1.947 2.714C37.9 12.4 36 19.09 36 24s1.9 11.6 3.08 15.286c.425 1.325-.556 2.714-1.947 2.714H10.867c-1.391 0-2.372-1.39-1.947-2.714C10.1 35.6 12 28.91 12 24S10.1 12.4 8.92 8.714ZM4 15c1.5 2 2 6 2 9s-.5 7-2 9"/><path d="M18 15.5h12M18 24h12m-12 8h4"/><path d="M44 15c-1.5 2-2 6-2 9s.5 6 2 9"/></svg></button>
-          <button class="img-save-btn img-save-btn--encrypt img-save-btn--right" onclick="exportSelectedPages('encrypt')" title="Зашифровать файл паролем" aria-label="Зашифровать файл паролем" data-i18n-title="encryptFileTooltip" data-i18n-aria="encryptFileTooltip"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></button>
+          <button class="img-save-btn img-save-btn--encrypt img-save-btn--right" onclick="exportSelectedPages('encrypt')" title="Зашифровать паролем" aria-label="Зашифровать паролем" data-i18n-title="encryptFileTooltip" data-i18n-aria="encryptFileTooltip"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></button>
         </div>
-        <div class="img-save-wrapper img-save-wrapper--multi">
+        <div class="img-save-wrapper img-save-wrapper--multi img-save-wrapper--four">
           <button id="saveBtn" onclick="savePDF()" class="save-btn compact-btn" title="Сохранить итоговый файл (S)" data-i18n-title="saveFinalFile"><span class="btn-ico">💾</span><span class="btn-label" data-i18n="save">Сохранить</span></button>
           <button class="img-save-btn img-save-btn--left" onclick="savePDF(true)" title="Сохранить как изображения&#10;(сохранение файла в PDF, где страницы сохранены как изображения)" aria-label="Сохранить как изображения" data-i18n-title="saveAsImagesHint" data-i18n-aria="saveAsImages"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></button>
+          <button class="img-save-btn img-save-btn--split" onclick="savePDF('split')" title="Сохранить по страницам&#10;Каждая страница — отдельный PDF-файл" aria-label="Сохранить по страницам" data-i18n-title="saveSplitPagesHint" data-i18n-aria="saveSplitPages"><svg viewBox="0 0 100 100" width="20" height="20" fill="currentColor" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" aria-hidden="true"><path d="M88.44,0.65C88.42,0.55,88.38,0.45,88.32,0.36C88.17,0.14,87.92,0,87.64,0h-8.75H29.22c-0.45,0-0.82,0.37-0.82,0.82v4.98h-4.8c-0.45,0-0.82,0.37-0.82,0.82v4.98h-4.8c-0.45,0-0.82,0.37-0.82,0.82v4.98h-4.8c-0.45,0-0.82,0.37-0.82,0.82v80.96c0,0.45,0.37,0.82,0.82,0.82H70.78c0.45,0,0.82-0.37,0.82-0.82v-4.98h4.8c0.45,0,0.82-0.37,0.82-0.82v-4.98h4.8c0.45,0,0.82-0.37,0.82-0.82v-4.98h4.8c0.45,0,0.82-0.37,0.82-0.82V9.57v-8.75C88.46,0.76,88.45,0.71,88.44,0.65zM86.82,1.64v5.95l-5.95-5.95H86.82zM69.96,98.36H13.18V19.04h3.98v74.34c0,0.45,0.37,0.82,0.82,0.82h51.99V98.36zM75.58,92.56H18.8V13.24h3.98v74.34c0,0.45,0.37,0.82,0.82,0.82H75.58V92.56zM81.2,86.76H24.42V7.44h3.98v74.34c0,0.45,0.37,0.82,0.82,0.82h51.99V86.76zM30.04,80.96V1.64H78.55l8.27,8.27v71.05H30.04z"/><path d="M79.77,15.99H37.09c-0.45,0-0.82,0.37-0.82,0.82c0,0.45,0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82C80.59,16.36,80.22,15.99,79.77,15.99z"/><path d="M79.77,25.37H37.09c-0.45,0-0.82,0.37-0.82,0.82c0,0.45,0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82C80.59,25.73,80.22,25.37,79.77,25.37z"/><path d="M79.77,34.74H37.09c-0.45,0-0.82,0.37-0.82,0.82c0,0.45,0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82C80.59,35.11,80.22,34.74,79.77,34.74z"/><path d="M79.77,44.11H37.09c-0.45,0-0.82,0.37-0.82,0.82c0,0.45,0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82C80.59,44.48,80.22,44.11,79.77,44.11z"/><path d="M79.77,53.49H37.09c-0.45,0-0.82,0.37-0.82,0.82s0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82S80.22,53.49,79.77,53.49z"/></svg></button>
           <button class="img-save-btn img-save-btn--compress img-save-btn--mid" onclick="if (!this.classList.contains('pm-compress-unavailable')) savePDF('compress')" title="Сжать PDF&#10;(уменьшить размер файла без потери качества)" aria-label="Сжать PDF" data-i18n-title="compressPdfHint" data-i18n-aria="compressPdf"><svg viewBox="0 0 48 48" width="20" height="20" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M8.92 8.714C8.495 7.39 9.476 6 10.867 6h26.266c1.391 0 2.372 1.39 1.947 2.714C37.9 12.4 36 19.09 36 24s1.9 11.6 3.08 15.286c.425 1.325-.556 2.714-1.947 2.714H10.867c-1.391 0-2.372-1.39-1.947-2.714C10.1 35.6 12 28.91 12 24S10.1 12.4 8.92 8.714ZM4 15c1.5 2 2 6 2 9s-.5 7-2 9"/><path d="M18 15.5h12M18 24h12m-12 8h4"/><path d="M44 15c-1.5 2-2 6-2 9s.5 6 2 9"/></svg></button>
-          <button class="img-save-btn img-save-btn--encrypt img-save-btn--right" onclick="savePDF('encrypt')" title="Зашифровать файл паролем" aria-label="Зашифровать файл паролем" data-i18n-title="encryptFileTooltip" data-i18n-aria="encryptFileTooltip"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></button>
+          <button class="img-save-btn img-save-btn--encrypt img-save-btn--right" onclick="savePDF('encrypt')" title="Зашифровать паролем" aria-label="Зашифровать паролем" data-i18n-title="encryptFileTooltip" data-i18n-aria="encryptFileTooltip"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></button>
         </div>
         <button id="mobileReadModeBtn" class="compact-btn" onclick="enterReadMode()" disabled title="Режим чтения" data-i18n-title="readMode"><span class="btn-ico"><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span></button>
       </div>
@@ -7579,8 +7632,8 @@
       </div>
     </div>
     <hr>
-    <button type="button" data-action="rot-left"><span class="ctx-label" data-i18n="ctxRotLeft">Повернуть против часовой стрелки</span><span class="ctx-icon"><span class="rotate-glyph" aria-hidden="true">↺</span></span></button>
-    <button type="button" data-action="rot-right"><span class="ctx-label" data-i18n="ctxRotRight">Повернуть по часовой стрелке</span><span class="ctx-icon"><span class="rotate-glyph" aria-hidden="true">↻</span></span></button>
+    <button type="button" data-action="rot-left"><span class="ctx-label" data-i18n="ctxRotLeft">Повернуть против ч.с.</span><span class="ctx-icon"><span class="rotate-glyph" aria-hidden="true">↺</span></span></button>
+    <button type="button" data-action="rot-right"><span class="ctx-label" data-i18n="ctxRotRight">Повернуть по ч.с.</span><span class="ctx-icon"><span class="rotate-glyph" aria-hidden="true">↻</span></span></button>
     <hr>
     <button type="button" data-action="edit"><span class="ctx-label" data-i18n="ctxEdit">Редактировать</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></span></button>
     <div class="ctx-sub ctx-sub--export">
@@ -7589,7 +7642,7 @@
         <button type="button" data-action="export-images"><span class="ctx-label" data-i18n="exportAsImages">Экспорт как изображения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></span></button>
         <button type="button" data-action="export-split"><span class="ctx-label" data-i18n="exportSplitPages">Экспорт по страницам</span><span class="ctx-icon"><svg viewBox="0 0 100 100" width="18" height="18" fill="currentColor" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" aria-hidden="true"><path d="M88.44,0.65C88.42,0.55,88.38,0.45,88.32,0.36C88.17,0.14,87.92,0,87.64,0h-8.75H29.22c-0.45,0-0.82,0.37-0.82,0.82v4.98h-4.8c-0.45,0-0.82,0.37-0.82,0.82v4.98h-4.8c-0.45,0-0.82,0.37-0.82,0.82v4.98h-4.8c-0.45,0-0.82,0.37-0.82,0.82v80.96c0,0.45,0.37,0.82,0.82,0.82H70.78c0.45,0,0.82-0.37,0.82-0.82v-4.98h4.8c0.45,0,0.82-0.37,0.82-0.82v-4.98h4.8c0.45,0,0.82-0.37,0.82-0.82v-4.98h4.8c0.45,0,0.82-0.37,0.82-0.82V9.57v-8.75C88.46,0.76,88.45,0.71,88.44,0.65zM86.82,1.64v5.95l-5.95-5.95H86.82zM69.96,98.36H13.18V19.04h3.98v74.34c0,0.45,0.37,0.82,0.82,0.82h51.99V98.36zM75.58,92.56H18.8V13.24h3.98v74.34c0,0.45,0.37,0.82,0.82,0.82H75.58V92.56zM81.2,86.76H24.42V7.44h3.98v74.34c0,0.45,0.37,0.82,0.82,0.82h51.99V86.76zM30.04,80.96V1.64H78.55l8.27,8.27v71.05H30.04z"/><path d="M79.77,15.99H37.09c-0.45,0-0.82,0.37-0.82,0.82c0,0.45,0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82C80.59,16.36,80.22,15.99,79.77,15.99z"/><path d="M79.77,25.37H37.09c-0.45,0-0.82,0.37-0.82,0.82c0,0.45,0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82C80.59,25.73,80.22,25.37,79.77,25.37z"/><path d="M79.77,34.74H37.09c-0.45,0-0.82,0.37-0.82,0.82c0,0.45,0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82C80.59,35.11,80.22,34.74,79.77,34.74z"/><path d="M79.77,44.11H37.09c-0.45,0-0.82,0.37-0.82,0.82c0,0.45,0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82C80.59,44.48,80.22,44.11,79.77,44.11z"/><path d="M79.77,53.49H37.09c-0.45,0-0.82,0.37-0.82,0.82s0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82S80.22,53.49,79.77,53.49z"/></svg></span></button>
         <button type="button" data-action="export-compress"><span class="ctx-label" data-i18n="compressPdf">Сжать PDF</span><span class="ctx-icon"><svg viewBox="0 0 48 48" width="18" height="18" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M8.92 8.714C8.495 7.39 9.476 6 10.867 6h26.266c1.391 0 2.372 1.39 1.947 2.714C37.9 12.4 36 19.09 36 24s1.9 11.6 3.08 15.286c.425 1.325-.556 2.714-1.947 2.714H10.867c-1.391 0-2.372-1.39-1.947-2.714C10.1 35.6 12 28.91 12 24S10.1 12.4 8.92 8.714ZM4 15c1.5 2 2 6 2 9s-.5 7-2 9"/><path d="M18 15.5h12M18 24h12m-12 8h4"/><path d="M44 15c-1.5 2-2 6-2 9s.5 6 2 9"/></svg></span></button>
-        <button type="button" data-action="export-encrypt"><span class="ctx-label" data-i18n="encryptFileTooltip">Зашифровать файл паролем</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span></button>
+        <button type="button" data-action="export-encrypt"><span class="ctx-label" data-i18n="encryptFileTooltip">Зашифровать паролем</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span></button>
       </div>
     </div>
     <button type="button" data-action="replace"><span class="ctx-label" data-i18n="replace">Заменить</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></span></button>
@@ -7616,15 +7669,7 @@
     </div>
     <hr>
     <button type="button" data-action="edit"><span class="ctx-label" data-i18n="ctxEdit">Редактировать</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z"/></svg></span></button>
-    <div class="ctx-sub ctx-sub--export">
-      <button type="button" data-action="export" class="ctx-sub-root" aria-haspopup="true"><span class="ctx-label" data-i18n="export">Экспорт</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span><span class="ctx-sub-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></span></button>
-      <div class="ctx-submenu">
-        <button type="button" data-action="export-images"><span class="ctx-label" data-i18n="exportAsImages">Экспорт как изображения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></span></button>
-        <button type="button" data-action="export-split"><span class="ctx-label" data-i18n="exportSplitPages">Экспорт по страницам</span><span class="ctx-icon"><svg viewBox="0 0 100 100" width="18" height="18" fill="currentColor" stroke="currentColor" stroke-width="2.5" stroke-linejoin="round" aria-hidden="true"><path d="M88.44,0.65C88.42,0.55,88.38,0.45,88.32,0.36C88.17,0.14,87.92,0,87.64,0h-8.75H29.22c-0.45,0-0.82,0.37-0.82,0.82v4.98h-4.8c-0.45,0-0.82,0.37-0.82,0.82v4.98h-4.8c-0.45,0-0.82,0.37-0.82,0.82v4.98h-4.8c-0.45,0-0.82,0.37-0.82,0.82v80.96c0,0.45,0.37,0.82,0.82,0.82H70.78c0.45,0,0.82-0.37,0.82-0.82v-4.98h4.8c0.45,0,0.82-0.37,0.82-0.82v-4.98h4.8c0.45,0,0.82-0.37,0.82-0.82v-4.98h4.8c0.45,0,0.82-0.37,0.82-0.82V9.57v-8.75C88.46,0.76,88.45,0.71,88.44,0.65zM86.82,1.64v5.95l-5.95-5.95H86.82zM69.96,98.36H13.18V19.04h3.98v74.34c0,0.45,0.37,0.82,0.82,0.82h51.99V98.36zM75.58,92.56H18.8V13.24h3.98v74.34c0,0.45,0.37,0.82,0.82,0.82H75.58V92.56zM81.2,86.76H24.42V7.44h3.98v74.34c0,0.45,0.37,0.82,0.82,0.82h51.99V86.76zM30.04,80.96V1.64H78.55l8.27,8.27v71.05H30.04z"/><path d="M79.77,15.99H37.09c-0.45,0-0.82,0.37-0.82,0.82c0,0.45,0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82C80.59,16.36,80.22,15.99,79.77,15.99z"/><path d="M79.77,25.37H37.09c-0.45,0-0.82,0.37-0.82,0.82c0,0.45,0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82C80.59,25.73,80.22,25.37,79.77,25.37z"/><path d="M79.77,34.74H37.09c-0.45,0-0.82,0.37-0.82,0.82c0,0.45,0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82C80.59,35.11,80.22,34.74,79.77,34.74z"/><path d="M79.77,44.11H37.09c-0.45,0-0.82,0.37-0.82,0.82c0,0.45,0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82C80.59,44.48,80.22,44.11,79.77,44.11z"/><path d="M79.77,53.49H37.09c-0.45,0-0.82,0.37-0.82,0.82s0.37,0.82,0.82,0.82h42.68c0.45,0,0.82-0.37,0.82-0.82S80.22,53.49,79.77,53.49z"/></svg></span></button>
-        <button type="button" data-action="export-compress"><span class="ctx-label" data-i18n="compressPdf">Сжать PDF</span><span class="ctx-icon"><svg viewBox="0 0 48 48" width="18" height="18" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M8.92 8.714C8.495 7.39 9.476 6 10.867 6h26.266c1.391 0 2.372 1.39 1.947 2.714C37.9 12.4 36 19.09 36 24s1.9 11.6 3.08 15.286c.425 1.325-.556 2.714-1.947 2.714H10.867c-1.391 0-2.372-1.39-1.947-2.714C10.1 35.6 12 28.91 12 24S10.1 12.4 8.92 8.714ZM4 15c1.5 2 2 6 2 9s-.5 7-2 9"/><path d="M18 15.5h12M18 24h12m-12 8h4"/><path d="M44 15c-1.5 2-2 6-2 9s.5 6 2 9"/></svg></span></button>
-        <button type="button" data-action="export-encrypt"><span class="ctx-label" data-i18n="encryptFileTooltip">Зашифровать файл паролем</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></span></button>
-      </div>
-    </div>
+    <button type="button" data-action="export"><span class="ctx-label" data-i18n="export">Экспорт</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg></span></button>
     <button type="button" data-action="replace"><span class="ctx-label" data-i18n="replace">Заменить</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></span></button>
     <hr>
     <button type="button" data-action="print"><span class="ctx-label" data-i18n="ctxPrintPage">Печать страницы</span><span class="ctx-icon">🖨️</span></button>
@@ -7632,30 +7677,20 @@
 
   <!--RMB menu in document navigation (Hand) mode-->
   <div id="navModeCtxMenu" aria-hidden="true">
-    <div class="ctx-sub ctx-sub--modes">
-      <button type="button" class="ctx-sub-root" aria-haspopup="true" title="Режим просмотра" data-i18n-title="ctxViewMode"><span class="ctx-label" data-i18n="ctxNavMode">Режим навигации</span><span class="ctx-icon"><svg viewBox="0 0 69.0645142 89.838707" width="18" height="18" fill="currentColor" stroke="currentColor" stroke-width="0.8" stroke-linejoin="round" aria-hidden="true"><path d="M40.4849663,82.8033905  c-9.1123066,0-16.3754902-5.1455078-19.4277363-13.7636719c-0.1801758-0.5087891-0.3701172-1.015625-0.5893555-1.5087891  c-0.6171875-1.3886719-0.6171875-1.3886719-0.7412109-1.5224609l-0.015625,0.0146484  c-0.7080078-1.3291016-3.1923828-5.6308632-11.9047842-20.7168007c-0.909668-1.5717773-0.3686523-3.5917969,1.2021484-4.5014648  c0.7021484-0.4023438,1.5004883-0.6147461,2.3085938-0.6147461c1.6572266,0,3.1967773,0.8867188,4.0185547,2.315918  l6.8134756,11.7963867c0.2260742,0.3916016,0.6865234,0.5839844,1.125,0.4648438  c0.4370117-0.1171875,0.7407227-0.5136719,0.7407227-0.9658203V16.7179394c0-2.1977549,1.6191406-4.0249033,3.6865234-4.1601572  c1.1650391-0.0810547,2.2583008,0.3310547,3.0761719,1.1494141c0.7470703,0.7475586,1.1586914,1.7426758,1.1586914,2.802247  v24.2529278c0,0.5522461,0.4477558,1,1.0000019,1s1-0.4477539,1-1V10.9962587c0-2.184082,1.7768555-3.960937,3.9604492-3.960937  c1.0600586,0,2.0551758,0.4116211,2.8022461,1.1591792c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v5.5131845  v0.277832v23.9750957c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1V16.7872753v-0.277832  c0-2.184083,1.7773438-3.9609385,3.9609375-3.9609385c1.0595703,0,2.0546875,0.4116211,2.8027344,1.1586914  c0.7470703,0.7475586,1.1582031,1.7426758,1.1582031,2.802247v5.9462891v18.3066387c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1  V22.4557323c0-2.184082,1.7773438-3.9609375,3.9609375-3.9609375c1.0595703,0,2.0546875,0.4116211,2.8017578,1.1591797  c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v37.1074219  C61.69981,72.3776093,52.1832085,82.8033905,40.4849663,82.8033905z"/></svg></span><span class="ctx-sub-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></span></button>
-      <div class="ctx-submenu">
-        <button type="button" data-action="select"><span class="ctx-label" data-i18n="ctxSelectMode">Режим выбора</span><span class="ctx-icon"><svg viewBox="-1 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M7 4 L7 19 L11 15.2 L13.7 21.2 L16 20.2 L13.4 14.4 L18 14 Z"/></svg></span></button>
-        <button type="button" data-action="read"><span class="ctx-label" data-i18n="ctxReadMode">Режим чтения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span></button>
-        <button type="button" data-action="loupe"><span class="ctx-label" data-i18n="ctxLoupeMode">Режим увеличения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20.5 20.5l-4.8-4.8"/></svg></span></button>
-        <hr>
-        <button type="button" data-action="fit-width"><span class="ctx-label" data-i18n="ctxFitWidth">По ширине страницы</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M2 12h4M18 12h4M3.5 9.5 2 12l1.5 2.5M20.5 9.5 22 12l-1.5 2.5"/></svg></span></button>
-      </div>
-    </div>
+    <button type="button" data-action="select"><span class="ctx-label" data-i18n="ctxSelectMode">Режим выбора</span><span class="ctx-icon"><svg viewBox="-1 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M7 4 L7 19 L11 15.2 L13.7 21.2 L16 20.2 L13.4 14.4 L18 14 Z"/></svg></span></button>
+    <button type="button" data-action="read"><span class="ctx-label" data-i18n="ctxReadMode">Режим чтения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span></button>
+    <button type="button" data-action="loupe"><span class="ctx-label" data-i18n="ctxLoupeMode">Режим увеличения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20.5 20.5l-4.8-4.8"/></svg></span></button>
+    <hr>
+    <button type="button" data-action="fit-width"><span class="ctx-label" data-i18n="ctxFitWidth">По ширине страницы</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M2 12h4M18 12h4M3.5 9.5 2 12l1.5 2.5M20.5 9.5 22 12l-1.5 2.5"/></svg></span></button>
   </div>
 
   <!--RMB menu in page magnification (loupe) mode-->
   <div id="loupeModeCtxMenu" aria-hidden="true">
-    <div class="ctx-sub ctx-sub--modes">
-      <button type="button" class="ctx-sub-root" aria-haspopup="true" title="Режим просмотра" data-i18n-title="ctxViewMode"><span class="ctx-label" data-i18n="ctxLoupeMode">Режим увеличения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20.5 20.5l-4.8-4.8"/></svg></span><span class="ctx-sub-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg></span></button>
-      <div class="ctx-submenu">
-        <button type="button" data-action="select"><span class="ctx-label" data-i18n="ctxSelectMode">Режим выбора</span><span class="ctx-icon"><svg viewBox="-1 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M7 4 L7 19 L11 15.2 L13.7 21.2 L16 20.2 L13.4 14.4 L18 14 Z"/></svg></span></button>
-        <button type="button" data-action="nav"><span class="ctx-label" data-i18n="ctxNavMode">Режим навигации</span><span class="ctx-icon"><svg viewBox="0 0 69.0645142 89.838707" width="18" height="18" fill="currentColor" stroke="currentColor" stroke-width="0.8" stroke-linejoin="round" aria-hidden="true"><path d="M40.4849663,82.8033905  c-9.1123066,0-16.3754902-5.1455078-19.4277363-13.7636719c-0.1801758-0.5087891-0.3701172-1.015625-0.5893555-1.5087891  c-0.6171875-1.3886719-0.6171875-1.3886719-0.7412109-1.5224609l-0.015625,0.0146484  c-0.7080078-1.3291016-3.1923828-5.6308632-11.9047842-20.7168007c-0.909668-1.5717773-0.3686523-3.5917969,1.2021484-4.5014648  c0.7021484-0.4023438,1.5004883-0.6147461,2.3085938-0.6147461c1.6572266,0,3.1967773,0.8867188,4.0185547,2.315918  l6.8134756,11.7963867c0.2260742,0.3916016,0.6865234,0.5839844,1.125,0.4648438  c0.4370117-0.1171875,0.7407227-0.5136719,0.7407227-0.9658203V16.7179394c0-2.1977549,1.6191406-4.0249033,3.6865234-4.1601572  c1.1650391-0.0810547,2.2583008,0.3310547,3.0761719,1.1494141c0.7470703,0.7475586,1.1586914,1.7426758,1.1586914,2.802247  v24.2529278c0,0.5522461,0.4477558,1,1.0000019,1s1-0.4477539,1-1V10.9962587c0-2.184082,1.7768555-3.960937,3.9604492-3.960937  c1.0600586,0,2.0551758,0.4116211,2.8022461,1.1591792c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v5.5131845  v0.277832v23.9750957c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1V16.7872753v-0.277832  c0-2.184083,1.7773438-3.9609385,3.9609375-3.9609385c1.0595703,0,2.0546875,0.4116211,2.8027344,1.1586914  c0.7470703,0.7475586,1.1582031,1.7426758,1.1582031,2.802247v5.9462891v18.3066387c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1  V22.4557323c0-2.184082,1.7773438-3.9609375,3.9609375-3.9609375c1.0595703,0,2.0546875,0.4116211,2.8017578,1.1591797  c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v37.1074219  C61.69981,72.3776093,52.1832085,82.8033905,40.4849663,82.8033905z"/></svg></span></button>
-        <button type="button" data-action="read"><span class="ctx-label" data-i18n="ctxReadMode">Режим чтения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span></button>
-        <hr>
-        <button type="button" data-action="fit-width"><span class="ctx-label" data-i18n="ctxFitWidth">По ширине страницы</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M2 12h4M18 12h4M3.5 9.5 2 12l1.5 2.5M20.5 9.5 22 12l-1.5 2.5"/></svg></span></button>
-      </div>
-    </div>
+    <button type="button" data-action="select"><span class="ctx-label" data-i18n="ctxSelectMode">Режим выбора</span><span class="ctx-icon"><svg viewBox="-1 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M7 4 L7 19 L11 15.2 L13.7 21.2 L16 20.2 L13.4 14.4 L18 14 Z"/></svg></span></button>
+    <button type="button" data-action="nav"><span class="ctx-label" data-i18n="ctxNavMode">Режим навигации</span><span class="ctx-icon"><svg viewBox="0 0 69.0645142 89.838707" width="18" height="18" fill="currentColor" stroke="currentColor" stroke-width="0.8" stroke-linejoin="round" aria-hidden="true"><path d="M40.4849663,82.8033905  c-9.1123066,0-16.3754902-5.1455078-19.4277363-13.7636719c-0.1801758-0.5087891-0.3701172-1.015625-0.5893555-1.5087891  c-0.6171875-1.3886719-0.6171875-1.3886719-0.7412109-1.5224609l-0.015625,0.0146484  c-0.7080078-1.3291016-3.1923828-5.6308632-11.9047842-20.7168007c-0.909668-1.5717773-0.3686523-3.5917969,1.2021484-4.5014648  c0.7021484-0.4023438,1.5004883-0.6147461,2.3085938-0.6147461c1.6572266,0,3.1967773,0.8867188,4.0185547,2.315918  l6.8134756,11.7963867c0.2260742,0.3916016,0.6865234,0.5839844,1.125,0.4648438  c0.4370117-0.1171875,0.7407227-0.5136719,0.7407227-0.9658203V16.7179394c0-2.1977549,1.6191406-4.0249033,3.6865234-4.1601572  c1.1650391-0.0810547,2.2583008,0.3310547,3.0761719,1.1494141c0.7470703,0.7475586,1.1586914,1.7426758,1.1586914,2.802247  v24.2529278c0,0.5522461,0.4477558,1,1.0000019,1s1-0.4477539,1-1V10.9962587c0-2.184082,1.7768555-3.960937,3.9604492-3.960937  c1.0600586,0,2.0551758,0.4116211,2.8022461,1.1591792c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v5.5131845  v0.277832v23.9750957c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1V16.7872753v-0.277832  c0-2.184083,1.7773438-3.9609385,3.9609375-3.9609385c1.0595703,0,2.0546875,0.4116211,2.8027344,1.1586914  c0.7470703,0.7475586,1.1582031,1.7426758,1.1582031,2.802247v5.9462891v18.3066387c0,0.5522461,0.4472656,1,1,1s1-0.4477539,1-1  V22.4557323c0-2.184082,1.7773438-3.9609375,3.9609375-3.9609375c1.0595703,0,2.0546875,0.4116211,2.8017578,1.1591797  c0.7470703,0.7460938,1.1582031,1.7412109,1.1582031,2.8017578v37.1074219  C61.69981,72.3776093,52.1832085,82.8033905,40.4849663,82.8033905z"/></svg></span></button>
+    <button type="button" data-action="read"><span class="ctx-label" data-i18n="ctxReadMode">Режим чтения</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span></button>
+    <hr>
+    <button type="button" data-action="fit-width"><span class="ctx-label" data-i18n="ctxFitWidth">По ширине страницы</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="3" width="12" height="18" rx="1.5"/><path d="M2 12h4M18 12h4M3.5 9.5 2 12l1.5 2.5M20.5 9.5 22 12l-1.5 2.5"/></svg></span></button>
   </div>
 
   <!--Context menu for selected page text in preview mode (desktop, >400% zoom) - same options as the page editor's-->
@@ -7875,9 +7910,9 @@
           </select>
           <span class="pe-props-sep" id="pePropFontSep"></span>
           <span id="pePropFormatWrap">
-            <button type="button" class="pe-fmt-btn" id="peFmtBold" title="Жирный" data-i18n-title="peBold"><span style="font-weight:800">Ж</span></button>
-            <button type="button" class="pe-fmt-btn" id="peFmtItalic" title="Курсив" data-i18n-title="peItalic"><span style="font-style:italic;font-weight:600;transform:translateX(-1px);display:inline-block">К</span></button>
-            <button type="button" class="pe-fmt-btn" id="peFmtUnderline" title="Подчёркнутый" data-i18n-title="peUnderline"><span style="text-decoration:underline;font-weight:600">Ч</span></button>
+            <button type="button" class="pe-fmt-btn" id="peFmtBold" title="Жирный" data-i18n-title="peBold"><span style="font-weight:800" data-i18n="peBoldLetter">Ж</span></button>
+            <button type="button" class="pe-fmt-btn" id="peFmtItalic" title="Курсив" data-i18n-title="peItalic"><span style="font-style:italic;font-weight:600;transform:translateX(-1px);display:inline-block" data-i18n="peItalicLetter">К</span></button>
+            <button type="button" class="pe-fmt-btn" id="peFmtUnderline" title="Подчёркнутый" data-i18n-title="peUnderline"><span style="text-decoration:underline;font-weight:600" data-i18n="peUnderlineLetter">Ч</span></button>
           </span>
           <span class="pe-props-sep" id="pePropAlignSep"></span>
           <span id="pePropAlignWrap">
@@ -7934,7 +7969,7 @@
         <button type="button" class="pe-mkb-done" id="peMobileKbDone" data-i18n="peMobileKbDone">Готово</button>
       </div>
       <textarea class="pe-mkb-text" id="peMobileKbText" inputmode="none" autocomplete="off" autocapitalize="off" spellcheck="false" rows="2"></textarea>
-      <div class="pe-mkb-keys" id="peMobileKbKeys" aria-label="Клавиатура"></div>
+      <div class="pe-mkb-keys" id="peMobileKbKeys" aria-label="Клавиатура" data-i18n-aria="peMobileKbKeysAria"></div>
     </div>
     <input type="file" id="peImgInput" accept="image/png,image/jpeg" style="display:none">
     <input type="file" id="peSignatureInput" accept="image/png,image/jpeg" style="display:none">
@@ -8111,7 +8146,7 @@
     </svg>
     <input type="range" id="readModeScaleSlider" min="0" max="200" value="100" step="1"
            oninput="changeScale(this.value)" onmouseup="this.blur()" ontouchend="this.blur()"
-           tabindex="-1" title="Масштаб">
+           tabindex="-1" title="Масштаб" data-i18n-title="zoomTitle">
   </div>
 
   <!--Hint when entering reading mode-->
@@ -8161,7 +8196,7 @@
 
   <!--Bookmarks / table of contents popup (opened from #bookmarksBtn) - always
        pinned to the left edge, fixed width, not repositionable or resizable.-->
-  <div id="pmBookmarksPanel" class="pm-search-panel pm-bookmarks-panel" role="dialog" aria-hidden="true" aria-label="Закладки">
+  <div id="pmBookmarksPanel" class="pm-search-panel pm-bookmarks-panel" role="dialog" aria-hidden="true" aria-label="Закладки" data-i18n-aria="bookmarksPanel">
     <div class="pm-search-row pm-bookmarks-header">
       <span class="pm-bookmarks-title" data-i18n="bookmarksPanel">Закладки</span>
       <div class="pm-bookmarks-header-actions">
@@ -8201,9 +8236,9 @@
     <button type="button" data-action="link"><span class="ctx-label" data-i18n="bookmarksLinkCurrent">Связать с текущим местом</span></button>
     <hr>
     <div class="pm-bookmarks-fmt-row">
-      <button type="button" class="pm-bookmarks-fmt-btn pm-bookmarks-fmt-bold" data-format="bold" title="Полужирный">Ж</button>
-      <button type="button" class="pm-bookmarks-fmt-btn pm-bookmarks-fmt-italic" data-format="italic" title="Курсив">К</button>
-      <button type="button" class="pm-bookmarks-fmt-btn pm-bookmarks-fmt-underline" data-format="underline" title="Подчёркнутый">Ч</button>
+      <button type="button" class="pm-bookmarks-fmt-btn pm-bookmarks-fmt-bold" data-format="bold" title="Жирный" data-i18n-title="peBold" data-i18n="peBoldLetter">Ж</button>
+      <button type="button" class="pm-bookmarks-fmt-btn pm-bookmarks-fmt-italic" data-format="italic" title="Курсив" data-i18n-title="peItalic" data-i18n="peItalicLetter">К</button>
+      <button type="button" class="pm-bookmarks-fmt-btn pm-bookmarks-fmt-underline" data-format="underline" title="Подчёркнутый" data-i18n-title="peUnderline" data-i18n="peUnderlineLetter">Ч</button>
     </div>
   </div>
 
@@ -8221,7 +8256,7 @@
   <!--Hint: hold/ready to export outside window-->
   <div id="exportDragHint" aria-live="polite" aria-hidden="true">
     <div class="export-drag-badge">
-      <span><span class="export-drag-ico" aria-hidden="true">⏳</span><span class="export-drag-text">Удерживайте…</span></span>
+      <span><span class="export-drag-ico" aria-hidden="true">⏳</span><span class="export-drag-text" data-i18n="exportHintHolding">Удерживайте…</span></span>
       <div class="export-hold-bar" aria-hidden="true"><div class="export-hold-fill"></div></div>
     </div>
   </div>
@@ -8670,8 +8705,9 @@
     // at that first call and throw, aborting the rest of this script (see
     // the full pmCompressEstimateIsFresh/pmComputeCompressEstimate/etc.
     // implementation much further down).
-    let pmCompressEstimateCache = { save: null, export: null };
-    let pmCompressEstimateInFlight = { save: null, export: null };
+    let pmCompressEstimateCache = { save: null, export: null, ctx: null };
+    let pmCompressEstimateInFlight = { save: null, export: null, ctx: null };
+    let pmCompressEstimateInFlightKey = { save: null, export: null, ctx: null };
     const PM_COMPRESS_ESTIMATE_TTL_MS = 20000;
     const PM_COMPRESS_HIGHLIGHT_RATIO = 0.30;
     // Same reasoning as pmCompressEstimateCache above: updateUIState() calls
@@ -8780,7 +8816,7 @@
     let historyCommitChain = Promise.resolve();
     let selectedPages = new Set();
     let markedForDeletion = new Set();
-    let currentFileName = 'отредактированный.pdf';
+    let currentFileName = '';
     let draggedIndex = null;
     let pageDragOverTabId = null;  //tab under cursor when dragging pages
     let pageCrossTabDrag = null;   //{ sourceTabId, indices } - transfer between tabs
@@ -9234,6 +9270,12 @@
         confirmExportSplitPages: 'Каждая выделенная страница будет сохранена отдельным PDF-файлом.<br><br>Будет создано файлов: <b>{n}</b>',
         exportSplitPagesYes: 'Экспортировать',
         exportSplitPagesNo: 'Отмена',
+        saveSplitPages: 'Сохранить по страницам',
+        saveSplitPagesHint: 'Сохранить по страницам\nКаждая страница — отдельный PDF-файл',
+        confirmSaveSplitPages: 'Каждая страница документа будет сохранена отдельным PDF-файлом.<br><br>Будет создано файлов: <b>{n}</b>',
+        saveSplitPagesYes: 'Сохранить',
+        loadingSavingPageOfTotal: 'Сохранение страниц: {i} из {total}...',
+        alertSavePagesError: 'Ошибка при сохранении страниц',
         loadingExportingPageOfTotal: 'Экспорт страниц: {i} из {total}...',
         compressPdf: 'Сжать PDF',
         compressPdfHint: 'Сжать PDF\n(уменьшить размер файла без потери качества)',
@@ -9363,11 +9405,13 @@
         ctxReadMode: 'Режим чтения',
         ctxLoupeMode: 'Режим увеличения',
         ctxViewMode: 'Режим просмотра',
+        linkFollow: 'Перейти по ссылке',
+        popCapLang: 'Язык интерфейса', popCapRestoreHelp: 'Вернуть подсказку', popCapDeletedHidden: 'Удалённые скрыты (Shift+H)', popCapDeletedShown: 'Удалённые показаны (Shift+H)',
         ctxSelectPages: 'Выбрать страницы', ctxSelectAll: 'Выбрать все (Ctrl+A)', ctxSelectEven: 'Выбрать чётные', ctxSelectOdd: 'Выбрать нечётные',
         ctxSelectMode: 'Режим выбора',
         ctxFitWidth: 'По ширине страницы',
-        ctxRotLeft: 'Повернуть против часовой стрелки',
-        ctxRotRight: 'Повернуть по часовой стрелке',
+        ctxRotLeft: 'Повернуть против ч.с.',
+        ctxRotRight: 'Повернуть по ч.с.',
         ctxEdit: 'Редактировать',
         ctxCut: 'Вырезать (Ctrl+X)',
         ctxCopy: 'Копировать (Ctrl+C)',
@@ -9436,6 +9480,8 @@
         peStrokeThinner: 'Тоньше на 1 px',
         peOpacity: 'Прозрачность',
         peFont: 'Шрифт', peFontDefault: 'Стандартный',
+        peBoldLetter: 'Ж', peItalicLetter: 'К', peUnderlineLetter: 'Ч',
+        zoomTitle: 'Масштаб', peMobileKbKeysAria: 'Клавиатура',
         peBold: 'Жирный',
         peItalic: 'Курсив',
         peUnderline: 'Подчёркнутый',
@@ -9469,7 +9515,7 @@
         pwdPlaceholder: 'Пароль',
         pwdOpen: 'Открыть',
         pwdCancel: 'Отмена',
-        encryptFileTooltip: 'Зашифровать файл паролем',
+        encryptFileTooltip: 'Зашифровать паролем',
         encryptPwdTitle: 'Зашифровать файл паролем',
         encryptPwdBody: 'Этот пароль потребуется, чтобы открыть сохранённый PDF.',
         encryptPwdPlaceholder: 'Пароль',
@@ -9489,13 +9535,10 @@
         imgSaveSaveTitle: 'Сохранить как изображение',
         imgSaveJpegTitle: 'Качество JPEG',
         imgSavePages: 'Страниц: {n}',
-        imgSaveDocsPages: 'Документов: {docs}, страниц: {pages}',
-        imgSaveAllDocs: 'Сохранить все открытые документы ({n})',
         imgSaveDpi: 'Разрешение (DPI):',
         imgSaveDpiHint: 'Меньше DPI — меньше файл, ниже детализация',
         imgSaveQuality: 'Качество JPEG:',
         imgSaveFileSize: 'Размер файла:',
-        imgSaveTotalSize: 'Общий размер файлов:',
         imgSaveEstimating: 'расчёт…',
         imgSaveContinue: 'Продолжить',
         imgSaveCancel: 'Отмена',
@@ -9578,11 +9621,6 @@
         alertInsertPagesError: 'Ошибка вставки страниц',
         loadingCopyingPages: 'Копирование страниц...', alertCopyError: 'Ошибка копирования',
         loadingCuttingPages: 'Вырезание страниц...', alertCutError: 'Ошибка вырезания',
-        loadingSavingDocuments: 'Сохранение документов...',
-        loadingSavingDocPreparingImages: 'Сохранение {i} из {total}: подготовка изображений…',
-        loadingSavingDocumentOfTotal: 'Сохранение документа {i} из {total}…',
-        loadingSavingDocEncrypting: 'Сохранение {i} из {total}: шифрование…',
-        alertSaveDocumentsError: 'Ошибка при сохранении документов',
         alertOpenWithPasswordFailed: 'не удалось открыть файл с указанным паролем',
         alertOpenFileFailed: 'не удалось открыть файл',
         alertPreparingProtectedFileFailed: 'не удалось подготовить защищённый файл',
@@ -9664,6 +9702,12 @@
         confirmExportSplitPages: 'Each selected page will be saved as a separate PDF file.<br><br>Files to be created: <b>{n}</b>',
         exportSplitPagesYes: 'Export',
         exportSplitPagesNo: 'Cancel',
+        saveSplitPages: 'Save by pages',
+        saveSplitPagesHint: 'Save by pages\nEach page as a separate PDF file',
+        confirmSaveSplitPages: 'Each page of the document will be saved as a separate PDF file.<br><br>Files to be created: <b>{n}</b>',
+        saveSplitPagesYes: 'Save',
+        loadingSavingPageOfTotal: 'Saving pages: {i} of {total}...',
+        alertSavePagesError: 'Error saving pages',
         loadingExportingPageOfTotal: 'Exporting pages: {i} of {total}...',
         compressPdf: 'Compress PDF',
         compressPdfHint: 'Compress PDF\n(reduce file size without losing quality)',
@@ -9793,6 +9837,8 @@
         ctxReadMode: 'Reading mode',
         ctxLoupeMode: 'Magnifier mode',
         ctxViewMode: 'View mode',
+        linkFollow: 'Open link',
+        popCapLang: 'Interface language', popCapRestoreHelp: 'Restore hints', popCapDeletedHidden: 'Deleted hidden (Shift+H)', popCapDeletedShown: 'Deleted shown (Shift+H)',
         ctxSelectPages: 'Select pages', ctxSelectAll: 'Select all (Ctrl+A)', ctxSelectEven: 'Select even', ctxSelectOdd: 'Select odd',
         ctxSelectMode: 'Selection mode',
         ctxFitWidth: 'Fit page width',
@@ -9866,6 +9912,8 @@
         peStrokeThinner: 'Thinner by 1 px',
         peOpacity: 'Opacity',
         peFont: 'Font', peFontDefault: 'Default',
+        peBoldLetter: 'B', peItalicLetter: 'I', peUnderlineLetter: 'U',
+        zoomTitle: 'Zoom', peMobileKbKeysAria: 'Keyboard',
         peBold: 'Bold',
         peItalic: 'Italic',
         peUnderline: 'Underline',
@@ -9899,7 +9947,7 @@
         pwdPlaceholder: 'Password',
         pwdOpen: 'Open',
         pwdCancel: 'Cancel',
-        encryptFileTooltip: 'Encrypt file with a password',
+        encryptFileTooltip: 'Encrypt with password',
         encryptPwdTitle: 'Encrypt file with a password',
         encryptPwdBody: 'This password will be required to open the saved PDF.',
         encryptPwdPlaceholder: 'Password',
@@ -9919,13 +9967,10 @@
         imgSaveSaveTitle: 'Save as image',
         imgSaveJpegTitle: 'JPEG quality',
         imgSavePages: 'Pages: {n}',
-        imgSaveDocsPages: 'Documents: {docs}, pages: {pages}',
-        imgSaveAllDocs: 'Save all open documents ({n})',
         imgSaveDpi: 'Resolution (DPI):',
         imgSaveDpiHint: 'Lower DPI — smaller file, less detail',
         imgSaveQuality: 'JPEG quality:',
         imgSaveFileSize: 'File size:',
-        imgSaveTotalSize: 'Total file size:',
         imgSaveEstimating: 'calculating…',
         imgSaveContinue: 'Continue',
         imgSaveCancel: 'Cancel',
@@ -10008,11 +10053,6 @@
         alertInsertPagesError: 'Error inserting pages',
         loadingCopyingPages: 'Copying pages...', alertCopyError: 'Copy error',
         loadingCuttingPages: 'Cutting pages...', alertCutError: 'Cut error',
-        loadingSavingDocuments: 'Saving documents...',
-        loadingSavingDocPreparingImages: 'Saving {i} of {total}: preparing images…',
-        loadingSavingDocumentOfTotal: 'Saving document {i} of {total}…',
-        loadingSavingDocEncrypting: 'Saving {i} of {total}: encrypting…',
-        alertSaveDocumentsError: 'Error saving the documents',
         alertOpenWithPasswordFailed: 'failed to open the file with the given password',
         alertOpenFileFailed: 'failed to open the file',
         alertPreparingProtectedFileFailed: 'failed to prepare the protected file',
@@ -10094,6 +10134,12 @@
         confirmExportSplitPages: 'Cada página seleccionada se guardará como un archivo PDF independiente.<br><br>Archivos que se crearán: <b>{n}</b>',
         exportSplitPagesYes: 'Exportar',
         exportSplitPagesNo: 'Cancelar',
+        saveSplitPages: 'Guardar por páginas',
+        saveSplitPagesHint: 'Guardar por páginas\nCada página como un archivo PDF independiente',
+        confirmSaveSplitPages: 'Cada página del documento se guardará como un archivo PDF independiente.<br><br>Archivos que se crearán: <b>{n}</b>',
+        saveSplitPagesYes: 'Guardar',
+        loadingSavingPageOfTotal: 'Guardando páginas: {i} de {total}...',
+        alertSavePagesError: 'Error al guardar páginas',
         loadingExportingPageOfTotal: 'Exportando páginas: {i} de {total}...',
         compressPdf: 'Comprimir PDF',
         compressPdfHint: 'Comprimir PDF\n(reducir el tamaño del archivo sin perder calidad)',
@@ -10223,6 +10269,8 @@
         ctxReadMode: 'Modo lectura',
         ctxLoupeMode: 'Modo lupa',
         ctxViewMode: 'Modo de vista',
+        linkFollow: 'Abrir enlace',
+        popCapLang: 'Idioma de la interfaz', popCapRestoreHelp: 'Restaurar ayuda', popCapDeletedHidden: 'Eliminadas ocultas (Shift+H)', popCapDeletedShown: 'Eliminadas visibles (Shift+H)',
         ctxSelectPages: 'Seleccionar páginas', ctxSelectAll: 'Seleccionar todas (Ctrl+A)', ctxSelectEven: 'Seleccionar pares', ctxSelectOdd: 'Seleccionar impares',
         ctxSelectMode: 'Modo selección',
         ctxFitWidth: 'Ajustar al ancho de página',
@@ -10296,6 +10344,8 @@
         peStrokeThinner: 'Reducir 1 px',
         peOpacity: 'Opacidad',
         peFont: 'Fuente', peFontDefault: 'Predeterminada',
+        peBoldLetter: 'N', peItalicLetter: 'K', peUnderlineLetter: 'S',
+        zoomTitle: 'Zoom', peMobileKbKeysAria: 'Teclado',
         peBold: 'Negrita',
         peItalic: 'Cursiva',
         peUnderline: 'Subrayado',
@@ -10329,7 +10379,7 @@
         pwdPlaceholder: 'Contraseña',
         pwdOpen: 'Abrir',
         pwdCancel: 'Cancelar',
-        encryptFileTooltip: 'Cifrar archivo con contraseña',
+        encryptFileTooltip: 'Cifrar con contraseña',
         encryptPwdTitle: 'Cifrar archivo con contraseña',
         encryptPwdBody: 'Esta contraseña será necesaria para abrir el PDF guardado.',
         encryptPwdPlaceholder: 'Contraseña',
@@ -10349,13 +10399,10 @@
         imgSaveSaveTitle: 'Guardar como imagen',
         imgSaveJpegTitle: 'Calidad JPEG',
         imgSavePages: 'Páginas: {n}',
-        imgSaveDocsPages: 'Documentos: {docs}, páginas: {pages}',
-        imgSaveAllDocs: 'Guardar todos los documentos abiertos ({n})',
         imgSaveDpi: 'Resolución (DPI):',
         imgSaveDpiHint: 'Menos DPI — archivo más pequeño, menos detalle',
         imgSaveQuality: 'Calidad JPEG:',
         imgSaveFileSize: 'Tamaño del archivo:',
-        imgSaveTotalSize: 'Tamaño total de los archivos:',
         imgSaveEstimating: 'calculando…',
         imgSaveContinue: 'Continuar',
         imgSaveCancel: 'Cancelar',
@@ -10438,11 +10485,6 @@
         alertInsertPagesError: 'Error al insertar páginas',
         loadingCopyingPages: 'Copiando páginas...', alertCopyError: 'Error al copiar',
         loadingCuttingPages: 'Cortando páginas...', alertCutError: 'Error al cortar',
-        loadingSavingDocuments: 'Guardando documentos...',
-        loadingSavingDocPreparingImages: 'Guardando {i} de {total}: preparando imágenes…',
-        loadingSavingDocumentOfTotal: 'Guardando documento {i} de {total}…',
-        loadingSavingDocEncrypting: 'Guardando {i} de {total}: cifrando…',
-        alertSaveDocumentsError: 'Error al guardar los documentos',
         alertOpenWithPasswordFailed: 'no se pudo abrir el archivo con la contraseña indicada',
         alertOpenFileFailed: 'no se pudo abrir el archivo',
         alertPreparingProtectedFileFailed: 'no se pudo preparar el archivo protegido',
@@ -10538,6 +10580,12 @@
         confirmExportSplitPages: '每个所选页面将保存为单独的 PDF 文件。<br><br>将创建的文件数：<b>{n}</b>',
         exportSplitPagesYes: '导出',
         exportSplitPagesNo: '取消',
+        saveSplitPages: '按页保存',
+        saveSplitPagesHint: '按页保存\n每一页保存为单独的 PDF 文件',
+        confirmSaveSplitPages: '文档的每一页将保存为单独的 PDF 文件。<br><br>将创建的文件数：<b>{n}</b>',
+        saveSplitPagesYes: '保存',
+        loadingSavingPageOfTotal: '正在保存页面：{i} / {total}...',
+        alertSavePagesError: '保存页面时出错',
         loadingExportingPageOfTotal: '正在导出页面：{i} / {total}...',
         compressPdf: '压缩 PDF',
         compressPdfHint: '压缩 PDF\n(在不损失质量的情况下减小文件大小)',
@@ -10719,6 +10767,8 @@
         ctxReadMode: '阅读模式',
         ctxLoupeMode: '放大镜模式',
         ctxViewMode: '查看模式',
+        linkFollow: '打开链接',
+        popCapLang: '界面语言', popCapRestoreHelp: '恢复提示', popCapDeletedHidden: '已隐藏删除页 (Shift+H)', popCapDeletedShown: '已显示删除页 (Shift+H)',
         ctxSelectPages: '选择页面', ctxSelectAll: '全选 (Ctrl+A)', ctxSelectEven: '选择偶数页', ctxSelectOdd: '选择奇数页',
         ctxSelectMode: '选择模式',
         ctxFitWidth: '适应页面宽度',
@@ -10792,6 +10842,8 @@
         peStrokeThinner: '变细 1 像素',
         peOpacity: '不透明度',
         peFont: '字体', peFontDefault: '默认',
+        peBoldLetter: 'B', peItalicLetter: 'I', peUnderlineLetter: 'U',
+        zoomTitle: '缩放', peMobileKbKeysAria: '键盘',
         peBold: '粗体',
         peItalic: '斜体',
         peUnderline: '下划线',
@@ -10825,7 +10877,7 @@
         pwdPlaceholder: '密码',
         pwdOpen: '打开',
         pwdCancel: '取消',
-        encryptFileTooltip: '使用密码加密文件',
+        encryptFileTooltip: '密码加密',
         encryptPwdTitle: '使用密码加密文件',
         encryptPwdBody: '打开已保存的 PDF 时需要输入此密码。',
         encryptPwdPlaceholder: '密码',
@@ -10845,13 +10897,10 @@
         imgSaveSaveTitle: '另存为图片',
         imgSaveJpegTitle: 'JPEG 质量',
         imgSavePages: '页数：{n}',
-        imgSaveDocsPages: '文档数：{docs}，页数：{pages}',
-        imgSaveAllDocs: '保存所有打开的文档 ({n})',
         imgSaveDpi: '分辨率 (DPI)：',
         imgSaveDpiHint: '较低的 DPI — 文件更小，细节更少',
         imgSaveQuality: 'JPEG 质量：',
         imgSaveFileSize: '文件大小：',
-        imgSaveTotalSize: '总文件大小：',
         imgSaveEstimating: '计算中…',
         imgSaveContinue: '继续',
         imgSaveCancel: '取消',
@@ -10943,11 +10992,6 @@
         alertCopyError: '复制出错',
         loadingCuttingPages: '正在剪切页面...',
         alertCutError: '剪切出错',
-        loadingSavingDocuments: '正在保存文档...',
-        loadingSavingDocPreparingImages: '正在保存 {i} / {total}：准备图片中…',
-        loadingSavingDocumentOfTotal: '正在保存文档 {i} / {total}…',
-        loadingSavingDocEncrypting: '正在保存 {i} / {total}：加密中…',
-        alertSaveDocumentsError: '保存文档时出错',
         alertOpenWithPasswordFailed: '使用提供的密码打开文件失败',
         alertOpenFileFailed: '打开文件失败',
         alertPreparingProtectedFileFailed: '准备受保护文件失败',
@@ -12245,6 +12289,9 @@
       document.querySelectorAll('.pe-callout-text').forEach((el) => {
         el.setAttribute('data-empty-hint', t('peCommentPlaceholder'));
       });
+      // Placeholders drawn by CSS (content: var(...)) in the page editor.
+      document.documentElement.style.setProperty('--pm-hint-text', JSON.stringify(t('peObjLabelText')));
+      document.documentElement.style.setProperty('--pm-hint-comment', JSON.stringify(t('peCommentPlaceholder')));
       document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
         const key = el.getAttribute('data-i18n-placeholder');
         if (key) el.setAttribute('placeholder', t(key));
@@ -12261,6 +12308,8 @@
         }
       } catch (_) {}
       try { if (typeof updateStickyFileBar === 'function') updateStickyFileBar(); } catch (_) {}
+      // Tab bar: its close / new-document tooltips are built by pmRenderBar.
+      try { if (typeof pmRenderBar === 'function' && typeof pmTabs !== 'undefined' && pmTabs.length) pmRenderBar(); } catch (_) {}
       if (typeof pmNavApplyStaticTooltips === 'function') {
         try { pmNavApplyStaticTooltips(); } catch (_) {}
       }
@@ -12293,6 +12342,57 @@
     // Sync the toggle button's icon/title with whatever <head> already applied.
     pmUpdateThemeToggleUI(pmCurrentTheme());
     pmApplyI18n();
+
+    // ── Captions of the top menu's popup buttons (desktop) ──
+    // A short name plus the hotkey, if any (the tooltip keeps the long
+    // explanation). Refreshed whenever a button is shown or its title changes
+    // (language, theme, shown/hidden deleted pages), and moved to the left of
+    // the button where the right side has no room for it.
+    function pmPopCapText(btn) {
+      switch (btn.id) {
+        case 'langToggleBtn': return t('popCapLang');
+        case 'restoreHelpBtn': return t('popCapRestoreHelp');
+        case 'aboutBtn': return t('about');
+        case 'watermarkBtn': return t('watermarkTitle');
+        case 'printSelectedBtn': return t('printSelectedPages');
+        case 'toggleDeletedBtn':
+          return t(deletedPagesHidden ? 'popCapDeletedHidden' : 'popCapDeletedShown');
+      }
+      // Export / Save popups: their titles carry long hints (and the compress
+      // estimate), the aria label is the plain name.
+      const ariaKey = btn.getAttribute('data-i18n-aria');
+      if (btn.classList.contains('img-save-btn') && ariaKey) return t(ariaKey);
+      // Hide menu, theme, view modes: the title is already short (with hotkey).
+      return btn.title || '';
+    }
+    let pmPopCapCtx = null;
+    function pmPopCapWidth(text) {
+      if (!pmPopCapCtx) pmPopCapCtx = document.createElement('canvas').getContext('2d');
+      pmPopCapCtx.font = '12.5px Arial, sans-serif';
+      return Math.ceil(pmPopCapCtx.measureText(text).width) + 22; // + padding and border
+    }
+    function pmPopCapUpdate(btn) {
+      const text = pmPopCapText(btn);
+      if (btn.getAttribute('data-pm-caption') !== text) btn.setAttribute('data-pm-caption', text);
+      if (!btn.classList.contains('show')) return;
+      const r = btn.getBoundingClientRect();
+      const fitsRight = r.right + 8 + pmPopCapWidth(text) <= window.innerWidth - 6;
+      btn.classList.toggle('pm-pop-cap--left', !fitsRight);
+    }
+    function pmPopCapsInit() {
+      const btns = document.querySelectorAll(
+        '#logoMenuArea > button, .readmode-wrapper .mode-btn, #watermarkBtn, ' +
+        '#toggleDeletedBtn, #printSelectedBtn, .top-menu .img-save-btn');
+      const mo = new MutationObserver((recs) => {
+        new Set(recs.map(r => r.target)).forEach(pmPopCapUpdate);
+      });
+      btns.forEach((btn) => {
+        btn.classList.add('pm-pop-cap');
+        pmPopCapUpdate(btn);
+        mo.observe(btn, { attributes: true, attributeFilter: ['class', 'title'] });
+      });
+    }
+    pmPopCapsInit();
 
     // ═══════════════════════════════════════════════════════════════════════
     // CRASH RECOVERY (IndexedDB, best-effort/local-only)
@@ -15834,10 +15934,12 @@
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    // INTERNAL DOCUMENT LINKS (select mode, any zoom)
+    // DOCUMENT LINKS (any zoom)
     // Clickable hotzones over a page's PDF Link annotations, jumping to
     // their target page - common in manuals/instructions authored with
-    // an embedded table of contents or cross-references.
+    // an embedded table of contents or cross-references - and over web
+    // links (URI link annotations, and http(s)/www addresses found in the
+    // page text), which open in a new browser tab.
     // ═══════════════════════════════════════════════════════════════════
     let pmLinksPageCache = new Map();
 
@@ -15855,6 +15957,58 @@
     // with left/top/width/height as 0..1 fractions of the page's own
     // (rotation-applied) box, ready to place as percentage-positioned
     // hotzones inside the box getPageImgDisplayMetrics computes for it.
+    // Only web pages: http(s) addresses, and www. ones taken as https.
+    function pmLinksWebUrl(raw) {
+      if (!raw || typeof raw !== 'string') return null;
+      const u = raw.trim();
+      if (/^https?:\/\/[^\s]+$/i.test(u)) return u;
+      if (/^www\.[^\s]+\.[^\s]+$/i.test(u)) return 'https://' + u;
+      return null;
+    }
+    // Trailing punctuation belongs to the sentence, not the address; a
+    // closing bracket stays only when the address opened one itself.
+    function pmLinksTrimUrl(u) {
+      for (;;) {
+        const last = u.slice(-1);
+        if (/[.,;:!?'"»…]/.test(last)) { u = u.slice(0, -1); continue; }
+        const pair = { ')': '(', ']': '[', '}': '{' }[last];
+        if (pair && u.split(pair).length <= u.split(last).length - 1) { u = u.slice(0, -1); continue; }
+        return u;
+      }
+    }
+    let pmLinksMeasureCtx = null;
+    // Web addresses in a page's text items -> [{ url, rect }] with rect in
+    // PDF space. Horizontal runs only; an address's span inside its run is
+    // estimated from proportional glyph widths.
+    function pmLinksFindTextUrls(textContent) {
+      const out = [];
+      if (!textContent || !textContent.items) return out;
+      const re = /(?:https?:\/\/|www\.)[^\s<>"'«»]+/gi;
+      for (const item of textContent.items) {
+        const str = item && item.str;
+        if (!str || str.length < 8 || !item.transform) continue;
+        re.lastIndex = 0;
+        let m;
+        while ((m = re.exec(str))) {
+          const text = pmLinksTrimUrl(m[0]);
+          const url = pmLinksWebUrl(text);
+          if (!url) continue;
+          const tr = item.transform;
+          if (Math.abs(tr[1]) > 1e-6 || Math.abs(tr[2]) > 1e-6 || !(tr[0] > 0) || !(item.width > 0)) continue;
+          if (!pmLinksMeasureCtx) {
+            pmLinksMeasureCtx = document.createElement('canvas').getContext('2d');
+            pmLinksMeasureCtx.font = '100px Arial, sans-serif';
+          }
+          const full = pmLinksMeasureCtx.measureText(str).width || 1;
+          const f1 = pmLinksMeasureCtx.measureText(str.slice(0, m.index)).width / full;
+          const f2 = pmLinksMeasureCtx.measureText(str.slice(0, m.index + text.length)).width / full;
+          const h = Math.abs(tr[3]) || item.height || 10;
+          out.push({ url, rect: [tr[4] + item.width * f1, tr[5] - 0.22 * h, tr[4] + item.width * f2, tr[5] + 0.9 * h] });
+        }
+      }
+      return out;
+    }
+
     async function pmLinksLoadPage(pageIdx) {
       const token = hqPdfjsToken;
       const cacheKey = pageIdx + ':' + token;
@@ -15873,7 +16027,21 @@
           const annots = await page.getAnnotations({ intent: 'display' });
           if (token !== hqPdfjsToken) return { aspectRatio, links: [] };
           const links = [];
+          const pushRect = (pdfRect, extra) => {
+            // pmViewportRect maps PDF-space corners into the rotated viewport
+            // pairwise without re-sorting them - hence min/max.
+            const r = pmViewportRect(viewport, pdfRect);
+            const left = Math.min(r[0], r[2]) / viewport.width;
+            const top = Math.min(r[1], r[3]) / viewport.height;
+            const width = Math.abs(r[2] - r[0]) / viewport.width;
+            const height = Math.abs(r[3] - r[1]) / viewport.height;
+            if (!(width > 0) || !(height > 0)) return;
+            links.push(Object.assign({ left, top, width, height }, extra));
+          };
           for (const a of annots) {
+            // Web links: open in a new browser tab.
+            const webUrl = a.subtype === 'Link' ? pmLinksWebUrl(a.url || a.unsafeUrl) : null;
+            if (webUrl) { pushRect(a.rect, { url: webUrl }); continue; }
             if (a.subtype !== 'Link' || a.dest == null) continue;
             let dest = a.dest;
             let targetPageIndex;
@@ -15898,6 +16066,26 @@
             if (!(width > 0) || !(height > 0)) continue;
             links.push({ pageIndex: targetPageIndex, left, top, width, height });
           }
+          // Web addresses written in the page text itself (no link annotation).
+          try {
+            let textContent = await page.getTextContent();
+            if (token !== hqPdfjsToken) return { aspectRatio, links: [] };
+            if (typeof peFilterRedactedTextItems === 'function') {
+              textContent = peFilterRedactedTextItems(textContent, pageIdx, viewport);
+            }
+            const annotated = links.slice();
+            pmLinksFindTextUrls(textContent).forEach(({ url, rect }) => {
+              const before = links.length;
+              pushRect(rect, { url });
+              const z = links[links.length - 1];
+              if (links.length === before) return;
+              // Already covered by a link annotation: keep just that one.
+              const cx = z.left + z.width / 2, cy = z.top + z.height / 2;
+              if (annotated.some(o => cx >= o.left && cx <= o.left + o.width && cy >= o.top && cy <= o.top + o.height)) links.pop();
+            });
+          } catch (err) {
+            console.warn('pmLinksLoadPage text urls', pageIdx, err);
+          }
           return { aspectRatio, links };
         } catch (err) {
           console.warn('pmLinksLoadPage', pageIdx, err);
@@ -15917,7 +16105,7 @@
 
     // Builds (or removes, if the page has no links) the .pm-link-layer for
     // one page card. Visibility/interactivity itself is CSS-only
-    // (body.nav-mode-active hides it) so this can run unconditionally
+    // (body.nav-mode-active hides internal links) so this can run unconditionally
     // whenever page content might have changed, without tracking mode
     // switches - switching into select mode shows an already-built layer
     // with no extra delay.
@@ -15949,6 +16137,7 @@
       layer.style.height = metrics.height + 'px';
       layer.innerHTML = '';
       links.forEach((link) => {
+        if (link.url) { layer.appendChild(pmLinksMakeWebZone(link)); return; }
         const zone = document.createElement('div');
         zone.className = 'pm-link-hotzone';
         zone.style.left = (link.left * 100) + '%';
@@ -15962,6 +16151,34 @@
         });
         layer.appendChild(zone);
       });
+    }
+
+    // A web link's hotzone: a real link opening a new browser tab. Works in
+    // navigation and reading mode too (see the CSS); a press that turned into
+    // a drag (panning the page) does not open it.
+    function pmLinksMakeWebZone(link) {
+      const a = document.createElement('a');
+      a.className = 'pm-link-hotzone pm-link-hotzone--url';
+      a.href = link.url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.draggable = false;
+      a.style.left = (link.left * 100) + '%';
+      a.style.top = (link.top * 100) + '%';
+      a.style.width = (link.width * 100) + '%';
+      a.style.height = (link.height * 100) + '%';
+      let down = null;
+      a.addEventListener('mouseenter', () => { a.title = t('linkFollow') + '\n' + link.url; });
+      a.addEventListener('mousedown', (e) => { down = { x: e.clientX, y: e.clientY }; });
+      a.addEventListener('dragstart', (e) => e.preventDefault());
+      a.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const moved = down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4;
+        down = null;
+        if (moved || e.button !== 0) e.preventDefault();
+      });
+      a.addEventListener('dblclick', (e) => e.stopPropagation());
+      return a;
     }
 
     let pmLinksBuildTimer = null;
@@ -26170,6 +26387,21 @@
         if (clientX >= r.left - pad && clientX <= r.right + pad
             && clientY >= r.top - pad && clientY <= r.bottom + pad) return true;
       }
+      // The top menu's popup buttons (view modes, Export, Save, ...) hang
+      // over the pages while shown - with their captions beside them and
+      // 6px gaps between them; pointing at any of that is pointing at the
+      // menu, not at a gap between pages.
+      for (const btn of document.querySelectorAll('.pm-pop-cap.show:not(.rl-slot-main)')) {
+        if (getComputedStyle(btn).opacity === '0') continue;
+        const r = btn.getBoundingClientRect();
+        if (!r.width || !r.height) continue;
+        const cap = btn.getAttribute('data-pm-caption');
+        const capW = (cap && typeof pmPopCapWidth === 'function') ? 8 + pmPopCapWidth(cap) : 0;
+        const toLeft = btn.classList.contains('pm-pop-cap--left');
+        const pad = 6;
+        if (clientX >= r.left - pad - (toLeft ? capW : 0) && clientX <= r.right + pad + (toLeft ? 0 : capW)
+            && clientY >= r.top - pad && clientY <= r.bottom + pad) return true;
+      }
       const stickyBar = document.getElementById('stickyFileBar');
       if (stickyBar && stickyBar.classList.contains('visible')) {
         const sr = stickyBar.getBoundingClientRect();
@@ -29396,11 +29628,11 @@
           <div>Author: <b>Евгений Кутьин</b> (Evgeniy Kutin)</div>
           <div>Repo: github.com/65WebDev/PDF-Manager</div>
           <div>Build: ${escapeHtml(PDF_MANAGER_BUILD_VERSION)} / ${escapeHtml(PDF_MANAGER_BUILD_DATE)}</div>
-          <div id="pmProvenanceHash" style="margin-top:8px; color:#9db4c9;">SHA-256: считаю…</div>
+          <div id="pmProvenanceHash" style="margin-top:8px; color:#9db4c9;">${escapeHtml(t('aboutShaComputing'))}</div>
         </div>
         <div style="display:flex; justify-content:center; margin-top:16px;">
           <button id="pmProvenanceCloseBtn" style="padding:7px 18px; border:none; border-radius:6px;
-            background:#3498db; color:#fff; font-weight:600; cursor:pointer; font-size:13px;">Закрыть</button>
+            background:#3498db; color:#fff; font-weight:600; cursor:pointer; font-size:13px;">${escapeHtml(t('aboutClose'))}</button>
         </div>`;
       overlay.appendChild(box);
       document.body.appendChild(overlay);
@@ -29416,7 +29648,7 @@
 
       const hash = await pdfManagerHashSelfScript();
       const hashEl = document.getElementById('pmProvenanceHash');
-      if (hashEl) hashEl.textContent = hash ? ('SHA-256: ' + hash) : 'SHA-256: недоступно в этом контексте';
+      if (hashEl) hashEl.textContent = hash ? ('SHA-256: ' + hash) : t('aboutShaUnavailable');
       console.log('[PDF Document Manager] author=Евгений Кутьин (Evgeniy Kutin) repo=github.com/65WebDev/PDF-Manager build=' +
         PDF_MANAGER_BUILD_VERSION + ' date=' + PDF_MANAGER_BUILD_DATE + (hash ? (' sha256=' + hash) : ''));
     }
@@ -29496,39 +29728,6 @@
       return await newDoc.save();
     }
 
-    async function buildBytesFromSnapshot(snap) {
-      if (!snap || !snap.pdfBytes) return null;
-      const marked = snap.marked || [];
-      if (!marked.length) return snap.pdfBytes.slice();
-      const tmpDoc = await PDFLib.PDFDocument.load(snap.pdfBytes.slice());
-      const markedSet = new Set(marked);
-      const keep = [];
-      for (let i = 0; i < tmpDoc.getPageCount(); i++) {
-        if (!markedSet.has(i)) keep.push(i);
-      }
-      const newDoc = await PDFLib.PDFDocument.create();
-      const copied = await newDoc.copyPages(tmpDoc, keep);
-      copied.forEach(p => newDoc.addPage(p));
-      if (typeof peMigrateEditorMeta === 'function') peMigrateEditorMeta(tmpDoc, newDoc, keep);
-      return await newDoc.save();
-    }
-
-    async function countPagesInSaveBytes(bytes) {
-      const d = await PDFLib.PDFDocument.load(bytes);
-      return d.getPageCount();
-    }
-
-    async function estimateCombinedRasterizedSize(sources, scale, jpegQuality) {
-      let totalBytes = 0;
-      let anyApprox = false;
-      for (const s of sources) {
-        const est = await estimateRasterizedPdfSize(s.bytes, scale, jpegQuality, s.pageCount);
-        totalBytes += est.bytes;
-        if (est.approx) anyApprox = true;
-      }
-      return { bytes: totalBytes, approx: anyApprox };
-    }
-
     function suggestPdfSaveFileName(fileName) {
       let suggestedName = (fileName || t('docPdfFallbackName'))
         .replace(/\.(docx?|xlsx?|eml|msg|png|jpe?g|bmp|gif|webp|tiff?)$/i, '.pdf');
@@ -29536,121 +29735,7 @@
       return suggestedName;
     }
 
-    function markInactiveTabSavedAfterImageSave(tab, vectorBytes, oldSnap) {
-      let pages = null;
-      if (oldSnap.pages && oldSnap.pages.length) {
-        const markedSet = new Set(oldSnap.marked || []);
-        pages = oldSnap.pages.filter((_, i) => !markedSet.has(i));
-        if (!pages.length || !pages.some(p => p && p.src && p.src.length > 8)) pages = null;
-      }
-      tab.docHistory = [{
-        pdfBytes: new Uint8Array(vectorBytes),
-        marked: [],
-        pages,
-        pendingIdx: null,
-        selected: oldSnap.selected || [],
-        lastSel: oldSnap.lastSel
-      }];
-      tab.docHistoryIndex = 0;
-      tab.dirty = false;
-      tab.unsavedNewDoc = false;
-    }
-
-    async function saveAllOpenTabsAsImage(jpegQuality, rasterScale, tabSources, encryptPassword) {
-      pmCaptureActive();
-
-      let dirHandle = null;
-      if (window.showDirectoryPicker) {
-        try {
-          dirHandle = await window.showDirectoryPicker(await buildDirectoryPickerOpts());
-        } catch (e) {
-          if (e && e.name === 'AbortError') return;
-          dirHandle = null;
-        }
-        if (dirHandle && !(typeof pmTabsEnabled === 'function' && pmTabsEnabled())) {
-          rememberFileHandleLocation(dirHandle);
-        }
-      }
-
-      showLoading(t('loadingSavingDocuments'));
-      const activeTabId = pmActiveId;
-
-      try {
-        for (let i = 0; i < tabSources.length; i++) {
-          const t = pmTabs.find(x => x.id === tabSources[i].tabId);
-          if (!t) continue;
-          const snap = (t.docHistoryIndex >= 0) ? t.docHistory[t.docHistoryIndex] : tabSources[i].snap;
-          if (!snap || !snap.pdfBytes) continue;
-
-          const hadDeletions = (snap.marked || []).length > 0;
-          const deletedIdx = hadDeletions ? [...snap.marked].sort((a, b) => a - b) : [];
-          const vectorBytes = await buildBytesFromSnapshot(snap);
-
-          showLoading(t('loadingSavingDocPreparingImages', { i: i + 1, total: tabSources.length }));
-          let fileBytes = await rasterizePdfBytesToImagePdf(
-            vectorBytes, rasterScale,
-            t('loadingSavingDocumentOfTotal', { i: i + 1, total: tabSources.length }), jpegQuality);
-          if (encryptPassword) {
-            showLoading(t('loadingSavingDocEncrypting', { i: i + 1, total: tabSources.length }));
-            fileBytes = await encryptPdfBytesWithPassword(fileBytes, encryptPassword);
-          }
-
-          const suggestedName = suggestPdfSaveFileName(t.fileName);
-
-          if (dirHandle) {
-            const fh = await dirHandle.getFileHandle(suggestedName, { create: true });
-            const w = await fh.createWritable();
-            await w.write(fileBytes);
-            await w.close();
-          } else {
-            const blob = new Blob([fileBytes], { type: 'application/pdf' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = suggestedName;
-            a.click();
-            URL.revokeObjectURL(url);
-            if (i < tabSources.length - 1) {
-              await new Promise(r => setTimeout(r, 350));
-            }
-          }
-
-          if (t.id === activeTabId) {
-            if (hadDeletions) {
-              const keep = [];
-              for (let j = 0; j < pdfDoc.getPageCount(); j++) {
-                if (!markedForDeletion.has(j)) keep.push(j);
-              }
-          const newDoc = await PDFLib.PDFDocument.create();
-          const copied = await newDoc.copyPages(pdfDoc, keep);
-          copied.forEach(p => newDoc.addPage(p));
-          if (typeof peMigrateEditorMeta === 'function') peMigrateEditorMeta(pdfDoc, newDoc, keep);
-          pdfDoc = newDoc;
-              markedForDeletion.clear();
-              invalidateHQ();
-              removeDeletedCardsIncrementally(deletedIdx);
-            }
-            await resetDocHistoryToCurrent();
-            pmCaptureActive();
-          } else {
-            markInactiveTabSavedAfterImageSave(t, vectorBytes, snap);
-          }
-        }
-      } catch (e) {
-        console.error(e);
-        alert(t('alertSaveDocumentsError'));
-      } finally {
-        hideLoading();
-        updateUIState();
-        pmRenderBar();
-      }
-    }
-
-    function showImageSaveOptionsDialog(srcBytes, pageCount, title, dialogOpts) {
-      dialogOpts = dialogOpts || {};
-      const allowSaveAll = !!(dialogOpts.allowSaveAll && dialogOpts.tabSources &&
-        dialogOpts.tabSources.length > 1);
-      const tabSources = allowSaveAll ? dialogOpts.tabSources : null;
+    function showImageSaveOptionsDialog(srcBytes, pageCount, title) {
 
       return new Promise((resolve) => {
         const overlay = document.createElement('div');
@@ -29663,16 +29748,9 @@
         box.style.cssText =
           'background:#fff;border-radius:12px;padding:24px 28px;max-width:92vw;min-width:320px;' +
           'box-shadow:0 10px 30px rgba(0,0,0,0.3);';
-        const saveAllHtml = allowSaveAll
-          ? '<label id="jpegSaveAllWrap" style="display:flex;align-items:flex-start;gap:10px;' +
-              'font-size:14px;color:#444;margin-bottom:16px;cursor:pointer;text-align:left;">' +
-              `<input type="checkbox" id="jpegSaveAllCheck" style="margin-top:3px;">` +
-              `<span>${escapeHtml(t('imgSaveAllDocs', { n: tabSources.length }))}</span></label>`
-          : '';
         box.innerHTML =
           `<div style="font-size:17px;color:#2c3e50;margin-bottom:6px;font-weight:600;">${escapeHtml(title || t('imgSaveJpegTitle'))}</div>` +
           `<div id="jpegPageInfo" style="font-size:13px;color:#666;margin-bottom:18px;">${escapeHtml(t('imgSavePages', { n: pageCount }))}</div>` +
-          saveAllHtml +
           '<label style="display:block;font-size:14px;color:#444;margin-bottom:8px;">' + escapeHtml(t('imgSaveDpi')) + ' ' +
             `<span id="jpegDpiVal">${DEFAULT_RASTER_DPI}</span></label>` +
           `<input id="jpegDpiSlider" type="range" min="${MIN_RASTER_DPI}" max="${MAX_RASTER_DPI}" ` +
@@ -29709,9 +29787,6 @@
         const dpiSlider = box.querySelector('#jpegDpiSlider');
         const dpiVal = box.querySelector('#jpegDpiVal');
         const sizeEl = box.querySelector('#jpegSizeEst');
-        const pageInfoEl = box.querySelector('#jpegPageInfo');
-        const saveAllCheck = box.querySelector('#jpegSaveAllCheck');
-        const sizeLabelEl = box.querySelector('#jpegSizeLabel');
         const encryptCheck = box.querySelector('#jpegEncryptCheck');
         const encryptPwdInput = box.querySelector('#jpegEncryptPwd');
         encryptCheck.onchange = () => {
@@ -29725,18 +29800,6 @@
 
         const getScale = () => dpiToPdfScale(parseInt(dpiSlider.value, 10));
         const getQuality = () => parseInt(qualitySlider.value, 10) / 100;
-
-        const updatePageInfo = () => {
-          if (saveAllCheck && saveAllCheck.checked) {
-            const totalPages = tabSources.reduce((sum, s) => sum + s.pageCount, 0);
-            pageInfoEl.textContent =
-              t('imgSaveDocsPages', { docs: tabSources.length, pages: totalPages });
-            if (sizeLabelEl) sizeLabelEl.textContent = t('imgSaveTotalSize');
-          } else {
-            pageInfoEl.textContent = t('imgSavePages', { n: pageCount });
-            if (sizeLabelEl) sizeLabelEl.textContent = t('imgSaveFileSize');
-          }
-        };
 
         const close = (result) => {
           if (closed) return;
@@ -29759,10 +29822,7 @@
           const token = ++estimateToken;
           sizeEl.textContent = t('imgSaveEstimating');
           try {
-            const sources = (saveAllCheck && saveAllCheck.checked)
-              ? tabSources
-              : [{ bytes: srcBytes, pageCount }];
-            const est = await estimateCombinedRasterizedSize(sources, getScale(), getQuality());
+            const est = await estimateRasterizedPdfSize(srcBytes, getScale(), getQuality(), pageCount);
             if (token !== estimateToken || closed) return;
             sizeEl.textContent = (est.approx ? '≈ ' : '') + formatBytes(est.bytes);
           } catch (_) {
@@ -29783,12 +29843,6 @@
           dpiVal.textContent = dpiSlider.value;
           scheduleEstimate();
         };
-        if (saveAllCheck) {
-          saveAllCheck.onchange = () => {
-            updatePageInfo();
-            scheduleEstimate();
-          };
-        }
 
         box.querySelector('#jpegOk').onclick = () => {
           if (encryptCheck.checked && !encryptPwdInput.value) {
@@ -29801,7 +29855,6 @@
             jpegQuality: getQuality(),
             scale: dpiToPdfScale(dpi),
             dpi,
-            saveAllTabs: !!(saveAllCheck && saveAllCheck.checked),
             encryptPassword: encryptCheck.checked ? encryptPwdInput.value : null
           });
         };
@@ -30448,15 +30501,37 @@
      * Export by pages: every selected page, in the order shown, as a PDF of
      * its own, named like a one-page Export (name_p.N.pdf). The number of
      * files is confirmed first. Where the browser can, the files go into one
-     * folder the user picks; otherwise each is downloaded in turn, as
-     * saveAllOpenTabsAsImage does.
+     * folder the user picks; otherwise each is downloaded in turn.
      */
-    async function exportSelectedPagesSplit() {
-      const indices = getExportSelectedIndices();
+    function exportSelectedPagesSplit() {
+      return pmWritePagesSplit(getExportSelectedIndices(), {
+        confirm: 'confirmExportSplitPages', yes: 'exportSplitPagesYes',
+        loading: 'loadingExportingPageOfTotal', error: 'alertExportPagesError'
+      });
+    }
+
+    /**
+     * Save by pages: every page of the document (marked-for-deletion ones
+     * left out), in the order shown, as a PDF of its own - the same way as
+     * Export by pages. The document itself is not saved by this.
+     */
+    function savePagesSplit() {
+      const indices = Array.from(pagesContainer.querySelectorAll('.page'))
+        .map(div => parseInt(div.dataset.index, 10))
+        .filter(idx => !Number.isNaN(idx) && !markedForDeletion.has(idx));
+      return pmWritePagesSplit(indices, {
+        confirm: 'confirmSaveSplitPages', yes: 'saveSplitPagesYes',
+        loading: 'loadingSavingPageOfTotal', error: 'alertSavePagesError'
+      });
+    }
+
+    // indices: pdfDoc pages in output order; text: i18n keys of the
+    // confirmation, its button, the progress and the error message.
+    async function pmWritePagesSplit(indices, text) {
       if (!indices.length) return;
       const ok = await showConfirmDialog(
-        t('confirmExportSplitPages', { n: indices.length }),
-        { html: true, yesText: t('exportSplitPagesYes'), noText: t('exportSplitPagesNo') });
+        t(text.confirm, { n: indices.length }),
+        { html: true, yesText: t(text.yes), noText: t('exportSplitPagesNo') });
       if (!ok) return;
 
       if (pmTabsEnabled() && pmActiveId != null) pmCaptureActive();
@@ -30476,7 +30551,7 @@
 
       try {
         for (let i = 0; i < indices.length; i++) {
-          showLoading(t('loadingExportingPageOfTotal', { i: i + 1, total: indices.length }));
+          showLoading(t(text.loading, { i: i + 1, total: indices.length }));
           const bytes = await buildExportPdfBytes([indices[i]]);
           const name = buildExportFileName([indices[i]]);
           if (dirHandle) {
@@ -30498,7 +30573,7 @@
         }
       } catch (e) {
         console.error(e);
-        alert(t('alertExportPagesError') + (e.message ? ': ' + e.message : ''));
+        alert(t(text.error) + (e.message ? ': ' + e.message : ''));
       }
 
       hideLoading();
@@ -30691,9 +30766,11 @@
     }
 
     // mode: true/'images' = "save as images", 'encrypt' = prompt for a
-    // password and encrypt the saved PDF, falsy = plain save.
+    // password and encrypt the saved PDF, 'split' = every page its own file
+    // (see savePagesSplit), falsy = plain save.
     async function savePDF(mode) {
       if (isLoading || !pdfDoc) return alert(t('alertNoDocument'));
+      if (mode === 'split') return savePagesSplit();
       const asImage = mode === true || mode === 'images';
       const encryptOnly = mode === 'encrypt';
       const compressOnly = mode === 'compress';
@@ -30705,41 +30782,16 @@
       if (asImage) {
         showLoading(t('loadingPreparing'));
         let previewBytes;
-        let tabSources = null;
         try {
           pmCaptureActive();
           previewBytes = await buildBytesForSave(true);
           const pageCount = pdfDoc.getPageCount() - markedForDeletion.size;
-
-          if (pmTabsEnabled() && pmTabs.length > 1) {
-            tabSources = [];
-            for (const t of pmTabs) {
-              const snap = (t.docHistoryIndex >= 0) ? t.docHistory[t.docHistoryIndex] : null;
-              if (!snap || !snap.pdfBytes) continue;
-              const bytes = await buildBytesFromSnapshot(snap);
-              const pc = await countPagesInSaveBytes(bytes);
-              tabSources.push({
-                tabId: t.id, fileName: t.fileName, sourceHandle: t.sourceHandle,
-                snap, bytes, pageCount: pc
-              });
-            }
-          }
-
           hideLoading();
-          const opts = await showImageSaveOptionsDialog(
-            previewBytes, pageCount, t('imgSaveSaveTitle'), {
-              allowSaveAll: !!(tabSources && tabSources.length > 1),
-              tabSources
-            });
+          const opts = await showImageSaveOptionsDialog(previewBytes, pageCount, t('imgSaveSaveTitle'));
           if (!opts) return;
           jpegQuality = opts.jpegQuality;
           rasterScale = opts.scale;
           encryptPassword = opts.encryptPassword || null;
-
-          if (opts.saveAllTabs && tabSources && tabSources.length > 1) {
-            await saveAllOpenTabsAsImage(jpegQuality, rasterScale, tabSources, encryptPassword);
-            return;
-          }
         } catch (e) {
           hideLoading();
           console.error(e);
@@ -33992,6 +34044,16 @@
       }
     })();
 
+    // ─── Desktop: top menu popup groups, one at a time ───
+    // Each group (logo column, view modes, delete, print, edit, export, save)
+    // hides a moment after the pointer leaves it, so the pointer can reach
+    // its popup buttons. Reaching another group must not leave the previous
+    // one hanging for that moment: showing a group hides the others at once.
+    const pmTopPopupHiders = new Set();
+    function pmTopPopupShowing(hideSelf) {
+      pmTopPopupHiders.forEach(hide => { if (hide !== hideSelf) hide(); });
+    }
+
     // ─── Desktop: show hide menu button when hovering over logo ───
     // We control visibility via JS so that the user can move the cursor from
     // the logo onto the popup buttons. Leaving the column hides after 300ms.
@@ -34015,6 +34077,7 @@
         if (menu && menu.classList.contains('collapsed')) return;
         clearTimeout(hideTimer);
         hideTimer = null;
+        pmTopPopupShowing(hideNow);
         btn.classList.add('show');
         if (themeBtn) themeBtn.classList.add('show');
         if (langBtn) langBtn.classList.add('show');
@@ -34037,6 +34100,12 @@
         clearTimeout(hideTimer);
         hideTimer = setTimeout(hide, LOGO_MENU_HIDE_MS);
       }
+      function hideNow() {
+        if (!hideTimer && !area.classList.contains('expanded')) return;
+        clearTimeout(hideTimer);
+        hide();
+      }
+      pmTopPopupHiders.add(hideNow);
 
       area.addEventListener('mouseenter', show);
       area.addEventListener('mouseleave', scheduleHide);
@@ -34115,12 +34184,15 @@
       function show() {
         if (!pdfDoc) return;   // nothing to act on yet - "see the opportunity" only makes sense once a document is open
         clearTimeout(hideTimer);
+        pmTopPopupShowing(hideNow);
         btn.classList.add('show');
       }
       function scheduleHide() {
         clearTimeout(hideTimer);
         hideTimer = setTimeout(() => btn.classList.remove('show'), POPUP_BTN_HIDE_MS);
       }
+      function hideNow() { clearTimeout(hideTimer); btn.classList.remove('show'); }
+      pmTopPopupHiders.add(hideNow);
 
       [wrapper, deleteBtn, btn].forEach(el => {
         el.addEventListener('mouseenter', show);
@@ -34143,6 +34215,7 @@
 
       function show() {
         clearTimeout(hideTimer);
+        pmTopPopupShowing(hideNow);
         // Unlike the cart/print, we don’t show these pop-up buttons,
         // while they are disabled (the document is not yet open): enable zoom mode
         // there’s still nothing, and the translucent “nothing” button looks like a bug.
@@ -34156,6 +34229,11 @@
           wrapper.querySelectorAll('.rl-slot-popup.show').forEach(el => el.classList.remove('show'));
         }, POPUP_BTN_HIDE_MS);
       }
+      function hideNow() {
+        clearTimeout(hideTimer);
+        wrapper.querySelectorAll('.rl-slot-popup.show').forEach(el => el.classList.remove('show'));
+      }
+      pmTopPopupHiders.add(hideNow);
 
       [wrapper, selectBtn, navBtn, readBtn, loupeBtn].filter(Boolean).forEach(el => {
         el.addEventListener('mouseenter', show);
@@ -34186,6 +34264,7 @@
       function show() {
         if (!pdfDoc) return;   // nothing to act on yet - "see the opportunity" only makes sense once a document is open
         clearTimeout(hideTimer);
+        pmTopPopupShowing(hideNow);
         positionPrintSelectedBtn();
         btn.classList.add('show');
       }
@@ -34193,6 +34272,8 @@
         clearTimeout(hideTimer);
         hideTimer = setTimeout(() => btn.classList.remove('show'), POPUP_BTN_HIDE_MS);
       }
+      function hideNow() { clearTimeout(hideTimer); btn.classList.remove('show'); }
+      pmTopPopupHiders.add(hideNow);
 
       [wrapper, printBtn, btn].forEach(el => {
         el.addEventListener('mouseenter', show);
@@ -34220,6 +34301,7 @@
       function show() {
         if (!pdfDoc) return;
         clearTimeout(hideTimer);
+        pmTopPopupShowing(hideNow);
         positionWatermarkBtn();
         btn.classList.add('show');
       }
@@ -34227,6 +34309,8 @@
         clearTimeout(hideTimer);
         hideTimer = setTimeout(() => btn.classList.remove('show'), POPUP_BTN_HIDE_MS);
       }
+      function hideNow() { clearTimeout(hideTimer); btn.classList.remove('show'); }
+      pmTopPopupHiders.add(hideNow);
       [wrapper, editPageBtn, btn].forEach(el => {
         el.addEventListener('mouseenter', show);
         el.addEventListener('mouseleave', scheduleHide);
@@ -34253,6 +34337,7 @@
         const show = () => {
           if (!pdfDoc) return;   // nothing to act on yet - "see the opportunity" only makes sense once a document is open
           clearTimeout(hideTimer);
+          pmTopPopupShowing(hideNow);
           popBtns.forEach(b => { if (!b.disabled) b.classList.add('show'); });
           const compressBtn = wrapper.querySelector('.img-save-btn--compress');
           if (compressBtn && typeof pmRefreshCompressEstimateTooltip === 'function') {
@@ -34269,6 +34354,8 @@
             popBtns.forEach(b => b.classList.remove('show'));
           }, POPUP_BTN_HIDE_MS);
         };
+        const hideNow = () => { clearTimeout(hideTimer); popBtns.forEach(b => b.classList.remove('show')); };
+        pmTopPopupHiders.add(hideNow);
 
         const hoverTargets = [wrapper, ...popBtns];
         if (mainBtn) hoverTargets.push(mainBtn);
@@ -37250,11 +37337,15 @@ function pmBookmarksUpdateListMaxHeight() {
   list.style.maxHeight = Math.max(60, Math.round(available)) + 'px';
 }
 
-function pmBookmarksSetStatus(text) {
+// key: an i18n key, or '' to clear. Kept in data-i18n so a language switch
+// (pmApplyI18n) re-translates a status that is already on screen.
+function pmBookmarksSetStatus(key) {
   const status = document.getElementById('pmBookmarksStatus');
   if (!status) return;
-  status.textContent = text || '';
-  status.classList.toggle('has-content', !!text);
+  if (key) status.setAttribute('data-i18n', key);
+  else status.removeAttribute('data-i18n');
+  status.textContent = key ? t(key) : '';
+  status.classList.toggle('has-content', !!key);
 }
 
 function pmBookmarksGoTo(pageIndex) {
@@ -37458,7 +37549,7 @@ function pmBookmarksRenderList(flatItems) {
   }
   pmBookmarksUpdateDeleteBtnState();
   if (!flatItems.length) {
-    pmBookmarksSetStatus(t('bookmarksEmpty'));
+    pmBookmarksSetStatus('bookmarksEmpty');
     return;
   }
   pmBookmarksSetStatus('');
@@ -37742,7 +37833,7 @@ async function pmBookmarksLoadAndRender() {
 
   const token = ++pmBookmarksReqToken;
   if (list) list.innerHTML = '';
-  pmBookmarksSetStatus(t('bookmarksLoading'));
+  pmBookmarksSetStatus('bookmarksLoading');
   let tree = [];
   try { tree = await pmBookmarksBuildTree(); } catch (_) { tree = []; }
   if (token !== pmBookmarksReqToken) return; // popup closed/reopened, or doc changed, meanwhile
@@ -41153,16 +41244,38 @@ function editSelectedPage() {
     const root = sub.querySelector(':scope > .ctx-sub-root');
     if (root && root.disabled) return;
     clearTimeout(sub._pmCloseT);
+    clearTimeout(pmCtxSubSwitchT); // a pending close must not hit this one
     pmCtxSubCloseAll(sub);
     if (sub.classList.contains('open')) return;
     sub.classList.add('open');
     pmCtxSubPlace(sub);
+    if (sub.classList.contains('ctx-sub--export') && menu.contains(sub)) pmCtxCompressRefresh();
   }
-  // While a submenu is open, the pointer on its way there may cross the
-  // next item (another submenu's, or a plain one): switching right away
-  // would pull the open submenu from under it. Such a switch waits
-  // PM_CTX_SUB_SWITCH_MS and is dropped if the pointer reaches the open
-  // submenu first.
+  // "Сжать PDF" in the Export submenu behaves like the top menu's: the
+  // expected size reduction for the pages the menu acts on is estimated in
+  // the background, and with nothing worth compressing the item is dimmed,
+  // does nothing and says why in its tooltip.
+  function pmCtxCompressReset() {
+    const btn = menu.querySelector('button[data-action="export-compress"]');
+    if (!btn) return;
+    btn.classList.remove('pm-compress-unavailable', 'pm-compress-calculating', 'pm-compress-notable');
+    btn.removeAttribute('title');
+    delete btn.dataset.pmCompressKey;
+  }
+  function pmCtxCompressRefresh() {
+    const btn = menu.querySelector('button[data-action="export-compress"]');
+    if (!btn || btn.disabled || typeof pmRefreshCompressEstimateTooltip !== 'function') return;
+    const want = new Set(ctxMenuTargetPages());
+    const pages = Array.from(pagesContainer.querySelectorAll('.page'))
+      .map(p => parseInt(p.dataset.index, 10))
+      .filter(i => want.has(i)); // in document order, as exported
+    pmRefreshCompressEstimateTooltip('ctx', btn, pages);
+  }
+  // Another item with a submenu takes over at once: its submenu opens and
+  // the open one closes in the same instant. A plain item closes the open
+  // submenu at once too, unless the pointer is heading into that submenu
+  // across it - then the close waits PM_CTX_SUB_SWITCH_MS and is dropped if
+  // the pointer reaches the submenu first.
   const PM_CTX_SUB_SWITCH_MS = 250;
   let pmCtxSubSwitchT = null;
   const pmCtxSubAnyOpen = () => !!document.querySelector('.ctx-sub.open');
@@ -41170,14 +41283,39 @@ function editSelectedPage() {
     clearTimeout(pmCtxSubSwitchT);
     pmCtxSubSwitchT = setTimeout(fn, PM_CTX_SUB_SWITCH_MS);
   }
+  // The pointer's last ~100 ms, for its direction.
+  const pmCtxPts = [];
+  document.addEventListener('mousemove', (e) => {
+    const now = performance.now();
+    pmCtxPts.push({ x: e.clientX, y: e.clientY, t: now });
+    while (pmCtxPts.length > 2 && now - pmCtxPts[0].t > 100) pmCtxPts.shift();
+  }, { passive: true });
+  // Is the pointer moving into the open submenu (its line of travel hits the
+  // submenu's near edge)?
+  function pmCtxSubAiming() {
+    const sub = document.querySelector('.ctx-sub.open');
+    const box = sub && sub.querySelector(':scope > .ctx-submenu');
+    if (!box || pmCtxPts.length < 2) return false;
+    const cur = pmCtxPts[pmCtxPts.length - 1], ref = pmCtxPts[0];
+    const dx = cur.x - ref.x, dy = cur.y - ref.y;
+    const r = box.getBoundingClientRect();
+    const toLeft = sub.classList.contains('ctx-sub--left');
+    if (toLeft ? dx >= 0 : dx <= 0) return false;
+    const edgeX = toLeft ? r.right : r.left;
+    const yAtEdge = cur.y + dy * (edgeX - cur.x) / dx;
+    return yAtEdge >= r.top - 6 && yAtEdge <= r.bottom + 6;
+  }
+  function pmCtxSubSwitch(fn) {
+    if (pmCtxSubAiming()) pmCtxSubSwitchLater(fn);
+    else { clearTimeout(pmCtxSubSwitchT); fn(); }
+  }
   [menu, readMenu, navMenu, loupeMenu].forEach(m => {
     if (!m) return;
     m.querySelectorAll('.ctx-sub').forEach(sub => {
       sub.addEventListener('mouseenter', () => {
         clearTimeout(sub._pmCloseT);
         if (sub.classList.contains('open')) { clearTimeout(pmCtxSubSwitchT); return; }
-        if (pmCtxSubAnyOpen()) pmCtxSubSwitchLater(() => pmCtxSubOpen(sub));
-        else pmCtxSubOpen(sub);
+        pmCtxSubOpen(sub);
       });
       sub.addEventListener('mouseleave', () => {
         clearTimeout(pmCtxSubSwitchT);
@@ -41187,11 +41325,11 @@ function editSelectedPage() {
         }, PM_CTX_SUB_CLOSE_MS);
       });
     });
-    // A plain menu item rested on closes an open submenu.
+    // A plain menu item reached closes an open submenu.
     m.addEventListener('mouseover', (e) => {
       const item = e.target.closest('button');
       if (!item || item.closest('.ctx-sub') || !pmCtxSubAnyOpen()) return;
-      pmCtxSubSwitchLater(() => pmCtxSubCloseAll());
+      pmCtxSubSwitch(() => pmCtxSubCloseAll());
     });
   });
 
@@ -41866,6 +42004,7 @@ function editSelectedPage() {
       if (navMenu) navMenu.classList.remove('visible');
       if (loupeMenu) loupeMenu.classList.remove('visible');
       updatePageCtxMenuState();
+      pmCtxCompressReset();
       positionCtxMenu(menu, e.clientX, e.clientY);
       return;
     }
@@ -41947,6 +42086,7 @@ function editSelectedPage() {
     if (navMenu) navMenu.classList.remove('visible');
     if (loupeMenu) loupeMenu.classList.remove('visible');
     updatePageCtxMenuState();
+    pmCtxCompressReset();
     positionCtxMenu(menu, e.clientX, e.clientY);
     clearCtxMenuTargetHighlight();
     pageDiv.classList.add('ctx-menu-target');
@@ -41954,7 +42094,7 @@ function editSelectedPage() {
 
   menu.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-action]');
-    if (!btn || btn.disabled) return;
+    if (!btn || btn.disabled || btn.classList.contains('pm-compress-unavailable')) return;
     const action = btn.dataset.action;
     const anchorIdx = ctxPageIdx;
     const selSnapshot = pageCtxSelectionSnapshot;
@@ -62840,6 +62980,9 @@ async function compressPdfImagesBytes(bytes, progressLabel) {
 //   'export' - only the currently SELECTED pages (Export never sends the
 //              whole document) - keyed to pdfDoc + the exact selection, so
 //              toggling which pages are checked invalidates it correctly.
+//   'ctx'    - the pages the preview RMB menu acts on (its Export submenu),
+//              which need not be the selection - keyed like 'export' to the
+//              exact pages, passed in by the caller.
 // (pmCompressEstimateCache/InFlight and the PM_COMPRESS_* consts are
 // declared near pdfDoc, far above - updateUIState() calls into this code
 // on the very first, synchronous "no document yet" pass, long before
@@ -62851,27 +62994,29 @@ function pmCompressEstimateIsFresh(scope, selKey) {
   const c = pmCompressEstimateCache[scope];
   if (!c || typeof pdfDoc === 'undefined' || !pdfDoc) return false;
   if (c.forDoc !== pdfDoc) return false;
-  if (scope === 'export') { if (c.forSelKey !== selKey) return false; }
+  if (scope !== 'save') { if (c.forSelKey !== selKey) return false; }
   else if (c.forPageCount !== pdfDoc.getPageCount()) return false;
   return (Date.now() - c.computedAt) < PM_COMPRESS_ESTIMATE_TTL_MS;
 }
 
-async function pmComputeCompressEstimate(scope) {
+async function pmComputeCompressEstimate(scope, ctxIndices) {
   if (typeof pdfDoc === 'undefined' || !pdfDoc) return null;
   let selKey = null, indices = null;
-  if (scope === 'export') {
-    indices = (typeof getExportSelectedIndices === 'function') ? getExportSelectedIndices() : [];
+  if (scope !== 'save') {
+    indices = scope === 'ctx' ? (ctxIndices || [])
+      : ((typeof getExportSelectedIndices === 'function') ? getExportSelectedIndices() : []);
     if (!indices.length) return null;
     selKey = indices.join(',');
   }
   if (pmCompressEstimateIsFresh(scope, selKey)) return pmCompressEstimateCache[scope];
-  if (pmCompressEstimateInFlight[scope]) return pmCompressEstimateInFlight[scope];
+  if (pmCompressEstimateInFlight[scope] && pmCompressEstimateInFlightKey[scope] === selKey) return pmCompressEstimateInFlight[scope];
   const targetDoc = pdfDoc;
   const targetPageCount = pdfDoc.getPageCount();
-  pmCompressEstimateInFlight[scope] = (async () => {
+  pmCompressEstimateInFlightKey[scope] = selKey;
+  const run = (async () => {
     try {
       let bytes;
-      if (scope === 'export') {
+      if (scope !== 'save') {
         bytes = await buildExportPdfBytes(indices);
       } else if (peDocumentHasEditorObjects() || peDocumentHasPendingShapeRaster(pdfDoc) || peDocumentHasRedactedPages(pdfDoc)) {
         bytes = await peBuildFlattenedPdfBytes(pdfDoc);
@@ -62889,10 +63034,15 @@ async function pmComputeCompressEstimate(scope) {
       console.warn('compress estimate failed', e);
       return null;
     } finally {
-      pmCompressEstimateInFlight[scope] = null;
+      // A newer request (other pages) may have taken the slot meanwhile.
+      if (pmCompressEstimateInFlight[scope] === run) {
+        pmCompressEstimateInFlight[scope] = null;
+        pmCompressEstimateInFlightKey[scope] = null;
+      }
     }
   })();
-  return pmCompressEstimateInFlight[scope];
+  pmCompressEstimateInFlight[scope] = run;
+  return run;
 }
 
 function pmApplyCompressEstimateToButton(btn, entry) {
@@ -62936,13 +63086,15 @@ function pmSyncCompressButtonsUnavailable() {
 }
 
 // Fire-and-forget: safe to call on every hover - internally cached/deduped.
-// scope: 'save' | 'export'; btn: that specific wrapper's own compress button
-// (each scope has its own button element - never shared).
-function pmRefreshCompressEstimateTooltip(scope, btn) {
+// scope: 'save' | 'export' | 'ctx'; btn: that scope's own compress button
+// (each scope has its own button element - never shared); ctxIndices: the
+// pages for 'ctx'.
+function pmRefreshCompressEstimateTooltip(scope, btn, ctxIndices) {
   if (typeof pdfDoc === 'undefined' || !pdfDoc || !btn) return;
   let selKey = null;
-  if (scope === 'export') {
-    const indices = (typeof getExportSelectedIndices === 'function') ? getExportSelectedIndices() : [];
+  if (scope !== 'save') {
+    const indices = scope === 'ctx' ? (ctxIndices || [])
+      : ((typeof getExportSelectedIndices === 'function') ? getExportSelectedIndices() : []);
     if (!indices.length) {
       pmApplyCompressEstimateToButton(btn, null);
       pmApplyCompressHighlight(btn, null);
@@ -62951,10 +63103,14 @@ function pmRefreshCompressEstimateTooltip(scope, btn) {
     }
     selKey = indices.join(',');
   }
+  btn.dataset.pmCompressKey = selKey || '';
   const apply = (entry) => {
+    // The RMB menu was reopened for other pages meanwhile - theirs wins.
+    if (scope === 'ctx' && btn.dataset.pmCompressKey !== selKey) return;
     btn.classList.remove('pm-compress-calculating');
     pmApplyCompressEstimateToButton(btn, entry);
     pmApplyCompressHighlight(btn, entry);
+    if (scope === 'ctx') btn.classList.toggle('pm-compress-unavailable', !!(entry && entry.changedCount === 0));
     pmSyncCompressButtonsUnavailable();
   };
   if (pmCompressEstimateIsFresh(scope, selKey)) { apply(pmCompressEstimateCache[scope]); return; }
@@ -62968,7 +63124,7 @@ function pmRefreshCompressEstimateTooltip(scope, btn) {
   btn.title = t('compressPdfEstimating');
   btn.classList.remove('pm-compress-unavailable', 'pm-compress-notable');
   btn.classList.add('pm-compress-calculating');
-  pmComputeCompressEstimate(scope).then(entry => apply(entry));
+  pmComputeCompressEstimate(scope, ctxIndices).then(entry => apply(entry));
 }
 
 // Re-applies whatever's already cached for both buttons (e.g. after
