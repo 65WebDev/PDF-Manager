@@ -873,8 +873,9 @@
 
     /*Cart: transparent when inactive, pink when active, light pink when hovered*/
     #deleteBtn:not(:disabled) { background: #7a3d57; }
-    /*Pink highlight on hover - even when the button is inactive*/
-    #deleteBtn:hover { background: #cc3d40 !important; opacity: 1 !important; }
+    /*Pink highlight on hover - only while there is something to delete (no
+       document or no page selected: it stays dimmed like the other buttons).*/
+    #deleteBtn:hover:not(:disabled) { background: #cc3d40 !important; opacity: 1 !important; }
 
     /*Wrapper for print button + print button for selected pages (same effect
        appearance of the cart/"Hide menu"; pops up even in disabled view -
@@ -1227,6 +1228,41 @@
     }
     #toggleDeletedBtn:hover { background: #3498db; }
     #toggleDeletedBtn svg { display: block; }
+    /*"Mark blank pages" - second popup under the bin, below the eye.*/
+    #markBlankBtn {
+      position: absolute;
+      top: calc(100% + 6px + 48px);
+      left: 0;
+      z-index: 99998;
+      opacity: 0;
+      transform: translateY(-6px);
+      pointer-events: none;
+      transition: opacity 0.15s, transform 0.15s, background 0.15s;
+    }
+    #markBlankBtn.show::before {
+      content: '';
+      position: absolute;
+      left: 0; right: 0;
+      top: -10px; height: 10px;
+    }
+    #markBlankBtn.show {
+      opacity: 1;
+      transform: translateY(0);
+      pointer-events: auto;
+    }
+    #markBlankBtn.show:disabled { opacity: 0.4; }
+    #markBlankBtn:hover:not(:disabled) { background: #3498db; }
+    #markBlankBtn svg { display: block; }
+    @media (pointer: coarse) { #markBlankBtn { display: none !important; } }
+    /*Short message at the bottom of the window (pmShowToast).*/
+    #pmToast {
+      position: fixed; left: 50%; bottom: 28px; z-index: 100002;
+      transform: translate(-50%, 10px); opacity: 0; pointer-events: none;
+      padding: 9px 18px; border-radius: 8px; max-width: calc(100vw - 32px);
+      background: rgba(44, 62, 80, 0.95); color: #fff; font-size: 14px;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.3); transition: opacity 0.2s, transform 0.2s;
+    }
+    #pmToast.show { opacity: 1; transform: translate(-50%, 0); }
 
     /*The wrapping of the "Select / Nav / Reading mode / Page enlargement mode"
        buttons is the same: all four elements are permanently in the DOM; when
@@ -1297,6 +1333,7 @@
     #desktopMenuToggleBtn,
     .top-menu .img-save-btn,
     #toggleDeletedBtn,
+    #markBlankBtn,
     #printSelectedBtn,
     #watermarkBtn,
     #headerFooterBtn,
@@ -6095,6 +6132,7 @@
          Without an explicit reinstallation, top here “moves” up/to the left if the wrapper (delete-wrapper/
          print-wrapper) at some point in the reflow is measured with a different height/width.*/
       #toggleDeletedBtn { top: calc(100% + 6px); left: 0; }
+      #markBlankBtn { top: calc(100% + 6px + 48px); left: 0; }
 
 
       /*After tapping, the blue hover backlight of the menu buttons does not “stick”*/
@@ -6109,7 +6147,7 @@
       .top-menu .save-btn:hover:not(:disabled) {
         background: #27ae60 !important;
       }
-      .top-menu #deleteBtn:hover {
+      .top-menu #deleteBtn:hover:not(:disabled) {
         background: #7a3d57 !important;
         opacity: 1 !important;
       }
@@ -7115,7 +7153,7 @@
       }
       /* Beat .top-menu button / .icon-btn / .icons-mode .compact-btn fixed 42px.
          Ratios = natural size / 42 (22→0.524, 30→0.714, 26→0.619, 18→0.429). */
-      .top-menu .main-row.menu-shrink button:not(#fitWidthBtn):not(.img-save-btn):not(#printSelectedBtn):not(#watermarkBtn):not(#headerFooterBtn):not(#toggleDeletedBtn):not(.rl-slot-popup),
+      .top-menu .main-row.menu-shrink button:not(#fitWidthBtn):not(.img-save-btn):not(#printSelectedBtn):not(#watermarkBtn):not(#headerFooterBtn):not(#toggleDeletedBtn):not(#markBlankBtn):not(.rl-slot-popup),
       .top-menu .main-row.menu-shrink label.icon-btn,
       .main-row.menu-shrink .compact-btn,
       .main-row.menu-shrink button.icon-btn,
@@ -7160,6 +7198,7 @@
       /* Pop-ups under delete/print/save stay matched to the shrunk hit target */
       .top-menu .main-row.menu-shrink .img-save-btn,
       .top-menu .main-row.menu-shrink #toggleDeletedBtn,
+      .top-menu .main-row.menu-shrink #markBlankBtn,
       .top-menu .main-row.menu-shrink #printSelectedBtn,
       .top-menu .main-row.menu-shrink #watermarkBtn,
       .top-menu .main-row.menu-shrink #headerFooterBtn,
@@ -7620,6 +7659,7 @@
         <div class="delete-wrapper">
           <button id="deleteBtn" class="icon-btn delete-btn" onclick="deleteSelected()" disabled title="Удалить выбранные страницы (Del)" data-i18n-title="deleteSelectedPages">🗑</button>
           <button id="toggleDeletedBtn" class="icon-btn" onclick="toggleDeletedVisibility()" title="Скрыты страницы помеченные на удаление (Shift+H)" data-i18n-title="deletedPagesHidden"></button>
+          <button id="markBlankBtn" class="icon-btn" onclick="selectBlankPages()" disabled title="Пометить пустые страницы" data-i18n-title="blankMark"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2.5h8.5l4 4V21a.5.5 0 0 1-.5.5H6a.5.5 0 0 1-.5-.5V3a.5.5 0 0 1 .5-.5z" stroke-dasharray="2.6 2.2"/><circle cx="11.5" cy="12.5" r="3.2"/><path d="M13.9 14.9l2.6 2.6"/></svg></button>
         </div>
         <label id="multiSelectLabel" class="icon-btn" title="Режим выделения нескольких страниц" data-i18n-title="multiSelectMode">
           <input type="checkbox" id="multiSelectCheckbox" onchange="updateMultiSelectMode()" style="display:none;">
@@ -7710,6 +7750,7 @@
         <button type="button" data-action="select-all"><span class="ctx-label" data-i18n="ctxSelectAll">Выбрать все (Ctrl+A)</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="5" width="8" height="13" rx="1" fill="currentColor"/><rect x="13.5" y="5" width="8" height="13" rx="1" fill="currentColor"/></svg></span></button>
         <button type="button" data-action="select-even"><span class="ctx-label" data-i18n="ctxSelectEven">Выбрать чётные</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="5" width="8" height="13" rx="1" fill="none"/><rect x="13.5" y="5" width="8" height="13" rx="1" fill="currentColor"/></svg></span></button>
         <button type="button" data-action="select-odd"><span class="ctx-label" data-i18n="ctxSelectOdd">Выбрать нечётные</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="5" width="8" height="13" rx="1" fill="currentColor"/><rect x="13.5" y="5" width="8" height="13" rx="1" fill="none"/></svg></span></button>
+        <button type="button" data-action="select-blank"><span class="ctx-label" data-i18n="ctxSelectBlank">Выбрать пустые</span><span class="ctx-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2.5h8.5l4 4V21a.5.5 0 0 1-.5.5H6a.5.5 0 0 1-.5-.5V3a.5.5 0 0 1 .5-.5z" stroke-dasharray="2.6 2.2"/><circle cx="11.5" cy="12.5" r="3.2"/><path d="M13.9 14.9l2.6 2.6"/></svg></span></button>
       </div>
     </div>
     <hr>
@@ -9501,6 +9542,8 @@
         ctxViewMode: 'Режим просмотра',
         linkFollow: 'Перейти по ссылке',
         popCapLang: 'Язык интерфейса', popCapRestoreHelp: 'Вернуть подсказку', popCapDeletedHidden: 'Удалённые скрыты (Shift+H)', popCapDeletedShown: 'Удалённые показаны (Shift+H)',
+        ctxSelectBlank: 'Выбрать пустые', blankMark: 'Пометить пустые страницы',
+        blankSearching: 'Поиск пустых страниц: {i} из {total}…', blankFound: 'Пустых страниц найдено и выделено: {n}', blankNone: 'Пустых страниц не найдено',
         ctxSelectPages: 'Выбрать страницы', ctxSelectAll: 'Выбрать все (Ctrl+A)', ctxSelectEven: 'Выбрать чётные', ctxSelectOdd: 'Выбрать нечётные',
         ctxSelectMode: 'Режим выбора',
         ctxFitWidth: 'По ширине страницы',
@@ -9946,6 +9989,8 @@
         ctxViewMode: 'View mode',
         linkFollow: 'Open link',
         popCapLang: 'Interface language', popCapRestoreHelp: 'Restore hints', popCapDeletedHidden: 'Deleted hidden (Shift+H)', popCapDeletedShown: 'Deleted shown (Shift+H)',
+        ctxSelectBlank: 'Select blank', blankMark: 'Mark blank pages',
+        blankSearching: 'Looking for blank pages: {i} of {total}…', blankFound: 'Blank pages found and selected: {n}', blankNone: 'No blank pages found',
         ctxSelectPages: 'Select pages', ctxSelectAll: 'Select all (Ctrl+A)', ctxSelectEven: 'Select even', ctxSelectOdd: 'Select odd',
         ctxSelectMode: 'Selection mode',
         ctxFitWidth: 'Fit page width',
@@ -10391,6 +10436,8 @@
         ctxViewMode: 'Modo de vista',
         linkFollow: 'Abrir enlace',
         popCapLang: 'Idioma de la interfaz', popCapRestoreHelp: 'Restaurar ayuda', popCapDeletedHidden: 'Eliminadas ocultas (Shift+H)', popCapDeletedShown: 'Eliminadas visibles (Shift+H)',
+        ctxSelectBlank: 'Seleccionar en blanco', blankMark: 'Marcar páginas en blanco',
+        blankSearching: 'Buscando páginas en blanco: {i} de {total}…', blankFound: 'Páginas en blanco encontradas y seleccionadas: {n}', blankNone: 'No se encontraron páginas en blanco',
         ctxSelectPages: 'Seleccionar páginas', ctxSelectAll: 'Seleccionar todas (Ctrl+A)', ctxSelectEven: 'Seleccionar pares', ctxSelectOdd: 'Seleccionar impares',
         ctxSelectMode: 'Modo selección',
         ctxFitWidth: 'Ajustar al ancho de página',
@@ -10902,6 +10949,8 @@
         ctxViewMode: '查看模式',
         linkFollow: '打开链接',
         popCapLang: '界面语言', popCapRestoreHelp: '恢复提示', popCapDeletedHidden: '已隐藏删除页 (Shift+H)', popCapDeletedShown: '已显示删除页 (Shift+H)',
+        ctxSelectBlank: '选择空白页', blankMark: '标记空白页',
+        blankSearching: '正在查找空白页：{i} / {total}…', blankFound: '已找到并选中空白页：{n}', blankNone: '未找到空白页',
         ctxSelectPages: '选择页面', ctxSelectAll: '全选 (Ctrl+A)', ctxSelectEven: '选择偶数页', ctxSelectOdd: '选择奇数页',
         ctxSelectMode: '选择模式',
         ctxFitWidth: '适应页面宽度',
@@ -12046,6 +12095,8 @@
       if (editPageBtn) {
         editPageBtn.disabled = baseDisabled || selectedNonDeleted.length !== 1;
       }
+      const markBlankBtnEl = document.getElementById('markBlankBtn');
+      if (markBlankBtnEl) markBlankBtnEl.disabled = baseDisabled || pdfDoc.getPageCount() === 0;
       const watermarkBtnEl = document.getElementById('watermarkBtn');
       if (watermarkBtnEl) watermarkBtnEl.disabled = baseDisabled || pdfDoc.getPageCount() === 0;
       const headerFooterBtnEl = document.getElementById('headerFooterBtn');
@@ -12491,6 +12542,7 @@
         case 'watermarkBtn': return t('watermarkTitle');
         case 'headerFooterBtn': return t('hfTitle');
         case 'printSelectedBtn': return t('printSelectedPages');
+        case 'markBlankBtn': return t('blankMark');
         case 'toggleDeletedBtn':
           return t(deletedPagesHidden ? 'popCapDeletedHidden' : 'popCapDeletedShown');
       }
@@ -12518,7 +12570,7 @@
     function pmPopCapsInit() {
       const btns = document.querySelectorAll(
         '#logoMenuArea > button, .readmode-wrapper .mode-btn, #watermarkBtn, #headerFooterBtn, ' +
-        '#toggleDeletedBtn, #printSelectedBtn, .top-menu .img-save-btn');
+        '#toggleDeletedBtn, #markBlankBtn, #printSelectedBtn, .top-menu .img-save-btn');
       const mo = new MutationObserver((recs) => {
         new Set(recs.map(r => r.target)).forEach(pmPopCapUpdate);
       });
@@ -21885,6 +21937,158 @@
       refreshCheckboxes();
       updateUIState();
       notifySelectionChanged();
+    }
+
+    // ---- Blank pages ----------------------------------------------------
+    // A page counts as blank when nothing on it would show in print:
+    //  - no annotation that shows (forms, comments, stamps; links do not),
+    //  - no object added in the page editor,
+    //  - and either no drawing operator at all, or, rendered small with a
+    //    band along the edges left out (scanner shadows, staples), next to no
+    //    ink. Ink is a pixel well darker than the page's own background, so
+    //    grey or yellowed paper and faint show-through do not count; a few
+    //    specks of dust or a lone page number stay under the limit.
+    // Found pages are only selected - what to do with them is up to the user.
+    const PM_BLANK_RENDER_W = 500;      // px across the rendered page
+    const PM_BLANK_PARALLEL = 4;        // pages checked at a time
+    const PM_BLANK_EDGE = 0.04;         // share of each side left out
+    const PM_BLANK_CONTRAST = 60;       // ink: this much darker than the paper
+    const PM_BLANK_MAX_INK = 0.0001;    // share of ink pixels a blank page may have
+    let pmBlankPaintOps = null;
+    function pmBlankIsPaintOp(fn) {
+      if (!pmBlankPaintOps) {
+        const names = ['showText', 'showSpacedText', 'nextLineShowText', 'nextLineSetSpacingShowText',
+          'paintImageXObject', 'paintInlineImageXObject', 'paintInlineImageXObjectGroup', 'paintImageMaskXObject',
+          'paintImageMaskXObjectGroup', 'paintImageXObjectRepeat', 'paintImageMaskXObjectRepeat',
+          'paintSolidColorImageMask', 'paintJpegXObject', 'fill', 'eoFill', 'stroke', 'fillStroke', 'eoFillStroke',
+          'closeStroke', 'closeFillStroke', 'closeEOFillStroke', 'shadingFill', 'constructPath'];
+        pmBlankPaintOps = new Set(names.map(n => pdfjsLib.OPS[n]).filter(v => v != null));
+      }
+      return pmBlankPaintOps.has(fn);
+    }
+    async function pmPageIsBlank(pjDoc, idx, canvas) {
+      if (typeof peLoadPageEditorObjects === 'function') {
+        try { if ((peLoadPageEditorObjects(idx) || []).length) return false; } catch (_) {}
+      }
+      const page = await pjDoc.getPage(idx + 1);
+      try {
+        const annots = await page.getAnnotations({ intent: 'display' });
+        if (annots.some(a => a.subtype !== 'Link' && a.subtype !== 'Popup')) return false;
+      } catch (_) {}
+      const ops = await page.getOperatorList();
+      if (!ops.fnArray.some(pmBlankIsPaintOp)) return true;
+      const rot = typeof page.rotate === 'number' ? page.rotate : 0;
+      const vp1 = page.getViewport({ scale: 1, rotation: rot });
+      const vp = page.getViewport({ scale: PM_BLANK_RENDER_W / vp1.width, rotation: rot });
+      canvas.width = Math.max(1, Math.round(vp.width));
+      canvas.height = Math.max(1, Math.round(vp.height));
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      await page.render({ canvasContext: ctx, viewport: vp }).promise;
+      const x0 = Math.round(canvas.width * PM_BLANK_EDGE), y0 = Math.round(canvas.height * PM_BLANK_EDGE);
+      const w = canvas.width - 2 * x0, h = canvas.height - 2 * y0;
+      if (w < 4 || h < 4) return false;
+      const d = ctx.getImageData(x0, y0, w, h).data;
+      // The paper's own shade: the median brightness.
+      const hist = new Uint32Array(256);
+      const lum = new Uint8Array(w * h);
+      for (let i = 0, p = 0; i < d.length; i += 4, p++) {
+        const l = (d[i] * 299 + d[i + 1] * 587 + d[i + 2] * 114) / 1000 | 0;
+        lum[p] = l;
+        hist[l]++;
+      }
+      let acc = 0, bg = 255;
+      for (let l = 0; l < 256; l++) { acc += hist[l]; if (acc >= lum.length / 2) { bg = l; break; } }
+      const limit = bg - PM_BLANK_CONTRAST;
+      const allowed = lum.length * PM_BLANK_MAX_INK;
+      let ink = 0;
+      for (let p = 0; p < lum.length; p++) {
+        if (lum[p] < limit && ++ink > allowed) return false;
+      }
+      return true;
+    }
+
+    // Pages in the order shown, those marked for deletion left out.
+    async function pmFindBlankPages(onProgress) {
+      const indices = Array.from(pagesContainer.querySelectorAll('.page'))
+        .filter(p => p.style.display !== 'none')
+        .map(p => parseInt(p.dataset.index, 10))
+        .filter(i => !Number.isNaN(i) && !markedForDeletion.has(i));
+      const doc = await getHQPdfjsDoc(hqPdfjsToken);
+      if (!doc) return null;
+      // A few pages at once: while one renders, the pdf.js worker is already
+      // decoding the next page's images.
+      const blank = new Array(indices.length).fill(false);
+      let next = 0, done = 0;
+      const lane = async () => {
+        const canvas = document.createElement('canvas');
+        while (next < indices.length) {
+          const k = next++;
+          try {
+            blank[k] = await pmPageIsBlank(doc, indices[k], canvas);
+          } catch (e) {
+            console.warn('blank page check', indices[k], e);
+          }
+          if (onProgress) onProgress(++done, indices.length);
+        }
+        canvas.width = canvas.height = 1;
+      };
+      await Promise.all(Array.from({ length: Math.min(PM_BLANK_PARALLEL, indices.length) }, lane));
+      return indices.filter((_, k) => blank[k]);
+    }
+
+    // Page RMB menu → "Выбрать страницы" → "Выбрать пустые", and the popup
+    // under the bin: selects the blank pages and says how many there are.
+    let pmBlankBusy = false;
+    async function selectBlankPages() {
+      if (!pdfDoc || isLoading || pmBlankBusy) return;
+      pmBlankBusy = true;
+      let found = null;
+      showLoading(t('blankSearching', { i: 0, total: '…' }));
+      try {
+        found = await pmFindBlankPages((n, total) => {
+          if (n % 4 === 0 || n === total) loadingText.textContent = t('blankSearching', { i: n, total });
+        });
+      } catch (e) {
+        console.error(e);
+      } finally {
+        hideLoading();
+        pmBlankBusy = false;
+      }
+      if (!found) return;
+      if (interactionMode !== 'select' && typeof setMode === 'function') setMode('select');
+      selectedPages.clear();
+      const set = new Set(found);
+      pagesContainer.querySelectorAll('.page').forEach(page => {
+        page.classList.toggle('selected', set.has(parseInt(page.dataset.index, 10)));
+      });
+      found.forEach(i => selectedPages.add(i));
+      lastSelectedIndex = found.length ? found[found.length - 1] : null;
+      refreshCheckboxes();
+      updateUIState();
+      notifySelectionChanged();
+      if (found.length) {
+        const first = pagesContainer.querySelector('.page[data-index="' + found[0] + '"]');
+        if (first && typeof scrollPageIntoViewTop === 'function') scrollPageIntoViewTop(first);
+      }
+      pmShowToast(found.length ? t('blankFound', { n: found.length }) : t('blankNone'));
+    }
+
+    // A short message at the bottom of the window that goes away by itself.
+    let pmToastTimer = null;
+    function pmShowToast(text, ms) {
+      let el = document.getElementById('pmToast');
+      if (!el) {
+        el = document.createElement('div');
+        el.id = 'pmToast';
+        el.setAttribute('role', 'status');
+        document.body.appendChild(el);
+      }
+      el.textContent = text;
+      el.classList.add('show');
+      clearTimeout(pmToastTimer);
+      pmToastTimer = setTimeout(() => el.classList.remove('show'), ms || 3500);
     }
 
     // Deselect all pages. Hotkey Esc.
@@ -34313,24 +34517,27 @@
     (function initDeletedVisibilityToggle() {
       if (isTouchDevice) return;
       const wrapper = document.querySelector('.delete-wrapper');
-      const btn = document.getElementById('toggleDeletedBtn');
-      if (!wrapper || !btn || !deleteBtn) return;
+      // The eye (show/hide deleted) and, below it, "mark blank pages".
+      const btns = ['toggleDeletedBtn', 'markBlankBtn'].map(id => document.getElementById(id)).filter(Boolean);
+      if (!wrapper || !btns.length || !deleteBtn) return;
       let hideTimer = null;
 
       function show() {
         if (!pdfDoc) return;   // nothing to act on yet - "see the opportunity" only makes sense once a document is open
         clearTimeout(hideTimer);
         pmTopPopupShowing(hideNow);
-        btn.classList.add('show');
+        btns.forEach(b => b.classList.add('show'));
       }
       function scheduleHide() {
         clearTimeout(hideTimer);
-        hideTimer = setTimeout(() => btn.classList.remove('show'), POPUP_BTN_HIDE_MS);
+        hideTimer = setTimeout(() => btns.forEach(b => b.classList.remove('show')), POPUP_BTN_HIDE_MS);
       }
-      function hideNow() { clearTimeout(hideTimer); btn.classList.remove('show'); }
+      function hideNow() { clearTimeout(hideTimer); btns.forEach(b => b.classList.remove('show')); }
       pmTopPopupHiders.add(hideNow);
+      const markBtn = document.getElementById('markBlankBtn');
+      if (markBtn) markBtn.addEventListener('click', hideNow);
 
-      [wrapper, deleteBtn, btn].forEach(el => {
+      [wrapper, deleteBtn, ...btns].forEach(el => {
         el.addEventListener('mouseenter', show);
         el.addEventListener('mouseleave', scheduleHide);
       });
@@ -41968,6 +42175,7 @@ function editSelectedPage() {
       'select-all': baseDisabled,
       'select-even': baseDisabled,
       'select-odd': baseDisabled,
+      'select-blank': baseDisabled,
       'rot-right': baseDisabled || targets.length === 0,
       'rot-left': baseDisabled || targets.length === 0,
       edit: baseDisabled || !pageEditAvailable() || editIdx == null || markedForDeletion.has(editIdx),
@@ -42319,6 +42527,9 @@ function editSelectedPage() {
         break;
       case 'select-odd':
         selectPagesByParity(1);
+        break;
+      case 'select-blank':
+        selectBlankPages();
         break;
       case 'export':
         if (selOk) exportSelectedPages();
