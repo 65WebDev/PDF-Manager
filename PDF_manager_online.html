@@ -26374,6 +26374,21 @@
         if (clientX >= r.left - pad && clientX <= r.right + pad
             && clientY >= r.top - pad && clientY <= r.bottom + pad) return true;
       }
+      // The top menu's popup buttons (view modes, Export, Save, ...) hang
+      // over the pages while shown - with their captions beside them and
+      // 6px gaps between them; pointing at any of that is pointing at the
+      // menu, not at a gap between pages.
+      for (const btn of document.querySelectorAll('.pm-pop-cap.show:not(.rl-slot-main)')) {
+        if (getComputedStyle(btn).opacity === '0') continue;
+        const r = btn.getBoundingClientRect();
+        if (!r.width || !r.height) continue;
+        const cap = btn.getAttribute('data-pm-caption');
+        const capW = (cap && typeof pmPopCapWidth === 'function') ? 8 + pmPopCapWidth(cap) : 0;
+        const toLeft = btn.classList.contains('pm-pop-cap--left');
+        const pad = 6;
+        if (clientX >= r.left - pad - (toLeft ? capW : 0) && clientX <= r.right + pad + (toLeft ? 0 : capW)
+            && clientY >= r.top - pad && clientY <= r.bottom + pad) return true;
+      }
       const stickyBar = document.getElementById('stickyFileBar');
       if (stickyBar && stickyBar.classList.contains('visible')) {
         const sr = stickyBar.getBoundingClientRect();
