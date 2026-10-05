@@ -1140,7 +1140,7 @@
     .pm-hf-col-right .pm-wm-pages label:last-child { display: flex; min-width: 0; }
     .pm-hf-preview {
       background: rgba(120,130,145,0.14); border-radius: 8px; padding: 12px; box-sizing: border-box;
-      display: flex; justify-content: center; max-height: 46vh; overflow: auto;
+      display: flex; justify-content: center; flex: none;
     }
     .pm-hf-preview canvas { display: block; box-shadow: 0 2px 10px rgba(0,0,0,0.25); }
     .pm-hf-help-pop { max-width: 420px; }
@@ -65861,9 +65861,14 @@ function pmHfRunDialog() {
           guideDrag.start = s.margins[w]; guideDrag.x = e.clientX; guideDrag.y = e.clientY; guideDrag.shift = e.shiftKey;
           return;
         }
-        const wMm = fr.W / PM_HF_PT_PER_MM, hMm = fr.H / PM_HF_PT_PER_MM;
+        const wMm = fr.W / PM_HF_PT_PER_MM;
         const other = w === 'left' ? s.margins.right : w === 'right' ? s.margins.left : 0;
-        const max = (w === 'left' || w === 'right') ? Math.max(0, wMm - other - 5) : Math.min(200, hMm / 2);
+        // A top/bottom line stays inside its band with the text box under it.
+        const mt = pmHfMetrics(s, '0');
+        const band = w === 'top' ? frozenBands.head : frozenBands.foot;
+        const max = (w === 'left' || w === 'right')
+          ? Math.max(0, wMm - other - 5)
+          : Math.max(0, (band - mt.asc - mt.desc - 4) / PM_HF_PT_PER_MM);
         s.margins[w] = Math.round(Math.min(max, Math.max(0, guideDrag.start + d)) * 10) / 10;
         syncControls();
         drawSoon();
@@ -65879,10 +65884,12 @@ function pmHfRunDialog() {
       const which = guideAt(e);
       if (!which) return;
       e.preventDefault();
-      // Bands keep their height while dragging (with room to grow), so the
-      // lines do not jump when a band would otherwise get taller.
-      const fr = lastGeom.fr, hb = bandHeights(fr);
-      frozenBands = { head: Math.min(fr.H / 2, hb.head + 72), foot: Math.min(fr.H / 2, hb.foot + 72) };
+      // The preview keeps its size while dragging - a taller band would move
+      // everything under the pointer (and on a small screen scroll the
+      // dialog) - so a top/bottom line goes as far as its band; after the
+      // drop the band refits and the line can be taken further.
+      const fr = lastGeom.fr;
+      frozenBands = Object.assign({}, bandHeights(fr));
       guideDrag = { id: e.pointerId, which, x: e.clientX, y: e.clientY, start: s.margins[which], shift: e.shiftKey };
       try { pv.setPointerCapture(e.pointerId); } catch (_) {}
       drawSoon();
