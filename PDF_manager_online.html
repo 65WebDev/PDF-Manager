@@ -919,7 +919,8 @@
        open: it does not depend on the selection the way "Edit page" does.*/
     .edit-wrapper { position: relative; display: inline-flex; }
     #watermarkBtn,
-    #headerFooterBtn {
+    #headerFooterBtn,
+    #pageFormatBtn {
       position: fixed;
       top: 0;
       left: 0;
@@ -930,22 +931,24 @@
       transition: opacity 0.15s, transform 0.15s, background 0.15s;
     }
     #watermarkBtn.show::before,
-    #headerFooterBtn.show::before {
+    #headerFooterBtn.show::before,
+    #pageFormatBtn.show::before {
       content: '';
       position: absolute;
       left: 0; right: 0;
       top: -10px; height: 10px;
     }
     #watermarkBtn.show,
-    #headerFooterBtn.show {
+    #headerFooterBtn.show,
+    #pageFormatBtn.show {
       opacity: 1;
       transform: translateY(0);
       pointer-events: auto;
     }
-    #watermarkBtn.show:disabled, #headerFooterBtn.show:disabled { opacity: 0.4; }
-    #watermarkBtn:hover:not(:disabled), #headerFooterBtn:hover:not(:disabled) { background: #3498db; }
-    #watermarkBtn svg, #headerFooterBtn svg { display: block; }
-    @media (pointer: coarse) { #watermarkBtn, #headerFooterBtn { display: none !important; } }
+    #watermarkBtn.show:disabled, #headerFooterBtn.show:disabled, #pageFormatBtn.show:disabled { opacity: 0.4; }
+    #watermarkBtn:hover:not(:disabled), #headerFooterBtn:hover:not(:disabled), #pageFormatBtn:hover:not(:disabled) { background: #3498db; }
+    #watermarkBtn svg, #headerFooterBtn svg, #pageFormatBtn svg { display: block; }
+    @media (pointer: coarse) { #watermarkBtn, #headerFooterBtn, #pageFormatBtn { display: none !important; } }
 
     /*Watermark dialog*/
     .pm-wm-overlay {
@@ -1158,6 +1161,44 @@
     .pm-hf-help-pop { max-width: 420px; }
     .pm-hf-help-pop code { background: rgba(52,152,219,0.12); border-radius: 4px; padding: 0 4px; }
     html[data-theme="dark"] .pm-wm-box .pm-hf-controls input[type=date] { background: #1c2128 !important; border-color: #4a5058 !important; color-scheme: dark; }
+    /*Page format dialog (pmPfRunDialog): options on top, the page as it is
+       and as it will be below, side by side at one scale.*/
+    /*As wide as the two option columns need - no stretched gap between
+       them; the summary and the preview take that width without adding to it.*/
+    .pm-pf-box { width: max-content; }
+    .pm-pf-box .pm-hf-cols > .pm-hf-col { flex: none; }
+    .pm-pf-summary, .pm-pf-preview { contain: inline-size; }
+    .pm-pf-box .pm-hf-col-left .pm-wm-label { width: 112px; }
+    /*Right column: labels at its left edge, the controls in one column right
+       after the widest label (its width is set when the dialog opens).*/
+    .pm-pf-box .pm-hf-col-right .pm-wm-label { width: auto; text-align: left; padding-right: 0; }
+    .pm-pf-dim { display: inline-flex; width: 78px; }
+    .pm-pf-dim .pm-wm-num { width: 100%; }
+    .pm-pf-dim .pm-wm-num input[type=number] { flex: 1; width: 0; min-width: 0; }
+    #pmPfFormat { min-width: 0; }
+    #pmPfRange { flex: none; width: 150px; }
+    .pm-pf-box .pm-hf-col-right .pm-wm-pages label:last-child { display: flex; min-width: 0; }
+    .pm-wm-check.pm-wm-off { opacity: 0.45; }
+    .pm-pf-summary { font-size: 13px; color: #34495e; text-align: center; min-height: 18px; }
+    .pm-pf-preview {
+      display: flex; align-items: center; justify-content: center; gap: 12px;
+      background: rgba(120,130,145,0.14); border-radius: 8px; padding: 12px; box-sizing: border-box;
+    }
+    .pm-pf-side { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+    .pm-pf-sheet { height: 300px; display: flex; align-items: center; justify-content: center; }
+    .pm-pf-sheet canvas { display: block; box-shadow: 0 2px 10px rgba(0,0,0,0.25); background: #fff; }
+    .pm-pf-cap { font-size: 12.5px; color: #555; text-align: center; white-space: nowrap; }
+    .pm-pf-cap-k { font-weight: 600; color: #2c3e50; }
+    .pm-pf-arrow { flex: none; width: 24px; font-size: 22px; color: #6b7785; text-align: center; }
+    .pm-pf-nav { justify-content: center; }
+    .pm-pf-box .pm-wm-row[hidden] { display: none; }
+    .pm-pf-box .pm-wm-ok:disabled { opacity: 0.5; cursor: default; background: #3498db; }
+    html[data-theme="dark"] .pm-wm-box .pm-pf-preview { background: rgba(255,255,255,0.05); }
+    html[data-theme="dark"] .pm-wm-box .pm-pf-summary,
+    html[data-theme="dark"] .pm-wm-box .pm-pf-cap,
+    html[data-theme="dark"] .pm-wm-box .pm-pf-arrow { color: #b8c0c8 !important; }
+    html[data-theme="dark"] .pm-wm-box .pm-pf-cap-k { color: #e2e6ea !important; }
+    html[data-theme="dark"] .pm-wm-box #pmPfRange::placeholder { color: #7d8791 !important; }
     @media (max-width: 900px) {
       .pm-hf-cols { flex-direction: column; }
       .pm-hf-col-right { border-left: none; padding-left: 0; }
@@ -1349,6 +1390,7 @@
     #printSelectedBtn,
     #watermarkBtn,
     #headerFooterBtn,
+    #pageFormatBtn,
     .readmode-wrapper .mode-btn.rl-slot-popup {
       width: 42px;
       height: 42px;
@@ -7165,7 +7207,7 @@
       }
       /* Beat .top-menu button / .icon-btn / .icons-mode .compact-btn fixed 42px.
          Ratios = natural size / 42 (22→0.524, 30→0.714, 26→0.619, 18→0.429). */
-      .top-menu .main-row.menu-shrink button:not(#fitWidthBtn):not(.img-save-btn):not(#printSelectedBtn):not(#watermarkBtn):not(#headerFooterBtn):not(#toggleDeletedBtn):not(#markBlankBtn):not(.rl-slot-popup),
+      .top-menu .main-row.menu-shrink button:not(#fitWidthBtn):not(.img-save-btn):not(#printSelectedBtn):not(#watermarkBtn):not(#headerFooterBtn):not(#pageFormatBtn):not(#toggleDeletedBtn):not(#markBlankBtn):not(.rl-slot-popup),
       .top-menu .main-row.menu-shrink label.icon-btn,
       .main-row.menu-shrink .compact-btn,
       .main-row.menu-shrink button.icon-btn,
@@ -7214,6 +7256,7 @@
       .top-menu .main-row.menu-shrink #printSelectedBtn,
       .top-menu .main-row.menu-shrink #watermarkBtn,
       .top-menu .main-row.menu-shrink #headerFooterBtn,
+      .top-menu .main-row.menu-shrink #pageFormatBtn,
       .top-menu .main-row.menu-shrink .readmode-wrapper .mode-btn.rl-slot-popup {
         width: var(--pm-menu-ctrl-h);
         height: var(--pm-menu-ctrl-h);
@@ -7665,6 +7708,13 @@
               <line x1="7.5" y1="18" x2="16.5" y2="18" stroke="#5dade2" stroke-width="2.4"/>
               <line x1="8" y1="10.5" x2="16" y2="10.5" stroke-width="1.3" opacity="0.5"/>
               <line x1="8" y1="13.5" x2="13" y2="13.5" stroke-width="1.3" opacity="0.5"/>
+            </svg>
+          </button>
+          <button id="pageFormatBtn" class="icon-btn" onclick="openPageFormatDialog()" disabled title="Приведение страниц к одному формату" data-i18n-title="pfTooltip">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="4" y="2" width="16" height="20" rx="2"/>
+              <rect x="9" y="8.5" width="6" height="7" rx="0.6" stroke="#5dade2" stroke-width="1.6"/>
+              <path d="M8.2 7.2L6.6 5.6M6.6 5.6h2.2M6.6 5.6v2.2M15.8 16.8l1.6 1.6M17.4 18.4h-2.2M17.4 18.4v-2.2" stroke="#5dade2" stroke-width="1.5"/>
             </svg>
           </button>
         </div>
@@ -9498,6 +9548,19 @@
         newDocumentHint: 'Будет создан новый документ', openInNewTabs: 'Откроется в новых вкладках',
         tabClose: 'Закрыть вкладку', tabCloseOthers: 'Закрыть другие вкладки', tabCloseRight: 'Закрыть вкладки справа',
         tabRename: 'Переименовать', tabRenameTitle: 'Переименовать документ',
+        pfTooltip: 'Приведение страниц к одному формату', pfTitle: 'Формат страниц', pfFormat: 'Формат', pfFmtFirst: 'Как у первой страницы', pfFmtCommon: 'Самый частый в документе', pfFmtCustom: 'Свой размер',
+        pfWidth: 'Ширина, мм', pfHeight: 'Высота, мм',
+        pfOrient: 'Ориентация', pfOrientPage: 'По странице', pfOrientPortrait: 'Книжная', pfOrientLandscape: 'Альбомная',
+        pfMode: 'Масштаб', pfModeFit: 'Вписать', pfModeFill: 'Заполнить', pfModeNone: 'Без масштаба',
+        pfModeFitHint: 'страница целиком помещается в новый формат, пропорции сохраняются',
+        pfModeFillHint: 'страница заполняет новый формат целиком, выступающие края обрезаются',
+        pfModeNoneHint: 'содержимое остаётся в натуральную величину',
+        pfHelpVector: 'Содержимое не растрируется: текст, ссылки, закладки, комментарии и поля форм сохраняются и сдвигаются вместе со страницей.',
+        pfNoEnlarge: 'Не увеличивать мелкие страницы', pfAlign: 'Выравнивание', pfAlignCenter: 'По центру', pfAlignTop: 'По верху',
+        pfMargin: 'Поля, мм', pfOnlyDiff: 'Только страницы другого размера',
+        pfSummary: 'Будет изменено страниц: {n} из {total}', pfMore: 'другие — {n}', pfNothing: 'Все выбранные страницы уже этого формата',
+        pfBefore: 'Было:', pfAfter: 'Станет:', pfPreviewPage: 'Страница {n} ({k} из {m})',
+        pfApplying: 'Изменение формата страниц…', pfApplyError: 'Не удалось изменить формат страниц', pfDone: 'Формат изменён у страниц: {n}',
         hfTitle: 'Колонтитулы', hfHeader: 'Верхний', hfFooter: 'Нижний',
         hfLeft: 'Слева', hfCenter: 'По центру', hfRight: 'Справа',
         hfPageNumber: 'Номер страницы', hfDate: 'Дата', hfBates: 'Нумерация Бейтса', hfInsert: 'Вставить',
@@ -9945,6 +10008,19 @@
         newDocumentHint: 'A new document will be created', openInNewTabs: 'Open in new tabs',
         tabClose: 'Close tab', tabCloseOthers: 'Close other tabs', tabCloseRight: 'Close tabs to the right',
         tabRename: 'Rename', tabRenameTitle: 'Rename document',
+        pfTooltip: 'Bring pages to one size', pfTitle: 'Page size', pfFormat: 'Size', pfFmtFirst: 'Same as the first page', pfFmtCommon: 'Most common in the document', pfFmtCustom: 'Custom',
+        pfWidth: 'Width, mm', pfHeight: 'Height, mm',
+        pfOrient: 'Orientation', pfOrientPage: 'Per page', pfOrientPortrait: 'Portrait', pfOrientLandscape: 'Landscape',
+        pfMode: 'Scaling', pfModeFit: 'Fit', pfModeFill: 'Fill', pfModeNone: 'No scaling',
+        pfModeFitHint: 'the whole page fits into the new size, proportions are kept',
+        pfModeFillHint: 'the page fills the new size completely, edges that stick out are cut off',
+        pfModeNoneHint: 'the content stays at its actual size',
+        pfHelpVector: 'Nothing is rasterized: text, links, bookmarks, comments and form fields are kept and move with the page.',
+        pfNoEnlarge: 'Do not enlarge small pages', pfAlign: 'Alignment', pfAlignCenter: 'Center', pfAlignTop: 'Top',
+        pfMargin: 'Margins, mm', pfOnlyDiff: 'Only pages of a different size',
+        pfSummary: 'Pages to change: {n} of {total}', pfMore: 'other — {n}', pfNothing: 'All chosen pages already have this size',
+        pfBefore: 'Before:', pfAfter: 'After:', pfPreviewPage: 'Page {n} ({k} of {m})',
+        pfApplying: 'Changing page size…', pfApplyError: 'Could not change the page size', pfDone: 'Page size changed: {n} pages',
         hfTitle: 'Header & footer', hfHeader: 'Header', hfFooter: 'Footer',
         hfLeft: 'Left', hfCenter: 'Center', hfRight: 'Right',
         hfPageNumber: 'Page number', hfDate: 'Date', hfBates: 'Bates numbering', hfInsert: 'Insert',
@@ -10392,6 +10468,19 @@
         newDocumentHint: 'Se creará un nuevo documento', openInNewTabs: 'Se abrirá en nuevas pestañas',
         tabClose: 'Cerrar pestaña', tabCloseOthers: 'Cerrar otras pestañas', tabCloseRight: 'Cerrar pestañas a la derecha',
         tabRename: 'Cambiar nombre', tabRenameTitle: 'Cambiar el nombre del documento',
+        pfTooltip: 'Llevar las páginas a un mismo tamaño', pfTitle: 'Tamaño de página', pfFormat: 'Tamaño', pfFmtFirst: 'Como la primera página', pfFmtCommon: 'El más frecuente del documento', pfFmtCustom: 'Personalizado',
+        pfWidth: 'Ancho, mm', pfHeight: 'Alto, mm',
+        pfOrient: 'Orientación', pfOrientPage: 'Según la página', pfOrientPortrait: 'Vertical', pfOrientLandscape: 'Horizontal',
+        pfMode: 'Escala', pfModeFit: 'Ajustar', pfModeFill: 'Rellenar', pfModeNone: 'Sin escala',
+        pfModeFitHint: 'la página entera cabe en el nuevo tamaño, se mantienen las proporciones',
+        pfModeFillHint: 'la página llena todo el nuevo tamaño, los bordes que sobresalen se recortan',
+        pfModeNoneHint: 'el contenido conserva su tamaño real',
+        pfHelpVector: 'No se rasteriza nada: el texto, los enlaces, los marcadores, los comentarios y los campos de formulario se conservan y se mueven con la página.',
+        pfNoEnlarge: 'No ampliar las páginas pequeñas', pfAlign: 'Alineación', pfAlignCenter: 'Centrado', pfAlignTop: 'Arriba',
+        pfMargin: 'Márgenes, mm', pfOnlyDiff: 'Solo páginas de otro tamaño',
+        pfSummary: 'Páginas que cambiarán: {n} de {total}', pfMore: 'otros — {n}', pfNothing: 'Todas las páginas elegidas ya tienen este tamaño',
+        pfBefore: 'Antes:', pfAfter: 'Después:', pfPreviewPage: 'Página {n} ({k} de {m})',
+        pfApplying: 'Cambiando el tamaño de página…', pfApplyError: 'No se pudo cambiar el tamaño de página', pfDone: 'Tamaño cambiado: {n} páginas',
         hfTitle: 'Encabezado y pie', hfHeader: 'Encabezado', hfFooter: 'Pie',
         hfLeft: 'Izquierda', hfCenter: 'Centro', hfRight: 'Derecha',
         hfPageNumber: 'Número de página', hfDate: 'Fecha', hfBates: 'Numeración Bates', hfInsert: 'Insertar',
@@ -10889,6 +10978,19 @@
         tabCloseOthers: '关闭其他标签页',
         tabCloseRight: '关闭右侧标签页',
         tabRename: '重命名',
+        pfTooltip: '将页面统一为同一尺寸', pfTitle: '页面尺寸', pfFormat: '尺寸', pfFmtFirst: '与第一页相同', pfFmtCommon: '文档中最常见的', pfFmtCustom: '自定义',
+        pfWidth: '宽度（毫米）', pfHeight: '高度（毫米）',
+        pfOrient: '方向', pfOrientPage: '按页面', pfOrientPortrait: '纵向', pfOrientLandscape: '横向',
+        pfMode: '缩放', pfModeFit: '适应', pfModeFill: '填充', pfModeNone: '不缩放',
+        pfModeFitHint: '整页放入新尺寸，保持比例',
+        pfModeFillHint: '页面完全填满新尺寸，超出的边缘被裁掉',
+        pfModeNoneHint: '内容保持实际大小',
+        pfHelpVector: '不会栅格化：文本、链接、书签、注释和表单域都会保留，并随页面一起移动。',
+        pfNoEnlarge: '不放大较小的页面', pfAlign: '对齐', pfAlignCenter: '居中', pfAlignTop: '顶部',
+        pfMargin: '边距（毫米）', pfOnlyDiff: '仅限尺寸不同的页面',
+        pfSummary: '将更改的页面：{n} / {total}', pfMore: '其他 — {n}', pfNothing: '所选页面均已是此尺寸',
+        pfBefore: '之前：', pfAfter: '之后：', pfPreviewPage: '第 {n} 页（{k} / {m}）',
+        pfApplying: '正在更改页面尺寸…', pfApplyError: '无法更改页面尺寸', pfDone: '已更改页面尺寸：{n} 页',
         hfTitle: '页眉和页脚', hfHeader: '页眉', hfFooter: '页脚',
         hfLeft: '左', hfCenter: '中', hfRight: '右',
         hfPageNumber: '页码', hfDate: '日期', hfBates: '贝茨编号', hfInsert: '插入',
@@ -12113,6 +12215,8 @@
       if (watermarkBtnEl) watermarkBtnEl.disabled = baseDisabled || pdfDoc.getPageCount() === 0;
       const headerFooterBtnEl = document.getElementById('headerFooterBtn');
       if (headerFooterBtnEl) headerFooterBtnEl.disabled = baseDisabled || pdfDoc.getPageCount() === 0;
+      const pageFormatBtnEl = document.getElementById('pageFormatBtn');
+      if (pageFormatBtnEl) pageFormatBtnEl.disabled = baseDisabled || pdfDoc.getPageCount() === 0;
       saveBtn.disabled = baseDisabled;
       scaleSlider.disabled = baseDisabled;
       const fitWidthBtnEl = document.getElementById('fitWidthBtn');
@@ -12553,6 +12657,7 @@
         case 'aboutBtn': return t('about');
         case 'watermarkBtn': return t('watermarkTitle');
         case 'headerFooterBtn': return t('hfTitle');
+        case 'pageFormatBtn': return t('pfTitle');
         case 'printSelectedBtn': return t('printSelectedPages');
         case 'markBlankBtn': return t('blankMark');
         case 'toggleDeletedBtn':
@@ -12581,7 +12686,7 @@
     }
     function pmPopCapsInit() {
       const btns = document.querySelectorAll(
-        '#logoMenuArea > button, .readmode-wrapper .mode-btn, #watermarkBtn, #headerFooterBtn, ' +
+        '#logoMenuArea > button, .readmode-wrapper .mode-btn, #watermarkBtn, #headerFooterBtn, #pageFormatBtn, ' +
         '#toggleDeletedBtn, #markBlankBtn, #printSelectedBtn, .top-menu .img-save-btn');
       const mo = new MutationObserver((recs) => {
         new Set(recs.map(r => r.target)).forEach(pmPopCapUpdate);
@@ -34645,7 +34750,7 @@
     (function initWatermarkToggle() {
       if (isTouchDevice) return;
       const wrapper = document.querySelector('.edit-wrapper');
-      const btns = ['watermarkBtn', 'headerFooterBtn'].map(id => document.getElementById(id)).filter(Boolean);
+      const btns = ['watermarkBtn', 'headerFooterBtn', 'pageFormatBtn'].map(id => document.getElementById(id)).filter(Boolean);
       if (!wrapper || !btns.length || !editPageBtn) return;
       let hideTimer = null;
 
@@ -66544,6 +66649,880 @@ function pmHfRunDialog() {
     slotEls[lastSlot].focus();
     const end = slotEls[lastSlot].value.length;
     slotEls[lastSlot].setSelectionRange(end, end);
+  });
+}
+// ============================================================
+// PAGE FORMAT: brings pages of different sizes to one format. Each page is
+// changed in place - nothing is rasterized: the page gets the new size and
+// its content one transform (scale + shift), wrapped around the existing
+// content streams. Annotations (links, form fields, comments), the
+// destinations of bookmarks and links, and the page editor's objects get
+// the same transform, so everything stays where it was on the content.
+// Sizes and offsets are visual (the page as seen, /Rotate applied, y down),
+// as for the watermark (pmWmPageFrame).
+// ============================================================
+const PM_PF_STORAGE_KEY = 'pmPageFormatSettings';
+const PM_PF_PT_PER_MM = 72 / 25.4;
+// Named formats, portrait, in mm.
+const PM_PF_SIZES = {
+  A3: [297, 420], A4: [210, 297], A5: [148, 210], Letter: [215.9, 279.4], Legal: [215.9, 355.6]
+};
+const PM_PF_FORMATS = ['A4', 'A3', 'A5', 'Letter', 'Legal', 'first', 'common', 'custom'];
+// Pages within this many pt of the target size already have it.
+const PM_PF_SAME_PT = 1.5;
+let pmPfDialogOpen = false;
+
+function pmPfDefaults() {
+  return {
+    format: 'A4',
+    customW: 210, customH: 297,   // mm
+    orient: 'page',               // page | portrait | landscape
+    mode: 'fit',                  // fit | fill | none
+    noEnlarge: false,
+    margin: 0,                    // mm
+    align: 'center',              // center | top
+    onlyDiff: true
+  };
+}
+
+function pmPfSanitize(s) {
+  const d = pmPfDefaults();
+  const out = Object.assign({}, d, s || {});
+  out.format = PM_PF_FORMATS.includes(out.format) ? out.format : d.format;
+  out.customW = pmWmClampNum(out.customW, 10, 5000, d.customW);
+  out.customH = pmWmClampNum(out.customH, 10, 5000, d.customH);
+  out.orient = ['page', 'portrait', 'landscape'].includes(out.orient) ? out.orient : d.orient;
+  out.mode = ['fit', 'fill', 'none'].includes(out.mode) ? out.mode : d.mode;
+  out.noEnlarge = !!out.noEnlarge;
+  out.margin = pmWmClampNum(out.margin, 0, 100, d.margin);
+  out.align = out.align === 'top' ? 'top' : 'center';
+  out.onlyDiff = out.onlyDiff !== false;
+  return out;
+}
+
+function pmPfLoadSettings() {
+  try {
+    const raw = localStorage.getItem(PM_PF_STORAGE_KEY);
+    if (raw) return pmPfSanitize(JSON.parse(raw));
+  } catch (_) {}
+  return pmPfSanitize(null);
+}
+function pmPfStoreSettings(s) {
+  try { localStorage.setItem(PM_PF_STORAGE_KEY, JSON.stringify(s)); } catch (_) {}
+}
+
+// Visual size of every page, in pt.
+function pmPfPageSizes(doc) {
+  const out = [];
+  const n = doc.getPageCount();
+  for (let i = 0; i < n; i++) {
+    const fr = pmWmPageFrame(doc.getPage(i));
+    out.push({ W: fr.W, H: fr.H });
+  }
+  return out;
+}
+
+// The target format as { a, b } (short and long side, pt), or null when a
+// custom size is out of range.
+function pmPfBaseSize(s, sizes) {
+  const ab = (w, h) => ({ a: Math.min(w, h), b: Math.max(w, h) });
+  const named = PM_PF_SIZES[s.format];
+  if (named) return ab(named[0] * PM_PF_PT_PER_MM, named[1] * PM_PF_PT_PER_MM);
+  if (s.format === 'custom') return ab(s.customW * PM_PF_PT_PER_MM, s.customH * PM_PF_PT_PER_MM);
+  const kept = [];
+  sizes.forEach((sz, i) => { if (!markedForDeletion.has(i)) kept.push(sz); });
+  if (!kept.length) return null;
+  if (s.format === 'first') return ab(kept[0].W, kept[0].H);
+  // The most frequent size, either way round; on a tie the earlier one.
+  const counts = new Map();
+  let best = null, bestN = 0;
+  kept.forEach(sz => {
+    const key = Math.round(Math.min(sz.W, sz.H)) + 'x' + Math.round(Math.max(sz.W, sz.H));
+    const n = (counts.get(key) || 0) + 1;
+    counts.set(key, n);
+    if (n > bestN) { bestN = n; best = sz; }
+  });
+  return ab(best.W, best.H);
+}
+
+// Where page content goes on the new page: visual target size (Tw x Th),
+// scale s and the offset (ox, oy) of the page's top-left corner.
+function pmPfPlanPage(sz, base, s) {
+  const land = s.orient === 'landscape' || (s.orient === 'page' && sz.W > sz.H);
+  const Tw = land ? base.b : base.a, Th = land ? base.a : base.b;
+  const same = Math.abs(sz.W - Tw) < PM_PF_SAME_PT && Math.abs(sz.H - Th) < PM_PF_SAME_PT;
+  const m = Math.min(s.margin * PM_PF_PT_PER_MM, Math.min(Tw, Th) / 2 - 1);
+  const aw = Math.max(1, Tw - 2 * m), ah = Math.max(1, Th - 2 * m);
+  let k = 1;
+  if (s.mode === 'fit') k = Math.min(aw / sz.W, ah / sz.H);
+  else if (s.mode === 'fill') k = Math.max(aw / sz.W, ah / sz.H);
+  if (s.noEnlarge && k > 1) k = 1;
+  const ox = m + (aw - k * sz.W) / 2;
+  const oy = s.align === 'top' ? m : m + (ah - k * sz.H) / 2;
+  return { W: sz.W, H: sz.H, Tw, Th, m, s: k, ox, oy, same };
+}
+
+// Plans for the target pages that change, in page order.
+function pmPfPlan(s, indices, sizes) {
+  const base = pmPfBaseSize(s, sizes);
+  if (!base) return [];
+  const out = [];
+  indices.forEach(idx => {
+    const p = pmPfPlanPage(sizes[idx], base, s);
+    if (s.onlyDiff && p.same) return;
+    p.idx = idx;
+    out.push(p);
+  });
+  return out;
+}
+
+// "A4", "Letter"... when a visual size (pt) is one, else null.
+function pmPfSizeName(W, H) {
+  const a = Math.min(W, H) / PM_PF_PT_PER_MM, b = Math.max(W, H) / PM_PF_PT_PER_MM;
+  for (const [name, [x, y]] of Object.entries(PM_PF_SIZES)) {
+    if (Math.abs(a - x) < 1 && Math.abs(b - y) < 1) return name;
+  }
+  return null;
+}
+
+function pmPfMmText(W, H) {
+  const nf = new Intl.NumberFormat(pmHfIntlLocale(), { maximumFractionDigits: 1 });
+  return nf.format(Math.round(W / PM_PF_PT_PER_MM * 10) / 10) + ' × ' +
+    nf.format(Math.round(H / PM_PF_PT_PER_MM * 10) / 10) + ' ' + t('hfMm');
+}
+
+// "Letter" or "180 × 250 мм" - a size for the summary.
+function pmPfShortSizeText(W, H) {
+  return pmPfSizeName(W, H) || pmPfMmText(W, H);
+}
+
+// "A4 · 210 × 297 мм" - a size under the preview.
+function pmPfLongSizeText(W, H) {
+  const name = pmPfSizeName(W, H);
+  return (name ? name + ' · ' : '') + pmPfMmText(W, H);
+}
+
+// The page's own (unrotated) space: the point seen at visual (vx, vy) on a
+// page whose crop box is cb and rotation rot.
+function pmPfVisToUser(vx, vy, rot, cb) {
+  const full = peOverlayPlacement(rot, cb);
+  return peRotatePointAround(full.x + vx, full.y + (full.h - vy), full.x, full.y, rot);
+}
+
+// Old unrotated coordinates -> new: x' = s*x + e, y' = s*y + f. The page
+// keeps its rotation, so the visual scale and shift come out as a plain
+// scale and shift in the page's own space too.
+function pmPfUserTransform(p, rot, cb) {
+  const sw = (rot % 180) ? p.Th : p.Tw, sh = (rot % 180) ? p.Tw : p.Th;
+  const from = pmPfVisToUser(0, 0, rot, cb);
+  const to = pmPfVisToUser(p.ox, p.oy, rot, { x: 0, y: 0, width: sw, height: sh });
+  return { s: p.s, e: to.x - p.s * from.x, f: to.y - p.s * from.y, sw, sh };
+}
+
+function pmPfNum(v) {
+  return Math.round(v * 1e6) / 1e6;
+}
+
+// Scales and shifts every coordinate of an annotation (once: an annotation
+// listed on two pages is not moved twice).
+function pmPfTransformAnnot(dict, T, done) {
+  if (!(dict instanceof PDFLib.PDFDict) || done.has(dict)) return;
+  done.add(dict);
+  const N = PDFLib.PDFName.of;
+  const ctx = dict.context;
+  const numsOf = (key) => {
+    const arr = dict.lookup(N(key));
+    return arr instanceof PDFLib.PDFArray ? arr : null;
+  };
+  const points = (arr) => {
+    const out = [];
+    for (let i = 0; i + 1 < arr.size(); i += 2) {
+      const x = arr.lookup(i), y = arr.lookup(i + 1);
+      if (!(x instanceof PDFLib.PDFNumber) || !(y instanceof PDFLib.PDFNumber)) return null;
+      out.push(pmPfNum(T.s * x.asNumber() + T.e), pmPfNum(T.s * y.asNumber() + T.f));
+    }
+    return out;
+  };
+  const setPoints = (key) => {
+    const arr = numsOf(key);
+    const pts = arr && points(arr);
+    if (pts) dict.set(N(key), ctx.obj(pts));
+  };
+  const rect = numsOf('Rect');
+  const r = rect && points(rect);
+  if (r && r.length === 4) {
+    dict.set(N('Rect'), ctx.obj([Math.min(r[0], r[2]), Math.min(r[1], r[3]), Math.max(r[0], r[2]), Math.max(r[1], r[3])]));
+  }
+  ['QuadPoints', 'Vertices', 'L', 'CL'].forEach(setPoints);
+  const ink = numsOf('InkList');
+  if (ink) {
+    const paths = [];
+    for (let i = 0; i < ink.size(); i++) {
+      const path = ink.lookup(i);
+      const pts = path instanceof PDFLib.PDFArray ? points(path) : null;
+      if (!pts) return;
+      paths.push(pts);
+    }
+    dict.set(N('InkList'), ctx.obj(paths));
+  }
+  const rd = numsOf('RD');
+  if (rd) {
+    const v = [];
+    for (let i = 0; i < rd.size(); i++) {
+      const n = rd.lookup(i);
+      if (!(n instanceof PDFLib.PDFNumber)) return;
+      v.push(pmPfNum(n.asNumber() * T.s));
+    }
+    dict.set(N('RD'), ctx.obj(v));
+  }
+}
+
+// Every explicit destination in the document that points at a changed page
+// (bookmarks, link annotations, named destinations, the open action) gets
+// the transform of that page.
+function pmPfTransformDestinations(doc, byPageRef) {
+  const ctx = doc.context;
+  const N = PDFLib.PDFName.of;
+  const seen = new Set();
+  const fixArray = (arr) => {
+    if (!(arr instanceof PDFLib.PDFArray) || seen.has(arr) || arr.size() < 2) return;
+    seen.add(arr);
+    const pageRef = arr.get(0);
+    const T = pageRef instanceof PDFLib.PDFRef ? byPageRef.get(pageRef.toString()) : null;
+    if (!T) return;
+    const kind = arr.lookup(1);
+    const type = kind instanceof PDFLib.PDFName ? kind.decodeText() : '';
+    const setNum = (i, f) => {
+      if (i >= arr.size()) return;
+      const v = arr.lookup(i);
+      if (v instanceof PDFLib.PDFNumber) arr.set(i, PDFLib.PDFNumber.of(pmPfNum(f(v.asNumber()))));
+    };
+    const X = (x) => T.s * x + T.e, Y = (y) => T.s * y + T.f;
+    if (type === 'XYZ') { setNum(2, X); setNum(3, Y); }
+    else if (type === 'FitH' || type === 'FitBH') setNum(2, Y);
+    else if (type === 'FitV' || type === 'FitBV') setNum(2, X);
+    else if (type === 'FitR') { setNum(2, X); setNum(3, Y); setNum(4, X); setNum(5, Y); }
+  };
+  // A destination: an array, or a dictionary holding it under /D.
+  const fixDest = (v) => {
+    const o = v instanceof PDFLib.PDFRef ? ctx.lookup(v) : v;
+    if (o instanceof PDFLib.PDFArray) fixArray(o);
+    else if (o instanceof PDFLib.PDFDict) {
+      const d = o.lookup(N('D'));
+      if (d instanceof PDFLib.PDFArray) fixArray(d);
+    }
+  };
+  // Dest, or a GoTo action's D (also along an action's /Next chain).
+  const fixHolder = (dict) => {
+    if (!(dict instanceof PDFLib.PDFDict)) return;
+    fixDest(dict.get(N('Dest')));
+    let a = dict.lookup(N('A'));
+    let hops = 0;
+    while (a instanceof PDFLib.PDFDict && hops++ < 32) {
+      const sName = a.lookup(N('S'));
+      if (sName instanceof PDFLib.PDFName && sName.decodeText() === 'GoTo') fixDest(a.get(N('D')));
+      const next = a.lookup(N('Next'));
+      a = next instanceof PDFLib.PDFDict ? next : null;
+    }
+  };
+  const catalog = doc.catalog;
+  // Bookmarks.
+  const outlines = catalog.lookup(N('Outlines'));
+  if (outlines instanceof PDFLib.PDFDict) {
+    const visited = new Set();
+    const stack = [outlines.lookup(N('First'))];
+    while (stack.length) {
+      let item = stack.pop();
+      while (item instanceof PDFLib.PDFDict && !visited.has(item)) {
+        visited.add(item);
+        fixHolder(item);
+        stack.push(item.lookup(N('First')));
+        item = item.lookup(N('Next'));
+      }
+    }
+  }
+  // Links on every page (a link on any page can lead to a changed one).
+  doc.getPages().forEach(page => {
+    const annots = page.node.lookup(N('Annots'));
+    if (!(annots instanceof PDFLib.PDFArray)) return;
+    for (let i = 0; i < annots.size(); i++) {
+      const a = annots.lookup(i);
+      if (a instanceof PDFLib.PDFDict) fixHolder(a);
+    }
+  });
+  // Named destinations: the old /Dests dictionary and the /Names tree.
+  const dests = catalog.lookup(N('Dests'));
+  if (dests instanceof PDFLib.PDFDict) dests.entries().forEach(([, v]) => fixDest(v));
+  const names = catalog.lookup(N('Names'));
+  const tree = names instanceof PDFLib.PDFDict ? names.lookup(N('Dests')) : null;
+  if (tree instanceof PDFLib.PDFDict) {
+    const visited = new Set();
+    const stack = [tree];
+    while (stack.length) {
+      const node = stack.pop();
+      if (!(node instanceof PDFLib.PDFDict) || visited.has(node)) continue;
+      visited.add(node);
+      const kids = node.lookup(N('Kids'));
+      if (kids instanceof PDFLib.PDFArray) for (let i = 0; i < kids.size(); i++) stack.push(kids.lookup(i));
+      const list = node.lookup(N('Names'));
+      if (list instanceof PDFLib.PDFArray) for (let i = 1; i < list.size(); i += 2) fixDest(list.get(i));
+    }
+  }
+  const open = catalog.get(N('OpenAction'));
+  const openObj = open instanceof PDFLib.PDFRef ? ctx.lookup(open) : open;
+  if (openObj instanceof PDFLib.PDFArray) fixArray(openObj);
+  else if (openObj instanceof PDFLib.PDFDict) {
+    const sName = openObj.lookup(N('S'));
+    if (sName instanceof PDFLib.PDFName && sName.decodeText() === 'GoTo') fixDest(openObj.get(N('D')));
+  }
+}
+
+// The page editor's objects are kept in page fractions (and a few sizes in
+// pt): move them with the content they were put on.
+function pmPfTransformEditorObject(o, p) {
+  const X = (fx) => peRoundNorm((p.ox + p.s * fx * p.W) / p.Tw);
+  const Y = (fy) => peRoundNorm((p.oy + p.s * fy * p.H) / p.Th);
+  const SW = (fw) => peRoundNorm(p.s * fw * p.W / p.Tw);
+  const SH = (fh) => peRoundNorm(p.s * fh * p.H / p.Th);
+  const num = (v) => typeof v === 'number' && Number.isFinite(v);
+  const rectIn = (r) => {
+    if (num(r.x)) r.x = X(r.x);
+    if (num(r.y)) r.y = Y(r.y);
+    if (num(r.w)) r.w = SW(r.w);
+    if (num(r.h)) r.h = SH(r.h);
+  };
+  const boxIn = (b) => {
+    if (num(b.boxX)) b.boxX = X(b.boxX);
+    if (num(b.boxY)) b.boxY = Y(b.boxY);
+    if (num(b.boxW)) b.boxW = SW(b.boxW);
+    if (num(b.boxH)) b.boxH = SH(b.boxH);
+    if (num(b.fontPt)) b.fontPt = Math.round(b.fontPt * p.s * 100) / 100;
+  };
+  const out = JSON.parse(JSON.stringify(o));
+  rectIn(out);
+  if (Array.isArray(out.frames)) out.frames.forEach(rectIn);
+  if (out.type === 'text') {
+    // Text keeps its layout box in pt, and its frame share of the page.
+    if (num(out.boxW)) out.boxW = out.boxW * p.s;
+    if (num(out.boxH)) out.boxH = out.boxH * p.s;
+    if (num(out.boxWFrac)) out.boxWFrac = SW(out.boxWFrac);
+    if (num(out.boxHFrac)) out.boxHFrac = SH(out.boxHFrac);
+    if (num(out.fontPt)) out.fontPt = Math.round(out.fontPt * p.s * 100) / 100;
+  } else if (out.type === 'callout') {
+    boxIn(out);
+  }
+  const sc = out.shapeComment || out.arrowComment;
+  if (sc && typeof sc === 'object') boxIn(sc);
+  if (out.hlComment && typeof out.hlComment === 'object') {
+    const c = out.hlComment;
+    if (num(c.offX)) c.offX = SW(c.offX);
+    if (num(c.offY)) c.offY = SH(c.offY);
+    if (num(c.boxWFrac)) c.boxWFrac = SW(c.boxWFrac);
+    if (num(c.boxHFrac)) c.boxHFrac = SH(c.boxHFrac);
+  }
+  if (num(out.strokePx)) out.strokePx = out.strokePx * p.s;
+  return out;
+}
+
+// Resizes one page and transforms everything on it. Returns its transform.
+function pmPfApplyToPage(doc, page, p) {
+  const N = PDFLib.PDFName.of;
+  const ctx = doc.context;
+  const node = page.node;
+  const rot = (((page.getRotation().angle || 0) % 360) + 360) % 360;
+  const cb = page.getCropBox();
+  const T = pmPfUserTransform(p, rot, cb);
+  // Content: clipped to the old crop box (what was hidden stays hidden),
+  // and to the margins, then scaled and shifted.
+  let pre = 'q\n';
+  if (p.m > 0.01) pre += `${pmPfNum(p.m)} ${pmPfNum(p.m)} ${pmPfNum(T.sw - 2 * p.m)} ${pmPfNum(T.sh - 2 * p.m)} re W n\n`;
+  pre += `${pmPfNum(T.s)} 0 0 ${pmPfNum(T.s)} ${pmPfNum(T.e)} ${pmPfNum(T.f)} cm\n`;
+  pre += `${pmPfNum(cb.x)} ${pmPfNum(cb.y)} ${pmPfNum(cb.width)} ${pmPfNum(cb.height)} re W n\n`;
+  const startRef = ctx.register(ctx.flateStream(pre));
+  const endRef = ctx.register(ctx.flateStream('\nQ\n'));
+  const contents = node.get(N('Contents'));
+  const looked = contents instanceof PDFLib.PDFRef ? ctx.lookup(contents) : contents;
+  const list = [startRef];
+  if (looked instanceof PDFLib.PDFArray) {
+    for (let i = 0; i < looked.size(); i++) list.push(looked.get(i));
+  } else if (contents) {
+    list.push(contents);
+  }
+  list.push(endRef);
+  node.set(N('Contents'), ctx.obj(list));
+  // Boxes: the new page, nothing else.
+  const box = ctx.obj([0, 0, pmPfNum(T.sw), pmPfNum(T.sh)]);
+  node.set(N('MediaBox'), box);
+  node.set(N('CropBox'), ctx.obj([0, 0, pmPfNum(T.sw), pmPfNum(T.sh)]));
+  ['BleedBox', 'TrimBox', 'ArtBox'].forEach(k => node.delete(N(k)));
+  // pdf-lib draws into its own content stream next time, not into ours.
+  peFreshContentStream(page);
+  return T;
+}
+
+// Changes the format of the planned pages in the live document as one
+// undoable step.
+async function pmPfApply(plans) {
+  if (!pdfDoc || !plans.length) return false;
+  showLoadingDeferred(t('pfApplying'), 300);
+  let claimed = false;
+  let bytes = null;
+  const done = [];
+  try {
+    claimed = await peClaimLivePdfDocWriter();
+    const docRef = pdfDoc;
+    if (!docRef) return false;
+    const count = docRef.getPageCount();
+    const meta = peReadAllEditorMetaFromDoc(docRef);
+    const byPageRef = new Map();
+    const annotsDone = new Set();
+    let metaChanged = false;
+    for (const p of plans) {
+      if (p.idx < 0 || p.idx >= count) continue;
+      const page = docRef.getPage(p.idx);
+      const T = pmPfApplyToPage(docRef, page, p);
+      byPageRef.set(page.ref.toString(), T);
+      const annots = page.node.lookup(PDFLib.PDFName.of('Annots'));
+      if (annots instanceof PDFLib.PDFArray) {
+        for (let i = 0; i < annots.size(); i++) pmPfTransformAnnot(annots.lookup(i), T, annotsDone);
+      }
+      const key = String(p.idx);
+      const objs = meta.pages && meta.pages[key];
+      if (Array.isArray(objs) && objs.length) {
+        meta.pages[key] = objs.map(o => (o ? pmPfTransformEditorObject(o, p) : o));
+        metaChanged = true;
+      }
+      if (meta.pageNorm && meta.pageNorm[key]) {
+        const rot = (((page.getRotation().angle || 0) % 360) + 360) % 360;
+        meta.pageNorm[key] = { W: p.Tw, H: p.Th, rot };
+        metaChanged = true;
+      }
+      done.push(p.idx);
+    }
+    if (!done.length) return false;
+    pmPfTransformDestinations(docRef, byPageRef);
+    if (metaChanged) peWriteAllEditorMetaToDoc(docRef, meta);
+    if (pdfDoc !== docRef) return false;
+    bytes = new Uint8Array(await docRef.save());
+  } catch (err) {
+    console.error(err);
+    alert(t('pfApplyError') + ': ' + (err && err.message || err));
+    return false;
+  } finally {
+    if (claimed) pdfDocCriticalWriterActive = false;
+    hideLoading();
+  }
+
+  originalFileBytes = bytes;
+  const marked = [...markedForDeletion].sort((x, y) => x - y);
+  const historyBytes = bytes.slice();
+  historyCommitChain = historyCommitChain
+    .then(() => commitHistoryStep(Promise.resolve(historyBytes), marked, done, { lazyPages: true }))
+    .catch(e => console.warn('history commit error', e));
+  documentDirty = true;
+  if (typeof updateInfo === 'function') updateInfo();
+  if (typeof updateStickyFileBar === 'function') updateStickyFileBar();
+  if (typeof pmOnDocumentDirtyChanged === 'function') pmOnDocumentDirtyChanged();
+  await pmWmRefreshPageImages(bytes, done);
+  if (typeof pmShowToast === 'function') pmShowToast(t('pfDone', { n: done.length }), 2500);
+  return true;
+}
+
+async function openPageFormatDialog() {
+  if (pmPfDialogOpen || pmHfDialogOpen || pmWmDialogOpen || !pdfDoc || isLoading || pdfDoc.getPageCount() === 0) return;
+  if (typeof pmPageEditorOpen === 'function' && pmPageEditorOpen()) return;
+  pmPfDialogOpen = true;
+  try {
+    await pmPfRunDialog();
+  } finally {
+    pmPfDialogOpen = false;
+  }
+}
+
+// Preview: the page as it is and as it will be, side by side at one scale.
+const PM_PF_PREVIEW_H = 300;
+
+function pmPfRunDialog() {
+  return new Promise((resolve) => {
+    const s = pmPfLoadSettings();
+    const pageCount = pdfDoc.getPageCount();
+    const sizes = pmPfPageSizes(pdfDoc);
+    const selected = [...selectedPages].filter(i => !markedForDeletion.has(i) && i < pageCount).sort((a, b) => a - b);
+    let pagesMode = selected.length > 1 ? 'selected' : 'all';
+    let rangeText = '';
+    let plans = [];
+    let previewPos = 0;
+    let previewIdx = -1;
+    let previewToken = 0;
+    const rasterCache = new Map();   // page index -> { canvas, pxPerPt }
+    let busy = false;
+    const esc = escapeHtml;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay-active pm-wm-overlay';
+    const box = document.createElement('div');
+    box.className = 'pm-modal-box pm-wm-box pm-hf-box pm-pf-box';
+    box.setAttribute('role', 'dialog');
+    const fmtLabel = (f) => ({ first: t('pfFmtFirst'), common: t('pfFmtCommon'), custom: t('pfFmtCustom') }[f] ||
+      (f + ' (' + pmPfMmText(PM_PF_SIZES[f][0] * PM_PF_PT_PER_MM, PM_PF_SIZES[f][1] * PM_PF_PT_PER_MM) + ')'));
+    const tbtn = (group, value, label, title) =>
+      `<button type="button" class="pm-wm-tbtn" data-${group}="${value}"${title ? ` title="${esc(title)}"` : ''}>${esc(label)}</button>`;
+    box.innerHTML = `
+      <div class="pm-wm-head">
+        <div class="pm-wm-title">${esc(t('pfTitle'))}</div>
+        <button type="button" class="pm-wm-help" id="pmPfHelp" aria-expanded="false">?</button>
+      </div>
+      <div class="pm-wm-help-pop pm-hf-help-pop" id="pmPfHelpPop" hidden>
+        <div><b>${esc(t('pfModeFit'))}</b> — ${esc(t('pfModeFitHint'))}</div>
+        <div><b>${esc(t('pfModeFill'))}</b> — ${esc(t('pfModeFillHint'))}</div>
+        <div><b>${esc(t('pfModeNone'))}</b> — ${esc(t('pfModeNoneHint'))}</div>
+        <div>${esc(t('pfHelpVector'))}</div>
+      </div>
+      <div class="pm-wm-controls pm-hf-controls">
+        <div class="pm-hf-cols">
+          <div class="pm-hf-col pm-hf-col-left">
+            <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('pfFormat'))}</span>
+              <select id="pmPfFormat">${PM_PF_FORMATS.map(f => `<option value="${f}">${esc(fmtLabel(f))}</option>`).join('')}</select>
+            </div>
+            <div class="pm-wm-row" id="pmPfCustomRow"><span class="pm-wm-label"></span>
+              <span class="pm-pf-dim" title="${esc(t('pfWidth'))}">${pmWmNumField('pmPfW', 10, 5000, 1)}</span>
+              <span class="pm-wm-unit">×</span>
+              <span class="pm-pf-dim" title="${esc(t('pfHeight'))}">${pmWmNumField('pmPfH', 10, 5000, 1)}</span>
+              <span class="pm-wm-unit">${esc(t('hfMm'))}</span>
+            </div>
+            <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('pfOrient'))}</span>
+              ${tbtn('orient', 'page', t('pfOrientPage'))}${tbtn('orient', 'portrait', t('pfOrientPortrait'))}${tbtn('orient', 'landscape', t('pfOrientLandscape'))}
+            </div>
+            <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('pfMode'))}</span>
+              ${tbtn('mode', 'fit', t('pfModeFit'), t('pfModeFitHint'))}${tbtn('mode', 'fill', t('pfModeFill'), t('pfModeFillHint'))}${tbtn('mode', 'none', t('pfModeNone'), t('pfModeNoneHint'))}
+            </div>
+            <div class="pm-wm-row"><span class="pm-wm-label"></span>
+              <label class="pm-wm-check"><input type="checkbox" id="pmPfNoEnlarge"> ${esc(t('pfNoEnlarge'))}</label>
+            </div>
+            <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('pfAlign'))}</span>
+              ${tbtn('align', 'center', t('pfAlignCenter'))}${tbtn('align', 'top', t('pfAlignTop'))}
+            </div>
+          </div>
+          <div class="pm-hf-col pm-hf-col-right">
+            <div class="pm-wm-row pm-wm-row-top"><span class="pm-wm-label">${esc(t('wmPages'))}</span>
+              <div class="pm-wm-pages">
+                <div class="pm-wm-pages-line">
+                  <label><input type="radio" name="pmPfPages" value="all"> ${esc(t('wmPagesAll', { n: pageCount }))}</label>
+                  <label><input type="radio" name="pmPfPages" value="selected"${selected.length ? '' : ' disabled'}> ${esc(t('wmPagesSelected', { n: selected.length }))}</label>
+                </div>
+                <label><input type="radio" name="pmPfPages" value="range"> ${esc(t('wmPagesRange'))}
+                  <input type="text" id="pmPfRange" placeholder="${esc(t('wmRangePlaceholder'))}" spellcheck="false" autocomplete="off"></label>
+              </div>
+            </div>
+            <div class="pm-wm-row"><span class="pm-wm-label"></span>
+              <label class="pm-wm-check"><input type="checkbox" id="pmPfOnlyDiff"> ${esc(t('pfOnlyDiff'))}</label>
+            </div>
+            <hr class="pm-wm-sep">
+            <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('pfMargin'))}</span>
+              <span class="pm-pf-dim">${pmWmNumField('pmPfMargin', 0, 100, 1)}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="pm-pf-summary" id="pmPfSummary"></div>
+      <div class="pm-pf-preview" id="pmPfPreviewBox">
+        <div class="pm-pf-side">
+          <div class="pm-pf-sheet"><canvas id="pmPfBefore"></canvas></div>
+          <div class="pm-pf-cap"><span class="pm-pf-cap-k">${esc(t('pfBefore'))}</span> <span id="pmPfBeforeSize"></span></div>
+        </div>
+        <div class="pm-pf-arrow" aria-hidden="true">→</div>
+        <div class="pm-pf-side">
+          <div class="pm-pf-sheet"><canvas id="pmPfAfter"></canvas></div>
+          <div class="pm-pf-cap"><span class="pm-pf-cap-k">${esc(t('pfAfter'))}</span> <span id="pmPfAfterSize"></span></div>
+        </div>
+      </div>
+      <div class="pm-wm-nav pm-pf-nav">
+        <button type="button" class="pm-wm-tbtn" id="pmPfPrev">◀</button>
+        <span id="pmPfNavLabel"></span>
+        <button type="button" class="pm-wm-tbtn" id="pmPfNext">▶</button>
+      </div>
+      <div class="pm-wm-error" id="pmPfError"></div>
+      <div class="pm-wm-actions">
+        <button type="button" class="pm-wm-ok" id="pmPfOk">${esc(t('wmApply'))}</button>
+        <button type="button" class="pm-wm-cancel" id="pmPfCancel">${esc(t('wmCancel'))}</button>
+      </div>`;
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    const $ = (id) => box.querySelector('#' + id);
+    const fmtSel = $('pmPfFormat'), customRow = $('pmPfCustomRow'), wIn = $('pmPfW'), hIn = $('pmPfH');
+    const noEnlargeChk = $('pmPfNoEnlarge'), onlyDiffChk = $('pmPfOnlyDiff'), marginIn = $('pmPfMargin');
+    const rangeIn = $('pmPfRange'), errEl = $('pmPfError'), summaryEl = $('pmPfSummary');
+    const beforeCv = $('pmPfBefore'), afterCv = $('pmPfAfter'), pvBox = $('pmPfPreviewBox');
+    const beforeSize = $('pmPfBeforeSize'), afterSize = $('pmPfAfterSize');
+    const navLabel = $('pmPfNavLabel'), prevBtn = $('pmPfPrev'), nextBtn = $('pmPfNext');
+    const okBtn = $('pmPfOk'), helpBtn = $('pmPfHelp'), helpPop = $('pmPfHelpPop');
+
+    // ---- targets and plans -------------------------------------------------
+    function targetIndices() {
+      let list;
+      if (pagesMode === 'selected') list = selected.slice();
+      else if (pagesMode === 'range') list = pmWmParseRange(rangeText, pageCount) || [];
+      else { list = []; for (let i = 0; i < pageCount; i++) list.push(i); }
+      return list.filter(i => !markedForDeletion.has(i));
+    }
+    function replan() {
+      const keep = previewIdx;
+      plans = pmPfPlan(s, targetIndices(), sizes);
+      const at = plans.findIndex(p => p.idx === keep);
+      previewPos = at >= 0 ? at : Math.min(previewPos, Math.max(0, plans.length - 1));
+      updateSummary();
+    }
+    function updateSummary() {
+      const total = targetIndices().length;
+      okBtn.disabled = !plans.length;
+      if (!plans.length) {
+        summaryEl.textContent = total ? t('pfNothing') : '';
+        return;
+      }
+      // Pages that change, grouped by their present size, most first.
+      const groups = new Map();
+      plans.forEach(p => {
+        const label = pmPfShortSizeText(p.W, p.H);
+        groups.set(label, (groups.get(label) || 0) + 1);
+      });
+      const list = [...groups.entries()].sort((a, b) => b[1] - a[1]);
+      const shown = list.slice(0, 4).map(([label, n]) => label + ' — ' + n);
+      if (list.length > 4) shown.push(t('pfMore', { n: list.slice(4).reduce((acc, g) => acc + g[1], 0) }));
+      summaryEl.textContent = t('pfSummary', { n: plans.length, total }) + ': ' + shown.join(', ');
+    }
+
+    // ---- preview -------------------------------------------------------------
+    function previewScale(p) {
+      const b = pvBox.getBoundingClientRect();
+      const sideW = Math.max(80, (b.width - 24 - 48) / 2 - 8);
+      return Math.min(sideW / Math.max(p.W, p.Tw), PM_PF_PREVIEW_H / Math.max(p.H, p.Th));
+    }
+    function sizeCanvas(cv, wPt, hPt, k, dpr) {
+      cv.style.width = Math.max(1, Math.round(wPt * k)) + 'px';
+      cv.style.height = Math.max(1, Math.round(hPt * k)) + 'px';
+      const w = Math.max(1, Math.round(wPt * k * dpr)), h = Math.max(1, Math.round(hPt * k * dpr));
+      if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+    }
+    function draw() {
+      const p = plans[previewPos];
+      if (!p) {
+        [beforeCv, afterCv].forEach(cv => { cv.width = 1; cv.height = 1; cv.style.width = '0px'; cv.style.height = '0px'; });
+        beforeSize.textContent = '';
+        afterSize.textContent = '';
+        return;
+      }
+      const k = previewScale(p);
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      sizeCanvas(beforeCv, p.W, p.H, k, dpr);
+      sizeCanvas(afterCv, p.Tw, p.Th, k, dpr);
+      const raster = rasterCache.get(p.idx);
+      const bx = beforeCv.getContext('2d');
+      bx.setTransform(1, 0, 0, 1, 0, 0);
+      bx.fillStyle = '#fff';
+      bx.fillRect(0, 0, beforeCv.width, beforeCv.height);
+      if (raster) bx.drawImage(raster.canvas, 0, 0, beforeCv.width, beforeCv.height);
+      const ka = afterCv.width / p.Tw;
+      const ax = afterCv.getContext('2d');
+      ax.setTransform(1, 0, 0, 1, 0, 0);
+      ax.fillStyle = '#fff';
+      ax.fillRect(0, 0, afterCv.width, afterCv.height);
+      const x = p.ox * ka, y = p.oy * ka, w = p.s * p.W * ka, h = p.s * p.H * ka;
+      ax.save();
+      ax.beginPath();
+      ax.rect(p.m * ka, p.m * ka, (p.Tw - 2 * p.m) * ka, (p.Th - 2 * p.m) * ka);
+      ax.clip();
+      if (raster) ax.drawImage(raster.canvas, x, y, w, h);
+      // Where the old page lands - its own white is not told apart from
+      // the new page's otherwise.
+      ax.strokeStyle = 'rgba(52,152,219,0.85)';
+      ax.lineWidth = Math.max(1, dpr);
+      ax.setLineDash([4 * dpr, 3 * dpr]);
+      ax.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+      ax.restore();
+      if (p.m > 0.01) {
+        ax.strokeStyle = 'rgba(231,76,60,0.6)';
+        ax.lineWidth = Math.max(1, dpr);
+        ax.setLineDash([2 * dpr, 3 * dpr]);
+        ax.strokeRect(p.m * ka + 0.5, p.m * ka + 0.5, (p.Tw - 2 * p.m) * ka - 1, (p.Th - 2 * p.m) * ka - 1);
+      }
+      ax.setLineDash([]);
+      beforeSize.textContent = pmPfLongSizeText(p.W, p.H);
+      afterSize.textContent = pmPfLongSizeText(p.Tw, p.Th) + (Math.abs(p.s - 1) > 0.005 ? ' · ' + Math.round(p.s * 100) + '%' : '');
+    }
+    async function ensureRaster() {
+      const p = plans[previewPos];
+      if (!p) return;
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const want = previewScale(p) * dpr * Math.max(1, p.s);
+      const hit = rasterCache.get(p.idx);
+      if (hit && hit.pxPerPt >= want * 0.9) return;
+      const token = ++previewToken;
+      let canvas = null;
+      try { canvas = await pmWmRenderPagePreview(p.idx, want); } catch (e) { console.warn('page format preview', e); }
+      if (!overlay.isConnected || !canvas) return;
+      rasterCache.set(p.idx, { canvas, pxPerPt: want });
+      while (rasterCache.size > 8) rasterCache.delete(rasterCache.keys().next().value);
+      if (token === previewToken && plans[previewPos] && plans[previewPos].idx === p.idx) draw();
+    }
+    function loadPreviewPage() {
+      const p = plans[previewPos];
+      previewIdx = p ? p.idx : -1;
+      navLabel.textContent = p ? t('pfPreviewPage', { n: p.idx + 1, k: previewPos + 1, m: plans.length }) : '—';
+      prevBtn.disabled = previewPos <= 0 || !plans.length;
+      nextBtn.disabled = previewPos >= plans.length - 1 || !plans.length;
+      draw();
+      ensureRaster();
+    }
+
+    // ---- controls <-> settings ---------------------------------------------
+    function syncControls() {
+      fmtSel.value = s.format;
+      customRow.hidden = s.format !== 'custom';
+      if (document.activeElement !== wIn) wIn.value = String(s.customW);
+      if (document.activeElement !== hIn) hIn.value = String(s.customH);
+      box.querySelectorAll('[data-orient]').forEach(b => b.classList.toggle('active', b.dataset.orient === s.orient));
+      box.querySelectorAll('[data-mode]').forEach(b => b.classList.toggle('active', b.dataset.mode === s.mode));
+      box.querySelectorAll('[data-align]').forEach(b => b.classList.toggle('active', b.dataset.align === s.align));
+      noEnlargeChk.checked = s.noEnlarge;
+      noEnlargeChk.disabled = s.mode === 'none';
+      noEnlargeChk.closest('label').classList.toggle('pm-wm-off', s.mode === 'none');
+      onlyDiffChk.checked = s.onlyDiff;
+      if (document.activeElement !== marginIn) marginIn.value = String(s.margin);
+      box.querySelectorAll('input[name="pmPfPages"]').forEach(r => { r.checked = r.value === pagesMode; });
+    }
+    function changed() {
+      errEl.textContent = '';
+      syncControls();
+      replan();
+      loadPreviewPage();
+    }
+    function bindNumber(el, lo, hi, get, set) {
+      el.addEventListener('input', () => {
+        const v = Number(el.value);
+        if (el.value !== '' && Number.isFinite(v) && v >= lo && v <= hi) { set(v); changed(); }
+      });
+      el.addEventListener('change', () => { set(pmWmClampNum(el.value, lo, hi, get())); el.value = String(get()); changed(); });
+    }
+    box.querySelectorAll('.pm-wm-num').forEach(wrap => {
+      const input = wrap.querySelector('input');
+      wrap.querySelectorAll('.pm-wm-spin button').forEach(btn => {
+        let hold = null;
+        const stepOnce = () => {
+          if (input.disabled) return;
+          if (btn.dataset.dir === '1') input.stepUp(); else input.stepDown();
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        };
+        const stop = () => {
+          if (!hold) return;
+          clearTimeout(hold.t); clearInterval(hold.i); hold = null;
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        };
+        btn.addEventListener('pointerdown', (e) => {
+          if (e.button !== 0 || input.disabled) return;
+          e.preventDefault();
+          stepOnce();
+          hold = { t: setTimeout(() => { if (hold) hold.i = setInterval(stepOnce, 60); }, 400), i: null };
+        });
+        btn.addEventListener('pointerup', stop);
+        btn.addEventListener('pointerleave', stop);
+        btn.addEventListener('pointercancel', stop);
+      });
+    });
+    fmtSel.addEventListener('change', () => { s.format = fmtSel.value; changed(); });
+    bindNumber(wIn, 10, 5000, () => s.customW, v => { s.customW = v; });
+    bindNumber(hIn, 10, 5000, () => s.customH, v => { s.customH = v; });
+    bindNumber(marginIn, 0, 100, () => s.margin, v => { s.margin = v; });
+    box.querySelectorAll('[data-orient]').forEach(b => b.addEventListener('click', () => { s.orient = b.dataset.orient; changed(); }));
+    box.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => { s.mode = b.dataset.mode; changed(); }));
+    box.querySelectorAll('[data-align]').forEach(b => b.addEventListener('click', () => { s.align = b.dataset.align; changed(); }));
+    noEnlargeChk.addEventListener('change', () => { s.noEnlarge = noEnlargeChk.checked; changed(); });
+    onlyDiffChk.addEventListener('change', () => { s.onlyDiff = onlyDiffChk.checked; changed(); });
+    box.querySelectorAll('input[name="pmPfPages"]').forEach(r => r.addEventListener('change', () => {
+      if (!r.checked) return;
+      pagesMode = r.value;
+      if (pagesMode === 'range') rangeIn.focus();
+      changed();
+    }));
+    rangeIn.addEventListener('input', () => { rangeText = rangeIn.value; changed(); });
+    rangeIn.addEventListener('focus', () => { if (pagesMode !== 'range') { pagesMode = 'range'; changed(); } });
+    prevBtn.addEventListener('click', () => { if (previewPos > 0) { previewPos--; loadPreviewPage(); } });
+    nextBtn.addEventListener('click', () => { if (previewPos < plans.length - 1) { previewPos++; loadPreviewPage(); } });
+    const setHelp = (open) => { helpPop.hidden = !open; helpBtn.setAttribute('aria-expanded', String(open)); };
+    helpBtn.addEventListener('click', (e) => { e.stopPropagation(); setHelp(helpPop.hidden); });
+    overlay.addEventListener('pointerdown', (e) => {
+      if (!helpPop.hidden && e.target !== helpBtn && !helpPop.contains(e.target)) setHelp(false);
+    }, true);
+
+    // ---- close / apply ---------------------------------------------------------
+    let settled = false;
+    function close(result) {
+      if (settled) return;
+      settled = true;
+      document.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('resize', onResize);
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      resolve(result);
+    }
+    async function apply() {
+      if (busy) return;
+      errEl.textContent = '';
+      if (pagesMode === 'range' && !pmWmParseRange(rangeText, pageCount)) {
+        errEl.textContent = t('wmBadRange'); rangeIn.focus(); return;
+      }
+      if (!plans.length) { errEl.textContent = t('pfNothing'); return; }
+      busy = true;
+      pmPfStoreSettings(s);
+      const todo = plans.slice();
+      close(true);
+      await pmPfApply(todo);
+    }
+    okBtn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); apply(); });
+    $('pmPfCancel').addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); close(false); });
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) e.preventDefault(); });
+    // Capture phase, stopped here: the app's shortcuts must not act on the
+    // document while the dialog is up.
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault(); e.stopPropagation();
+        if (!helpPop.hidden) setHelp(false); else close(false);
+        return;
+      }
+      if (e.key === 'Enter' && e.target && e.target.tagName === 'INPUT' &&
+          ['text', 'number'].includes(e.target.type)) {
+        e.preventDefault(); e.stopPropagation(); apply(); return;
+      }
+      e.stopPropagation();
+    };
+    document.addEventListener('keydown', onKey, true);
+    let resizeTimer = null;
+    const onResize = () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => { draw(); ensureRaster(); }, 200);
+    };
+    window.addEventListener('resize', onResize);
+
+    // The format list ends where the orientation buttons end; the right
+    // column's labels take the width of the widest one.
+    function fitWidths() {
+      const last = box.querySelector('[data-orient="landscape"]');
+      const fr = fmtSel.getBoundingClientRect(), lr = last.getBoundingClientRect();
+      if (lr.right > fr.left + 40) fmtSel.style.width = Math.round(lr.right - fr.left) + 'px';
+      const labels = [...box.querySelectorAll('.pm-hf-col-right .pm-wm-label')];
+      labels.forEach(l => { l.style.width = ''; });
+      const w = Math.max(...labels.map(l => l.textContent.trim() ? Math.ceil(l.getBoundingClientRect().width) : 0));
+      labels.forEach(l => { l.style.width = (w + 4) + 'px'; });
+    }
+    syncControls();
+    fitWidths();
+    replan();
+    // Open on the first selected page when it is among those that change.
+    if (selected.length) {
+      const at = plans.findIndex(p => p.idx === selected[0]);
+      if (at >= 0) previewPos = at;
+    }
+    loadPreviewPage();
+    fmtSel.focus();
   });
 }
   </script>
