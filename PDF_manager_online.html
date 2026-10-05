@@ -3259,7 +3259,7 @@
     /*pe-empty instead of pure :empty - the element now always has children
        (corner anchors) so :empty never fires; class is exhibited
        from JS by actual text content (see peSyncTextEmptyClass).*/
-    .pe-obj-text.pe-inline-edit.pe-empty::before { content: 'Текст'; color: rgba(0,0,0,.35); pointer-events: none; }
+    .pe-obj-text.pe-inline-edit.pe-empty::before { content: var(--pm-hint-text, 'Текст'); color: rgba(0,0,0,.35); pointer-events: none; }
     .pe-obj-text.pe-inline-edit.pe-empty { min-width: 3.2em; }
     .pe-obj-comment { position: relative; }
     .pe-comment-icon { display: flex; width: 100%; height: 100%; align-items: center; justify-content: center; pointer-events: none; }
@@ -3269,7 +3269,7 @@
       font-size: 13px; line-height: 1.25; color: #2c3e50; white-space: pre-wrap;
       cursor: text; user-select: text; z-index: 3; box-shadow: 0 2px 8px rgba(0,0,0,.15);
     }
-    .pe-comment-edit:empty::before { content: 'Комментарий…'; color: rgba(0,0,0,.35); }
+    .pe-comment-edit:empty::before { content: var(--pm-hint-comment, 'Комментарий…'); color: rgba(0,0,0,.35); }
     .pe-obj-hl { opacity: .4; }
     .pe-obj-hl:hover:not(.sel) { outline: 1.5px dashed rgba(52,152,219,.55); outline-offset: 1px; }
     .pe-obj-callout-frame {
@@ -7460,14 +7460,14 @@
 
   <div class="top-menu" id="topMenu">
     <!--PDF logo in the top right corner (with gradient and border)-->
-    <span class="app-logo" title="Менеджер документов PDF"><svg width="42" height="42" role="img" aria-label="PDF" viewBox="0 0 42 42" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <span class="app-logo" title="Менеджер документов PDF" data-i18n-title="appTitle"><svg width="42" height="42" role="img" aria-label="PDF" viewBox="0 0 42 42" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <linearGradient id="blueGrad" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" style="stop-color:#1479e6;stop-opacity:1" />
       <stop offset="100%" style="stop-color:#003d80;stop-opacity:1" />
     </linearGradient>
   </defs>
-  <title>Менеджер документов PDF</title>
+  <title data-i18n="appTitle">Менеджер документов PDF</title>
   <rect width="42" height="42" rx="10" fill="url(#blueGrad)"/>
   <!-- Tuner: page x=-0.8 y=0 scale=1.09; text x=-0.6 y=0.8 size=10.7 -->
   <g transform="translate(21 21) scale(1.09) translate(-21.8 -21)">
@@ -7910,9 +7910,9 @@
           </select>
           <span class="pe-props-sep" id="pePropFontSep"></span>
           <span id="pePropFormatWrap">
-            <button type="button" class="pe-fmt-btn" id="peFmtBold" title="Жирный" data-i18n-title="peBold"><span style="font-weight:800">Ж</span></button>
-            <button type="button" class="pe-fmt-btn" id="peFmtItalic" title="Курсив" data-i18n-title="peItalic"><span style="font-style:italic;font-weight:600;transform:translateX(-1px);display:inline-block">К</span></button>
-            <button type="button" class="pe-fmt-btn" id="peFmtUnderline" title="Подчёркнутый" data-i18n-title="peUnderline"><span style="text-decoration:underline;font-weight:600">Ч</span></button>
+            <button type="button" class="pe-fmt-btn" id="peFmtBold" title="Жирный" data-i18n-title="peBold"><span style="font-weight:800" data-i18n="peBoldLetter">Ж</span></button>
+            <button type="button" class="pe-fmt-btn" id="peFmtItalic" title="Курсив" data-i18n-title="peItalic"><span style="font-style:italic;font-weight:600;transform:translateX(-1px);display:inline-block" data-i18n="peItalicLetter">К</span></button>
+            <button type="button" class="pe-fmt-btn" id="peFmtUnderline" title="Подчёркнутый" data-i18n-title="peUnderline"><span style="text-decoration:underline;font-weight:600" data-i18n="peUnderlineLetter">Ч</span></button>
           </span>
           <span class="pe-props-sep" id="pePropAlignSep"></span>
           <span id="pePropAlignWrap">
@@ -7969,7 +7969,7 @@
         <button type="button" class="pe-mkb-done" id="peMobileKbDone" data-i18n="peMobileKbDone">Готово</button>
       </div>
       <textarea class="pe-mkb-text" id="peMobileKbText" inputmode="none" autocomplete="off" autocapitalize="off" spellcheck="false" rows="2"></textarea>
-      <div class="pe-mkb-keys" id="peMobileKbKeys" aria-label="Клавиатура"></div>
+      <div class="pe-mkb-keys" id="peMobileKbKeys" aria-label="Клавиатура" data-i18n-aria="peMobileKbKeysAria"></div>
     </div>
     <input type="file" id="peImgInput" accept="image/png,image/jpeg" style="display:none">
     <input type="file" id="peSignatureInput" accept="image/png,image/jpeg" style="display:none">
@@ -8146,7 +8146,7 @@
     </svg>
     <input type="range" id="readModeScaleSlider" min="0" max="200" value="100" step="1"
            oninput="changeScale(this.value)" onmouseup="this.blur()" ontouchend="this.blur()"
-           tabindex="-1" title="Масштаб">
+           tabindex="-1" title="Масштаб" data-i18n-title="zoomTitle">
   </div>
 
   <!--Hint when entering reading mode-->
@@ -8196,7 +8196,7 @@
 
   <!--Bookmarks / table of contents popup (opened from #bookmarksBtn) - always
        pinned to the left edge, fixed width, not repositionable or resizable.-->
-  <div id="pmBookmarksPanel" class="pm-search-panel pm-bookmarks-panel" role="dialog" aria-hidden="true" aria-label="Закладки">
+  <div id="pmBookmarksPanel" class="pm-search-panel pm-bookmarks-panel" role="dialog" aria-hidden="true" aria-label="Закладки" data-i18n-aria="bookmarksPanel">
     <div class="pm-search-row pm-bookmarks-header">
       <span class="pm-bookmarks-title" data-i18n="bookmarksPanel">Закладки</span>
       <div class="pm-bookmarks-header-actions">
@@ -8236,9 +8236,9 @@
     <button type="button" data-action="link"><span class="ctx-label" data-i18n="bookmarksLinkCurrent">Связать с текущим местом</span></button>
     <hr>
     <div class="pm-bookmarks-fmt-row">
-      <button type="button" class="pm-bookmarks-fmt-btn pm-bookmarks-fmt-bold" data-format="bold" title="Полужирный">Ж</button>
-      <button type="button" class="pm-bookmarks-fmt-btn pm-bookmarks-fmt-italic" data-format="italic" title="Курсив">К</button>
-      <button type="button" class="pm-bookmarks-fmt-btn pm-bookmarks-fmt-underline" data-format="underline" title="Подчёркнутый">Ч</button>
+      <button type="button" class="pm-bookmarks-fmt-btn pm-bookmarks-fmt-bold" data-format="bold" title="Жирный" data-i18n-title="peBold" data-i18n="peBoldLetter">Ж</button>
+      <button type="button" class="pm-bookmarks-fmt-btn pm-bookmarks-fmt-italic" data-format="italic" title="Курсив" data-i18n-title="peItalic" data-i18n="peItalicLetter">К</button>
+      <button type="button" class="pm-bookmarks-fmt-btn pm-bookmarks-fmt-underline" data-format="underline" title="Подчёркнутый" data-i18n-title="peUnderline" data-i18n="peUnderlineLetter">Ч</button>
     </div>
   </div>
 
@@ -8256,7 +8256,7 @@
   <!--Hint: hold/ready to export outside window-->
   <div id="exportDragHint" aria-live="polite" aria-hidden="true">
     <div class="export-drag-badge">
-      <span><span class="export-drag-ico" aria-hidden="true">⏳</span><span class="export-drag-text">Удерживайте…</span></span>
+      <span><span class="export-drag-ico" aria-hidden="true">⏳</span><span class="export-drag-text" data-i18n="exportHintHolding">Удерживайте…</span></span>
       <div class="export-hold-bar" aria-hidden="true"><div class="export-hold-fill"></div></div>
     </div>
   </div>
@@ -8816,7 +8816,7 @@
     let historyCommitChain = Promise.resolve();
     let selectedPages = new Set();
     let markedForDeletion = new Set();
-    let currentFileName = 'отредактированный.pdf';
+    let currentFileName = '';
     let draggedIndex = null;
     let pageDragOverTabId = null;  //tab under cursor when dragging pages
     let pageCrossTabDrag = null;   //{ sourceTabId, indices } - transfer between tabs
@@ -9480,6 +9480,8 @@
         peStrokeThinner: 'Тоньше на 1 px',
         peOpacity: 'Прозрачность',
         peFont: 'Шрифт', peFontDefault: 'Стандартный',
+        peBoldLetter: 'Ж', peItalicLetter: 'К', peUnderlineLetter: 'Ч',
+        zoomTitle: 'Масштаб', peMobileKbKeysAria: 'Клавиатура',
         peBold: 'Жирный',
         peItalic: 'Курсив',
         peUnderline: 'Подчёркнутый',
@@ -9910,6 +9912,8 @@
         peStrokeThinner: 'Thinner by 1 px',
         peOpacity: 'Opacity',
         peFont: 'Font', peFontDefault: 'Default',
+        peBoldLetter: 'B', peItalicLetter: 'I', peUnderlineLetter: 'U',
+        zoomTitle: 'Zoom', peMobileKbKeysAria: 'Keyboard',
         peBold: 'Bold',
         peItalic: 'Italic',
         peUnderline: 'Underline',
@@ -10340,6 +10344,8 @@
         peStrokeThinner: 'Reducir 1 px',
         peOpacity: 'Opacidad',
         peFont: 'Fuente', peFontDefault: 'Predeterminada',
+        peBoldLetter: 'N', peItalicLetter: 'K', peUnderlineLetter: 'S',
+        zoomTitle: 'Zoom', peMobileKbKeysAria: 'Teclado',
         peBold: 'Negrita',
         peItalic: 'Cursiva',
         peUnderline: 'Subrayado',
@@ -10836,6 +10842,8 @@
         peStrokeThinner: '变细 1 像素',
         peOpacity: '不透明度',
         peFont: '字体', peFontDefault: '默认',
+        peBoldLetter: 'B', peItalicLetter: 'I', peUnderlineLetter: 'U',
+        zoomTitle: '缩放', peMobileKbKeysAria: '键盘',
         peBold: '粗体',
         peItalic: '斜体',
         peUnderline: '下划线',
@@ -12281,6 +12289,9 @@
       document.querySelectorAll('.pe-callout-text').forEach((el) => {
         el.setAttribute('data-empty-hint', t('peCommentPlaceholder'));
       });
+      // Placeholders drawn by CSS (content: var(...)) in the page editor.
+      document.documentElement.style.setProperty('--pm-hint-text', JSON.stringify(t('peObjLabelText')));
+      document.documentElement.style.setProperty('--pm-hint-comment', JSON.stringify(t('peCommentPlaceholder')));
       document.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
         const key = el.getAttribute('data-i18n-placeholder');
         if (key) el.setAttribute('placeholder', t(key));
@@ -12297,6 +12308,8 @@
         }
       } catch (_) {}
       try { if (typeof updateStickyFileBar === 'function') updateStickyFileBar(); } catch (_) {}
+      // Tab bar: its close / new-document tooltips are built by pmRenderBar.
+      try { if (typeof pmRenderBar === 'function' && typeof pmTabs !== 'undefined' && pmTabs.length) pmRenderBar(); } catch (_) {}
       if (typeof pmNavApplyStaticTooltips === 'function') {
         try { pmNavApplyStaticTooltips(); } catch (_) {}
       }
@@ -29615,11 +29628,11 @@
           <div>Author: <b>Евгений Кутьин</b> (Evgeniy Kutin)</div>
           <div>Repo: github.com/65WebDev/PDF-Manager</div>
           <div>Build: ${escapeHtml(PDF_MANAGER_BUILD_VERSION)} / ${escapeHtml(PDF_MANAGER_BUILD_DATE)}</div>
-          <div id="pmProvenanceHash" style="margin-top:8px; color:#9db4c9;">SHA-256: считаю…</div>
+          <div id="pmProvenanceHash" style="margin-top:8px; color:#9db4c9;">${escapeHtml(t('aboutShaComputing'))}</div>
         </div>
         <div style="display:flex; justify-content:center; margin-top:16px;">
           <button id="pmProvenanceCloseBtn" style="padding:7px 18px; border:none; border-radius:6px;
-            background:#3498db; color:#fff; font-weight:600; cursor:pointer; font-size:13px;">Закрыть</button>
+            background:#3498db; color:#fff; font-weight:600; cursor:pointer; font-size:13px;">${escapeHtml(t('aboutClose'))}</button>
         </div>`;
       overlay.appendChild(box);
       document.body.appendChild(overlay);
@@ -29635,7 +29648,7 @@
 
       const hash = await pdfManagerHashSelfScript();
       const hashEl = document.getElementById('pmProvenanceHash');
-      if (hashEl) hashEl.textContent = hash ? ('SHA-256: ' + hash) : 'SHA-256: недоступно в этом контексте';
+      if (hashEl) hashEl.textContent = hash ? ('SHA-256: ' + hash) : t('aboutShaUnavailable');
       console.log('[PDF Document Manager] author=Евгений Кутьин (Evgeniy Kutin) repo=github.com/65WebDev/PDF-Manager build=' +
         PDF_MANAGER_BUILD_VERSION + ' date=' + PDF_MANAGER_BUILD_DATE + (hash ? (' sha256=' + hash) : ''));
     }
@@ -37324,11 +37337,15 @@ function pmBookmarksUpdateListMaxHeight() {
   list.style.maxHeight = Math.max(60, Math.round(available)) + 'px';
 }
 
-function pmBookmarksSetStatus(text) {
+// key: an i18n key, or '' to clear. Kept in data-i18n so a language switch
+// (pmApplyI18n) re-translates a status that is already on screen.
+function pmBookmarksSetStatus(key) {
   const status = document.getElementById('pmBookmarksStatus');
   if (!status) return;
-  status.textContent = text || '';
-  status.classList.toggle('has-content', !!text);
+  if (key) status.setAttribute('data-i18n', key);
+  else status.removeAttribute('data-i18n');
+  status.textContent = key ? t(key) : '';
+  status.classList.toggle('has-content', !!key);
 }
 
 function pmBookmarksGoTo(pageIndex) {
@@ -37532,7 +37549,7 @@ function pmBookmarksRenderList(flatItems) {
   }
   pmBookmarksUpdateDeleteBtnState();
   if (!flatItems.length) {
-    pmBookmarksSetStatus(t('bookmarksEmpty'));
+    pmBookmarksSetStatus('bookmarksEmpty');
     return;
   }
   pmBookmarksSetStatus('');
@@ -37816,7 +37833,7 @@ async function pmBookmarksLoadAndRender() {
 
   const token = ++pmBookmarksReqToken;
   if (list) list.innerHTML = '';
-  pmBookmarksSetStatus(t('bookmarksLoading'));
+  pmBookmarksSetStatus('bookmarksLoading');
   let tree = [];
   try { tree = await pmBookmarksBuildTree(); } catch (_) { tree = []; }
   if (token !== pmBookmarksReqToken) return; // popup closed/reopened, or doc changed, meanwhile
