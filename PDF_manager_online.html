@@ -920,7 +920,8 @@
     .edit-wrapper { position: relative; display: inline-flex; }
     #watermarkBtn,
     #headerFooterBtn,
-    #pageFormatBtn {
+    #pageFormatBtn,
+    #autoCropBtn {
       position: fixed;
       top: 0;
       left: 0;
@@ -932,7 +933,8 @@
     }
     #watermarkBtn.show::before,
     #headerFooterBtn.show::before,
-    #pageFormatBtn.show::before {
+    #pageFormatBtn.show::before,
+    #autoCropBtn.show::before {
       content: '';
       position: absolute;
       left: 0; right: 0;
@@ -940,15 +942,16 @@
     }
     #watermarkBtn.show,
     #headerFooterBtn.show,
-    #pageFormatBtn.show {
+    #pageFormatBtn.show,
+    #autoCropBtn.show {
       opacity: 1;
       transform: translateY(0);
       pointer-events: auto;
     }
-    #watermarkBtn.show:disabled, #headerFooterBtn.show:disabled, #pageFormatBtn.show:disabled { opacity: 0.4; }
-    #watermarkBtn:hover:not(:disabled), #headerFooterBtn:hover:not(:disabled), #pageFormatBtn:hover:not(:disabled) { background: #3498db; }
-    #watermarkBtn svg, #headerFooterBtn svg, #pageFormatBtn svg { display: block; }
-    @media (pointer: coarse) { #watermarkBtn, #headerFooterBtn, #pageFormatBtn { display: none !important; } }
+    #watermarkBtn.show:disabled, #headerFooterBtn.show:disabled, #pageFormatBtn.show:disabled, #autoCropBtn.show:disabled { opacity: 0.4; }
+    #watermarkBtn:hover:not(:disabled), #headerFooterBtn:hover:not(:disabled), #pageFormatBtn:hover:not(:disabled), #autoCropBtn:hover:not(:disabled) { background: #3498db; }
+    #watermarkBtn svg, #headerFooterBtn svg, #pageFormatBtn svg, #autoCropBtn svg { display: block; }
+    @media (pointer: coarse) { #watermarkBtn, #headerFooterBtn, #pageFormatBtn, #autoCropBtn { display: none !important; } }
 
     /*Watermark dialog*/
     .pm-wm-overlay {
@@ -1192,6 +1195,10 @@
     .pm-pf-arrow { flex: none; width: 24px; font-size: 22px; color: #6b7785; text-align: center; }
     .pm-pf-nav { justify-content: center; }
     .pm-pf-box .pm-wm-row[hidden] { display: none; }
+    /*Auto-crop dialog (pmAcRunDialog): the page format dialog's layout.*/
+    .pm-ac-box .pm-hf-col-left .pm-wm-label { width: 128px; }
+    #pmAcRange { flex: none; width: 150px; }
+    .pm-ac-box .pm-hf-col-right .pm-wm-label { width: auto; text-align: left; padding-right: 0; margin-right: 6px; }
     .pm-pf-box .pm-wm-ok:disabled { opacity: 0.5; cursor: default; background: #3498db; }
     html[data-theme="dark"] .pm-wm-box .pm-pf-preview { background: rgba(255,255,255,0.05); }
     html[data-theme="dark"] .pm-wm-box .pm-pf-summary,
@@ -1391,6 +1398,7 @@
     #watermarkBtn,
     #headerFooterBtn,
     #pageFormatBtn,
+    #autoCropBtn,
     .readmode-wrapper .mode-btn.rl-slot-popup {
       width: 42px;
       height: 42px;
@@ -7229,7 +7237,7 @@
       }
       /* Beat .top-menu button / .icon-btn / .icons-mode .compact-btn fixed 42px.
          Ratios = natural size / 42 (22→0.524, 30→0.714, 26→0.619, 18→0.429). */
-      .top-menu .main-row.menu-shrink button:not(#fitWidthBtn):not(.img-save-btn):not(#printSelectedBtn):not(#watermarkBtn):not(#headerFooterBtn):not(#pageFormatBtn):not(#toggleDeletedBtn):not(#markBlankBtn):not(.rl-slot-popup),
+      .top-menu .main-row.menu-shrink button:not(#fitWidthBtn):not(.img-save-btn):not(#printSelectedBtn):not(#watermarkBtn):not(#headerFooterBtn):not(#pageFormatBtn):not(#autoCropBtn):not(#toggleDeletedBtn):not(#markBlankBtn):not(.rl-slot-popup),
       .top-menu .main-row.menu-shrink label.icon-btn,
       .main-row.menu-shrink .compact-btn,
       .main-row.menu-shrink button.icon-btn,
@@ -7279,6 +7287,7 @@
       .top-menu .main-row.menu-shrink #watermarkBtn,
       .top-menu .main-row.menu-shrink #headerFooterBtn,
       .top-menu .main-row.menu-shrink #pageFormatBtn,
+      .top-menu .main-row.menu-shrink #autoCropBtn,
       .top-menu .main-row.menu-shrink .readmode-wrapper .mode-btn.rl-slot-popup {
         width: var(--pm-menu-ctrl-h);
         height: var(--pm-menu-ctrl-h);
@@ -7744,6 +7753,13 @@
               <rect x="4" y="2" width="16" height="20" rx="2"/>
               <rect x="9" y="8.5" width="6" height="7" rx="0.6" stroke="#5dade2" stroke-width="1.6"/>
               <path d="M8.2 7.2L6.6 5.6M6.6 5.6h2.2M6.6 5.6v2.2M15.8 16.8l1.6 1.6M17.4 18.4h-2.2M17.4 18.4v-2.2" stroke="#5dade2" stroke-width="1.5"/>
+            </svg>
+          </button>
+          <button id="autoCropBtn" class="icon-btn" onclick="openAutoCropDialog()" disabled title="Автоматически обрезать белые поля страниц" data-i18n-title="acTooltip">
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M6 2v14a2 2 0 0 0 2 2h14"/>
+              <path d="M2 6h14a2 2 0 0 1 2 2v14"/>
+              <rect x="9" y="9" width="6" height="6" rx="0.6" stroke="#5dade2" stroke-width="1.6"/>
             </svg>
           </button>
         </div>
@@ -9577,6 +9593,17 @@
         newDocumentHint: 'Будет создан новый документ', openInNewTabs: 'Откроется в новых вкладках',
         tabClose: 'Закрыть вкладку', tabCloseOthers: 'Закрыть другие вкладки', tabCloseRight: 'Закрыть вкладки справа',
         tabRename: 'Переименовать', tabRenameTitle: 'Переименовать документ',
+        acTitle: 'Обрезать белые поля', acTooltip: 'Автоматически обрезать белые поля страниц', acDialogTitle: 'Обрезать белые поля',
+        acMargin: 'Отступ, мм', acMode: 'Обрезка', acModeEach: 'Каждая страница отдельно', acModeSame: 'Одинаково для всех',
+        acModeEachHint: 'у каждой страницы обрезается своё пустое поле',
+        acModeSameHint: 'одна рамка для всех страниц — по самому широкому содержимому, страницы остаются одного размера',
+        acWhite: 'Порог белого, %', acWhiteHint: 'пиксели светлее этого значения считаются белыми; уменьшите для сканов с сероватым фоном',
+        acSpecks: 'Не учитывать мелкие точки',
+        acHelpHow: 'Белые поля находятся по изображению страницы: остаётся всё содержимое и заданный отступ вокруг него.',
+        acHelpUndo: 'Содержимое не удаляется — меняется только видимая область страницы; обрезку можно отменить (Ctrl+Z).',
+        acAnalysing: 'Анализ страниц: {k} из {n}…', acSummary: 'Будет обрезано страниц: {n} из {total}', acBlankSkipped: 'пустых пропущено: {n}',
+        acNothing: 'Белых полей для обрезки не найдено',
+        acApplying: 'Обрезка белых полей…', acApplyError: 'Не удалось обрезать поля', acDone: 'Поля обрезаны у страниц: {n}',
         pfTooltip: 'Привести страницы к одному формату', pfDialogTitle: 'Привести страницы к одному формату', tipHeaderFooter: 'Добавить колонтитулы на страницы', tipWatermark: 'Нанести водяной знак на страницы', tipBlankMark: 'Найти и выбрать пустые страницы', tipEncrypt: 'Зашифровать паролем, который потребуется для открытия файла', tipSelectMode: 'Режим выбора и работы со страницами', tipReadMode: 'Скрыть меню и увеличить по ширине страницы', tipLoupeMode: 'Увеличить выбранный участок документа', tipMenuHide: 'Скрыть верхнее меню', tipMenuShow: 'Показать верхнее меню', tipTheme: 'Изменить оформление интерфейса',
         pfTitle: 'Формат страниц', pfFormat: 'Формат', pfFmtFirst: 'Как у первой страницы', pfFmtCommon: 'Самый частый в документе', pfFmtCustom: 'Свой размер',
         pfWidth: 'Ширина, мм', pfHeight: 'Высота, мм',
@@ -10038,6 +10065,17 @@
         newDocumentHint: 'A new document will be created', openInNewTabs: 'Open in new tabs',
         tabClose: 'Close tab', tabCloseOthers: 'Close other tabs', tabCloseRight: 'Close tabs to the right',
         tabRename: 'Rename', tabRenameTitle: 'Rename document',
+        acTitle: 'Trim white margins', acTooltip: 'Automatically trim the white margins of pages', acDialogTitle: 'Trim white margins',
+        acMargin: 'Margin, mm', acMode: 'Trim', acModeEach: 'Each page separately', acModeSame: 'Same for all',
+        acModeEachHint: 'each page loses its own empty margin',
+        acModeSameHint: 'one frame for all pages, fitted to the widest content; pages keep one size',
+        acWhite: 'White threshold, %', acWhiteHint: 'pixels lighter than this count as white; lower it for scans with a greyish background',
+        acSpecks: 'Ignore small dots',
+        acHelpHow: 'White margins are found from the page image: all the content stays, with the set margin around it.',
+        acHelpUndo: 'Nothing is removed — only the visible area of the page changes; the trim can be undone (Ctrl+Z).',
+        acAnalysing: 'Analysing pages: {k} of {n}…', acSummary: 'Pages to trim: {n} of {total}', acBlankSkipped: 'blank skipped: {n}',
+        acNothing: 'No white margins to trim',
+        acApplying: 'Trimming white margins…', acApplyError: 'Could not trim the margins', acDone: 'Margins trimmed: {n} pages',
         pfTooltip: 'Bring pages to one size', pfDialogTitle: 'Bring pages to one size', tipHeaderFooter: 'Add headers and footers to pages', tipWatermark: 'Put a watermark on pages', tipBlankMark: 'Find and select blank pages', tipEncrypt: 'Encrypt with a password that will be needed to open the file', tipSelectMode: 'Select pages and work with them', tipReadMode: 'Hide the menu and zoom to the page width', tipLoupeMode: 'Magnify a chosen area of the document', tipMenuHide: 'Hide the top menu', tipMenuShow: 'Show the top menu', tipTheme: 'Change the interface appearance',
         pfTitle: 'Page size', pfFormat: 'Size', pfFmtFirst: 'Same as the first page', pfFmtCommon: 'Most common in the document', pfFmtCustom: 'Custom',
         pfWidth: 'Width, mm', pfHeight: 'Height, mm',
@@ -10499,6 +10537,17 @@
         newDocumentHint: 'Se creará un nuevo documento', openInNewTabs: 'Se abrirá en nuevas pestañas',
         tabClose: 'Cerrar pestaña', tabCloseOthers: 'Cerrar otras pestañas', tabCloseRight: 'Cerrar pestañas a la derecha',
         tabRename: 'Cambiar nombre', tabRenameTitle: 'Cambiar el nombre del documento',
+        acTitle: 'Recortar márgenes blancos', acTooltip: 'Recortar automáticamente los márgenes blancos de las páginas', acDialogTitle: 'Recortar márgenes blancos',
+        acMargin: 'Margen, mm', acMode: 'Recorte', acModeEach: 'Cada página por separado', acModeSame: 'Igual para todas',
+        acModeEachHint: 'cada página pierde su propio margen vacío',
+        acModeSameHint: 'un mismo marco para todas las páginas, ajustado al contenido más ancho; las páginas quedan del mismo tamaño',
+        acWhite: 'Umbral de blanco, %', acWhiteHint: 'los píxeles más claros que este valor se consideran blancos; bájelo para escaneos con fondo grisáceo',
+        acSpecks: 'Ignorar puntos pequeños',
+        acHelpHow: 'Los márgenes blancos se detectan en la imagen de la página: se conserva todo el contenido con el margen indicado alrededor.',
+        acHelpUndo: 'No se elimina nada: solo cambia el área visible de la página; el recorte se puede deshacer (Ctrl+Z).',
+        acAnalysing: 'Analizando páginas: {k} de {n}…', acSummary: 'Páginas que se recortarán: {n} de {total}', acBlankSkipped: 'en blanco omitidas: {n}',
+        acNothing: 'No hay márgenes blancos que recortar',
+        acApplying: 'Recortando márgenes blancos…', acApplyError: 'No se pudieron recortar los márgenes', acDone: 'Márgenes recortados: {n} páginas',
         pfTooltip: 'Llevar las páginas a un mismo tamaño', pfDialogTitle: 'Llevar las páginas a un mismo tamaño', tipHeaderFooter: 'Añadir encabezados y pies a las páginas', tipWatermark: 'Poner una marca de agua en las páginas', tipBlankMark: 'Buscar y seleccionar las páginas en blanco', tipEncrypt: 'Cifrar con una contraseña que se pedirá al abrir el archivo', tipSelectMode: 'Seleccionar páginas y trabajar con ellas', tipReadMode: 'Ocultar el menú y ajustar al ancho de la página', tipLoupeMode: 'Ampliar una zona elegida del documento', tipMenuHide: 'Ocultar el menú superior', tipMenuShow: 'Mostrar el menú superior', tipTheme: 'Cambiar la apariencia de la interfaz',
         pfTitle: 'Tamaño de página', pfFormat: 'Tamaño', pfFmtFirst: 'Como la primera página', pfFmtCommon: 'El más frecuente del documento', pfFmtCustom: 'Personalizado',
         pfWidth: 'Ancho, mm', pfHeight: 'Alto, mm',
@@ -11010,6 +11059,17 @@
         tabCloseOthers: '关闭其他标签页',
         tabCloseRight: '关闭右侧标签页',
         tabRename: '重命名',
+        acTitle: '裁剪白边', acTooltip: '自动裁剪页面的白边', acDialogTitle: '裁剪白边',
+        acMargin: '留边（毫米）', acMode: '裁剪方式', acModeEach: '每页单独裁剪', acModeSame: '所有页面相同',
+        acModeEachHint: '每一页裁去各自的空白边',
+        acModeSameHint: '所有页面使用同一个裁剪框，按最宽的内容确定；页面保持同一尺寸',
+        acWhite: '白色阈值（%）', acWhiteHint: '比此值更浅的像素视为白色；扫描件背景偏灰时请调低',
+        acSpecks: '忽略细小斑点',
+        acHelpHow: '根据页面图像查找白边：保留全部内容，并在其周围留出设定的边距。',
+        acHelpUndo: '不会删除任何内容，只改变页面的可见区域；裁剪可以撤销（Ctrl+Z）。',
+        acAnalysing: '正在分析页面：{k} / {n}…', acSummary: '将裁剪的页面：{n} / {total}', acBlankSkipped: '已跳过空白页：{n}',
+        acNothing: '没有可裁剪的白边',
+        acApplying: '正在裁剪白边…', acApplyError: '无法裁剪白边', acDone: '已裁剪白边：{n} 页',
         pfTooltip: '将页面统一为同一尺寸', pfDialogTitle: '将页面统一为同一尺寸', tipHeaderFooter: '为页面添加页眉和页脚', tipWatermark: '为页面添加水印', tipBlankMark: '查找并选择空白页', tipEncrypt: '使用打开文件时需要输入的密码加密', tipSelectMode: '选择并处理页面', tipReadMode: '隐藏菜单并按页面宽度放大', tipLoupeMode: '放大文档中选定的区域', tipMenuHide: '隐藏顶部菜单', tipMenuShow: '显示顶部菜单', tipTheme: '更改界面外观',
         pfTitle: '页面尺寸', pfFormat: '尺寸', pfFmtFirst: '与第一页相同', pfFmtCommon: '文档中最常见的', pfFmtCustom: '自定义',
         pfWidth: '宽度（毫米）', pfHeight: '高度（毫米）',
@@ -12250,6 +12310,8 @@
       if (headerFooterBtnEl) headerFooterBtnEl.disabled = baseDisabled || pdfDoc.getPageCount() === 0;
       const pageFormatBtnEl = document.getElementById('pageFormatBtn');
       if (pageFormatBtnEl) pageFormatBtnEl.disabled = baseDisabled || pdfDoc.getPageCount() === 0;
+      const autoCropBtnEl = document.getElementById('autoCropBtn');
+      if (autoCropBtnEl) autoCropBtnEl.disabled = baseDisabled || pdfDoc.getPageCount() === 0;
       saveBtn.disabled = baseDisabled;
       scaleSlider.disabled = baseDisabled;
       const fitWidthBtnEl = document.getElementById('fitWidthBtn');
@@ -12692,6 +12754,7 @@
         case 'watermarkBtn': return t('watermarkTitle');
         case 'headerFooterBtn': return t('hfTitle');
         case 'pageFormatBtn': return t('pfTitle');
+        case 'autoCropBtn': return t('acTitle');
         // The tooltip of these says what they do; the caption keeps the name.
         case 'selectModeBtn': return t('selectMode');
         case 'readModeBtn': return t('readModeKey');
@@ -12731,7 +12794,7 @@
     }
     function pmPopCapsInit() {
       const btns = document.querySelectorAll(
-        '#logoMenuArea > button, .readmode-wrapper .mode-btn, #watermarkBtn, #headerFooterBtn, #pageFormatBtn, ' +
+        '#logoMenuArea > button, .readmode-wrapper .mode-btn, #watermarkBtn, #headerFooterBtn, #pageFormatBtn, #autoCropBtn, ' +
         '#toggleDeletedBtn, #markBlankBtn, #printSelectedBtn, .top-menu .img-save-btn');
       const mo = new MutationObserver((recs) => {
         new Set(recs.map(r => r.target)).forEach(pmPopCapUpdate);
@@ -34854,7 +34917,7 @@
     (function initWatermarkToggle() {
       if (isTouchDevice) return;
       const wrapper = document.querySelector('.edit-wrapper');
-      const btns = ['watermarkBtn', 'headerFooterBtn', 'pageFormatBtn'].map(id => document.getElementById(id)).filter(Boolean);
+      const btns = ['watermarkBtn', 'headerFooterBtn', 'pageFormatBtn', 'autoCropBtn'].map(id => document.getElementById(id)).filter(Boolean);
       if (!wrapper || !btns.length || !editPageBtn) return;
       let hideTimer = null;
 
@@ -67627,6 +67690,612 @@ function pmPfRunDialog() {
     }
     loadPreviewPage();
     fmtSel.focus();
+  });
+}
+// ============================================================
+// AUTO-CROP: trims the white margins around page content. Every target page
+// is rendered once at a low resolution (with the page editor's objects on
+// it) and reduced to two ink profiles - how many dark pixels each row and
+// each column has; the crop box then follows from them for any margin and
+// speck setting without rendering again. Applying only sets the page's
+// CropBox, exactly as the page editor's crop tool does (nothing is removed;
+// undo brings the margins back), and rebases the editor objects and the
+// redaction bookkeeping the same way. Coordinates are visual: the page as
+// seen, in pt, origin top-left, y down (pmWmPageFrame).
+// ============================================================
+const PM_AC_STORAGE_KEY = 'pmAutoCropSettings';
+// Analysis raster: pixels per pt, and a cap on pixels per page.
+const PM_AC_PX_PER_PT = 1.5;
+const PM_AC_MAX_PX = 3e6;
+// A crop that takes less than this off every side changes nothing.
+const PM_AC_MIN_TRIM_PT = 1;
+let pmAcDialogOpen = false;
+
+function pmAcDefaults() {
+  return {
+    margin: 5,          // mm kept around the content
+    mode: 'each',       // each | same
+    white: 95,          // %: lighter than this counts as white
+    specks: true        // ignore lone dots (scanner dust)
+  };
+}
+
+function pmAcSanitize(s) {
+  const d = pmAcDefaults();
+  const out = Object.assign({}, d, s || {});
+  out.margin = pmWmClampNum(out.margin, 0, 50, d.margin);
+  out.mode = out.mode === 'same' ? 'same' : 'each';
+  out.white = Math.round(pmWmClampNum(out.white, 50, 100, d.white));
+  out.specks = out.specks !== false;
+  return out;
+}
+
+function pmAcLoadSettings() {
+  try {
+    const raw = localStorage.getItem(PM_AC_STORAGE_KEY);
+    if (raw) return pmAcSanitize(JSON.parse(raw));
+  } catch (_) {}
+  return pmAcSanitize(null);
+}
+function pmAcStoreSettings(s) {
+  try { localStorage.setItem(PM_AC_STORAGE_KEY, JSON.stringify(s)); } catch (_) {}
+}
+
+// A pdf.js copy of the live document for the analysis: the app's own when
+// it is current, otherwise one parsed from the document's bytes.
+async function pmAcPdfjsDoc() {
+  if (typeof whenPdfDocIdle === 'function') await whenPdfDocIdle();
+  if (typeof hqPdfjsDoc !== 'undefined' && hqPdfjsDoc && pdfDoc && hqPdfjsDoc.numPages === pdfDoc.getPageCount()) {
+    return { doc: hqPdfjsDoc, own: false };
+  }
+  const bytes = await pdfDoc.save();
+  return { doc: await pdfjsLib.getDocument({ data: bytes }).promise, own: true };
+}
+
+// Renders one page as seen (rotation, editor objects) and counts, per row
+// and per column, the pixels darker than the white threshold.
+async function pmAcProfilePage(pj, idx, white, canvas) {
+  const page = await pj.getPage(idx + 1);
+  const rot = typeof page.rotate === 'number' ? page.rotate : 0;
+  const vp1 = page.getViewport({ scale: 1, rotation: rot });
+  let k = PM_AC_PX_PER_PT;
+  if (vp1.width * vp1.height * k * k > PM_AC_MAX_PX) k = Math.sqrt(PM_AC_MAX_PX / (vp1.width * vp1.height));
+  const vp = page.getViewport({ scale: k, rotation: rot });
+  const w = Math.max(1, Math.round(vp.width)), h = Math.max(1, Math.round(vp.height));
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, w, h);
+  await page.render({ canvasContext: ctx, viewport: vp }).promise;
+  if (typeof peCompositeEditorObjectsOnCanvas === 'function') {
+    try { await peCompositeEditorObjectsOnCanvas(ctx, idx, w, h); } catch (_) {}
+  }
+  const data = ctx.getImageData(0, 0, w, h).data;
+  const lim = Math.round(white * 2.55);
+  const rows = new Uint32Array(h), cols = new Uint32Array(w);
+  for (let y = 0, p = 0; y < h; y++) {
+    for (let x = 0; x < w; x++, p += 4) {
+      if (data[p] < lim || data[p + 1] < lim || data[p + 2] < lim) { rows[y]++; cols[x]++; }
+    }
+  }
+  return { W: vp1.width, H: vp1.height, k, w, h, rows, cols };
+}
+
+// Content box of a profiled page, visual pt, or null for a blank page.
+// With specks ignored, a row or column needs a few dark pixels to count, so
+// scanner dust near the edge does not hold the margin.
+function pmAcInkBox(prof, specks) {
+  const need = specks ? 3 : 1;
+  const span = (arr) => {
+    let a = -1, b = -1;
+    for (let i = 0; i < arr.length; i++) if (arr[i] >= need) { if (a < 0) a = i; b = i; }
+    return a < 0 ? null : [a, b + 1];
+  };
+  const ys = span(prof.rows), xs = span(prof.cols);
+  if (!ys || !xs) return null;
+  return { l: xs[0] / prof.k, t: ys[0] / prof.k, r: xs[1] / prof.k, b: ys[1] / prof.k };
+}
+
+// Crop plans for the analysed target pages: { idx, W, H, l, t, r, b }
+// (the box to keep, visual pt). Blank pages and pages with nothing to trim
+// are left out; `blank` counts the former.
+function pmAcPlan(s, indices, profiles) {
+  const m = s.margin * PM_PF_PT_PER_MM;
+  const boxes = [];
+  let blank = 0;
+  indices.forEach(idx => {
+    const prof = profiles.get(idx);
+    if (!prof) return;
+    const ink = pmAcInkBox(prof, s.specks);
+    if (!ink) { blank++; return; }
+    boxes.push({ idx, W: prof.W, H: prof.H, ink });
+  });
+  // One box for all: the union of the content boxes, from each page's
+  // top-left corner.
+  let same = null;
+  if (s.mode === 'same' && boxes.length) {
+    same = boxes.reduce((u, b) => ({
+      l: Math.min(u.l, b.ink.l), t: Math.min(u.t, b.ink.t), r: Math.max(u.r, b.ink.r), b: Math.max(u.b, b.ink.b)
+    }), { ...boxes[0].ink });
+  }
+  const plans = [];
+  boxes.forEach(({ idx, W, H, ink }) => {
+    const c = same || ink;
+    const p = {
+      idx, W, H,
+      l: Math.max(0, c.l - m), t: Math.max(0, c.t - m),
+      r: Math.min(W, c.r + m), b: Math.min(H, c.b + m)
+    };
+    if (p.r - p.l < 1 || p.b - p.t < 1) return;
+    const trims = [p.l, p.t, W - p.r, H - p.b];
+    if (trims.every(v => v < PM_AC_MIN_TRIM_PT)) return;
+    plans.push(p);
+  });
+  return { plans, blank };
+}
+
+// Crops the planned pages of the live document as one undoable step.
+async function pmAcApply(plans) {
+  if (!pdfDoc || !plans.length) return false;
+  showLoadingDeferred(t('acApplying'), 300);
+  let claimed = false;
+  let bytes = null;
+  const done = [];
+  try {
+    claimed = await peClaimLivePdfDocWriter();
+    const docRef = pdfDoc;
+    if (!docRef) return false;
+    const count = docRef.getPageCount();
+    const meta = peReadAllEditorMetaFromDoc(docRef);
+    let metaChanged = false;
+    for (const p of plans) {
+      if (p.idx < 0 || p.idx >= count) continue;
+      const page = docRef.getPage(p.idx);
+      const rot = (((page.getRotation().angle || 0) % 360) + 360) % 360;
+      const oldCb = page.getCropBox();
+      const a = pmPfVisToUser(p.l, p.t, rot, oldCb), b = pmPfVisToUser(p.r, p.b, rot, oldCb);
+      const crop = {
+        x: Math.min(a.x, b.x), y: Math.min(a.y, b.y),
+        w: Math.abs(b.x - a.x), h: Math.abs(b.y - a.y)
+      };
+      // Editor objects are page fractions: keep those on the kept part and
+      // rebase them onto it, as the editor's own crop does.
+      const key = String(p.idx);
+      const frac = { x: p.l / p.W, y: p.t / p.H, w: Math.max(1e-6, (p.r - p.l) / p.W), h: Math.max(1e-6, (p.b - p.t) / p.H) };
+      const objs = meta.pages && meta.pages[key];
+      if (Array.isArray(objs) && objs.length) {
+        const kept = [];
+        objs.forEach(o => {
+          if (!o) return;
+          const c = JSON.parse(JSON.stringify(o));
+          if (!peNormRectsIntersect(peGetObjectNormBounds(c), frac)) return;
+          peRemapObjectForCrop(c, frac);
+          kept.push(c);
+        });
+        meta.pages[key] = kept;
+        if (!kept.length) delete meta.pages[key];
+        metaChanged = true;
+      }
+      if (meta.pageNorm && meta.pageNorm[key]) {
+        meta.pageNorm[key] = { W: p.r - p.l, H: p.b - p.t, rot };
+        metaChanged = true;
+      }
+      page.setCropBox(crop.x, crop.y, crop.w, crop.h);
+      peRemapPageRedactBookkeepingForCrop(page, oldCb, crop, p.idx);
+      done.push(p.idx);
+    }
+    if (!done.length) return false;
+    if (metaChanged) peWriteAllEditorMetaToDoc(docRef, meta);
+    if (pdfDoc !== docRef) return false;
+    bytes = new Uint8Array(await docRef.save());
+  } catch (err) {
+    console.error(err);
+    alert(t('acApplyError') + ': ' + (err && err.message || err));
+    return false;
+  } finally {
+    if (claimed) pdfDocCriticalWriterActive = false;
+    hideLoading();
+  }
+
+  originalFileBytes = bytes;
+  const marked = [...markedForDeletion].sort((x, y) => x - y);
+  const historyBytes = bytes.slice();
+  historyCommitChain = historyCommitChain
+    .then(() => commitHistoryStep(Promise.resolve(historyBytes), marked, done, { lazyPages: true }))
+    .catch(e => console.warn('history commit error', e));
+  documentDirty = true;
+  if (typeof updateInfo === 'function') updateInfo();
+  if (typeof updateStickyFileBar === 'function') updateStickyFileBar();
+  if (typeof pmOnDocumentDirtyChanged === 'function') pmOnDocumentDirtyChanged();
+  await pmWmRefreshPageImages(bytes, done);
+  if (typeof pmShowToast === 'function') pmShowToast(t('acDone', { n: done.length }), 2500);
+  return true;
+}
+
+async function openAutoCropDialog() {
+  if (pmAcDialogOpen || pmPfDialogOpen || pmHfDialogOpen || pmWmDialogOpen || !pdfDoc || isLoading || pdfDoc.getPageCount() === 0) return;
+  if (typeof pmPageEditorOpen === 'function' && pmPageEditorOpen()) return;
+  pmAcDialogOpen = true;
+  try {
+    await pmAcRunDialog();
+  } finally {
+    pmAcDialogOpen = false;
+  }
+}
+
+function pmAcRunDialog() {
+  return new Promise((resolve) => {
+    const s = pmAcLoadSettings();
+    const pageCount = pdfDoc.getPageCount();
+    const selected = [...selectedPages].filter(i => !markedForDeletion.has(i) && i < pageCount).sort((a, b) => a - b);
+    let pagesMode = selected.length > 1 ? 'selected' : 'all';
+    let rangeText = '';
+    let plans = [];
+    let blank = 0;
+    let previewPos = 0;
+    let previewIdx = -1;
+    let previewToken = 0;
+    const rasterCache = new Map();   // page index -> { canvas, pxPerPt }
+    const profiles = new Map();      // page index -> ink profile (for profWhite)
+    let profWhite = s.white;
+    let pj = null;                   // { doc, own }
+    let analysing = false;
+    let analyseGen = 0;
+    let busy = false;
+    const esc = escapeHtml;
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay-active pm-wm-overlay';
+    const box = document.createElement('div');
+    box.className = 'pm-modal-box pm-wm-box pm-hf-box pm-pf-box pm-ac-box';
+    box.setAttribute('role', 'dialog');
+    const tbtn = (group, value, label, title) =>
+      `<button type="button" class="pm-wm-tbtn" data-${group}="${value}"${title ? ` title="${esc(title)}"` : ''}>${esc(label)}</button>`;
+    box.innerHTML = `
+      <div class="pm-wm-head">
+        <div class="pm-wm-title">${esc(t('acDialogTitle'))}</div>
+        <button type="button" class="pm-wm-help" id="pmAcHelp" aria-expanded="false">?</button>
+      </div>
+      <div class="pm-wm-help-pop pm-hf-help-pop" id="pmAcHelpPop" hidden>
+        <div>${esc(t('acHelpHow'))}</div>
+        <div><b>${esc(t('acModeSame'))}</b> — ${esc(t('acModeSameHint'))}</div>
+        <div><b>${esc(t('acWhite'))}</b> — ${esc(t('acWhiteHint'))}</div>
+        <div>${esc(t('acHelpUndo'))}</div>
+      </div>
+      <div class="pm-wm-controls pm-hf-controls">
+        <div class="pm-hf-cols">
+          <div class="pm-hf-col pm-hf-col-left">
+            <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('acMargin'))}</span>
+              <span class="pm-pf-dim">${pmWmNumField('pmAcMargin', 0, 50, 1)}</span>
+            </div>
+            <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('acMode'))}</span>
+              ${tbtn('acmode', 'each', t('acModeEach'), t('acModeEachHint'))}${tbtn('acmode', 'same', t('acModeSame'), t('acModeSameHint'))}
+            </div>
+            <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('acWhite'))}</span>
+              <span class="pm-pf-dim" title="${esc(t('acWhiteHint'))}">${pmWmNumField('pmAcWhite', 50, 100, 1)}</span>
+            </div>
+            <div class="pm-wm-row"><span class="pm-wm-label"></span>
+              <label class="pm-wm-check"><input type="checkbox" id="pmAcSpecks"> ${esc(t('acSpecks'))}</label>
+            </div>
+          </div>
+          <div class="pm-hf-col pm-hf-col-right">
+            <div class="pm-wm-row pm-wm-row-top"><span class="pm-wm-label">${esc(t('wmPages'))}</span>
+              <div class="pm-wm-pages">
+                <div class="pm-wm-pages-line">
+                  <label><input type="radio" name="pmAcPages" value="all"> ${esc(t('wmPagesAll', { n: pageCount }))}</label>
+                  <label><input type="radio" name="pmAcPages" value="selected"${selected.length ? '' : ' disabled'}> ${esc(t('wmPagesSelected', { n: selected.length }))}</label>
+                </div>
+                <label><input type="radio" name="pmAcPages" value="range"> ${esc(t('wmPagesRange'))}
+                  <input type="text" id="pmAcRange" placeholder="${esc(t('wmRangePlaceholder'))}" spellcheck="false" autocomplete="off"></label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="pm-pf-summary" id="pmAcSummary"></div>
+      <div class="pm-pf-preview" id="pmAcPreviewBox">
+        <div class="pm-pf-side">
+          <div class="pm-pf-sheet"><canvas id="pmAcBefore"></canvas></div>
+          <div class="pm-pf-cap"><span class="pm-pf-cap-k">${esc(t('pfBefore'))}</span> <span id="pmAcBeforeSize"></span></div>
+        </div>
+        <div class="pm-pf-arrow" aria-hidden="true">→</div>
+        <div class="pm-pf-side">
+          <div class="pm-pf-sheet"><canvas id="pmAcAfter"></canvas></div>
+          <div class="pm-pf-cap"><span class="pm-pf-cap-k">${esc(t('pfAfter'))}</span> <span id="pmAcAfterSize"></span></div>
+        </div>
+      </div>
+      <div class="pm-wm-nav pm-pf-nav">
+        <button type="button" class="pm-wm-tbtn" id="pmAcPrev">◀</button>
+        <span id="pmAcNavLabel"></span>
+        <button type="button" class="pm-wm-tbtn" id="pmAcNext">▶</button>
+      </div>
+      <div class="pm-wm-error" id="pmAcError"></div>
+      <div class="pm-wm-actions">
+        <button type="button" class="pm-wm-ok" id="pmAcOk">${esc(t('wmApply'))}</button>
+        <button type="button" class="pm-wm-cancel" id="pmAcCancel">${esc(t('wmCancel'))}</button>
+      </div>`;
+    overlay.appendChild(box);
+    document.body.appendChild(overlay);
+
+    const $ = (id) => box.querySelector('#' + id);
+    const marginIn = $('pmAcMargin'), whiteIn = $('pmAcWhite'), specksChk = $('pmAcSpecks');
+    const rangeIn = $('pmAcRange'), errEl = $('pmAcError'), summaryEl = $('pmAcSummary');
+    const beforeCv = $('pmAcBefore'), afterCv = $('pmAcAfter'), pvBox = $('pmAcPreviewBox');
+    const beforeSize = $('pmAcBeforeSize'), afterSize = $('pmAcAfterSize');
+    const navLabel = $('pmAcNavLabel'), prevBtn = $('pmAcPrev'), nextBtn = $('pmAcNext');
+    const okBtn = $('pmAcOk'), helpBtn = $('pmAcHelp'), helpPop = $('pmAcHelpPop');
+
+    // ---- targets, analysis, plans ----------------------------------------------
+    function targetIndices() {
+      let list;
+      if (pagesMode === 'selected') list = selected.slice();
+      else if (pagesMode === 'range') list = pmWmParseRange(rangeText, pageCount) || [];
+      else { list = []; for (let i = 0; i < pageCount; i++) list.push(i); }
+      return list.filter(i => !markedForDeletion.has(i));
+    }
+    function missing() {
+      return targetIndices().filter(i => !profiles.has(i));
+    }
+    // Profiles every target page not done yet, the first selected one first;
+    // the plans are redone as pages come in (throttled).
+    async function analyse() {
+      const gen = ++analyseGen;
+      if (profWhite !== s.white) { profiles.clear(); profWhite = s.white; }
+      let todo = missing();
+      if (!todo.length) { analysing = false; replan(); return; }
+      if (selected.length && todo.includes(selected[0])) todo = [selected[0], ...todo.filter(i => i !== selected[0])];
+      analysing = true;
+      replan();
+      try {
+        if (!pj) pj = await pmAcPdfjsDoc();
+        if (!overlay.isConnected) return;
+        const canvas = document.createElement('canvas');
+        let last = 0;
+        for (let i = 0; i < todo.length; i++) {
+          if (gen !== analyseGen || !overlay.isConnected) return;
+          const idx = todo[i];
+          try { profiles.set(idx, await pmAcProfilePage(pj.doc, idx, profWhite, canvas)); } catch (e) { console.warn('auto-crop analysis', idx, e); }
+          const now = performance.now();
+          if (now - last > 250 || i === 0) { last = now; replan(); }
+        }
+      } catch (e) {
+        console.warn('auto-crop analysis', e);
+      }
+      if (gen !== analyseGen || !overlay.isConnected) return;
+      analysing = false;
+      replan();
+    }
+    function replan() {
+      const keep = previewIdx;
+      const r = pmAcPlan(s, targetIndices(), profiles);
+      // One box for all pages is only known once every page is in.
+      plans = (s.mode === 'same' && analysing) ? [] : r.plans;
+      blank = r.blank;
+      const at = plans.findIndex(p => p.idx === keep);
+      previewPos = at >= 0 ? at : Math.min(previewPos, Math.max(0, plans.length - 1));
+      updateSummary();
+      loadPreviewPage();
+    }
+    function updateSummary() {
+      const total = targetIndices().length;
+      okBtn.disabled = analysing || !plans.length;
+      if (analysing) {
+        const doneN = total - missing().length;
+        summaryEl.textContent = t('acAnalysing', { k: doneN, n: total });
+        return;
+      }
+      if (!plans.length) { summaryEl.textContent = total ? t('acNothing') : ''; return; }
+      let text = t('acSummary', { n: plans.length, total });
+      if (blank) text += ' · ' + t('acBlankSkipped', { n: blank });
+      summaryEl.textContent = text;
+    }
+
+    // ---- preview ---------------------------------------------------------------
+    function previewScale(p) {
+      const b = pvBox.getBoundingClientRect();
+      const sideW = Math.max(80, (b.width - 24 - 48) / 2 - 8);
+      return Math.min(sideW / p.W, PM_PF_PREVIEW_H / p.H);
+    }
+    function sizeCanvas(cv, wPt, hPt, k, dpr) {
+      cv.style.width = Math.max(1, Math.round(wPt * k)) + 'px';
+      cv.style.height = Math.max(1, Math.round(hPt * k)) + 'px';
+      const w = Math.max(1, Math.round(wPt * k * dpr)), h = Math.max(1, Math.round(hPt * k * dpr));
+      if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+    }
+    function draw() {
+      const p = plans[previewPos];
+      if (!p) {
+        [beforeCv, afterCv].forEach(cv => { cv.width = 1; cv.height = 1; cv.style.width = '0px'; cv.style.height = '0px'; });
+        beforeSize.textContent = '';
+        afterSize.textContent = '';
+        return;
+      }
+      const k = previewScale(p);
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const cw = p.r - p.l, ch = p.b - p.t;
+      sizeCanvas(beforeCv, p.W, p.H, k, dpr);
+      sizeCanvas(afterCv, cw, ch, k, dpr);
+      const raster = rasterCache.get(p.idx);
+      const kb = beforeCv.width / p.W;
+      const bx = beforeCv.getContext('2d');
+      bx.setTransform(1, 0, 0, 1, 0, 0);
+      bx.fillStyle = '#fff';
+      bx.fillRect(0, 0, beforeCv.width, beforeCv.height);
+      if (raster) bx.drawImage(raster.canvas, 0, 0, beforeCv.width, beforeCv.height);
+      // What goes: dimmed; what stays: a dashed frame.
+      bx.fillStyle = 'rgba(44,62,80,0.28)';
+      const L = p.l * kb, T = p.t * kb, R = p.r * kb, B = p.b * kb;
+      bx.fillRect(0, 0, beforeCv.width, T);
+      bx.fillRect(0, B, beforeCv.width, beforeCv.height - B);
+      bx.fillRect(0, T, L, B - T);
+      bx.fillRect(R, T, beforeCv.width - R, B - T);
+      bx.strokeStyle = 'rgba(52,152,219,0.95)';
+      bx.lineWidth = Math.max(1, dpr);
+      bx.setLineDash([4 * dpr, 3 * dpr]);
+      bx.strokeRect(L + 0.5, T + 0.5, R - L - 1, B - T - 1);
+      bx.setLineDash([]);
+      const ka = afterCv.width / cw;
+      const ax = afterCv.getContext('2d');
+      ax.setTransform(1, 0, 0, 1, 0, 0);
+      ax.fillStyle = '#fff';
+      ax.fillRect(0, 0, afterCv.width, afterCv.height);
+      if (raster) {
+        const rk = raster.canvas.width / p.W;
+        ax.drawImage(raster.canvas, p.l * rk, p.t * rk, cw * rk, ch * rk, 0, 0, cw * ka, ch * ka);
+      }
+      beforeSize.textContent = pmPfLongSizeText(p.W, p.H);
+      afterSize.textContent = pmPfMmText(cw, ch);
+    }
+    async function ensureRaster() {
+      const p = plans[previewPos];
+      if (!p) return;
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      const want = previewScale(p) * dpr * Math.max(1, p.W / Math.max(1, p.r - p.l));
+      const hit = rasterCache.get(p.idx);
+      if (hit && hit.pxPerPt >= Math.min(want, 4) * 0.9) return;
+      const token = ++previewToken;
+      let canvas = null;
+      try { canvas = await pmWmRenderPagePreview(p.idx, Math.min(want, 4)); } catch (e) { console.warn('auto-crop preview', e); }
+      if (!overlay.isConnected || !canvas) return;
+      rasterCache.set(p.idx, { canvas, pxPerPt: Math.min(want, 4) });
+      while (rasterCache.size > 8) rasterCache.delete(rasterCache.keys().next().value);
+      if (token === previewToken && plans[previewPos] && plans[previewPos].idx === p.idx) draw();
+    }
+    function loadPreviewPage() {
+      const p = plans[previewPos];
+      const changedPage = (p ? p.idx : -1) !== previewIdx;
+      previewIdx = p ? p.idx : -1;
+      navLabel.textContent = p ? t('pfPreviewPage', { n: p.idx + 1, k: previewPos + 1, m: plans.length }) : '—';
+      prevBtn.disabled = previewPos <= 0 || !plans.length;
+      nextBtn.disabled = previewPos >= plans.length - 1 || !plans.length;
+      draw();
+      if (changedPage || !rasterCache.has(previewIdx)) ensureRaster();
+    }
+
+    // ---- controls <-> settings ---------------------------------------------------
+    function syncControls() {
+      if (document.activeElement !== marginIn) marginIn.value = String(s.margin);
+      if (document.activeElement !== whiteIn) whiteIn.value = String(s.white);
+      box.querySelectorAll('[data-acmode]').forEach(b => b.classList.toggle('active', b.dataset.acmode === s.mode));
+      specksChk.checked = s.specks;
+      box.querySelectorAll('input[name="pmAcPages"]').forEach(r => { r.checked = r.value === pagesMode; });
+    }
+    function changed() {
+      errEl.textContent = '';
+      syncControls();
+      if (missing().length || profWhite !== s.white) analyse(); else replan();
+    }
+    let whiteTimer = null;
+    function bindNumber(el, lo, hi, get, set, delay) {
+      const run = () => { if (delay) { clearTimeout(whiteTimer); whiteTimer = setTimeout(changed, delay); } else changed(); };
+      el.addEventListener('input', () => {
+        const v = Number(el.value);
+        if (el.value !== '' && Number.isFinite(v) && v >= lo && v <= hi) { set(v); run(); }
+      });
+      el.addEventListener('change', () => { set(pmWmClampNum(el.value, lo, hi, get())); el.value = String(get()); run(); });
+    }
+    box.querySelectorAll('.pm-wm-num').forEach(wrap => {
+      const input = wrap.querySelector('input');
+      wrap.querySelectorAll('.pm-wm-spin button').forEach(btn => {
+        let hold = null;
+        const stepOnce = () => {
+          if (input.disabled) return;
+          if (btn.dataset.dir === '1') input.stepUp(); else input.stepDown();
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+        };
+        const stop = () => {
+          if (!hold) return;
+          clearTimeout(hold.t); clearInterval(hold.i); hold = null;
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+        };
+        btn.addEventListener('pointerdown', (e) => {
+          if (e.button !== 0 || input.disabled) return;
+          e.preventDefault();
+          stepOnce();
+          hold = { t: setTimeout(() => { if (hold) hold.i = setInterval(stepOnce, 60); }, 400), i: null };
+        });
+        btn.addEventListener('pointerup', stop);
+        btn.addEventListener('pointerleave', stop);
+        btn.addEventListener('pointercancel', stop);
+      });
+    });
+    bindNumber(marginIn, 0, 50, () => s.margin, v => { s.margin = v; });
+    // A new white threshold renders the pages again: wait for the typing.
+    bindNumber(whiteIn, 50, 100, () => s.white, v => { s.white = Math.round(v); }, 500);
+    box.querySelectorAll('[data-acmode]').forEach(b => b.addEventListener('click', () => { s.mode = b.dataset.acmode; changed(); }));
+    specksChk.addEventListener('change', () => { s.specks = specksChk.checked; changed(); });
+    box.querySelectorAll('input[name="pmAcPages"]').forEach(r => r.addEventListener('change', () => {
+      if (!r.checked) return;
+      pagesMode = r.value;
+      if (pagesMode === 'range') rangeIn.focus();
+      changed();
+    }));
+    rangeIn.addEventListener('input', () => { rangeText = rangeIn.value; changed(); });
+    rangeIn.addEventListener('focus', () => { if (pagesMode !== 'range') { pagesMode = 'range'; changed(); } });
+    prevBtn.addEventListener('click', () => { if (previewPos > 0) { previewPos--; loadPreviewPage(); } });
+    nextBtn.addEventListener('click', () => { if (previewPos < plans.length - 1) { previewPos++; loadPreviewPage(); } });
+    const setHelp = (open) => { helpPop.hidden = !open; helpBtn.setAttribute('aria-expanded', String(open)); };
+    helpBtn.addEventListener('click', (e) => { e.stopPropagation(); setHelp(helpPop.hidden); });
+    overlay.addEventListener('pointerdown', (e) => {
+      if (!helpPop.hidden && e.target !== helpBtn && !helpPop.contains(e.target)) setHelp(false);
+    }, true);
+
+    // ---- close / apply -------------------------------------------------------------
+    let settled = false;
+    function close(result) {
+      if (settled) return;
+      settled = true;
+      analyseGen++;
+      clearTimeout(whiteTimer);
+      document.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('resize', onResize);
+      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+      if (pj && pj.own) { try { pmDestroyPdfjsDoc(pj.doc); } catch (_) {} }
+      resolve(result);
+    }
+    async function apply() {
+      if (busy || analysing) return;
+      errEl.textContent = '';
+      if (pagesMode === 'range' && !pmWmParseRange(rangeText, pageCount)) {
+        errEl.textContent = t('wmBadRange'); rangeIn.focus(); return;
+      }
+      if (!plans.length) { errEl.textContent = t('acNothing'); return; }
+      busy = true;
+      pmAcStoreSettings(s);
+      const todo = plans.slice();
+      close(true);
+      await pmAcApply(todo);
+    }
+    okBtn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); apply(); });
+    $('pmAcCancel').addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); close(false); });
+    overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) e.preventDefault(); });
+    // Capture phase, stopped here: the app's shortcuts must not act on the
+    // document while the dialog is up.
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault(); e.stopPropagation();
+        if (!helpPop.hidden) setHelp(false); else close(false);
+        return;
+      }
+      if (e.key === 'Enter' && e.target && e.target.tagName === 'INPUT' &&
+          ['text', 'number'].includes(e.target.type)) {
+        e.preventDefault(); e.stopPropagation(); apply(); return;
+      }
+      e.stopPropagation();
+    };
+    document.addEventListener('keydown', onKey, true);
+    let resizeTimer = null;
+    const onResize = () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => { draw(); ensureRaster(); }, 200);
+    };
+    window.addEventListener('resize', onResize);
+
+    syncControls();
+    analyse();
+    marginIn.focus();
   });
 }
   </script>
