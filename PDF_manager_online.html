@@ -7522,6 +7522,7 @@
       box-shadow: 0 10px 40px rgba(0,0,0,0.6) !important;
     }
     html[data-theme="dark"] .pm-modal-box * { color: #e2e6ea !important; }
+    #aboutUpdateLine a.pm-about-update-dl { color: #b45309; text-decoration: underline; white-space: nowrap; }
     /* About update banner: light inline backgrounds + global light text = unreadable.
        Override both for dark theme (warn = outdated, fail = feed unreachable). */
     html[data-theme="dark"] .pm-modal-box #aboutUpdateLine.pm-about-update-warn {
@@ -7529,6 +7530,12 @@
       border-color: #a67c32 !important;
       color: #f3d79a !important;
     }
+    html[data-theme="dark"] .pm-modal-box #aboutUpdateLine.pm-about-update-ok {
+      background: #22362a !important;
+      border-color: #3f7a52 !important;
+      color: #b6e3c3 !important;
+    }
+    html[data-theme="dark"] .pm-modal-box #aboutUpdateLine.pm-about-update-warn a.pm-about-update-dl { color: #ffd27a !important; }
     html[data-theme="dark"] .pm-modal-box #aboutUpdateLine.pm-about-update-fail {
       background: #2c323a !important;
       border-color: #5a6572 !important;
@@ -9542,8 +9549,8 @@
         aboutClose: 'Закрыть', aboutShaComputing: 'SHA-256: считаю…',
         aboutShaUnavailable: 'SHA-256: недоступно в этом контексте',
         aboutUpdateFail: 'Не удалось проверить обновления (нет доступа к списку версий).',
+        aboutUpdateDownload: 'Скачать', aboutUpToDate: 'Установлена последняя версия',
         aboutUpdateApp: 'Вышла обновлённая версия приложения {ver}',
-        aboutUpdateEditor: 'Доступен обновлённый редактор {build}',
         aboutUpdateWeb: 'Вышла обновлённая версия {build}',
         pagePrevDesktop: 'Предыдущая страница (ПКМ - автопрокрутка)',
         pagePrevTouch: 'Предыдущая страница. Удерживание - автопрокрутка',
@@ -10003,8 +10010,8 @@
         aboutClose: 'Close', aboutShaComputing: 'SHA-256: computing…',
         aboutShaUnavailable: 'SHA-256: unavailable in this context',
         aboutUpdateFail: 'Could not check for updates (no access to version list).',
+        aboutUpdateDownload: 'Download', aboutUpToDate: 'You have the latest version',
         aboutUpdateApp: 'An updated application version {ver} is available',
-        aboutUpdateEditor: 'An updated editor {build} is available',
         aboutUpdateWeb: 'An updated version {build} is available',
         pagePrevDesktop: 'Previous page (RMB — auto-scroll)',
         pagePrevTouch: 'Previous page. Hold — auto-scroll',
@@ -10464,8 +10471,8 @@
         aboutClose: 'Cerrar', aboutShaComputing: 'SHA-256: calculando…',
         aboutShaUnavailable: 'SHA-256: no disponible en este contexto',
         aboutUpdateFail: 'No se pudo comprobar si hay actualizaciones (sin acceso a la lista de versiones).',
+        aboutUpdateDownload: 'Descargar', aboutUpToDate: 'Tienes la última versión',
         aboutUpdateApp: 'Hay una nueva versión de la aplicación disponible: {ver}',
-        aboutUpdateEditor: 'Hay un editor actualizado disponible: {build}',
         aboutUpdateWeb: 'Hay una nueva versión disponible: {build}',
         pagePrevDesktop: 'Página anterior (clic derecho - desplazamiento automático)',
         pagePrevTouch: 'Página anterior. Mantener pulsado - desplazamiento automático',
@@ -10956,8 +10963,8 @@
         aboutShaComputing: 'SHA-256：计算中…',
         aboutShaUnavailable: 'SHA-256：在当前环境下不可用',
         aboutUpdateFail: '无法检查更新（无法访问版本列表）。',
+        aboutUpdateDownload: '下载', aboutUpToDate: '已是最新版本',
         aboutUpdateApp: '有可用的应用程序更新版本 {ver}',
-        aboutUpdateEditor: '有可用的编辑器更新 {build}',
         aboutUpdateWeb: '有可用的更新版本 {build}',
         pagePrevDesktop: '上一页（右键 — 自动滚动）',
         pagePrevTouch: '上一页。长按 — 自动滚动',
@@ -29779,6 +29786,28 @@
       } catch (_) { /* ignore */ }
     }
 
+    /** Desktop shell's OS: 'linux' or 'windows' (the two shells released). */
+    function pdfManagerDesktopPlatform() {
+      const ua = String((navigator && navigator.userAgent) || '');
+      return (/Linux|X11/i.test(ua) && !/Windows/i.test(ua)) ? 'linux' : 'windows';
+    }
+
+    /**
+     * Opens an https link of the About box (download page, repository) in the
+     * system browser. The desktop shell does not open target=_blank links on
+     * its own, so it is asked to; a browser just follows the link.
+     */
+    function pdfManagerOpenExternalLink(e, url) {
+      if (!pdfManagerIsDesktopShell()) return;
+      try {
+        const invoke = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke;
+        if (typeof invoke !== 'function') return;
+        e.preventDefault();
+        Promise.resolve(invoke.call(window.__TAURI__.core, 'open_external_url', { url }))
+          .catch((err) => console.warn('open_external_url', err));
+      } catch (_) { /* let the link do what it can */ }
+    }
+
     function pdfManagerLocalBuildNumber() {
       const m = /^build-(\d+)$/i.exec(String(PDF_MANAGER_BUILD_VERSION || '').trim());
       return m ? parseInt(m[1], 10) : 0;
@@ -29885,37 +29914,49 @@
     }
 
     /**
-     * Compare local build / Windows shell version with the published feed.
-     * Returns { outdated, messages[] } or null when the feed is unreachable.
+     * Compare the desktop app version (Windows or Linux, each with its own
+     * release) or the stamped web build with the published feed.
+     * Returns { outdated, upToDate, messages[], downloadUrl, feed }, or null
+     * when the feed is unreachable. upToDate is set only when a comparison
+     * could actually be made (an unstamped page cannot tell).
      */
     async function pdfManagerCheckForUpdates() {
-      // Offline HTML builds never phone home for updates (Windows shell still may).
+      // Offline HTML builds never phone home for updates (the desktop shell still may).
       if (PDF_MANAGER_OFFLINE_BUILD && !pdfManagerIsDesktopShell()) return null;
       const feed = await pdfManagerFetchLatestVersionFeed();
       if (!feed) return null;
       const messages = [];
-      const isDesktop = pdfManagerIsDesktopShell();
-      const localWin = isDesktop
-        ? await pdfManagerResolveDesktopAppVersion()
-        : String(PDF_MANAGER_WINDOWS_VERSION || '').trim();
-      const remoteWin = String(feed.windowsVersion || '').trim();
-      if (localWin && remoteWin && pdfManagerCompareSemver(remoteWin, localWin) > 0) {
-        messages.push(t('aboutUpdateApp', { ver: remoteWin }));
+      let compared = false;
+      let downloadUrl = '';
+      if (pdfManagerIsDesktopShell()) {
+        // The editor inside the app only changes with a new app release, so
+        // only the app version counts here - a newer editor build on main
+        // is not something a desktop user can install.
+        const linux = pdfManagerDesktopPlatform() === 'linux';
+        const localVer = await pdfManagerResolveDesktopAppVersion();
+        const remoteVer = String((linux ? feed.linuxVersion : feed.windowsVersion) || '').trim();
+        if (localVer && remoteVer) {
+          compared = true;
+          if (pdfManagerCompareSemver(remoteVer, localVer) > 0) {
+            messages.push(t('aboutUpdateApp', { ver: remoteVer }));
+            downloadUrl = String((linux ? feed.linuxDownloadUrl : feed.windowsDownloadUrl) || '').trim();
+          }
+        }
+      } else {
+        const localNum = pdfManagerLocalBuildNumber();
+        const remoteNum = Number(feed.number) || 0;
+        const remoteBuild = String(feed.build || (remoteNum ? ('build-' + remoteNum) : '')).trim();
+        // Unstamped HTML (dev / Pages source) has no build number to compare.
+        if (remoteNum > 0 && localNum > 0) {
+          compared = true;
+          if (remoteNum > localNum) {
+            messages.push(t('aboutUpdateWeb', { build: remoteBuild }));
+            downloadUrl = String(feed.downloadUrl || '').trim();
+          }
+        }
       }
-      const localNum = pdfManagerLocalBuildNumber();
-      const remoteNum = Number(feed.number) || 0;
-      const remoteBuild = String(feed.build || (remoteNum ? ('build-' + remoteNum) : '')).trim();
-      if (remoteNum > 0 && localNum > 0 && remoteNum > localNum) {
-        // On desktop the package version is primary; phrase editor updates clearly.
-        messages.push(
-          isDesktop
-            ? t('aboutUpdateEditor', { build: remoteBuild })
-            : t('aboutUpdateWeb', { build: remoteBuild })
-        );
-      }
-      // Unstamped local HTML (dev / Pages source): still hint if a release exists
-      // and we are clearly behind is unknown — skip to avoid false alarms.
-      return { outdated: messages.length > 0, messages, feed };
+      if (!/^https:\/\//i.test(downloadUrl)) downloadUrl = '';
+      return { outdated: messages.length > 0, upToDate: compared && !messages.length, messages, downloadUrl, feed };
     }
 
     function pdfManagerFormatAboutVersionHtml(opts) {
@@ -29982,7 +30023,7 @@
       const aboutKind = isDesktop ? t('aboutDesktop') : t('aboutWeb');
       const repoLineHtml = PDF_MANAGER_REPO_URL
         ? `<p style="margin:6px 0 0; font-size:12px; color:#555;">${escapeHtml(t('aboutRepository'))}
-             <a href="${escapeHtml(PDF_MANAGER_REPO_URL)}" target="_blank" rel="noopener noreferrer"
+             <a id="aboutRepoLink" href="${escapeHtml(PDF_MANAGER_REPO_URL)}" target="_blank" rel="noopener noreferrer"
                 style="color:#2f7bd6;">${escapeHtml(PDF_MANAGER_REPO_LABEL)}</a></p>`
         : '';
       const updateLineHtml = isOfflineHtml
@@ -30019,6 +30060,8 @@
         document.removeEventListener('keydown', onKey, true);
       };
       box.querySelector('#aboutCloseBtn').onclick = close;
+      const repoLink = box.querySelector('#aboutRepoLink');
+      if (repoLink) repoLink.addEventListener('click', (e) => pdfManagerOpenExternalLink(e, repoLink.href));
       overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
       const onKey = (e) => {
         if (e.key === 'Escape' || e.key === 'Enter') { e.preventDefault(); close(); }
@@ -30054,12 +30097,34 @@
           if (!el) return;
           if (result && result.outdated && result.messages && result.messages.length) {
             el.style.display = 'block';
-            el.classList.remove('pm-about-update-fail');
+            el.classList.remove('pm-about-update-fail', 'pm-about-update-ok');
             el.classList.add('pm-about-update-warn');
             el.style.background = '#fff6e5';
             el.style.borderColor = '#f0c36d';
             el.style.color = '#7a4b00';
             el.textContent = result.messages.join(' ');
+            if (result.downloadUrl) {
+              const a = document.createElement('a');
+              a.href = result.downloadUrl;
+              a.target = '_blank';
+              a.rel = 'noopener noreferrer';
+              a.className = 'pm-about-update-dl';
+              a.textContent = t('aboutUpdateDownload');
+              a.addEventListener('click', (e) => pdfManagerOpenExternalLink(e, result.downloadUrl));
+              el.appendChild(document.createTextNode(' '));
+              el.appendChild(a);
+            }
+            return;
+          }
+          if (result && result.upToDate) {
+            el.style.display = 'block';
+            el.classList.remove('pm-about-update-fail', 'pm-about-update-warn');
+            el.classList.add('pm-about-update-ok');
+            el.style.background = '#eaf7ee';
+            el.style.borderColor = '#9fd5ae';
+            el.style.color = '#1e6b34';
+            el.style.fontWeight = '500';
+            el.textContent = t('aboutUpToDate');
             return;
           }
           if (!result) {
