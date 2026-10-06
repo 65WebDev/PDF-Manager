@@ -1568,6 +1568,28 @@
       cursor: inherit;
     }
     .pm-pop-cap.pm-pop-cap--left::after { left: auto; right: calc(100% + 8px); }
+    /*An invisible part of the button over the 8px gap and the caption's
+       column (--pm-cap-w, set by pmPopCapUpdate), from its own bridge above
+       down to its bottom: moving between the button and its caption, or
+       down the captions, never lands on what is under them. Each button's
+       own rule keeps the top of its bridge; the rest is set here.*/
+    :where(.pm-pop-cap.show:not(.rl-slot-main))::before {
+      content: '';
+      position: absolute;
+      top: 0;
+    }
+    .pm-pop-cap.show:not(.rl-slot-main)::before {
+      left: 0 !important;
+      right: calc(-8px - var(--pm-cap-w, 0px)) !important;
+      bottom: -1px !important;   /* over the button's own 1px border too */
+      height: auto !important;
+    }
+    /*The logo's popups have no bridge of their own over the gap above.*/
+    #logoMenuArea > button.pm-pop-cap.show::before { top: calc(-1px - var(--logo-popup-gap, 6px)); }
+    .pm-pop-cap.pm-pop-cap--left.show:not(.rl-slot-main)::before {
+      left: calc(-8px - var(--pm-cap-w, 0px)) !important;
+      right: 0 !important;
+    }
     .pm-pop-cap.show:not(.rl-slot-main)::after { display: block; }
     .pm-pop-cap.show:hover:not(:disabled)::after { background: rgba(52, 152, 219, 0.96); }
     .top-menu.collapsed #desktopMenuToggleBtn.pm-pop-cap::after,
@@ -12681,7 +12703,9 @@
       if (btn.getAttribute('data-pm-caption') !== text) btn.setAttribute('data-pm-caption', text);
       if (!btn.classList.contains('show')) return;
       const r = btn.getBoundingClientRect();
-      const fitsRight = r.right + 8 + pmPopCapWidth(text) <= window.innerWidth - 6;
+      const capW = pmPopCapWidth(text);
+      const fitsRight = r.right + 8 + capW <= window.innerWidth - 6;
+      btn.style.setProperty('--pm-cap-w', capW + 'px');
       btn.classList.toggle('pm-pop-cap--left', !fitsRight);
     }
     function pmPopCapsInit() {
