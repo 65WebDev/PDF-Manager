@@ -161,6 +161,29 @@ async fn fetch_url_text(url: String) -> Result<String, String> {
   resp.text().await.map_err(|e| format!("Чтение ответа: {e}"))
 }
 
+/// Open an https:// link in the system browser — the About box's download
+/// page of a newer release and the repository link (target=_blank does not
+/// leave the WebView on its own).
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+  let parsed = url::Url::parse(url.trim()).map_err(|e| format!("Неверный адрес: {e}"))?;
+  if parsed.scheme() != "https" {
+    return Err("Разрешены только HTTPS-ссылки".into());
+  }
+  let target = parsed.as_str();
+  #[cfg(target_os = "windows")]
+  let spawned = std::process::Command::new("rundll32")
+    .args(["url.dll,FileProtocolHandler", target])
+    .spawn();
+  #[cfg(target_os = "macos")]
+  let spawned = std::process::Command::new("open").arg(target).spawn();
+  #[cfg(all(unix, not(target_os = "macos")))]
+  let spawned = std::process::Command::new("xdg-open").arg(target).spawn();
+  spawned
+    .map(|_| ())
+    .map_err(|e| format!("Не удалось открыть ссылку: {e}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   // argv[0] is the executable; the rest may include PDF paths from the shell.
@@ -182,6 +205,7 @@ pub fn run() {
       read_local_file,
       write_local_file,
       fetch_url_text,
+      open_external_url,
       maximize_main_window_cmd
     ])
     .setup(move |app| {
@@ -217,6 +241,13 @@ mod tests {
   fn quoted_windows_path_is_collected() {
     let paths = collect_pdf_paths_from_args([r#""D:\docs\a b.pdf""#]);
     assert_eq!(paths.len(), 1);
+  }
+
+  #[test]
+  fn open_external_url_rejects_non_https() {
+    assert!(open_external_url("http://example.com".into()).is_err());
+    assert!(open_external_url("file:///etc/passwd".into()).is_err());
+    assert!(open_external_url("not a url".into()).is_err());
   }
 
   #[test]
