@@ -1195,9 +1195,19 @@
     .pm-pf-arrow { flex: none; width: 24px; font-size: 22px; color: #6b7785; text-align: center; }
     .pm-pf-nav { justify-content: center; }
     .pm-pf-box .pm-wm-row[hidden] { display: none; }
-    /*Auto-crop dialog (pmAcRunDialog): the page format dialog's layout.*/
-    .pm-ac-box .pm-hf-col-left .pm-wm-label { width: 128px; }
-    #pmAcRange { flex: none; width: 150px; }
+    /*Auto-crop dialog (pmAcRunDialog): the page format dialog's layout,
+       narrower - the preview's "before" and "after" sit closer together.*/
+    .pm-ac-box { width: 712px; }
+    .pm-ac-box .pm-hf-col-left .pm-wm-label { width: 116px; white-space: nowrap; }
+    .pm-ac-modes { display: flex; flex-direction: column; align-items: stretch; gap: 6px; }
+    .pm-ac-modes .pm-wm-tbtn { text-align: left; }
+    .pm-ac-vsep { width: 1px; align-self: stretch; margin: 2px 3px; background: #e3e6ea; }
+    html[data-theme="dark"] .pm-wm-box .pm-ac-vsep { background: #3a4048; }
+    .pm-ac-box .pm-hf-cols { gap: 12px; }
+    .pm-ac-box .pm-hf-col-right { padding-left: 12px; }
+    .pm-ac-box .pm-pf-dim { width: 64px; }
+    .pm-ac-box .pm-wm-pages-line { flex-direction: column; align-items: flex-start; gap: 4px; }
+    #pmAcRange { flex: none; width: 96px; }
     .pm-ac-box .pm-hf-col-right .pm-wm-label { width: auto; text-align: left; padding-right: 0; margin-right: 6px; }
     .pm-pf-box .pm-wm-ok:disabled { opacity: 0.5; cursor: default; background: #3498db; }
     html[data-theme="dark"] .pm-wm-box .pm-pf-preview { background: rgba(255,255,255,0.05); }
@@ -67714,7 +67724,7 @@ let pmAcDialogOpen = false;
 function pmAcDefaults() {
   return {
     margin: 5,          // mm kept around the content
-    mode: 'each',       // each | same
+    mode: 'same',       // same | each
     white: 95,          // %: lighter than this counts as white
     specks: true        // ignore lone dots (scanner dust)
   };
@@ -67724,7 +67734,7 @@ function pmAcSanitize(s) {
   const d = pmAcDefaults();
   const out = Object.assign({}, d, s || {});
   out.margin = pmWmClampNum(out.margin, 0, 50, d.margin);
-  out.mode = out.mode === 'same' ? 'same' : 'each';
+  out.mode = out.mode === 'each' ? 'each' : 'same';
   out.white = Math.round(pmWmClampNum(out.white, 50, 100, d.white));
   out.specks = out.specks !== false;
   return out;
@@ -67970,13 +67980,14 @@ function pmAcRunDialog() {
             <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('acMargin'))}</span>
               <span class="pm-pf-dim">${pmWmNumField('pmAcMargin', 0, 50, 1)}</span>
             </div>
-            <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('acMode'))}</span>
-              ${tbtn('acmode', 'each', t('acModeEach'), t('acModeEachHint'))}${tbtn('acmode', 'same', t('acModeSame'), t('acModeSameHint'))}
+            <div class="pm-wm-row pm-wm-row-top"><span class="pm-wm-label">${esc(t('acMode'))}</span>
+              <div class="pm-ac-modes">
+                ${tbtn('acmode', 'same', t('acModeSame'), t('acModeSameHint'))}${tbtn('acmode', 'each', t('acModeEach'), t('acModeEachHint'))}
+              </div>
             </div>
             <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('acWhite'))}</span>
               <span class="pm-pf-dim" title="${esc(t('acWhiteHint'))}">${pmWmNumField('pmAcWhite', 50, 100, 1)}</span>
-            </div>
-            <div class="pm-wm-row"><span class="pm-wm-label"></span>
+              <span class="pm-ac-vsep" aria-hidden="true"></span>
               <label class="pm-wm-check"><input type="checkbox" id="pmAcSpecks"> ${esc(t('acSpecks'))}</label>
             </div>
           </div>
@@ -67988,7 +67999,7 @@ function pmAcRunDialog() {
                   <label><input type="radio" name="pmAcPages" value="selected"${selected.length ? '' : ' disabled'}> ${esc(t('wmPagesSelected', { n: selected.length }))}</label>
                 </div>
                 <label><input type="radio" name="pmAcPages" value="range"> ${esc(t('wmPagesRange'))}
-                  <input type="text" id="pmAcRange" placeholder="${esc(t('wmRangePlaceholder'))}" spellcheck="false" autocomplete="off"></label>
+                  <input type="text" id="pmAcRange" placeholder="1-3, 5" spellcheck="false" autocomplete="off"></label>
               </div>
             </div>
           </div>
@@ -68293,6 +68304,15 @@ function pmAcRunDialog() {
     };
     window.addEventListener('resize', onResize);
 
+    // Labels on the left: one column as wide as the longest of them in
+    // this language (at least the CSS width), never wrapped.
+    (function fitLabels() {
+      const labels = [...box.querySelectorAll('.pm-hf-col-left .pm-wm-label')];
+      labels.forEach(l => { l.style.width = 'auto'; });
+      const w = Math.max(...labels.map(l => Math.ceil(l.getBoundingClientRect().width)));
+      labels.forEach(l => { l.style.width = ''; });
+      if (w > 116) labels.forEach(l => { l.style.width = w + 'px'; });
+    })();
     syncControls();
     analyse();
     marginIn.focus();
