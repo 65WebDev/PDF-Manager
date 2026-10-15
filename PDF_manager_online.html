@@ -23079,6 +23079,7 @@
     // browser gives us one, so the caller can wait for the OS transition
     // instead of racing it - see the comment in enterReadMode().
     function requestReadModeFullscreen() {
+      if (pdfManagerIsDesktopShell()) return pmDesktopReadModeFullscreen(true);
       if (!isTouchDevice) return null;
       const el = document.documentElement;
       const req = el.requestFullscreen || el.webkitRequestFullscreen || el.webkitRequestFullScreen;
@@ -23090,6 +23091,7 @@
       return null;
     }
     function exitReadModeFullscreen() {
+      if (pdfManagerIsDesktopShell()) { pmDesktopReadModeFullscreen(false); return; }
       const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
       if (!fsEl) return;
       const exit = document.exitFullscreen || document.webkitExitFullscreen || document.webkitCancelFullScreen;
@@ -23098,6 +23100,35 @@
         const p = exit.call(document);
         if (p && typeof p.catch === 'function') p.catch(function () {});
       } catch (_) {}
+    }
+
+    // Desktop app: reading mode takes the whole screen - the window's title
+    // bar and the taskbar go away, and come back when the mode ends. The
+    // WebView's own Fullscreen API only fills the window, so the shell is
+    // asked (set_main_window_fullscreen). Resolves (never rejects) once the
+    // window has been resized, or after a short wait, so the reading-mode
+    // scale is worked out for the new size.
+    function pmDesktopReadModeFullscreen(on) {
+      let invoke = null;
+      try { invoke = window.__TAURI__ && window.__TAURI__.core && window.__TAURI__.core.invoke; } catch (_) {}
+      if (typeof invoke !== 'function') return null;
+      return new Promise((resolve) => {
+        let done = false;
+        const finish = () => {
+          if (done) return;
+          done = true;
+          window.removeEventListener('resize', onResize);
+          clearTimeout(timer);
+          resolve();
+        };
+        const onResize = () => setTimeout(finish, 50);
+        const timer = setTimeout(finish, 600);
+        window.addEventListener('resize', onResize);
+        try {
+          Promise.resolve(invoke.call(window.__TAURI__.core, 'set_main_window_fullscreen', { fullscreen: !!on }))
+            .catch((err) => { console.warn('set_main_window_fullscreen', err); finish(); });
+        } catch (_) { finish(); }
+      });
     }
 
     // ---- Full screen while a document is open (touch) -------------------
@@ -23120,6 +23151,9 @@
 
     function pmArmDocFullscreen() {
       if (!isTouchDevice || pmDocFullscreenAsked || pmDocFullscreenArmed) return;
+      // The desktop app has no browser bar to hide; only reading mode takes
+      // its window full screen.
+      if (pdfManagerIsDesktopShell()) return;
       if (pmIsFullscreen()) return;
       pmDocFullscreenArmed = true;
       const fire = () => {
@@ -23189,7 +23223,7 @@
         // same thread is what stretches out the visible black frame. Capped
         // so a browser that resolves late (or silently never settles) can't
         // stall entering reading mode.
-        await Promise.race([fsPromise, new Promise((r) => setTimeout(r, 350))]);
+        await Promise.race([fsPromise, new Promise((r) => setTimeout(r, pdfManagerIsDesktopShell() ? 700 : 350))]);
       }
       if (typeof pmSyncLayout === 'function') pmSyncLayout();
 
