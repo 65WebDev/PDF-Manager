@@ -23167,6 +23167,9 @@
     const PM_RM_HIDE_ON_SCROLL = new Set(['pmPagePrevBtn', 'pmPageNextBtn', 'readModeScaleOverlay', 'helpToggle']);
     let pmRmScrolling = false;
     let pmRmScrollTimer = null;
+    // Left button held on the pages (or their scrollbar): the pointer is
+    // busy moving the document, so passing near a control reveals nothing.
+    let pmRmGrabbing = false;
     const PM_RM_FADE_TARGETS = [
       ['pmPagePrevBtn', 0.1], ['pmPageNextBtn', 0.1], ['readModeScaleOverlay', 0.1],
       ['helpToggle', 0.1], ['desktopMenuToggleBtn', 0.5]
@@ -23182,7 +23185,7 @@
         if (!el) return;
         let near = 0;
         let over = false;
-        if (pmRmFadePt) {
+        if (pmRmFadePt && !pmRmGrabbing) {
           const r = el.getBoundingClientRect();
           if (r.width && r.height) {
             const dx = Math.max(r.left - pmRmFadePt.x, 0, pmRmFadePt.x - r.right);
@@ -23210,6 +23213,7 @@
     function pmReadModeFadeSet(on) {
       document.body.classList.toggle('pm-rm-fade', !!on);
       pmRmScrolling = false;
+      pmRmGrabbing = false;
       clearTimeout(pmRmScrollTimer);
       if (on) { pmReadModeFadeSchedule(); return; }
       PM_RM_FADE_TARGETS.forEach(([id]) => {
@@ -23222,6 +23226,22 @@
       pmRmFadePt = { x: e.clientX, y: e.clientY };
       if (document.body.classList.contains('pm-rm-fade')) pmReadModeFadeSchedule();
     }, { capture: true, passive: true });
+    document.addEventListener('pointerdown', (e) => {
+      if (!document.body.classList.contains('pm-rm-fade') || e.pointerType === 'touch' || e.button !== 0) return;
+      const tgt = e.target;
+      if (!tgt || !tgt.closest || !tgt.closest('#scrollContainer')) return;
+      if (tgt.closest('.pm-page-nav-btn, #readModeScaleOverlay, #helpToggle, #helpPanel, #logoMenuArea, .top-menu, #pmAutoScrollSpeed, #pmAutoScrollPauseBtn')) return;
+      pmRmGrabbing = true;
+      pmReadModeFadeSchedule();
+    }, true);
+    const pmRmGrabEnd = () => {
+      if (!pmRmGrabbing) return;
+      pmRmGrabbing = false;
+      if (document.body.classList.contains('pm-rm-fade')) pmReadModeFadeSchedule();
+    };
+    window.addEventListener('pointerup', pmRmGrabEnd, true);
+    window.addEventListener('pointercancel', pmRmGrabEnd, true);
+    window.addEventListener('blur', pmRmGrabEnd);
     document.documentElement.addEventListener('mouseleave', () => {
       pmRmFadePt = null;
       if (document.body.classList.contains('pm-rm-fade')) pmReadModeFadeSchedule();
