@@ -68,11 +68,15 @@ fn focus_main_window(app: &AppHandle) {
 }
 
 /// Maximize the main window (Windows “развернуть”), not exclusive fullscreen.
+/// Left alone while it is full screen (reading mode): that ends on its own
+/// and brings the window back as it was.
 fn maximize_main_window(app: &AppHandle) {
   if let Some(window) = app.get_webview_window("main") {
     let _ = window.show();
     let _ = window.unminimize();
-    let _ = window.maximize();
+    if !window.is_fullscreen().unwrap_or(false) {
+      let _ = window.maximize();
+    }
     let _ = window.set_focus();
   }
 }
@@ -104,6 +108,20 @@ fn take_pending_open_files(state: State<'_, PendingOpenFiles>) -> Vec<String> {
 #[tauri::command]
 fn maximize_main_window_cmd(app: AppHandle) {
   maximize_main_window(&app);
+}
+
+/// Reading mode: the main window covers the whole screen (no title bar, no
+/// taskbar); leaving it returns the window to its previous state.
+#[tauri::command]
+fn set_main_window_fullscreen(app: AppHandle, fullscreen: bool) -> Result<(), String> {
+  let window = app
+    .get_webview_window("main")
+    .ok_or_else(|| "Главное окно не найдено".to_string())?;
+  window
+    .set_fullscreen(fullscreen)
+    .map_err(|e| format!("Полноэкранный режим: {e}"))?;
+  let _ = window.set_focus();
+  Ok(())
 }
 
 /// Read a local PDF for the embedded editor (file-association / Open with).
@@ -206,7 +224,8 @@ pub fn run() {
       write_local_file,
       fetch_url_text,
       open_external_url,
-      maximize_main_window_cmd
+      maximize_main_window_cmd,
+      set_main_window_fullscreen
     ])
     .setup(move |app| {
       // Always start maximized (Windows "развернуть"), not just when opened
