@@ -3857,6 +3857,17 @@
     body.read-mode-active.pm-rm-fade .pm-page-nav-btn { transition: opacity 0.25s ease, top 0.15s ease, left 0.15s ease, background 0.15s; }
     body.read-mode-active.pm-rm-fade #readModeScaleOverlay { transition: opacity 0.25s ease; }
     body.read-mode-active.pm-rm-fade #helpToggle { transition: opacity 0.25s ease, background 0.15s, transform 0.15s; }
+    /*The page held with the left button (pmRmGrabbing): the controls take no
+       pointer, so passing over them neither lights them up nor turns the
+       cursor into a pointing hand; dragging the page itself shows a grabbing
+       hand everywhere (not for the scrollbar - that keeps its own cursor).*/
+    body.read-mode-active.pm-rm-fade.pm-rm-grabbing .pm-page-nav-btn,
+    body.read-mode-active.pm-rm-fade.pm-rm-grabbing #readModeScaleOverlay,
+    body.read-mode-active.pm-rm-fade.pm-rm-grabbing #helpToggle,
+    body.read-mode-active.pm-rm-fade.pm-rm-grabbing #logoMenuArea,
+    body.read-mode-active.pm-rm-fade.pm-rm-grabbing #desktopMenuToggleBtn { pointer-events: none !important; }
+    body.read-mode-active.pm-rm-fade.pm-rm-panning,
+    body.read-mode-active.pm-rm-fade.pm-rm-panning * { cursor: grabbing !important; }
     body.read-mode-active.pm-rm-fade .top-menu.collapsed #desktopMenuToggleBtn { opacity: var(--pm-rm-op, 0.5) !important; }
     /*Navigation and reading mode on touch: the pages take no pointer events
        there, so a long press lands on the scroll area itself - no selection,
@@ -23214,6 +23225,7 @@
       document.body.classList.toggle('pm-rm-fade', !!on);
       pmRmScrolling = false;
       pmRmGrabbing = false;
+      document.body.classList.remove('pm-rm-grabbing', 'pm-rm-panning');
       clearTimeout(pmRmScrollTimer);
       if (on) { pmReadModeFadeSchedule(); return; }
       PM_RM_FADE_TARGETS.forEach(([id]) => {
@@ -23232,9 +23244,15 @@
       if (!tgt || !tgt.closest || !tgt.closest('#scrollContainer')) return;
       if (tgt.closest('.pm-page-nav-btn, #readModeScaleOverlay, #helpToggle, #helpPanel, #logoMenuArea, .top-menu, #pmAutoScrollSpeed, #pmAutoScrollPauseBtn')) return;
       pmRmGrabbing = true;
+      // On the scrollbar (right of the content box) it is not a page drag.
+      const sr = scrollContainer.getBoundingClientRect();
+      const onBar = tgt === scrollContainer && (e.clientX - sr.left) >= scrollContainer.clientWidth;
+      document.body.classList.add('pm-rm-grabbing');
+      document.body.classList.toggle('pm-rm-panning', !onBar);
       pmReadModeFadeSchedule();
     }, true);
     const pmRmGrabEnd = () => {
+      document.body.classList.remove('pm-rm-grabbing', 'pm-rm-panning');
       if (!pmRmGrabbing) return;
       pmRmGrabbing = false;
       if (document.body.classList.contains('pm-rm-fade')) pmReadModeFadeSchedule();
