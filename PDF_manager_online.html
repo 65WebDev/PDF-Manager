@@ -3844,6 +3844,27 @@
     body.read-mode-active #insertIndicator {
       display: none !important;
     }
+    /*Reading mode on desktop (class pm-rm-fade, set with the mode): no page
+       number tab or scrollbar page number, and the floating controls nearly
+       vanish - they come back as the pointer nears them (--pm-rm-op, from
+       pmReadModeFadeUpdate): arrows, zoom and "?" from 10%, the menu from 50%.*/
+    body.read-mode-active.pm-rm-fade #pageNumTab,
+    body.read-mode-active.pm-rm-fade #scrollPageIndicator { display: none !important; }
+    body.read-mode-active.pm-rm-fade .pm-page-nav-btn,
+    body.read-mode-active.pm-rm-fade #readModeScaleOverlay,
+    body.read-mode-active.pm-rm-fade #helpToggle { opacity: var(--pm-rm-op, 0.1) !important; }
+    body.read-mode-active.pm-rm-fade .top-menu.collapsed #desktopMenuToggleBtn { opacity: var(--pm-rm-op, 0.5) !important; }
+    /*Navigation and reading mode on touch: the pages take no pointer events
+       there, so a long press lands on the scroll area itself - no selection,
+       no callout (the browser buzzes the phone for those).*/
+    @media (pointer: coarse) {
+      body.nav-mode-active #scrollContainer,
+      body.nav-mode-active #scrollContainer * {
+        -webkit-touch-callout: none !important;
+        -webkit-user-select: none !important;
+        user-select: none !important;
+      }
+    }
     /*The text layer should not remain in the DOM during navigation - otherwise it will be raw text
        is superimposed on the preview and the page visually “doubles”.*/
     body.nav-mode-active .page-text-layer {
@@ -23131,6 +23152,64 @@
       });
     }
 
+    // Reading mode on desktop: the floating controls nearly vanish and come
+    // back as the pointer nears them - fully at the control, PM_RM_FADE_PX
+    // away still at their resting opacity (CSS: body.pm-rm-fade).
+    const PM_RM_FADE_PX = 50;
+    const PM_RM_FADE_TARGETS = [
+      ['pmPagePrevBtn', 0.1], ['pmPageNextBtn', 0.1], ['readModeScaleOverlay', 0.1],
+      ['helpToggle', 0.1], ['desktopMenuToggleBtn', 0.5]
+    ];
+    let pmRmFadeRaf = 0;
+    let pmRmFadePt = null;   // last mouse position, null while outside the window
+    function pmReadModeFadeUpdate() {
+      pmRmFadeRaf = 0;
+      if (!document.body.classList.contains('pm-rm-fade')) return;
+      const logoOpen = !!document.querySelector('#logoMenuArea.expanded');
+      PM_RM_FADE_TARGETS.forEach(([id, base]) => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        let near = 0;
+        if (pmRmFadePt) {
+          const r = el.getBoundingClientRect();
+          if (r.width && r.height) {
+            const dx = Math.max(r.left - pmRmFadePt.x, 0, pmRmFadePt.x - r.right);
+            const dy = Math.max(r.top - pmRmFadePt.y, 0, pmRmFadePt.y - r.bottom);
+            near = Math.max(0, Math.min(1, 1 - Math.hypot(dx, dy) / PM_RM_FADE_PX));
+          }
+        }
+        // In use: an arrow running auto-scroll, a focused control, the open
+        // logo menu - fully visible.
+        if (el.classList.contains('pm-nav-autoscroll') || el.matches(':focus-visible') ||
+            (id === 'desktopMenuToggleBtn' && logoOpen)) near = 1;
+        const top = el.disabled ? 0.35 : 1;
+        el.style.setProperty('--pm-rm-op', (base + (Math.max(base, top) - base) * near).toFixed(3));
+      });
+    }
+    function pmReadModeFadeSchedule() {
+      if (!pmRmFadeRaf) pmRmFadeRaf = requestAnimationFrame(pmReadModeFadeUpdate);
+    }
+    function pmReadModeFadeSet(on) {
+      document.body.classList.toggle('pm-rm-fade', !!on);
+      if (on) { pmReadModeFadeSchedule(); return; }
+      PM_RM_FADE_TARGETS.forEach(([id]) => {
+        const el = document.getElementById(id);
+        if (el) el.style.removeProperty('--pm-rm-op');
+      });
+    }
+    document.addEventListener('pointermove', (e) => {
+      if (e.pointerType === 'touch') return;
+      pmRmFadePt = { x: e.clientX, y: e.clientY };
+      if (document.body.classList.contains('pm-rm-fade')) pmReadModeFadeSchedule();
+    }, { capture: true, passive: true });
+    document.documentElement.addEventListener('mouseleave', () => {
+      pmRmFadePt = null;
+      if (document.body.classList.contains('pm-rm-fade')) pmReadModeFadeSchedule();
+    });
+    ['focusin', 'focusout', 'keyup'].forEach((type) => document.addEventListener(type, () => {
+      if (document.body.classList.contains('pm-rm-fade')) pmReadModeFadeSchedule();
+    }, true));
+
     // ---- Full screen while a document is open (touch) -------------------
     // A page cannot hide the browser's own top bar (back arrow, title,
     // share) any other way - the Fullscreen API is the only lever, and it
@@ -23290,6 +23369,7 @@
         syncReadModeScaleOverlay();
         const ov = document.getElementById('readModeScaleOverlay');
         if (ov) ov.style.opacity = '0.5';
+        pmReadModeFadeSet(true);
       }
       syncModeButtonSlots();
     }
@@ -23315,6 +23395,7 @@
 
       readModeActive = false;
       document.body.classList.remove('read-mode-active');
+      pmReadModeFadeSet(false);
       exitReadModeFullscreen();
       if (typeof pmSyncLayout === 'function') pmSyncLayout();
 
@@ -34566,6 +34647,14 @@
     // and interferes with dragging.
     document.addEventListener('contextmenu', (e) => {
       if (e.target.closest('.page, .icon-btn, .compact-btn, .mode-btn, .scale-control, #pageCountBox')) {
+        e.preventDefault();
+        return;
+      }
+      // Navigation / reading mode on touch: pages take no pointer events, so
+      // a long press is on the scroll area - its native long-press (and the
+      // vibration Android gives it) has nothing to offer there.
+      if (isTouchDevice && document.body.classList.contains('nav-mode-active') &&
+          e.target.closest && e.target.closest('#scrollContainer')) {
         e.preventDefault();
       }
     });
