@@ -3845,14 +3845,18 @@
       display: none !important;
     }
     /*Reading mode on desktop (class pm-rm-fade, set with the mode): no page
-       number tab or scrollbar page number, and the floating controls nearly
-       vanish - they come back as the pointer nears them (--pm-rm-op, from
-       pmReadModeFadeUpdate): arrows, zoom and "?" from 10%, the menu from 50%.*/
-    body.read-mode-active.pm-rm-fade #pageNumTab,
-    body.read-mode-active.pm-rm-fade #scrollPageIndicator { display: none !important; }
+       number tab (the scrollbar's page number stays), and the floating
+       controls nearly vanish - they come back as the pointer nears them
+       (--pm-rm-op, from pmReadModeFadeUpdate): arrows, zoom and "?" from 10%,
+       the menu from 50%. While the page scrolls the first three are gone
+       altogether and fade back in once it has been still for a while.*/
+    body.read-mode-active.pm-rm-fade #pageNumTab { display: none !important; }
     body.read-mode-active.pm-rm-fade .pm-page-nav-btn,
     body.read-mode-active.pm-rm-fade #readModeScaleOverlay,
     body.read-mode-active.pm-rm-fade #helpToggle { opacity: var(--pm-rm-op, 0.1) !important; }
+    body.read-mode-active.pm-rm-fade .pm-page-nav-btn { transition: opacity 0.25s ease, top 0.15s ease, left 0.15s ease, background 0.15s; }
+    body.read-mode-active.pm-rm-fade #readModeScaleOverlay { transition: opacity 0.25s ease; }
+    body.read-mode-active.pm-rm-fade #helpToggle { transition: opacity 0.25s ease, background 0.15s, transform 0.15s; }
     body.read-mode-active.pm-rm-fade .top-menu.collapsed #desktopMenuToggleBtn { opacity: var(--pm-rm-op, 0.5) !important; }
     /*Navigation and reading mode on touch: the pages take no pointer events
        there, so a long press lands on the scroll area itself - no selection,
@@ -23154,8 +23158,15 @@
 
     // Reading mode on desktop: the floating controls nearly vanish and come
     // back as the pointer nears them - fully at the control, PM_RM_FADE_PX
-    // away still at their resting opacity (CSS: body.pm-rm-fade).
+    // away still at their resting opacity (CSS: body.pm-rm-fade). While the
+    // page scrolls (dragging it, the scrollbar, the wheel) the arrows, zoom
+    // and "?" are gone altogether - unless one of them is the thing in use -
+    // and come back PM_RM_SCROLL_IDLE_MS after the last scroll.
     const PM_RM_FADE_PX = 50;
+    const PM_RM_SCROLL_IDLE_MS = 2000;
+    const PM_RM_HIDE_ON_SCROLL = new Set(['pmPagePrevBtn', 'pmPageNextBtn', 'readModeScaleOverlay', 'helpToggle']);
+    let pmRmScrolling = false;
+    let pmRmScrollTimer = null;
     const PM_RM_FADE_TARGETS = [
       ['pmPagePrevBtn', 0.1], ['pmPageNextBtn', 0.1], ['readModeScaleOverlay', 0.1],
       ['helpToggle', 0.1], ['desktopMenuToggleBtn', 0.5]
@@ -23170,18 +23181,25 @@
         const el = document.getElementById(id);
         if (!el) return;
         let near = 0;
+        let over = false;
         if (pmRmFadePt) {
           const r = el.getBoundingClientRect();
           if (r.width && r.height) {
             const dx = Math.max(r.left - pmRmFadePt.x, 0, pmRmFadePt.x - r.right);
             const dy = Math.max(r.top - pmRmFadePt.y, 0, pmRmFadePt.y - r.bottom);
+            over = dx === 0 && dy === 0;
             near = Math.max(0, Math.min(1, 1 - Math.hypot(dx, dy) / PM_RM_FADE_PX));
           }
         }
-        // In use: an arrow running auto-scroll, a focused control, the open
-        // logo menu - fully visible.
-        if (el.classList.contains('pm-nav-autoscroll') || el.matches(':focus-visible') ||
-            (id === 'desktopMenuToggleBtn' && logoOpen)) near = 1;
+        // In use: under the pointer, an arrow running auto-scroll, a focused
+        // control, the open logo menu - fully visible.
+        const inUse = over || el.classList.contains('pm-nav-autoscroll') || el.matches(':focus-visible') ||
+          (id === 'desktopMenuToggleBtn' && logoOpen);
+        if (inUse) near = 1;
+        if (pmRmScrolling && !inUse && PM_RM_HIDE_ON_SCROLL.has(id)) {
+          el.style.setProperty('--pm-rm-op', '0');
+          return;
+        }
         const top = el.disabled ? 0.35 : 1;
         el.style.setProperty('--pm-rm-op', (base + (Math.max(base, top) - base) * near).toFixed(3));
       });
@@ -23191,6 +23209,8 @@
     }
     function pmReadModeFadeSet(on) {
       document.body.classList.toggle('pm-rm-fade', !!on);
+      pmRmScrolling = false;
+      clearTimeout(pmRmScrollTimer);
       if (on) { pmReadModeFadeSchedule(); return; }
       PM_RM_FADE_TARGETS.forEach(([id]) => {
         const el = document.getElementById(id);
@@ -23209,6 +23229,15 @@
     ['focusin', 'focusout', 'keyup'].forEach((type) => document.addEventListener(type, () => {
       if (document.body.classList.contains('pm-rm-fade')) pmReadModeFadeSchedule();
     }, true));
+    // Any scroll of the pages - drag, scrollbar, wheel, keys - hides them;
+    // the idle timer restarts with every scroll event.
+    document.addEventListener('scroll', (e) => {
+      if (!document.body.classList.contains('pm-rm-fade')) return;
+      if (e.target !== scrollContainer) return;
+      if (!pmRmScrolling) { pmRmScrolling = true; pmReadModeFadeSchedule(); }
+      clearTimeout(pmRmScrollTimer);
+      pmRmScrollTimer = setTimeout(() => { pmRmScrolling = false; pmReadModeFadeSchedule(); }, PM_RM_SCROLL_IDLE_MS);
+    }, { capture: true, passive: true });
 
     // ---- Full screen while a document is open (touch) -------------------
     // A page cannot hide the browser's own top bar (back arrow, title,
