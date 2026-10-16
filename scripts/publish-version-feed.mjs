@@ -9,6 +9,7 @@
  *   COMMIT / SHORT_COMMIT / DOWNLOAD_URL / OFFLINE_DOWNLOAD_URL (optional)
  *   WINDOWS_VERSION / WINDOWS_DOWNLOAD_URL (optional; merged into existing feed)
  *   LINUX_VERSION / LINUX_DOWNLOAD_URL (optional; merged into existing feed)
+ *   ANDROID_VERSION / ANDROID_DOWNLOAD_URL (optional; merged into existing feed)
  *   SKIP_GH=1      write files only, do not upload/commit
  *   SKIP_COMMIT=1  upload release asset but do not commit to main
  *
@@ -116,10 +117,41 @@ function latestLinuxFromGh() {
   return null;
 }
 
+function latestAndroidFromGh() {
+  const r = runGh([
+    'release',
+    'list',
+    '--limit',
+    '30',
+    '--json',
+    'tagName,url',
+  ]);
+  if (r.status !== 0) return null;
+  try {
+    const list = JSON.parse(r.stdout || '[]');
+    for (const item of list) {
+      const tag = String(item.tagName || '');
+      const m = /^android-v(.+)$/i.exec(tag);
+      if (m) {
+        return {
+          androidVersion: m[1],
+          androidDownloadUrl:
+            item.url ||
+            `https://github.com/65WebDev/PDF-Manager/releases/tag/${tag}`,
+        };
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 function buildFeed() {
   const prev = readExistingFeed();
   const winGh = latestWindowsFromGh() || {};
   const linuxGh = latestLinuxFromGh() || {};
+  const androidGh = latestAndroidFromGh() || {};
 
   const build = env('BUILD', prev.build || '');
   const numberRaw = env('NUMBER', prev.number != null ? String(prev.number) : '');
@@ -156,6 +188,15 @@ function buildFeed() {
     linuxGh.linuxDownloadUrl || prev.linuxDownloadUrl || '',
   );
 
+  const androidVersion = env(
+    'ANDROID_VERSION',
+    androidGh.androidVersion || prev.androidVersion || '',
+  );
+  const androidDownloadUrl = env(
+    'ANDROID_DOWNLOAD_URL',
+    androidGh.androidDownloadUrl || prev.androidDownloadUrl || '',
+  );
+
   const feed = {
     build: build || prev.build || '',
     number: Number.isFinite(number) ? number : Number(prev.number) || 0,
@@ -168,6 +209,8 @@ function buildFeed() {
     windowsDownloadUrl,
     linuxVersion,
     linuxDownloadUrl,
+    androidVersion,
+    androidDownloadUrl,
     updatedAt: new Date().toISOString(),
   };
   return feed;
@@ -247,8 +290,8 @@ function commitFeedToMain() {
 
 function main() {
   const feed = buildFeed();
-  if (!feed.build && !feed.windowsVersion && !feed.linuxVersion) {
-    console.error('Nothing to publish: set BUILD/NUMBER and/or WINDOWS_VERSION/LINUX_VERSION');
+  if (!feed.build && !feed.windowsVersion && !feed.linuxVersion && !feed.androidVersion) {
+    console.error('Nothing to publish: set BUILD/NUMBER and/or WINDOWS_VERSION/LINUX_VERSION/ANDROID_VERSION');
     process.exit(1);
   }
   writeFeedFiles(feed);

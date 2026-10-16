@@ -24,6 +24,10 @@ const TAURI_OPEN_BRIDGE = `
 <script>
 /* Tauri desktop bridge: Open-with, second instance, Explorer drag-and-drop */
 (function () {
+  // The Android app shares this bridge: files sent to it ("Open with",
+  // "Share") arrive as paths of copies in the app cache.
+  var IS_ANDROID = /Android/i.test(navigator.userAgent || '');
+
   function waitFor(pred, tries, ms) {
     return new Promise(function (resolve) {
       var n = 0;
@@ -344,7 +348,8 @@ const TAURI_OPEN_BRIDGE = `
         // Tag with the real disk path (association / Explorer drag-drop /
         // second instance - never the in-app Open picker) so the main app
         // can write Save straight back to it without a save-location dialog.
-        file.__pmNativePath = path;
+        // Not on Android: there the path is a copy in the app cache.
+        if (!IS_ANDROID) file.__pmNativePath = path;
         files.push(file);
       } catch (err) {
         console.error('[Tauri] failed to read', path, err);
@@ -569,6 +574,54 @@ const TAURI_OPEN_BRIDGE = `
     }
   }
 
+  // A document with unsaved changes is about to be replaced (a phone has no
+  // tabs) - the same question as "Select file" asks.
+  async function confirmReplaceUnsaved() {
+    try {
+      var tabsOn = getGlobalFn('pmTabsEnabled');
+      if (tabsOn && tabsOn()) return true;
+      if (typeof pdfDoc === 'undefined' || !pdfDoc) return true;
+      if (typeof documentDirty === 'undefined' || !documentDirty) return true;
+      var ask = getGlobalFn('showConfirmDialog');
+      var tr = getGlobalFn('t');
+      if (!ask || !tr) return true;
+      return !!(await ask(tr('confirmOpenReplace'), {
+        html: true, yesText: tr('confirmOpenReplaceYes'), noText: tr('confirmOpenReplaceNo')
+      }));
+    } catch (_) {
+      return true;
+    }
+  }
+
+  // Android: a PDF sent to the running app (onNewIntent) is announced by the
+  // plugin calling window.__pmAndroidFilesPending(); returning to the app is
+  // a second chance to pick it up.
+  function watchAndroidOpenedFiles(invoke) {
+    var busy = false;
+    var again = false;
+    async function poll() {
+      if (busy) { again = true; return; }
+      busy = true;
+      try {
+        do {
+          again = false;
+          var paths = await invoke('take_pending_open_files');
+          if (paths && paths.length && await confirmReplaceUnsaved()) {
+            await openPaths(paths, invoke, null);
+          }
+        } while (again);
+      } catch (err) {
+        console.error('[Tauri] take_pending_open_files', err);
+      } finally {
+        busy = false;
+      }
+    }
+    window.__pmAndroidFilesPending = poll;
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') poll();
+    });
+  }
+
   async function boot() {
     var ready = await waitFor(function () {
       return !!(window.__TAURI__ && window.__TAURI__.core
@@ -602,6 +655,8 @@ const TAURI_OPEN_BRIDGE = `
       console.error('[Tauri] take_pending_open_files', err);
     }
 
+    if (IS_ANDROID) watchAndroidOpenedFiles(invoke);
+
     if (tauri.event && typeof tauri.event.listen === 'function') {
       try {
         await tauri.event.listen('open-files', function (event) {
@@ -621,6 +676,211 @@ const TAURI_OPEN_BRIDGE = `
   } else {
     boot();
   }
+})();
+</script>
+
+<script>
+/* Tauri Android bridge: Save / Export through the system file picker,
+   Share, Print, the Back key. Active in the Android app only. */
+(function () {
+  if (!/Android/i.test(navigator.userAgent || '')) return;
+
+  function invoke(cmd, args) {
+    var core = window.__TAURI__ && window.__TAURI__.core;
+    if (!core || typeof core.invoke !== 'function') {
+      return Promise.reject(new Error('Tauri API is not available'));
+    }
+    return core.invoke(cmd, args);
+  }
+
+  function abortError() {
+    try {
+      return new DOMException('The user aborted a request.', 'AbortError');
+    } catch (_) {
+      var e = new Error('The user aborted a request.');
+      e.name = 'AbortError';
+      return e;
+    }
+  }
+
+  var MIME_BY_EXT = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg' };
+  function mimeFor(name, fallback) {
+    var m = /\\.([a-z0-9]+)$/i.exec(String(name || ''));
+    return (m && MIME_BY_EXT[m[1].toLowerCase()]) || fallback || 'application/octet-stream';
+  }
+
+  // The Android WebView cannot pass a request body to the app, so a file
+  // goes over as base64 text, 3 MB of it per message, and is put together
+  // in the app cache (android_stage_chunk) under a token.
+  var CHUNK = 3 * 1024 * 1024;
+  var stageSeq = 0;
+
+  function readBase64(blob) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () {
+        var url = String(reader.result || '');
+        resolve(url.slice(url.indexOf(',') + 1));
+      };
+      reader.onerror = function () { reject(reader.error || new Error('read failed')); };
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function stage(data) {
+    var blob = data instanceof Blob ? data : new Blob([data]);
+    var token = 'f' + Date.now().toString(36) + '_' + (++stageSeq);
+    var offset = 0;
+    do {
+      var part = await readBase64(blob.slice(offset, offset + CHUNK));
+      await invoke('android_stage_chunk', { token: token, offset: offset, data: part });
+      offset += CHUNK;
+    } while (offset < blob.size);
+    return token;
+  }
+
+  // Stands in for FileSystemWritableFileStream: collects what is written,
+  // hands the whole file over on close().
+  function collectingWritable(onClose, onAbort) {
+    var parts = [];
+    return {
+      write: function (data) {
+        if (data && typeof data === 'object' && !(data instanceof Blob) &&
+            !(data instanceof ArrayBuffer) && !ArrayBuffer.isView(data) && 'data' in data) {
+          data = data.data;   // { type: 'write', data }
+        }
+        parts.push(data instanceof Blob ? data : new Blob([data]));
+        return Promise.resolve();
+      },
+      close: function () {
+        var blob = new Blob(parts);
+        parts = [];
+        return onClose(blob);
+      },
+      abort: function () {
+        parts = [];
+        return onAbort ? onAbort() : Promise.resolve();
+      }
+    };
+  }
+
+  // The editor saves through the File System Access API where a browser has
+  // it; the Android WebView does not, and its downloads go nowhere. These two
+  // pickers stand in for it with the system's own "Save as" and folder
+  // pickers, so Save, Export, Save by pages and image saving all keep their
+  // usual flow: the place is picked first, the file is written after.
+  window.showSaveFilePicker = async function (opts) {
+    opts = opts || {};
+    var name = String(opts.suggestedName || 'document.pdf');
+    var mime = null;
+    try {
+      var accept = opts.types && opts.types[0] && opts.types[0].accept;
+      if (accept) mime = Object.keys(accept)[0] || null;
+    } catch (_) {}
+    mime = mime || mimeFor(name, 'application/pdf');
+    var uri = await invoke('android_pick_save_target', { name: name, mime: mime });
+    if (!uri) throw abortError();
+    return {
+      kind: 'file',
+      name: name,
+      createWritable: async function () {
+        return collectingWritable(async function (blob) {
+          var token = await stage(blob);
+          await invoke('android_write_target', { uri: uri, token: token });
+        }, function () {
+          // Nothing was written (the file could not be made): do not leave
+          // an empty document behind.
+          return invoke('android_discard_target', { uri: uri }).catch(function () {});
+        });
+      }
+    };
+  };
+
+  window.showDirectoryPicker = async function () {
+    var folder = await invoke('android_pick_folder');
+    if (!folder) throw abortError();
+    return {
+      kind: 'directory',
+      name: '',
+      getFileHandle: async function (name) {
+        name = String(name);
+        return {
+          kind: 'file',
+          name: name,
+          createWritable: async function () {
+            return collectingWritable(async function (blob) {
+              var token = await stage(blob);
+              await invoke('android_write_into_folder', {
+                folder: folder, name: name, mime: mimeFor(name, 'application/pdf'), token: token
+              });
+            });
+          }
+        };
+      }
+    };
+  };
+
+  // Safety net: a download link the editor clicks as a fallback
+  // (<a download href="blob:...">) would do nothing in the WebView - its
+  // file goes to the system "Save as" instead.
+  var blobsByUrl = new Map();
+  var createObjectURL = URL.createObjectURL;
+  var revokeObjectURL = URL.revokeObjectURL;
+  URL.createObjectURL = function (obj) {
+    var url = createObjectURL.apply(URL, arguments);
+    if (obj instanceof Blob) blobsByUrl.set(url, obj);
+    return url;
+  };
+  URL.revokeObjectURL = function (url) {
+    blobsByUrl.delete(url);
+    return revokeObjectURL.apply(URL, arguments);
+  };
+  var anchorClick = HTMLAnchorElement.prototype.click;
+  HTMLAnchorElement.prototype.click = function () {
+    var blob = this.hasAttribute('download') ? blobsByUrl.get(this.href) : null;
+    if (!blob) return anchorClick.apply(this, arguments);
+    var name = this.getAttribute('download') || 'document.pdf';
+    (async function () {
+      var uri = await invoke('android_pick_save_target', { name: name, mime: blob.type || mimeFor(name, 'application/pdf') });
+      if (!uri) return;
+      var token = await stage(blob);
+      await invoke('android_write_target', { uri: uri, token: token });
+    })().catch(function (err) {
+      console.error('[Android] save', err);
+      alert(String(err && err.message ? err.message : err));
+    });
+  };
+
+  // Share sheet and print dialog (used by pmShareDocument / pmPrintPdfBytes).
+  window.__pmAndroid = {
+    share: async function (bytes, name, mime) {
+      var token = await stage(bytes);
+      await invoke('android_share_file', {
+        token: token, name: name || 'document.pdf', mime: mime || mimeFor(name, 'application/pdf')
+      });
+    },
+    print: async function (bytes, name) {
+      var token = await stage(bytes);
+      await invoke('android_print_file', { token: token, name: name || 'document.pdf' });
+    }
+  };
+
+  // Back key (asked by the plugin): closes what is open - a dialog, the page
+  // editor, search, reading mode - the way Esc does. false = nothing open,
+  // the app then goes to the background (it is not closed).
+  window.__pmAndroidBack = function () {
+    var searchOpen = false;
+    try { searchOpen = !!(typeof pmSearchState !== 'undefined' && pmSearchState && pmSearchState.open); } catch (_) {}
+    var open = !!document.querySelector('.modal-overlay-active') || searchOpen ||
+      document.body.classList.contains('read-mode-active');
+    if (!open) return false;
+    var target = (document.activeElement && document.activeElement !== document.body)
+      ? document.activeElement : document;
+    target.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Escape', code: 'Escape', keyCode: 27, which: 27, bubbles: true, cancelable: true
+    }));
+    return true;
+  };
 })();
 </script>
 `;

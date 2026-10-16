@@ -2,7 +2,8 @@
 <#
 .SYNOPSIS
   Build Windows .exe (Tauri) for PDF Manager — optionally also a Linux
-  .deb/.AppImage via WSL2 — and upload both to GitHub Releases.
+  .deb/.AppImage via WSL2 and an Android .apk — and upload them to GitHub
+  Releases.
 
 .DESCRIPTION
   Checks Node / Rust / MSVC link.exe, runs npm ci if needed, then release build.
@@ -22,18 +23,28 @@
   — dist-linux\ is visible there and gh is already authenticated); pass
   -Local to keep it a local-only build for either platform.
 
+  With -Android (or -AndroidOnly), the same commit is also built as an
+  Android APK (ARM phones and tablets) on this machine. Needs Android Studio
+  (SDK + NDK), JAVA_HOME / ANDROID_HOME / NDK_HOME and your signing key in
+  src-tauri\gen\android\keystore.properties — see docs\windows-tauri-build.md,
+  section Android. Unless -Local, the APK is uploaded to GitHub Release
+  android-v{version} (scripts\upload-android-apk.mjs).
+
   Output:
     - portable:        src-tauri\target\release\PDF Manager.exe
     - installer:        src-tauri\target\release\bundle\nsis\*.exe
     - GitHub (Windows):  release tag windows-v{version}
     - Linux (-Linux):    dist-linux\*.deb, dist-linux\*.AppImage
     - GitHub (Linux):    release tag linux-v{version}
+    - Android (-Android): dist-android\PDF-Manager_{version}.apk
+    - GitHub (Android):  release tag android-v{version}
 
   Docs: docs\windows-tauri-build.md
 
 .PARAMETER Local
-  Build only — do NOT upload to GitHub. Applies to both platforms: skips
-  npm run tauri:build:local's upload AND scripts\upload-linux-installer.mjs.
+  Build only — do NOT upload to GitHub. Applies to every platform: skips
+  npm run tauri:build:local's upload, scripts\upload-linux-installer.mjs and
+  scripts\upload-android-apk.mjs.
 
 .PARAMETER SkipNpmCi
   Skip npm ci (use when node_modules already exists).
@@ -58,6 +69,15 @@
   Build ONLY the Linux .deb/.AppImage via WSL2 — skips the Windows build
   entirely. Useful for iterating on the Linux side without waiting on a full
   Windows rebuild each time. Still uploads to linux-v{version} unless -Local.
+
+.PARAMETER Android
+  Also build the Android APK, after the Windows (and Linux) build, and
+  (unless -Local) upload it to GitHub Release android-v{version}.
+
+.PARAMETER AndroidOnly
+  Build ONLY the Android APK — skips the Windows build. Still uploads to
+  android-v{version} unless -Local. The version is the one in
+  src-tauri\tauri.conf.json (bumped by a Windows release build).
 
 .PARAMETER WslDistro
   WSL distro name to build in (see `wsl -l`). Default: your WSL default distro.
@@ -84,6 +104,14 @@
 .EXAMPLE
   # Only rebuild the Linux side (e.g. iterating without a Windows rebuild):
   .\scripts\build-windows-exe.ps1 -LinuxOnly -Local
+
+.EXAMPLE
+  # Windows + Linux + Android in one go:
+  .\scripts\build-windows-exe.ps1 -Linux -Android
+
+.EXAMPLE
+  # Only the Android APK, kept local (dist-android\):
+  .\scripts\build-windows-exe.ps1 -AndroidOnly -Local
 #>
 
 [CmdletBinding()]
@@ -96,11 +124,16 @@ param(
   [switch] $NoBump,
   [switch] $Linux,
   [switch] $LinuxOnly,
+  [switch] $Android,
+  [switch] $AndroidOnly,
   [string] $WslDistro
 )
 
 $ErrorActionPreference = 'Stop'
 $doUpload = -not $Local
+# -LinuxOnly / -AndroidOnly: no Windows build this run.
+$skipWindows = $LinuxOnly -or $AndroidOnly
+$npmCiDone = $false
 
 function Write-Step([string] $Message) {
   Write-Host ""
@@ -390,11 +423,12 @@ if (-not $SkipGitSync) {
   }
 }
 
-if ($LinuxOnly -and $doUpload) {
+if ($skipWindows -and $doUpload) {
   # The Windows-build block below (which normally checks node/gh) is skipped
-  # entirely under -LinuxOnly, but the Linux release upload still runs from
-  # here (PowerShell/Windows side, via node) after the WSL2 build finishes.
-  Write-Step "GitHub auth check (Linux upload)"
+  # entirely under -LinuxOnly / -AndroidOnly, but the Linux / Android release
+  # upload still runs from here (PowerShell/Windows side, via node) after the
+  # build finishes.
+  Write-Step "GitHub auth check (Linux / Android upload)"
   Assert-Cmd 'node' @"
 Install Node.js 20+ LTS: https://nodejs.org/
 Then open a NEW PowerShell window.
@@ -402,8 +436,8 @@ Then open a NEW PowerShell window.
   Ensure-GhAuth
 }
 
-if ($LinuxOnly) {
-  Write-Step "Windows build skipped (-LinuxOnly)"
+if ($skipWindows) {
+  Write-Step "Windows build skipped (-LinuxOnly / -AndroidOnly)"
 } else {
 
 Write-Step "Environment check"
@@ -443,6 +477,7 @@ if (-not $SkipNpmCi) {
   npm ci
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
   Write-Ok "dependencies installed"
+  $npmCiDone = $true
 } else {
   Write-Step "npm ci skipped (-SkipNpmCi)"
   if (-not (Test-Path (Join-Path $RepoRoot 'node_modules'))) {
@@ -574,7 +609,7 @@ Write-Host ""
 Write-Host "Run portable:" -ForegroundColor DarkGray
 Write-Host ('  & "{0}"' -f $portable) -ForegroundColor DarkGray
 
-} # end Windows build ($LinuxOnly)
+} # end Windows build ($skipWindows)
 
 if ($Linux -or $LinuxOnly) {
   Write-Step "Linux build via WSL2"
@@ -659,6 +694,154 @@ Install one (Ubuntu recommended), then re-open PowerShell and rerun this script:
   } finally {
     [Console]::OutputEncoding = $prevOutputEncoding
     if ($null -eq $prevWslUtf8) { Remove-Item Env:WSL_UTF8 -ErrorAction SilentlyContinue } else { $env:WSL_UTF8 = $prevWslUtf8 }
+  }
+}
+
+if ($Android -or $AndroidOnly) {
+  Write-Step "Android build (APK)"
+
+  Assert-Cmd 'node' @"
+Install Node.js 20+ LTS: https://nodejs.org/
+Then open a NEW PowerShell window.
+"@
+  Assert-Cmd 'npm' @"
+npm is installed with Node.js. Open a new terminal after install.
+"@
+  Assert-Cmd 'rustup' @"
+Install Rust (stable): https://rustup.rs/
+New terminal after rustup-init.exe.
+"@
+
+  # JDK: Android Studio's own (its jbr folder) is fine.
+  if (-not $env:JAVA_HOME -or -not (Test-Path -LiteralPath (Join-Path $env:JAVA_HOME 'bin\java.exe'))) {
+    Write-Fail "JAVA_HOME is not set to a JDK."
+    Write-Host @"
+Point it at Android Studio's JDK (once), then open a NEW PowerShell window:
+  [Environment]::SetEnvironmentVariable("JAVA_HOME", "C:\Program Files\Android\Android Studio\jbr", "User")
+See docs\windows-tauri-build.md, section Android.
+"@ -ForegroundColor Yellow
+    exit 1
+  }
+  Write-Ok ("JAVA_HOME - {0}" -f $env:JAVA_HOME)
+
+  $sdk = $env:ANDROID_HOME
+  if (-not $sdk) { $sdk = $env:ANDROID_SDK_ROOT }
+  if (-not $sdk -or -not (Test-Path -LiteralPath (Join-Path $sdk 'platform-tools'))) {
+    Write-Fail "ANDROID_HOME does not point to the Android SDK."
+    Write-Host @"
+Install the SDK with Android Studio (SDK Manager), then once:
+  [Environment]::SetEnvironmentVariable("ANDROID_HOME", "`$env:LocalAppData\Android\Sdk", "User")
+and open a NEW PowerShell window. See docs\windows-tauri-build.md, section Android.
+"@ -ForegroundColor Yellow
+    exit 1
+  }
+  $env:ANDROID_HOME = $sdk
+  Write-Ok ("ANDROID_HOME - {0}" -f $sdk)
+
+  if (-not $env:NDK_HOME -or -not (Test-Path -LiteralPath (Join-Path $env:NDK_HOME 'source.properties'))) {
+    # Not set (or stale): take the newest NDK installed in the SDK for this run.
+    $ndkRoot = Join-Path $sdk 'ndk'
+    $ndk = $null
+    if (Test-Path -LiteralPath $ndkRoot) {
+      $ndk = Get-ChildItem -LiteralPath $ndkRoot -Directory -ErrorAction SilentlyContinue |
+        Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName 'source.properties') } |
+        Sort-Object { try { [version]$_.Name } catch { [version]'0.0' } } |
+        Select-Object -Last 1
+    }
+    if (-not $ndk) {
+      Write-Fail "Android NDK not found (NDK_HOME, $ndkRoot)."
+      Write-Host @"
+Android Studio -> Settings -> Languages & Frameworks -> Android SDK -> SDK Tools:
+tick "NDK (Side by side)", Apply. Then rerun this script.
+"@ -ForegroundColor Yellow
+      exit 1
+    }
+    $env:NDK_HOME = $ndk.FullName
+  }
+  Write-Ok ("NDK_HOME - {0}" -f $env:NDK_HOME)
+
+  # Rust targets for ARM phones/tablets (64-bit and older 32-bit).
+  $androidTargets = @('aarch64-linux-android', 'armv7-linux-androideabi')
+  $installedTargets = @(& rustup target list --installed 2>$null)
+  foreach ($t in $androidTargets) {
+    if ($installedTargets -notcontains $t) {
+      Write-Host ("rustup target add {0}" -f $t) -ForegroundColor DarkGray
+      & rustup target add $t
+      if ($LASTEXITCODE -ne 0) {
+        Write-Fail ("rustup target add {0} failed." -f $t)
+        exit $LASTEXITCODE
+      }
+    }
+  }
+  Write-Ok ("Rust targets - {0}" -f ($androidTargets -join ', '))
+
+  if (-not $npmCiDone) {
+    if (-not $SkipNpmCi) {
+      Write-Step "npm ci"
+      npm ci
+      if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      $npmCiDone = $true
+    } elseif (-not (Test-Path (Join-Path $RepoRoot 'node_modules'))) {
+      Write-Fail "node_modules missing. Remove -SkipNpmCi or run npm ci."
+      exit 1
+    }
+  }
+
+  # Signing key: never in the repository (see app\build.gradle.kts).
+  $keystoreProps = Join-Path $RepoRoot 'src-tauri\gen\android\keystore.properties'
+  $hasKey = (Test-Path -LiteralPath $keystoreProps) -or [bool]$env:PM_ANDROID_KEYSTORE
+  if (-not $hasKey) {
+    if ($doUpload) {
+      Write-Fail "No signing key: $keystoreProps not found."
+      Write-Host @"
+An unsigned APK cannot be installed, so it is not uploaded. Create the key and
+keystore.properties (docs\windows-tauri-build.md, section Android), or build
+without upload:
+  .\scripts\build-windows-exe.ps1 -AndroidOnly -Local
+"@ -ForegroundColor Yellow
+      exit 1
+    }
+    Write-Host "WARN no keystore.properties - the APK will be UNSIGNED (cannot be installed)." -ForegroundColor Yellow
+  }
+
+  $ver = Get-AppVersion
+  Write-Host ("App version: {0}" -f $ver) -ForegroundColor DarkGray
+  Write-Host "First build may take 15-30+ minutes (Rust for two Android targets + Gradle)." -ForegroundColor DarkGray
+
+  $tauriCli = Join-Path $RepoRoot 'node_modules\@tauri-apps\cli\tauri.js'
+  & node $tauriCli android build --apk --target aarch64 --target armv7
+  if ($LASTEXITCODE -ne 0) {
+    Write-Fail ("Android build failed with exit code {0}" -f $LASTEXITCODE)
+    Write-Host "See docs\windows-tauri-build.md section Android." -ForegroundColor Yellow
+    exit $LASTEXITCODE
+  }
+
+  $apkDir = Join-Path $RepoRoot 'src-tauri\gen\android\app\build\outputs\apk\universal\release'
+  $apk = Get-ChildItem -LiteralPath $apkDir -Filter '*.apk' -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1
+  if (-not $apk) {
+    Write-Fail ("APK not found in {0}" -f $apkDir)
+    exit 1
+  }
+  if ($apk.Name -match 'unsigned') {
+    Write-Host ("WARN {0} is unsigned." -f $apk.Name) -ForegroundColor Yellow
+  }
+  $androidOutDir = Join-Path $RepoRoot 'dist-android'
+  New-Item -ItemType Directory -Force -Path $androidOutDir | Out-Null
+  $apkOut = Join-Path $androidOutDir ("PDF-Manager_{0}.apk" -f $ver)
+  Copy-Item -LiteralPath $apk.FullName -Destination $apkOut -Force
+  Write-Ok ("APK: {0}" -f $apkOut)
+
+  if ($doUpload) {
+    Write-Step "Android release upload (GitHub Release android-v{version})"
+    node (Join-Path $RepoRoot 'scripts\upload-android-apk.mjs')
+    if ($LASTEXITCODE -ne 0) {
+      Write-Fail "Android release upload failed."
+      exit $LASTEXITCODE
+    }
+  } else {
+    Write-Host "Local build only (-Local): Android GitHub upload skipped." -ForegroundColor DarkGray
   }
 }
 
