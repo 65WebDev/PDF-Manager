@@ -12,6 +12,15 @@ Not published by CI yet — build locally on Windows.
 - NSIS installer with **`.pdf` file association**
 - Open PDF via command line / “Open with” / second-instance handoff (single-instance plugin)
 
+## Android (APK)
+
+The same shell builds for Android (`gen/android/`, `src/android.rs`, Kotlin
+plugin `PdfBridgePlugin.kt`): PDFs from other apps (“Open with”, “Share”),
+Save / Export through the system file picker, Share, Print, full-screen
+reading mode. Build: `.\scripts\build-windows-exe.ps1 -AndroidOnly` — setup and
+signing key in **[docs/windows-tauri-build.md](../docs/windows-tauri-build.md)**,
+section 4b. Test APKs: GitHub Actions workflow **Android APK**.
+
 ## Full Windows guide (RU)
 
 See **[docs/windows-tauri-build.md](../docs/windows-tauri-build.md)** — установка Git/Node/Rust/Build Tools, `link.exe`, сборка `.exe`, ассоциация PDF, типичные ошибки.
