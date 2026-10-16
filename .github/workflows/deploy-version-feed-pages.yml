@@ -16,6 +16,13 @@ on:
       - 'PDF_manager_online.html'
       - '.nojekyll'
       - '.github/workflows/deploy-version-feed-pages.yml'
+      # Installable offline_ru app (PWA) at /ru/
+      - 'scripts/build-offline.mjs'
+      - 'scripts/build-offline-ru.mjs'
+      - 'scripts/build-pwa-ru.mjs'
+      - 'pwa/**'
+      - 'package.json'
+      - 'package-lock.json'
   workflow_dispatch:
   # The Release workflow commits version-feed.js with GITHUB_TOKEN. That
   # commit does not trigger `push` workflows, and creating the GitHub
@@ -62,6 +69,37 @@ jobs:
         with:
           enablement: true
 
+      # Installable Russian-only offline app (PWA), published at /ru/ - see
+      # scripts/build-pwa-ru.mjs. Built from the same stamped HTML as the
+      # release assets (runner-local stamp, never committed). If a CDN the
+      # offline build inlines from is down, the rest of the site (version
+      # feed for the About check, landing, online editor) still deploys;
+      # already installed copies keep working from their cache.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Build installable offline_ru app (PWA)
+        id: pwa
+        continue-on-error: true
+        run: |
+          npm ci
+          BUILD=$(jq -r '.build // empty' version.json)
+          DATE_ONLY=$(jq -r '.date // empty' version.json | cut -dT -f1)
+          cp PDF_manager_online.html "$RUNNER_TEMP/online-src.html"
+          if [[ "$BUILD" =~ ^build-[0-9]+$ ]] && [ -n "$DATE_ONLY" ]; then
+            sed -i \
+              -e "s/__PDF_MANAGER_BUILD__/${BUILD}/g" \
+              -e "s/__PDF_MANAGER_DATE__/${DATE_ONLY}/g" \
+              PDF_manager_online.html
+          fi
+          npm run build:offline
+          npm run build:offline-ru
+          npm run build:pwa-ru
+          # Back to the tracked source: the site copy below is stamped on its own.
+          cp "$RUNNER_TEMP/online-src.html" PDF_manager_online.html
+
       - name: Prepare site
         run: |
           mkdir -p _site
@@ -95,6 +133,12 @@ jobs:
             fi
           fi
           if [ -f .nojekyll ]; then cp .nojekyll _site/; else touch _site/.nojekyll; fi
+          if [ -d pwa-ru ] && [ -f pwa-ru/index.html ]; then
+            mkdir -p _site/ru && cp -r pwa-ru/. _site/ru/
+            echo "PWA (offline_ru) -> _site/ru"
+          else
+            echo "::warning::PWA (offline_ru) was not built - /ru/ is left out of this deploy"
+          fi
           if [ -f version-feed.js ]; then cp version-feed.js _site/; fi
           if [ -f version.json ]; then cp version.json _site/; fi
           # Tiny JS alias so Content-Type is always script-friendly.
