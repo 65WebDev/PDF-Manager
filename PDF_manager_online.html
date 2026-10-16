@@ -11741,6 +11741,9 @@
 
     let fileInput = null;
     let sourceFileHandle = null; //handle of the source file (File System Access API) for saving nearby
+    // Handles the system gave the installed app (launch queue): Save may ask
+    // to write back to these (pickSaveFileHandle).
+    const pmOsLaunchedHandles = new WeakSet();
     let lastDirHandle = null;    //last opening catalog - to offer it again
     // Desktop (Tauri) equivalent of sourceFileHandle: the real disk path a
     // document was opened from via file association / Explorer drag-drop /
@@ -11873,7 +11876,14 @@
     async function pickSaveFileHandle(suggestedName, { preferSourceFile = false } = {}) {
       if (preferSourceFile) {
         const src = getActiveTabSourceHandle();
-        if (src && (await queryHandlePermission(src, 'readwrite')) === 'granted') {
+        let state = src ? await queryHandlePermission(src, 'readwrite') : null;
+        // Opened from the system in the installed app ("Open with", default
+        // app): the file was handed to this app to edit, so Save writes back
+        // to it - the browser asks once for leave to change it.
+        if (state === 'prompt' && pmOsLaunchedHandles.has(src)) {
+          try { state = await src.requestPermission({ mode: 'readwrite' }); } catch (_) {}
+        }
+        if (src && state === 'granted') {
           return src;
         }
       }
@@ -35463,6 +35473,38 @@ async function pmOpenFilesAsTabs(files, handles, insertAt) {
     if (ok === false) break;
     at++;
   }
+}
+
+// Installed web app (PWA - scripts/build-pwa-ru.mjs): PDFs the system hands
+// over ("Open with", the default app for .pdf) come in through the launch
+// queue as file handles and open like the Open dialog's - in tabs, with the
+// handle kept so Save can write back to the same file (pickSaveFileHandle).
+// Anywhere else the queue never carries files, so this stays idle.
+if (window.launchQueue && typeof window.launchQueue.setConsumer === 'function') {
+  window.launchQueue.setConsumer(async (params) => {
+    const handles = ((params && params.files) || []).filter(h => h && h.kind === 'file');
+    if (!handles.length) return;
+    if (document.readyState === 'loading') {
+      await new Promise(r => document.addEventListener('DOMContentLoaded', r, { once: true }));
+    }
+    const files = [], kept = [];
+    for (const h of handles) {
+      try {
+        files.push(await h.getFile());
+        kept.push(h);
+        pmOsLaunchedHandles.add(h);
+      } catch (e) { console.warn('launchQueue: cannot read', h && h.name, e); }
+    }
+    if (!files.length) return;
+    if (pmTabsEnabled()) {
+      await pmOpenFilesAsTabs(files, kept);
+    } else if (files.length === 1) {
+      sourceFileHandle = kept[0];
+      await loadPDF(files[0]);
+    } else {
+      showMergeOrderModal(files, async (ordered) => { await openMultipleAsNewDocument(ordered); });
+    }
+  });
 }
 
 // Sorting files by name (natural) - “alphabetically”.
