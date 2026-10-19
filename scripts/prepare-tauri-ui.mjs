@@ -764,11 +764,19 @@ const TAURI_OPEN_BRIDGE = `
     };
   }
 
+  // The WebView's own File System Access (newer Android WebViews have it)
+  // hands the editor file handles that cannot be written back to: Save on a
+  // file opened with "Select file" failed with "An operation that depends on
+  // state cached in an interface object was made but the state had changed
+  // since it was read from disk". Files open through <input type=file>
+  // instead (the system file picker too), and are saved as below.
+  try { window.showOpenFilePicker = undefined; } catch (_) {}
+
   // The editor saves through the File System Access API where a browser has
-  // it; the Android WebView does not, and its downloads go nowhere. These two
-  // pickers stand in for it with the system's own "Save as" and folder
-  // pickers, so Save, Export, Save by pages and image saving all keep their
-  // usual flow: the place is picked first, the file is written after.
+  // it; in the Android app its downloads go nowhere. These two pickers stand
+  // in for it with the system's own "Save as" and folder pickers, so Save,
+  // Export, Save by pages and image saving all keep their usual flow: the
+  // place is picked first, the file is written after.
   window.showSaveFilePicker = async function (opts) {
     opts = opts || {};
     var name = String(opts.suggestedName || 'document.pdf');

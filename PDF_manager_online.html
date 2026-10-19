@@ -11967,7 +11967,9 @@
 
     /** Selecting a file to record: no unnecessary permission requests before the save dialog.*/
     async function pickSaveFileHandle(suggestedName, { preferSourceFile = false } = {}) {
-      if (preferSourceFile) {
+      // Android app: never write back through a handle the WebView gave out
+      // (it fails there) - Save always goes through the system "Save as".
+      if (preferSourceFile && !pmIsAndroidApp()) {
         const src = getActiveTabSourceHandle();
         if (src && (await queryHandlePermission(src, 'readwrite')) === 'granted') {
           return src;
