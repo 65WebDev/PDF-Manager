@@ -257,12 +257,23 @@ pub async fn android_print_file(app: AppHandle, token: String, name: String) -> 
   Ok(())
 }
 
-/// About box links: handed to the system (browser).
+/// Links of the UI (About box, links in a PDF): handed to the system -
+/// browser, mail app or dialer.
 #[tauri::command]
 pub async fn open_external_url(app: AppHandle, url: String) -> Result<(), String> {
   let parsed = crate::parse_external_url(&url)?;
   let _: Empty = call(&app, "openUrl", json!({ "url": parsed.as_str() })).await?;
   Ok(())
+}
+
+/// The same from the navigation guard (lib.rs), which runs on the UI thread
+/// and must not wait for the plugin there. `url` is already checked.
+pub fn open_url_detached(app: AppHandle, url: String) {
+  tauri::async_runtime::spawn(async move {
+    if let Err(e) = call::<Empty>(&app, "openUrl", json!({ "url": url })).await {
+      log::warn!("openUrl: {e}");
+    }
+  });
 }
 
 /// Reading mode: the status and navigation bars are hidden (a swipe from the

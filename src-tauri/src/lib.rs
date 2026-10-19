@@ -205,24 +205,56 @@ async fn fetch_url_text(url: String) -> Result<String, String> {
   resp.text().await.map_err(|e| format!("Чтение ответа: {e}"))
 }
 
-/// Only https:// links leave the app (About box: download page, repository).
+/// Links that may leave the app for the system's own apps: the web
+/// (browser), mail and phone. Anything else - file:, javascript:, custom
+/// protocol handlers a PDF might point at - is refused.
 fn parse_external_url(url: &str) -> Result<url::Url, String> {
   let parsed = url::Url::parse(url.trim()).map_err(|e| format!("Неверный адрес: {e}"))?;
-  if parsed.scheme() != "https" {
-    return Err("Разрешены только HTTPS-ссылки".into());
+  match parsed.scheme() {
+    "https" | "http" | "mailto" | "tel" => Ok(parsed),
+    _ => Err("Разрешены только ссылки http(s), mailto и tel".into()),
   }
-  Ok(parsed)
 }
 
-/// Open an https:// link in the system browser — the About box's download
-/// page of a newer release and the repository link (target=_blank does not
-/// leave the WebView on its own).
-/// (Android: `android::open_external_url` hands it to the system.)
+/// The app's own page (its custom protocol: tauri://localhost, or
+/// http(s)://tauri.localhost on Windows and Android) and documents made in
+/// the page (print frame, blobs) - the only places the window may show.
+fn is_app_url(url: &url::Url) -> bool {
+  matches!(url.scheme(), "tauri" | "about" | "blob" | "data")
+    || (matches!(url.scheme(), "http" | "https") && url.host_str() == Some("tauri.localhost"))
+}
+
+/// Keeps the window on the editor: a navigation anywhere else (a link in a
+/// PDF, a link to a new tab, a script) is cancelled, and a web, mail or
+/// phone address goes to the system's browser / mail app / dialer instead.
+fn links_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+  tauri::plugin::Builder::new("pm-links")
+    .on_navigation(|webview, url| {
+      if is_app_url(url) {
+        return true;
+      }
+      match parse_external_url(url.as_str()) {
+        Ok(external) => {
+          #[cfg(desktop)]
+          {
+            let _ = webview;
+            if let Err(e) = open_with_system(external.as_str()) {
+              log::warn!("{e}");
+            }
+          }
+          #[cfg(target_os = "android")]
+          android::open_url_detached(tauri::Manager::app_handle(webview).clone(), external.to_string());
+        }
+        Err(_) => log::warn!("navigation to {url} blocked"),
+      }
+      false
+    })
+    .build()
+}
+
+/// Hands a checked link to the system (browser, mail app, dialer).
 #[cfg(desktop)]
-#[tauri::command]
-fn open_external_url(url: String) -> Result<(), String> {
-  let parsed = parse_external_url(&url)?;
-  let target = parsed.as_str();
+fn open_with_system(target: &str) -> Result<(), String> {
   #[cfg(target_os = "windows")]
   let spawned = std::process::Command::new("rundll32")
     .args(["url.dll,FileProtocolHandler", target])
@@ -234,6 +266,17 @@ fn open_external_url(url: String) -> Result<(), String> {
   spawned
     .map(|_| ())
     .map_err(|e| format!("Не удалось открыть ссылку: {e}"))
+}
+
+/// Open a link of the UI in the system browser (or mail app / dialer) - the
+/// About box's links, a link in a PDF (target=_blank does not leave the
+/// WebView on its own).
+/// (Android: `android::open_external_url` hands it to the system.)
+#[cfg(desktop)]
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+  let parsed = parse_external_url(&url)?;
+  open_with_system(parsed.as_str())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -260,6 +303,8 @@ pub fn run() {
   // sharing and printing go through the system - see android.rs.
   #[cfg(target_os = "android")]
   let builder = builder.plugin(android::init());
+
+  let builder = builder.plugin(links_plugin());
 
   builder
     .invoke_handler(tauri::generate_handler![
@@ -333,10 +378,25 @@ mod tests {
   }
 
   #[test]
-  fn open_external_url_rejects_non_https() {
-    assert!(open_external_url("http://example.com".into()).is_err());
+  fn only_web_mail_and_phone_links_leave_the_app() {
+    for ok in ["https://example.com/a?b=1&c", "http://example.com", "mailto:a@b.c", "tel:+71234567890"] {
+      assert!(parse_external_url(ok).is_ok(), "{ok}");
+    }
+    for bad in ["file:///etc/passwd", "javascript:alert(1)", "ms-settings:", "smb://host/x", "not a url"] {
+      assert!(parse_external_url(bad).is_err(), "{bad}");
+    }
     assert!(open_external_url("file:///etc/passwd".into()).is_err());
     assert!(open_external_url("not a url".into()).is_err());
+  }
+
+  #[test]
+  fn the_window_stays_on_the_app() {
+    for own in ["tauri://localhost/index.html", "http://tauri.localhost/", "https://tauri.localhost/x", "about:blank", "blob:http://tauri.localhost/1", "data:text/html,x"] {
+      assert!(is_app_url(&url::Url::parse(own).unwrap()), "{own}");
+    }
+    for out in ["https://example.com/", "http://localhost:1420/", "mailto:a@b.c", "file:///x.pdf", "https://tauri.localhost.evil.com/"] {
+      assert!(!is_app_url(&url::Url::parse(out).unwrap()), "{out}");
+    }
   }
 
   #[test]

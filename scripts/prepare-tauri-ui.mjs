@@ -22,6 +22,54 @@ const uiIndex = join(uiDir, 'index.html');
 /** Injected only into the Tauri UI copy — never into the browser HTML releases. */
 const TAURI_OPEN_BRIDGE = `
 <script>
+/* Tauri shell: links leave the app. A web, mail or phone link opens in the
+   system's browser / mail app / dialer (open_external_url); the window
+   itself never navigates away from the editor (the shell's navigation
+   guard, links_plugin in src-tauri/src/lib.rs, turns such navigations
+   away as well). */
+(function () {
+  function isExternal(href) {
+    try {
+      var u = new URL(href, location.href);
+      if (u.protocol === 'mailto:' || u.protocol === 'tel:') return true;
+      return (u.protocol === 'http:' || u.protocol === 'https:') && u.origin !== location.origin;
+    } catch (_) {
+      return false;
+    }
+  }
+  function openExternal(url) {
+    var core = window.__TAURI__ && window.__TAURI__.core;
+    if (!core || typeof core.invoke !== 'function') return;
+    Promise.resolve(core.invoke('open_external_url', { url: String(url) }))
+      .catch(function (err) { console.warn('open_external_url', err); });
+  }
+  // Decided after the link's own handlers: they may cancel the click (a drag
+  // over a link in a page) or open it themselves (About box).
+  function onLinkActivate(e) {
+    if (e.type === 'auxclick' && e.button !== 1) return;
+    var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+    if (!a || !isExternal(a.href)) return;
+    var after = function (ev) {
+      a.removeEventListener(e.type, after);
+      if (ev !== e || ev.defaultPrevented) return;
+      ev.preventDefault();
+      openExternal(a.href);
+    };
+    a.addEventListener(e.type, after);
+  }
+  document.addEventListener('click', onLinkActivate, true);
+  document.addEventListener('auxclick', onLinkActivate, true);
+  var nativeOpen = window.open;
+  window.open = function (url) {
+    if (url != null && isExternal(String(url))) {
+      openExternal(new URL(String(url), location.href).href);
+      return null;
+    }
+    return nativeOpen.apply(window, arguments);
+  };
+})();
+</script>
+<script>
 /* Tauri desktop bridge: Open-with, second instance, Explorer drag-and-drop */
 (function () {
   // The Android app shares this bridge: files sent to it ("Open with",

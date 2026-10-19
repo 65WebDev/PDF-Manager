@@ -325,12 +325,13 @@ class PdfBridgePlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
-  /** Opens an https link in the browser (About box). */
+  /** Opens a web link in the browser, mailto: in the mail app, tel: in the dialer. */
   @Command
   fun openUrl(invoke: Invoke) {
     val url = invoke.getArgs().getString("url")
-    if (!url.startsWith("https://")) {
-      invoke.reject("Разрешены только HTTPS-ссылки")
+    val scheme = Uri.parse(url).scheme?.lowercase()
+    if (scheme !in setOf("https", "http", "mailto", "tel")) {
+      invoke.reject("Разрешены только ссылки http(s), mailto и tel")
       return
     }
     try {
