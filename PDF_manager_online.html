@@ -4853,6 +4853,13 @@
     #stickyFileBar .file-ico { margin-right: 6px; font-weight: normal; }
     /*Marker for unsaved changes - a small red asterisk after the file name*/
     .dirty-star { color: #e53935; font-weight: 700; margin-left: 3px; }
+    /*The whole file name while a finger holds the cut one (touch).*/
+    .pm-file-name-tip {
+      position: fixed; z-index: 100002; max-width: calc(100vw - 16px); box-sizing: border-box;
+      padding: 6px 10px; border-radius: 8px; background: rgba(44,62,80,0.96); color: #fff;
+      font-size: 14px; line-height: 1.35; text-align: center; overflow-wrap: anywhere;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.3); pointer-events: none;
+    }
     /*When the strip is visible, slightly lower the pages so that the top row does not
        went under the strip (desktop only; on mobile the strip is on top of the content).*/
     .main.sticky-active .pages { padding-top: 35px; }
@@ -7120,6 +7127,16 @@
         top: 50%;
         transform: translate(-50%, -50%);
       }
+      /*A long file name stays on one line, cut with "…" at its end (the icon
+         and the unsaved "*" stay); holding a finger on it shows the whole
+         name (initFileNameHold).*/
+      .content-header .info { white-space: nowrap; word-break: normal; overflow-wrap: normal; }
+      .content-header .info .info-line { display: inline-flex; align-items: baseline; max-width: 100%; vertical-align: top; }
+      .content-header .info .file-name {
+        min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal;
+      }
+      .content-header .info .file-ico,
+      .content-header .info .dirty-star { flex: none; }
 
       /*The menu is collapsed: the file name is centered horizontally AND on the same line along
          vertical with a menu hide button (it is fixed at the top: top:10px).*/
@@ -14383,10 +14400,14 @@
 
     function updateInfo() {
       if (pdfDoc) {
-        const shown = escapeHtml(formatFileNameForDisplay(currentFileName));
+        // Touch: the whole name, cut with "…" at its end by CSS (holding a
+        // finger on it shows it all - initFileNameHold); elsewhere the
+        // middle of a long name gives way.
+        const shown = escapeHtml(isTouchDevice ? (currentFileName || '') : formatFileNameForDisplay(currentFileName));
         //title - full name (on hover/hold)
-        infoDiv.innerHTML = `<span class="file-ico">📄</span><b class="file-name">${shown}</b>${dirtyStarHtml()}`;
-        infoDiv.title = currentFileName || '';
+        infoDiv.innerHTML = `<span class="info-line"><span class="file-ico">📄</span><b class="file-name">${shown}</b>${dirtyStarHtml()}</span>`;
+        // (Touch: no title - its tooltip would show beside our own bubble.)
+        infoDiv.title = isTouchDevice ? '' : (currentFileName || '');
         infoDiv.style.display = 'block';
       } else {
         //There is no document - we hide the file name so that it does not overlap with the title.
@@ -14407,6 +14428,45 @@
     //• the document is not open → “PDF Document Manager” in the center;
     //• document is open → counter on the left, name in the center, title on the right (desktop);
     //• if the name matches the title → hide the title, press the name to the right.
+    // Touch: holding a finger on a file name cut with "…" shows the whole
+    // name in a bubble under it until the finger lifts or moves away.
+    (function initFileNameHold() {
+      if (!isTouchDevice || !infoDiv) return;
+      const HOLD_MS = 450, MOVE_PX = 10;
+      let timer = null, tip = null, start = null;
+      const hide = () => {
+        clearTimeout(timer);
+        timer = null;
+        if (tip) { tip.remove(); tip = null; }
+      };
+      const show = () => {
+        timer = null;
+        const nameEl = infoDiv.querySelector('.file-name');
+        if (!nameEl || !currentFileName || nameEl.scrollWidth <= nameEl.clientWidth + 1) return;
+        tip = document.createElement('div');
+        tip.className = 'pm-file-name-tip';
+        tip.textContent = currentFileName;
+        document.body.appendChild(tip);
+        const r = infoDiv.getBoundingClientRect();
+        const w = tip.offsetWidth;
+        tip.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2)) + 'px';
+        tip.style.top = (r.bottom + 6) + 'px';
+      };
+      infoDiv.addEventListener('pointerdown', (e) => {
+        if (e.pointerType === 'mouse') return;
+        hide();
+        start = { x: e.clientX, y: e.clientY };
+        timer = setTimeout(show, HOLD_MS);
+      });
+      infoDiv.addEventListener('pointermove', (e) => {
+        if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > MOVE_PX) hide();
+      });
+      ['pointerup', 'pointercancel', 'pointerleave'].forEach(type => infoDiv.addEventListener(type, () => { start = null; hide(); }));
+      // No system menu / text selection on the held name.
+      infoDiv.addEventListener('contextmenu', (e) => e.preventDefault());
+      window.addEventListener('scroll', hide, true);
+    })();
+
     function updateHeaderLayout() {
       const header = document.querySelector('.content-header');
       if (!header) return;
