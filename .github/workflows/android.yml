@@ -1,0 +1,185 @@
+name: Android APK
+
+# Test build of the Android app (APK for ARM phones and tablets). Runs for
+# pull requests that touch the app shell (src-tauri/, the Tauri bridge) and
+# on demand (Actions -> Android APK -> Run workflow). The APK is attached to
+# the run under "Artifacts" and also put on the pre-release "android-test"
+# (replaced by every build) - a direct link that needs no GitHub login:
+#   https://github.com/65WebDev/PDF-Manager/releases/download/android-test/PDF-Manager-test.apk
+#
+# Signing: with the repository secrets ANDROID_KEYSTORE_BASE64,
+# ANDROID_KEYSTORE_PASSWORD, ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD set,
+# the APK is signed with your own key (the same as local builds, it then
+# updates an installed release in place). Without them a test key is used,
+# made once and kept in the Actions cache, so one test build installs over
+# the previous one; a build signed with your key replaces it only after
+# uninstalling it.
+# Releases (android-v*) are built and uploaded locally:
+#   .\scripts\build-windows-exe.ps1 -AndroidOnly
+
+on:
+  pull_request:
+    paths:
+      - 'src-tauri/**'
+      - 'scripts/prepare-tauri-ui.mjs'
+      - '.github/workflows/android.yml'
+  workflow_dispatch:
+
+permissions:
+  # Writes the android-test pre-release (see the last step).
+  contents: write
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    env:
+      HAS_SIGNING_SECRET: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # The runner image ships the Android SDK and NDKs.
+      - name: Android SDK / NDK
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          ndk="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          if [ -z "$ndk" ] || [ ! -f "$ndk/source.properties" ]; then
+            echo "No NDK on the runner" >&2
+            exit 1
+          fi
+          echo "NDK_HOME=$ndk" >> "$GITHUB_ENV"
+          echo "NDK: $ndk"
+
+      - name: Rust (Android targets)
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add aarch64-linux-android armv7-linux-androideabi
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: android-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: android-cargo-
+
+      - run: npm ci
+
+      # Every command the UI calls must be allowed (else: "not allowed by ACL").
+      - name: Tauri command permissions
+        run: node scripts/check-tauri-acl.mjs
+
+      # Without secrets: the same test key build after build.
+      - name: Test signing key (cache)
+        if: env.HAS_SIGNING_SECRET != 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.pdf-manager-test-key
+          key: android-test-signing-key-v1
+
+      - name: Signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          ks="$RUNNER_TEMP/release.jks"
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$ks"
+            {
+              echo "PM_ANDROID_KEYSTORE=$ks"
+              echo "PM_ANDROID_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD"
+              echo "PM_ANDROID_KEY_ALIAS=$KEY_ALIAS"
+              echo "PM_ANDROID_KEY_PASSWORD=${KEY_PASSWORD:-$KEYSTORE_PASSWORD}"
+            } >> "$GITHUB_ENV"
+            echo "Signing with the repository key."
+          else
+            ks="$HOME/.pdf-manager-test-key/test.jks"
+            if [ ! -f "$ks" ]; then
+              mkdir -p "$(dirname "$ks")"
+              keytool -genkeypair -keystore "$ks" -alias ci -keyalg RSA -keysize 2048 \
+                -validity 10000 -storepass android -keypass android \
+                -dname "CN=PDF Manager test build"
+            fi
+            {
+              echo "PM_ANDROID_KEYSTORE=$ks"
+              echo "PM_ANDROID_KEYSTORE_PASSWORD=android"
+              echo "PM_ANDROID_KEY_ALIAS=ci"
+              echo "PM_ANDROID_KEY_PASSWORD=android"
+            } >> "$GITHUB_ENV"
+            echo "No signing secrets - the test key."
+          fi
+
+      - name: Build APK
+        run: npx tauri android build --apk --target aarch64 --target armv7
+
+      - name: Collect APK
+        run: |
+          ver=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          apk=$(ls -t src-tauri/gen/android/app/build/outputs/apk/universal/release/*.apk | head -n 1)
+          mkdir -p dist-android
+          cp "$apk" "dist-android/PDF-Manager_${ver}-test.apk"
+          ls -l dist-android
+          # The build must leave the tracked Android project as it is
+          # (what it generates is git-ignored).
+          git status --porcelain
+          test -z "$(git status --porcelain -- src-tauri/gen/android)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pdf-manager-android-apk
+          path: dist-android/*.apk
+          if-no-files-found: error
+
+      # A fixed download link for the phone: the pre-release "android-test"
+      # (never "Latest"), its APK replaced by every build. Not for pull
+      # requests from forks - their token cannot write.
+      - name: Publish to the android-test pre-release
+        if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SRC_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          SRC_REF: ${{ github.head_ref || github.ref_name }}
+          PR_NUM: ${{ github.event.pull_request.number }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          tag=android-test
+          cp "$(ls dist-android/*.apk | head -n 1)" PDF-Manager-test.apk
+          ver=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          if [ "$HAS_SIGNING_SECRET" = "true" ]; then key="ключ из секретов репозитория"; else key="тестовый ключ"; fi
+          {
+            echo "Тестовая сборка Android-приложения — не релиз. Файл заменяется при каждой сборке workflow «Android APK»."
+            echo
+            echo "**Скачать:** [PDF-Manager-test.apk](https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/PDF-Manager-test.apk)"
+            echo
+            echo "- Версия: ${ver}"
+            echo "- Ветка: \`${SRC_REF}\`${PR_NUM:+, PR #${PR_NUM}}, коммит \`${SRC_SHA:0:7}\`"
+            echo "- Собрано: $(date -u '+%Y-%m-%d %H:%M') UTC, [запуск](${RUN_URL})"
+            echo "- Подпись: ${key}"
+            echo
+            echo "Test build of the Android app, not a release; replaced by every build."
+          } > notes.md
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" PDF-Manager-test.apk --clobber
+            gh release edit "$tag" --title "Android test build" --notes-file notes.md --prerelease --latest=false
+          else
+            gh release create "$tag" PDF-Manager-test.apk --target "$SRC_SHA" \
+              --title "Android test build" --notes-file notes.md --prerelease --latest=false
+          fi
+          echo "APK: https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}/PDF-Manager-test.apk"

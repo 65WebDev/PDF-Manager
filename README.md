@@ -44,12 +44,16 @@
 | **Windows: portable `.exe`** | https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.46/pdf-manager.exe |
 | **Linux: `.deb`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.46/PDF.Manager_0.1.46_amd64.deb|
 | **Linux: `.AppImage`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.46/PDF.Manager_0.1.46_amd64.AppImage|
+| **Android: `.apk`** | https://github.com/65WebDev/PDF-Manager/releases/download/android-test/PDF-Manager-test.apk |
 | **Windows release** | https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.46 |
 | **Linux release** | https://github.com/65WebDev/PDF-Manager/releases/tag/linux-v0.1.46 |
+| **Android release** | https://github.com/65WebDev/PDF-Manager/releases/tag/android-test |
 
 After downloading, open the HTML file in your browser. The online version loads its libraries from a CDN; the offline version bundles everything inside the file and works without internet access.
 
 Supported browsers: Chrome/Edge 125+, Firefox ESR, Safari 18+ (including iOS/iPadOS 18+).
+
+Android app: Android 7.0+, phones and tablets. Open the downloaded `.apk` on the phone; if Android warns about an app from an unknown developer, choose “Install anyway”.
 
 ### Features
 
@@ -123,12 +127,16 @@ Supported browsers: Chrome/Edge 125+, Firefox ESR, Safari 18+ (including iOS/iPa
 | **Windows: portable `.exe`** | https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.46/pdf-manager.exe |
 | **Linux: `.deb`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.46/PDF.Manager_0.1.46_amd64.deb|
 | **Linux: `.AppImage`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.46/PDF.Manager_0.1.46_amd64.AppImage|
+| **Android: `.apk`** | https://github.com/65WebDev/PDF-Manager/releases/download/android-test/PDF-Manager-test.apk |
 | **Релиз Windows** | https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.46 |
 | **Релиз Linux** | https://github.com/65WebDev/PDF-Manager/releases/tag/linux-v0.1.46 |
+| **Релиз Android** | https://github.com/65WebDev/PDF-Manager/releases/tag/android-test |
 
 После скачивания откройте HTML-файл в браузере. Онлайн-версия подгружает библиотеки из CDN; офлайн-версия содержит все зависимости внутри файла и работает без интернета.
 
 Поддерживаемые браузеры: Chrome/Edge 125+, Firefox ESR, Safari 18+ (в том числе iOS/iPadOS 18+).
+
+Приложение для Android: Android 7.0+, телефоны и планшеты. Откройте скачанный `.apk` на телефоне; если Android предупредит о приложении от неизвестного разработчика, выберите «Всё равно установить».
 
 ### Возможности
 

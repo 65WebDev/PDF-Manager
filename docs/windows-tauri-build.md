@@ -1,4 +1,4 @@
-# Сборка Windows‑ и Linux‑приложения (Tauri)
+# Сборка Windows‑, Linux‑ и Android‑приложения (Tauri)
 
 > Десктопная оболочка (Tauri, `src-tauri/`) живёт прямо в `main`.  
 > В автоматический release‑pipeline (`build-N`, HTML‑релизы) эта сборка **не включена** — только ручной запуск.
@@ -13,8 +13,9 @@
 | Windows: установщик (NSIS) | `src-tauri\target\release\bundle\nsis\` (например `PDF Manager_0.1.15_x64-setup.exe`) |
 | Linux: пакет `.deb` | `dist-linux\*.deb` |
 | Linux: `.AppImage` | `dist-linux\*.AppImage` |
+| Android: `.apk` | `dist-android\PDF-Manager_{версия}.apk` (раздел 4b) |
 
-Сборка упаковывает **офлайн‑HTML** (`PDF_manager_offline.html`) в окно Tauri + WebView2 (Windows) / WebKitGTK (Linux).
+Сборка упаковывает **офлайн‑HTML** (`PDF_manager_offline.html`) в окно Tauri + WebView2 (Windows) / WebKitGTK (Linux) / Android System WebView (Android).
 
 ---
 
@@ -324,6 +325,182 @@ Bundle-таргеты Linux заданы отдельно от Windows, в `src-
 
 ---
 
+## 4b. Android (`.apk`) — на той же Windows-машине
+
+APK для телефонов и планшетов на ARM (64- и 32-битных), Android 7.0 и новее.
+Собирается тем же скриптом: `-Android` (вместе с Windows-сборкой) или
+`-AndroidOnly` (только APK). Без `-Local` APK заливается в GitHub Release
+`android-v{version}`, обновляются лента версий (проверка обновлений в
+«О программе» на телефоне), README и `index.html` — так же, как для Linux.
+
+Что умеет версия для Android:
+
+- открывает PDF из других приложений: «Открыть с помощью» (файловый
+  менеджер, почта, мессенджер) и «Поделиться» → PDF Manager — в том числе
+  несколько файлов сразу;
+- **Сохранить** / **Экспорт** — через системный диалог «Сохранить как»
+  (можно выбрать папку на телефоне, SD-карту, Google Диск и т. п.);
+  «Сохранить по страницам» спрашивает папку один раз;
+- кнопка **«Поделиться»** (первый ряд, после «Режима чтения») — системное
+  меню «Поделиться»: документ в том виде, в каком его записал бы «Сохранить»
+  (порядок страниц, без помеченных на удаление, с правками), но без сохранения;
+- кнопка **«Печать»** (второй ряд) — системный диалог печати (принтеры,
+  «Сохранить как PDF»); печать выделенных страниц — в меню страницы
+  (долгое нажатие);
+- режим чтения скрывает строку состояния и панель навигации;
+- кнопка «Назад» закрывает открытое (диалог, редактор страницы, поиск,
+  режим чтения), а если ничего не открыто — сворачивает приложение
+  (документ не теряется).
+
+Файл, открытый из другого приложения, — это копия в кэше приложения,
+поэтому «Сохранить» всегда спрашивает, куда записать (поверх исходного
+файла не пишет).
+
+### Один раз: установить и настроить
+
+1. **Android Studio**: https://developer.android.com/studio — установить с
+   настройками по умолчанию, запустить один раз (мастер скачает SDK).
+2. В Android Studio: **More Actions → SDK Manager** (или Settings →
+   Languages & Frameworks → **Android SDK**):
+   - вкладка **SDK Platforms** — отметить **Android 16 (API 36)**;
+   - вкладка **SDK Tools** — отметить **NDK (Side by side)**,
+     **Android SDK Build-Tools**, **Android SDK Command-line Tools (latest)**,
+     **Android SDK Platform-Tools**;
+   - **Apply** и дождаться загрузки. Вверху окна виден путь
+     **Android SDK Location** — обычно `C:\Users\<вы>\AppData\Local\Android\Sdk`.
+3. Переменные среды (PowerShell, один раз; если путь к SDK другой —
+   подставьте его):
+
+   ```powershell
+   [Environment]::SetEnvironmentVariable("JAVA_HOME", "C:\Program Files\Android\Android Studio\jbr", "User")
+   [Environment]::SetEnvironmentVariable("ANDROID_HOME", "$env:LocalAppData\Android\Sdk", "User")
+   $ndk = Get-ChildItem "$env:LocalAppData\Android\Sdk\ndk" -Directory | Sort-Object Name | Select-Object -Last 1
+   $ndk.FullName   # должен вывести ...\Sdk\ndk\<версия>
+   [Environment]::SetEnvironmentVariable("NDK_HOME", $ndk.FullName, "User")
+   ```
+
+   Если `Get-ChildItem` пишет «не удаётся найти путь …\Sdk\ndk» — NDK ещё не
+   установлен (пункт 2, **NDK (Side by side)**). Скрипт сборки, кстати, сам
+   найдёт самый новый NDK в SDK, если `NDK_HOME` не задан.
+
+   Затем **новое** окно PowerShell и проверка (все три — `True`):
+
+   ```powershell
+   Test-Path "$env:JAVA_HOME\bin\java.exe"
+   Test-Path "$env:ANDROID_HOME\platform-tools"
+   Test-Path "$env:NDK_HOME\source.properties"
+   ```
+
+4. Rust-цели для Android скрипт добавляет сам (`rustup target add
+   aarch64-linux-android armv7-linux-androideabi`).
+
+### Один раз: ключ подписи (только у вас, не в репозитории)
+
+Android ставит только подписанные APK, а **обновление** приложения — только
+подписанное тем же ключом. Ключ создаётся один раз:
+
+```powershell
+mkdir "$env:USERPROFILE\keys" -Force
+& "$env:JAVA_HOME\bin\keytool.exe" -genkeypair -v `
+  -keystore "$env:USERPROFILE\keys\pdf-manager-release.jks" `
+  -alias pdf-manager -keyalg RSA -keysize 2048 -validity 10000
+```
+
+keytool спросит пароль и данные владельца (имя можно любое). Затем создайте
+файл `src-tauri\gen\android\keystore.properties` (он в `.gitignore` и в git не
+попадёт):
+
+```properties
+storeFile=C:/Users/<вы>/keys/pdf-manager-release.jks
+storePassword=<пароль хранилища>
+keyAlias=pdf-manager
+keyPassword=<пароль ключа (обычно тот же)>
+```
+
+Путь — с **прямыми** слешами `/` (обратные в `.properties` надо удваивать).
+
+> **Сохраните `.jks` и пароли в надёжном месте (резервная копия).** Потеряв
+> ключ, выпустить обновление уже установленного приложения нельзя — только
+> удалить и поставить заново. Для Google Play этот же ключ потом станет
+> «ключом загрузки» (upload key).
+
+### Сборка
+
+```powershell
+# Только APK + загрузка в GitHub Release android-v{version}:
+.\scripts\build-windows-exe.ps1 -AndroidOnly
+
+# Только APK, без GitHub (файл в dist-android\):
+.\scripts\build-windows-exe.ps1 -AndroidOnly -Local
+
+# Windows + Android (и Linux) за один запуск:
+.\scripts\build-windows-exe.ps1 -Android
+.\scripts\build-windows-exe.ps1 -Linux -Android
+```
+
+Версия APK — из `src-tauri\tauri.conf.json` (та же, что у Windows/Linux;
+поднимает её Windows-сборка). Первая сборка — **15–30+ минут** (Rust для двух
+целей + Gradle скачивает зависимости), следующие быстрее.
+
+Без `keystore.properties` локальная сборка (`-Local`) даёт **неподписанный**
+APK (поставить его нельзя), а сборка с загрузкой останавливается с
+подсказкой.
+
+Вручную, без скрипта: `npx tauri android build --apk --target aarch64 --target armv7`
+→ `src-tauri\gen\android\app\build\outputs\apk\universal\release\`.
+
+### Установка на телефон
+
+Скопируйте APK на телефон (или скачайте со страницы релиза) и откройте его.
+Android попросит разрешить установку из этого источника (браузер / файловый
+менеджер) — разрешите. Обновление: поставить новый APK поверх (тот же ключ).
+
+### Тестовая сборка в GitHub Actions
+
+Workflow **Android APK** (`.github/workflows/android.yml`) собирает APK
+на каждый PR, который меняет `src-tauri/` или мост Tauri, и вручную:
+**Actions → Android APK → Run workflow**.
+
+Где взять готовый APK:
+
+- **прямая ссылка, без входа в GitHub** (удобно открыть прямо на телефоне):
+  https://github.com/65WebDev/PDF-Manager/releases/download/android-test/PDF-Manager-test.apk —
+  пре-релиз `android-test`, файл в нём заменяется каждой сборкой; на
+  странице релиза видно, из какой ветки и коммита он собран;
+- в разделе **Artifacts** запуска (ZIP; скачивается только после входа в GitHub).
+
+Подпись там:
+
+- если в **Settings → Secrets and variables → Actions** заданы секреты
+  `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`,
+  `ANDROID_KEY_PASSWORD` — вашим ключом (такой APK обновляет установленный);
+- иначе — тестовым ключом, который создаётся один раз и хранится в кэше
+  Actions: следующая тестовая сборка ставится поверх предыдущей, а ваш
+  релиз встанет поверх тестовой только после её удаления.
+
+Секреты репозитория видны только Actions (их нельзя прочитать обратно ни в
+интерфейсе, ни из логов). Строка для `ANDROID_KEYSTORE_BASE64`:
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("$env:USERPROFILE\keys\pdf-manager-release.jks")) | Set-Clipboard
+```
+
+### Как устроено
+
+- `src-tauri\gen\android\` — Android-проект (Gradle), создан `tauri android init`
+  и хранится в git; всё, что сборка генерирует в нём, — в `.gitignore`.
+- `src-tauri\tauri.android.conf.json` — идентификатор `io.github.pdfmanager`,
+  minSdk 24; `fileAssociations` для Android отключены — фильтры «Открыть с
+  помощью» / «Поделиться» прописаны в `AndroidManifest.xml` явно.
+- `src-tauri\src\android.rs` + `PdfBridgePlugin.kt` — мост к Android
+  (файлы из других приложений, «Сохранить как», выбор папки, «Поделиться»,
+  печать, полный экран, ссылки); `scripts\prepare-tauri-ui.mjs` — его часть
+  в UI (активна только на Android).
+- Подпись — `app\build.gradle.kts`: `keystore.properties` или переменные
+  `PM_ANDROID_KEYSTORE*` (так её получает GitHub Actions).
+
+---
+
 ## 5. Ассоциация с PDF (установщик)
 
 NSIS‑установщик регистрирует приложение как обработчик **`.pdf`** (`bundle.fileAssociations`).
@@ -376,6 +553,12 @@ NSIS‑установщик регистрирует приложение как
 | Внутри WSL: `rustc`/`node` не найдены | Поставить их **внутри WSL** (не путать с Windows-версиями) — см. раздел 4a «Once». |
 | Linux-сборка просит sudo-пароль на каждый запуск | Нормально при первом запуске (доустановка apt-пакетов). Если пакеты уже стоят, `build-linux.sh` больше `apt-get` не вызывает. |
 | `.AppImage` не запускается («permission denied») | `chmod +x dist-linux/*.AppImage` перед запуском — GitHub/Windows не сохраняют исполняемый бит. |
+| `-Android`: `JAVA_HOME is not set to a JDK` / `ANDROID_HOME …` / `Android NDK not found` | Раздел 4b «Один раз»: Android Studio + SDK Manager (NDK), переменные среды, **новое** окно PowerShell. |
+| `-Android`: `Get-ChildItem … \Sdk\ndk … не существует` при настройке | NDK не установлен: SDK Manager → SDK Tools → **NDK (Side by side)** → Apply; затем повторить команду с `NDK_HOME`. |
+| `-Android`: `No signing key` | Нет `src-tauri\gen\android\keystore.properties` — создать ключ и файл (раздел 4b) или собрать с `-Local`. |
+| Gradle: `SDK location not found` / нет `platforms;android-36` | SDK Manager → SDK Platforms → **Android 16 (API 36)**; проверить `ANDROID_HOME`. |
+| Gradle: `Keystore file … not found` / `wrong password` | Путь в `keystore.properties` с прямыми слешами `/`, пароли без кавычек. |
+| Телефон: «Приложение не установлено» при обновлении | APK подписан другим ключом (например, тестовая сборка из Actions) — удалить старое приложение и поставить заново. |
 
 ---
 
@@ -388,6 +571,7 @@ NSIS‑установщик регистрирует приложение как
 5. Запустить `src-tauri\target\release\PDF Manager.exe`  
 6. Установить NSIS‑сборку и проверить «Открыть с помощью» для PDF  
 7. Заодно и Linux (`.deb`/`.AppImage`)? `.\scripts\build-windows-exe.ps1 -Linux` (нужен WSL2, см. раздел 4a)  
+8. Android (`.apk`)? Android Studio + ключ подписи (раздел 4b), затем `.\scripts\build-windows-exe.ps1 -AndroidOnly`  
 
 ---
 

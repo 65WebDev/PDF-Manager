@@ -1659,6 +1659,8 @@
     .mode-btn.active-mode { background: #3498db; }
     /*Mobile reading mode button - hidden on desktop*/
     #mobileReadModeBtn { display: none; }
+    /*Share - only in the Android app's touch toolbar (body.pm-android-app)*/
+    #shareBtn { display: none; }
     /*In reading mode, the undo/redo mobile buttons are hidden*/
     body.read-mode-active #mobileUndoRedoBar { display: none !important; }
 
@@ -4851,6 +4853,13 @@
     #stickyFileBar .file-ico { margin-right: 6px; font-weight: normal; }
     /*Marker for unsaved changes - a small red asterisk after the file name*/
     .dirty-star { color: #e53935; font-weight: 700; margin-left: 3px; }
+    /*The whole file name while a finger holds the cut one (touch).*/
+    .pm-file-name-tip {
+      position: fixed; z-index: 100002; max-width: calc(100vw - 16px); box-sizing: border-box;
+      padding: 6px 10px; border-radius: 8px; background: rgba(44,62,80,0.96); color: #fff;
+      font-size: 14px; line-height: 1.35; text-align: center; overflow-wrap: anywhere;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.3); pointer-events: none;
+    }
     /*When the strip is visible, slightly lower the pages so that the top row does not
        went under the strip (desktop only; on mobile the strip is on top of the content).*/
     .main.sticky-active .pages { padding-top: 35px; }
@@ -6176,6 +6185,13 @@
       /*Bookmarks popup: desktop-only for now, same as the mode-switch group next to it*/
       #bookmarksBtn { display: none !important; }
       #mobileReadModeBtn { display: inline-flex !important; }
+      /*Android app: Share after reading mode, Print back in the tool row -
+         a 6th column in both rows (the system share sheet / print dialog
+         are what a phone has instead of downloads and the browser's viewer).
+         Printing the selected pages stays in the page menu (long press).*/
+      body.pm-android-app #shareBtn { display: inline-flex !important; }
+      body.pm-android-app .print-wrapper { display: inline-flex !important; }
+      body.pm-android-app #printSelectedBtn { display: none !important; }
       /*Merge button hidden on mobile (replaced with read button)*/
       #mergeBtn { display: none !important; }
       /*The hover on the touchscreen “sticks” after tapping - remove the constant blue backlight;
@@ -6212,6 +6228,15 @@
       /*We reduce the gaps and indentation under the logo so that 5 icons fit into a row*/
       .main-row { gap: 8px 8px; padding-right: 56px; }
       .left-actions, .right-actions, .centered-actions { gap: 8px; }
+      /*Android app on a narrower phone (360-391 px): 6 icons per row -
+         narrower gaps, and the row may run up to 6 px short of the logo
+         column (from 392 px the usual gaps fit).*/
+      @media (max-width: 391px) {
+        body.pm-android-app .main-row { gap: 8px 4px; padding-right: 48px; }
+        body.pm-android-app .left-actions,
+        body.pm-android-app .right-actions,
+        body.pm-android-app .centered-actions { gap: 4px; }
+      }
 
       /*We bring the icons of the central block to the same sizes as the file icons
          (40x40, padding 7px) so that both rows are aligned one to one.
@@ -7102,6 +7127,16 @@
         top: 50%;
         transform: translate(-50%, -50%);
       }
+      /*A long file name stays on one line, cut with "…" at its end (the icon
+         and the unsaved "*" stay); holding a finger on it shows the whole
+         name (initFileNameHold).*/
+      .content-header .info { white-space: nowrap; word-break: normal; overflow-wrap: normal; }
+      .content-header .info .info-line { display: inline-flex; align-items: baseline; max-width: 100%; vertical-align: top; }
+      .content-header .info .file-name {
+        min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal;
+      }
+      .content-header .info .file-ico,
+      .content-header .info .dirty-star { flex: none; }
 
       /*The menu is collapsed: the file name is centered horizontally AND on the same line along
          vertical with a menu hide button (it is fixed at the top: top:10px).*/
@@ -7885,6 +7920,7 @@
           <button class="img-save-btn img-save-btn--encrypt img-save-btn--right" onclick="savePDF('encrypt')" title="Зашифровать паролем, который потребуется для открытия файла" aria-label="Зашифровать паролем" data-i18n-title="tipEncrypt" data-i18n-aria="encryptFileTooltip"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></button>
         </div>
         <button id="mobileReadModeBtn" class="compact-btn" onclick="enterReadMode()" disabled title="Режим чтения" data-i18n-title="readMode"><span class="btn-ico"><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span></button>
+        <button id="shareBtn" class="compact-btn" onclick="pmShareDocument()" disabled title="Поделиться документом" aria-label="Поделиться документом" data-i18n-title="shareDocument" data-i18n-aria="shareDocument"><span class="btn-ico"><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><line x1="8.3" y1="13.3" x2="15.7" y2="17.7"/><line x1="15.7" y1="6.3" x2="8.3" y2="10.7"/></svg></span></button>
       </div>
 
       <!--Scale is a separate block, moved independently-->
@@ -9178,6 +9214,14 @@
                           (window.matchMedia && window.matchMedia('(pointer: coarse)').matches)) &&
                           !(window.matchMedia && window.matchMedia('(any-pointer: fine)').matches);
 
+    // The Android app (the Tauri shell on a phone or tablet): Share and Print
+    // in the touch toolbar; saving, sharing and printing go through the
+    // system (see the Android part of the Tauri bridge, prepare-tauri-ui.mjs).
+    function pmIsAndroidApp() {
+      return !!(window.__TAURI_INTERNALS__ || window.__TAURI__) && /Android/i.test(navigator.userAgent || '');
+    }
+    if (pmIsAndroidApp()) document.body.classList.add('pm-android-app');
+
     //Tabs (desktop): state - up to the init code and drop/open handlers below.
     let pmTabs = [];
     let pmActiveId = null;
@@ -9632,6 +9676,7 @@
         helpTabRight: '<span class="hk">Ctrl + стрелка вправо</span> — выбрать вкладку справа',
         helpTabClose: '<span class="hk">Ctrl + Del</span> — закрыть вкладку',
         aboutDesktop: 'Десктопное приложение для работы с PDF-документами.',
+        aboutAndroid: 'Приложение для Android для работы с PDF-документами.',
         aboutWeb: 'Веб-приложение для работы с PDF-документами. Вся обработка выполняется в браузере.',
         aboutVersion: 'Версия {ver}', aboutEditor: 'Редактор: {build}', aboutEditorFrom: ' от {date}',
         aboutVersionUnknownApp: 'Версия приложения неизвестна',
@@ -9990,6 +10035,8 @@
         alertPrintWindowFailed: 'Не удалось открыть окно печати. Файл сохранён для печати.',
         alertPreparePrintSelectedError: 'Ошибка при подготовке выделенных страниц к печати',
         alertNoPagesToPrint: 'Нет страниц для печати',
+        alertNoPagesToShare: 'Нет страниц, чтобы поделиться', shareDocument: 'Поделиться документом',
+        shareError: 'Не удалось поделиться файлом',
         printAllFilePrefix: 'для_печати_',
         alertPreparePrintAllError: 'Ошибка при подготовке документа к печати',
         alertNoDocument: 'Нет документа',
@@ -10105,6 +10152,7 @@
         helpTabRight: '<span class="hk">Ctrl + right arrow</span> — select tab to the right',
         helpTabClose: '<span class="hk">Ctrl + Del</span> — close tab',
         aboutDesktop: 'Desktop application for working with PDF documents.',
+        aboutAndroid: 'Android application for working with PDF documents.',
         aboutWeb: 'Web application for working with PDF documents. All processing is done in the browser.',
         aboutVersion: 'Version {ver}', aboutEditor: 'Editor: {build}', aboutEditorFrom: ' from {date}',
         aboutVersionUnknownApp: 'Application version unknown',
@@ -10463,6 +10511,8 @@
         alertPrintWindowFailed: 'Could not open the print window. The file was saved for printing.',
         alertPreparePrintSelectedError: 'Error preparing the selected pages for printing',
         alertNoPagesToPrint: 'No pages to print',
+        alertNoPagesToShare: 'No pages to share', shareDocument: 'Share document',
+        shareError: 'Could not share the file',
         printAllFilePrefix: 'for_print_',
         alertPreparePrintAllError: 'Error preparing the document for printing',
         alertNoDocument: 'No document',
@@ -10578,6 +10628,7 @@
         helpTabRight: '<span class="hk">Ctrl + flecha derecha</span> — seleccionar pestaña de la derecha',
         helpTabClose: '<span class="hk">Ctrl + Supr</span> — cerrar pestaña',
         aboutDesktop: 'Aplicación de escritorio para trabajar con documentos PDF.',
+        aboutAndroid: 'Aplicación para Android para trabajar con documentos PDF.',
         aboutWeb: 'Aplicación web para trabajar con documentos PDF. Todo el procesamiento se realiza en el navegador.',
         aboutVersion: 'Versión {ver}', aboutEditor: 'Editor: {build}', aboutEditorFrom: ' del {date}',
         aboutVersionUnknownApp: 'Versión de la aplicación desconocida',
@@ -10936,6 +10987,8 @@
         alertPrintWindowFailed: 'No se pudo abrir la ventana de impresión. El archivo se guardó para imprimir.',
         alertPreparePrintSelectedError: 'Error al preparar las páginas seleccionadas para imprimir',
         alertNoPagesToPrint: 'No hay páginas para imprimir',
+        alertNoPagesToShare: 'No hay páginas para compartir', shareDocument: 'Compartir documento',
+        shareError: 'No se pudo compartir el archivo',
         printAllFilePrefix: 'para_imprimir_',
         alertPreparePrintAllError: 'Error al preparar el documento para imprimir',
         alertNoDocument: 'No hay documento',
@@ -11079,6 +11132,7 @@
         helpTabRight: '<span class="hk">Ctrl + 右箭头</span> — 选择右侧标签页',
         helpTabClose: '<span class="hk">Ctrl + Del</span> — 关闭标签页',
         aboutDesktop: '用于处理 PDF 文档的桌面应用程序。',
+        aboutAndroid: '用于处理 PDF 文档的 Android 应用程序。',
         aboutWeb: '用于处理 PDF 文档的网页应用程序。所有处理均在浏览器中完成。',
         aboutVersion: '版本 {ver}',
         aboutEditor: '编辑器：{build}',
@@ -11484,6 +11538,8 @@
         alertPrintWindowFailed: '无法打开打印窗口。文件已保存以供打印。',
         alertPreparePrintSelectedError: '准备打印所选页面时出错',
         alertNoPagesToPrint: '没有可打印的页面',
+        alertNoPagesToShare: '没有可分享的页面', shareDocument: '分享文档',
+        shareError: '无法分享文件',
         printAllFilePrefix: '打印_',
         alertPreparePrintAllError: '准备打印文档时出错',
         alertNoDocument: '没有文档',
@@ -11763,6 +11819,7 @@
     const toggleDeletedBtn = document.getElementById('toggleDeletedBtn');
     const printBtn = document.getElementById('printBtn');
     const printSelectedBtn = document.getElementById('printSelectedBtn');
+    const shareBtn = document.getElementById('shareBtn');
     const exportBtn = document.getElementById('exportBtn');
     const exportDragBtn = document.getElementById('exportDragBtn');
     const replaceBtn = document.getElementById('replaceBtn');
@@ -11910,7 +11967,9 @@
 
     /** Selecting a file to record: no unnecessary permission requests before the save dialog.*/
     async function pickSaveFileHandle(suggestedName, { preferSourceFile = false } = {}) {
-      if (preferSourceFile) {
+      // Android app: never write back through a handle the WebView gave out
+      // (it fails there) - Save always goes through the system "Save as".
+      if (preferSourceFile && !pmIsAndroidApp()) {
         const src = getActiveTabSourceHandle();
         if (src && (await queryHandlePermission(src, 'readwrite')) === 'granted') {
           return src;
@@ -12359,6 +12418,7 @@
       const selectedNonDeleted = [...selectedPages].filter(i => !markedForDeletion.has(i));
       deleteBtn.disabled = baseDisabled || selectedNonDeleted.length === 0;
       printBtn.disabled = baseDisabled;
+      if (shareBtn) shareBtn.disabled = baseDisabled;
       if (printSelectedBtn) printSelectedBtn.disabled = baseDisabled || selectedNonDeleted.length === 0;
       exportBtn.disabled = baseDisabled || selectedNonDeleted.length === 0;
       //Pop-up export buttons (like images + drag) repeat the export state
@@ -14342,10 +14402,14 @@
 
     function updateInfo() {
       if (pdfDoc) {
-        const shown = escapeHtml(formatFileNameForDisplay(currentFileName));
+        // Touch: the whole name, cut with "…" at its end by CSS (holding a
+        // finger on it shows it all - initFileNameHold); elsewhere the
+        // middle of a long name gives way.
+        const shown = escapeHtml(isTouchDevice ? (currentFileName || '') : formatFileNameForDisplay(currentFileName));
         //title - full name (on hover/hold)
-        infoDiv.innerHTML = `<span class="file-ico">📄</span><b class="file-name">${shown}</b>${dirtyStarHtml()}`;
-        infoDiv.title = currentFileName || '';
+        infoDiv.innerHTML = `<span class="info-line"><span class="file-ico">📄</span><b class="file-name">${shown}</b>${dirtyStarHtml()}</span>`;
+        // (Touch: no title - its tooltip would show beside our own bubble.)
+        infoDiv.title = isTouchDevice ? '' : (currentFileName || '');
         infoDiv.style.display = 'block';
       } else {
         //There is no document - we hide the file name so that it does not overlap with the title.
@@ -14366,6 +14430,45 @@
     //• the document is not open → “PDF Document Manager” in the center;
     //• document is open → counter on the left, name in the center, title on the right (desktop);
     //• if the name matches the title → hide the title, press the name to the right.
+    // Touch: holding a finger on a file name cut with "…" shows the whole
+    // name in a bubble under it until the finger lifts or moves away.
+    (function initFileNameHold() {
+      if (!isTouchDevice || !infoDiv) return;
+      const HOLD_MS = 450, MOVE_PX = 10;
+      let timer = null, tip = null, start = null;
+      const hide = () => {
+        clearTimeout(timer);
+        timer = null;
+        if (tip) { tip.remove(); tip = null; }
+      };
+      const show = () => {
+        timer = null;
+        const nameEl = infoDiv.querySelector('.file-name');
+        if (!nameEl || !currentFileName || nameEl.scrollWidth <= nameEl.clientWidth + 1) return;
+        tip = document.createElement('div');
+        tip.className = 'pm-file-name-tip';
+        tip.textContent = currentFileName;
+        document.body.appendChild(tip);
+        const r = infoDiv.getBoundingClientRect();
+        const w = tip.offsetWidth;
+        tip.style.left = Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2)) + 'px';
+        tip.style.top = (r.bottom + 6) + 'px';
+      };
+      infoDiv.addEventListener('pointerdown', (e) => {
+        if (e.pointerType === 'mouse') return;
+        hide();
+        start = { x: e.clientX, y: e.clientY };
+        timer = setTimeout(show, HOLD_MS);
+      });
+      infoDiv.addEventListener('pointermove', (e) => {
+        if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > MOVE_PX) hide();
+      });
+      ['pointerup', 'pointercancel', 'pointerleave'].forEach(type => infoDiv.addEventListener(type, () => { start = null; hide(); }));
+      // No system menu / text selection on the held name.
+      infoDiv.addEventListener('contextmenu', (e) => e.preventDefault());
+      window.addEventListener('scroll', hide, true);
+    })();
+
     function updateHeaderLayout() {
       const header = document.querySelector('.content-header');
       if (!header) return;
@@ -30080,9 +30183,15 @@
       } catch (_) { /* ignore */ }
     }
 
-    /** Desktop shell's OS: 'linux' or 'windows' (the two shells released). */
+    /**
+     * The app shell's platform: 'windows', 'linux' or 'android' - each has
+     * its own release and its own fields in the version feed
+     * (windowsVersion / linuxVersion / androidVersion, ...DownloadUrl).
+     * Android first: its user agent says "Linux" too.
+     */
     function pdfManagerDesktopPlatform() {
       const ua = String((navigator && navigator.userAgent) || '');
+      if (/Android/i.test(ua)) return 'android';
       return (/Linux|X11/i.test(ua) && !/Windows/i.test(ua)) ? 'linux' : 'windows';
     }
 
@@ -30226,14 +30335,14 @@
         // The editor inside the app only changes with a new app release, so
         // only the app version counts here - a newer editor build on main
         // is not something a desktop user can install.
-        const linux = pdfManagerDesktopPlatform() === 'linux';
+        const platform = pdfManagerDesktopPlatform();
         const localVer = await pdfManagerResolveDesktopAppVersion();
-        const remoteVer = String((linux ? feed.linuxVersion : feed.windowsVersion) || '').trim();
+        const remoteVer = String(feed[platform + 'Version'] || '').trim();
         if (localVer && remoteVer) {
           compared = true;
           if (pdfManagerCompareSemver(remoteVer, localVer) > 0) {
             messages.push(t('aboutUpdateApp', { ver: remoteVer }));
-            downloadUrl = String((linux ? feed.linuxDownloadUrl : feed.windowsDownloadUrl) || '').trim();
+            downloadUrl = String(feed[platform + 'DownloadUrl'] || '').trim();
           }
         }
       } else {
@@ -30314,7 +30423,7 @@
       const libsHtml = PDF_MANAGER_LIBRARIES
         .map(([name, ver]) => `${escapeHtml(name)} ${escapeHtml(ver)}`)
         .join(' &nbsp;·&nbsp; ');
-      const aboutKind = isDesktop ? t('aboutDesktop') : t('aboutWeb');
+      const aboutKind = isDesktop ? t(pmIsAndroidApp() ? 'aboutAndroid' : 'aboutDesktop') : t('aboutWeb');
       const repoLineHtml = PDF_MANAGER_REPO_URL
         ? `<p style="margin:6px 0 0; font-size:12px; color:#555;">${escapeHtml(t('aboutRepository'))}
              <a id="aboutRepoLink" href="${escapeHtml(PDF_MANAGER_REPO_URL)}" target="_blank" rel="noopener noreferrer"
@@ -31449,6 +31558,12 @@
      * Only if that fails too is the file downloaded for printing by hand.
      */
     async function pmPrintPdfBytes(pdfBytes, fallbackFileName) {
+      // Android app: the system print dialog (printers, "Save as PDF").
+      if (pmIsAndroidApp() && window.__pmAndroid) {
+        await window.__pmAndroid.print(pdfBytes,
+          currentFileName ? suggestPdfSaveFileName(currentFileName) : fallbackFileName);
+        return;
+      }
       if (!isTauriDesktopApp()) {
         const url = URL.createObjectURL(new Blob([pdfBytes], { type: 'application/pdf' }));
         const printWindow = window.open(url, '_blank');
@@ -31620,6 +31735,28 @@
       }
     }
 
+    // Android app: send the document - as Save would write it (pages in the
+    // order shown, marked ones left out, edits applied), without saving it -
+    // through the system share sheet (mail, messengers, cloud drives...).
+    async function pmShareDocument() {
+      if (isLoading || !pdfDoc || !window.__pmAndroid) return;
+      const indices = Array.from(pagesContainer.querySelectorAll('.page'))
+        .map(div => parseInt(div.dataset.index, 10))
+        .filter(idx => !Number.isNaN(idx) && !markedForDeletion.has(idx));
+      if (!indices.length) return alert(t('alertNoPagesToShare'));
+      if (pmTabsEnabled() && pmActiveId != null) pmCaptureActive();
+      showLoading(t('loadingPreparing'));
+      try {
+        const bytes = await buildExportPdfBytes(indices);
+        await window.__pmAndroid.share(bytes, suggestPdfSaveFileName(currentFileName), 'application/pdf');
+      } catch (e) {
+        console.error(e);
+        alert(t('shareError') + (e && e.message ? ': ' + e.message : (e ? ': ' + e : '')));
+      } finally {
+        hideLoading();
+      }
+    }
+
     // mode: true/'images' = "save as images", 'encrypt' = prompt for a
     // password and encrypt the saved PDF, 'split' = every page its own file
     // (see savePagesSplit), falsy = plain save.
@@ -31672,7 +31809,9 @@
       // (Linux) has no such API at all, and WebView2 (Windows) only has a
       // real sourceHandle when the file was opened via showOpenFilePicker.
       const isRegularSave = !asImage && !encryptOnly && !compressOnly;
-      const nativeSavePath = (isRegularSave && isTauriDesktopApp()) ? getActiveTabNativePath() : null;
+      // (Not in the Android app: a file sent to it is a copy in the app cache.)
+      const nativeSavePath = (isRegularSave && isTauriDesktopApp() && !pmIsAndroidApp())
+        ? getActiveTabNativePath() : null;
 
       // First, select the file and open the recording stream (while the user gesture is active),
       // then we collect the PDF - otherwise createWritable is blocked after a long preparation.
