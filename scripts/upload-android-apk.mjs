@@ -151,7 +151,7 @@ function updateReadmeAndroidLinks(info) {
     return false;
   }
   writeFileSync(README_PATH, text, 'utf8');
-  console.log('README.md: обновлены ссылки на', tag);
+  console.log('README.md: обновлены ссылки на', info.tag);
   return true;
 }
 
@@ -198,7 +198,7 @@ function updateIndexAndroidLinks(info) {
     return false;
   }
   writeFileSync(INDEX_PATH, text, 'utf8');
-  console.log('index.html: обновлены ссылки на', tag);
+  console.log('index.html: обновлены ссылки на', info.tag);
   return true;
 }
 

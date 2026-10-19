@@ -258,6 +258,10 @@
         <span lang-ru>Linux: .AppImage</span>
         <span lang-en>Linux: .AppImage</span>
       </a>
+      <a class="btn btn-secondary" id="downloadAndroidApkBtn" href="https://github.com/65WebDev/PDF-Manager/releases/download/android-v0.1.47/PDF-Manager_0.1.47.apk">
+        <span lang-ru>Android: .apk</span>
+        <span lang-en>Android: .apk</span>
+      </a>
     </div>
     <p class="privacy-note">
       <span lang-ru>Файлы не покидают ваш компьютер — вся обработка PDF происходит локально в браузере, без загрузки на сервер.</span>
@@ -474,6 +478,17 @@
           <span lang-ru>Скачать</span><span lang-en>Download</span>
         </a>
       </div>
+      <div class="dist-card">
+        <span class="d-badge">Android</span>
+        <h3><span lang-ru>Приложение для Android</span><span lang-en>Android app</span></h3>
+        <p>
+          <span lang-ru>APK для телефонов и планшетов: открывает PDF из других приложений, сохраняет, отправляет и печатает через Android.</span>
+          <span lang-en>An APK for phones and tablets: opens PDFs from other apps, saves, shares and prints through Android.</span>
+        </p>
+        <a class="btn btn-secondary" id="distAndroidBtn" href="https://github.com/65WebDev/PDF-Manager/releases/download/android-v0.1.47/PDF-Manager_0.1.47.apk" style="width:100%; justify-content:center;">
+          <span lang-ru>Скачать</span><span lang-en>Download</span>
+        </a>
+      </div>
     </div>
   </section>
 
@@ -534,6 +549,8 @@
       var linuxDebBtn = document.getElementById('downloadLinuxDebBtn');
       var linuxAppImageBtn = document.getElementById('downloadLinuxAppImageBtn');
       var distLinuxBtn = document.getElementById('distLinuxBtn');
+      var androidApkBtn = document.getElementById('downloadAndroidApkBtn');
+      var distAndroidBtn = document.getElementById('distAndroidBtn');
       try {
         var res = await fetch('version.json', { cache: 'no-store' });
         if (!res.ok) throw new Error('no version');
@@ -564,6 +581,12 @@
           if (linuxAppImageBtn) linuxAppImageBtn.href = appImageUrl;
           if (distLinuxBtn) distLinuxBtn.href = debUrl;
         }
+        var androidVer = String(v.androidVersion || '').trim();
+        if (androidVer) {
+          var apkUrl = 'https://github.com/65WebDev/PDF-Manager/releases/download/android-v' + androidVer + '/PDF-Manager_' + androidVer + '.apk';
+          if (androidApkBtn) androidApkBtn.href = apkUrl;
+          if (distAndroidBtn) distAndroidBtn.href = apkUrl;
+        }
         var date = v.date ? new Date(v.date).toLocaleString(document.documentElement.lang === 'en' ? 'en-US' : 'ru-RU') : '—';
         var repoBase = 'https://github.com/65WebDev/PDF-Manager';
         el.innerHTML =
@@ -576,6 +599,10 @@
           (linuxVer ? (
             '<br><span lang-ru><strong>Linux:</strong> <a href="' + repoBase + '/releases/tag/linux-v' + linuxVer + '">v' + linuxVer + '</a></span>' +
             '<span lang-en><strong>Linux:</strong> <a href="' + repoBase + '/releases/tag/linux-v' + linuxVer + '">v' + linuxVer + '</a></span>'
+          ) : '') +
+          (androidVer ? (
+            '<br><span lang-ru><strong>Android:</strong> <a href="' + repoBase + '/releases/tag/android-v' + androidVer + '">v' + androidVer + '</a></span>' +
+            '<span lang-en><strong>Android:</strong> <a href="' + repoBase + '/releases/tag/android-v' + androidVer + '">v' + androidVer + '</a></span>'
           ) : '') +
           '<br><span lang-ru><strong>Коммит:</strong> <a href="' + repoBase + '/commit/' + (v.commit || '') + '">' + (v.shortCommit || '—') + '</a></span>' +
           '<span lang-en><strong>Commit:</strong> <a href="' + repoBase + '/commit/' + (v.commit || '') + '">' + (v.shortCommit || '—') + '</a></span>' +
