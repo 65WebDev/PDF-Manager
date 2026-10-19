@@ -459,16 +459,24 @@ Android попросит разрешить установку из этого �
 
 Workflow **Android APK** (`.github/workflows/android.yml`) собирает APK
 на каждый PR, который меняет `src-tauri/` или мост Tauri, и вручную:
-**Actions → Android APK → Run workflow**. Готовый APK — в разделе
-**Artifacts** запуска.
+**Actions → Android APK → Run workflow**.
+
+Где взять готовый APK:
+
+- **прямая ссылка, без входа в GitHub** (удобно открыть прямо на телефоне):
+  https://github.com/65WebDev/PDF-Manager/releases/download/android-test/PDF-Manager-test.apk —
+  пре-релиз `android-test`, файл в нём заменяется каждой сборкой; на
+  странице релиза видно, из какой ветки и коммита он собран;
+- в разделе **Artifacts** запуска (ZIP; скачивается только после входа в GitHub).
 
 Подпись там:
 
 - если в **Settings → Secrets and variables → Actions** заданы секреты
   `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`,
   `ANDROID_KEY_PASSWORD` — вашим ключом (такой APK обновляет установленный);
-- иначе — одноразовым тестовым ключом: APK ставится, но поверх него ваш
-  релиз встанет только после удаления тестового.
+- иначе — тестовым ключом, который создаётся один раз и хранится в кэше
+  Actions: следующая тестовая сборка ставится поверх предыдущей, а ваш
+  релиз встанет поверх тестовой только после её удаления.
 
 Секреты репозитория видны только Actions (их нельзя прочитать обратно ни в
 интерфейсе, ни из логов). Строка для `ANDROID_KEYSTORE_BASE64`:
