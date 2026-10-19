@@ -1130,10 +1130,39 @@
     .pm-hf-col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
     .pm-hf-col-left { flex: 1.45; }
     .pm-hf-grow { flex: 1; min-width: 0; }
-    .pm-hf-controls input[type=date] {
-      border: 1px solid #bbb; border-radius: 6px; padding: 2px 6px; height: 28px; font-size: 13px;
-      box-sizing: border-box; background: #fff; color: #2c3e50;
+    /*Date: a square calendar button between the label and the format list,
+       and the month calendar it opens (pmHfRunDialog).*/
+    .pm-hf-cal-btn {
+      width: 28px; min-width: 28px; padding: 0; flex: none;
+      display: inline-flex; align-items: center; justify-content: center;
     }
+    .pm-hf-cal-btn svg { display: block; }
+    .pm-hf-cal-btn.pm-hf-cal-custom { border-color: #3498db; color: #3498db; }
+    .pm-hf-cal-btn[aria-expanded="true"] { background: #3498db; border-color: #3498db; color: #fff; }
+    .pm-hf-cal {
+      position: fixed; z-index: 4; width: 238px; padding: 8px; box-sizing: border-box;
+      background: #fff; color: #2c3e50; border-radius: 8px;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.25); font-size: 13px; user-select: none;
+    }
+    .pm-hf-cal-head { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+    .pm-hf-cal-title { flex: 1; text-align: center; font-weight: 600; }
+    .pm-hf-cal-nav {
+      width: 26px; height: 26px; padding: 0; border: none; border-radius: 6px;
+      background: transparent; color: inherit; font-size: 18px; line-height: 1; cursor: pointer;
+    }
+    .pm-hf-cal-nav:hover { background: rgba(52,152,219,0.15); }
+    .pm-hf-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+    .pm-hf-cal-wd { text-align: center; font-size: 11px; color: #8a96a3; padding: 2px 0; }
+    .pm-hf-cal-day {
+      height: 28px; padding: 0; border: 1px solid transparent; border-radius: 6px;
+      background: transparent; color: inherit; font-size: 13px; cursor: pointer;
+    }
+    .pm-hf-cal-day:hover { background: rgba(52,152,219,0.15); }
+    .pm-hf-cal-day.pm-hf-cal-out { color: #a8b1ba; }
+    .pm-hf-cal-day.pm-hf-cal-today { border-color: #3498db; }
+    .pm-hf-cal-day.pm-hf-cal-sel,
+    .pm-hf-cal-day.pm-hf-cal-sel:hover { background: #3498db; border-color: #3498db; color: #fff; font-weight: 600; }
+    .pm-hf-cal-foot { display: flex; justify-content: center; margin-top: 6px; }
     /*Bates and margins: label / field pairs in a two-column grid.*/
     .pm-hf-bates, .pm-hf-margins {
       display: grid; grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr);
@@ -1163,7 +1192,13 @@
     .pm-hf-preview canvas { display: block; box-shadow: 0 2px 10px rgba(0,0,0,0.25); }
     .pm-hf-help-pop { max-width: 420px; }
     .pm-hf-help-pop code { background: rgba(52,152,219,0.12); border-radius: 4px; padding: 0 4px; }
-    html[data-theme="dark"] .pm-wm-box .pm-hf-controls input[type=date] { background: #1c2128 !important; border-color: #4a5058 !important; color-scheme: dark; }
+    html[data-theme="dark"] .pm-wm-box .pm-hf-cal { background: #333a44; box-shadow: 0 4px 16px rgba(0,0,0,0.6); }
+    html[data-theme="dark"] .pm-wm-box .pm-hf-cal .pm-hf-cal-wd { color: #8a949e !important; }
+    html[data-theme="dark"] .pm-wm-box .pm-hf-cal .pm-hf-cal-day.pm-hf-cal-out { color: #7d8791 !important; }
+    html[data-theme="dark"] .pm-wm-box .pm-hf-cal .pm-hf-cal-day.pm-hf-cal-sel { color: #fff !important; }
+    html[data-theme="dark"] .pm-wm-box .pm-hf-cal-btn.pm-hf-cal-custom { border-color: #3498db; }
+    html[data-theme="dark"] .pm-wm-box .pm-hf-cal-btn.pm-hf-cal-custom svg { color: #5dade2 !important; }
+    html[data-theme="dark"] .pm-wm-box .pm-hf-cal-btn[aria-expanded="true"] { background: #3498db; border-color: #3498db; }
     /*Page format dialog (pmPfRunDialog): options on top, the page as it is
        and as it will be below, side by side at one scale.*/
     /*As wide as the two option columns need - no stretched gap between
@@ -9667,12 +9702,13 @@
         hfTitle: 'Колонтитулы', hfHeader: 'Верхний', hfFooter: 'Нижний',
         hfLeft: 'Слева', hfCenter: 'По центру', hfRight: 'Справа',
         hfPageNumber: 'Номер страницы', hfDate: 'Дата', hfBates: 'Нумерация Бейтса', hfInsert: 'Вставить',
+        hfPickDate: 'Выбрать дату в календаре', hfToday: 'Сегодня', hfPrevMonth: 'Предыдущий месяц', hfNextMonth: 'Следующий месяц',
         hfBatesPrefix: 'Префикс', hfBatesSuffix: 'Суффикс', hfBatesStart: 'С номера', hfBatesDigits: 'Цифр',
         hfMargins: 'Отступы, мм', hfMarginTop: 'Сверху', hfMarginBottom: 'Снизу', hfMarginLeft: 'Слева', hfMarginRight: 'Справа',
         hfFmtPage: 'Страница {page}', hfFmtPageOf: 'Страница {page} из {pages}', hfFmtNumOf: '{page} из {pages}',
         hfHelpVars: 'Переменные пишутся прямо в тексте в фигурных скобках — их можно переставлять и окружать любым текстом. Кнопки «Вставить» добавляют их туда, где стоит курсор.',
         hfHelpPage: 'номер страницы и число страниц',
-        hfHelpDate: 'дата; D, DD — день, M, MM — месяц числом, MMM, MMMM — месяц словом, YY, YYYY — год',
+        hfHelpDate: 'дата (сегодняшняя или выбранная в календаре); D, DD — день, M, MM — месяц числом, MMM, MMMM — месяц словом, YY, YYYY — год',
         hfHelpBates: 'номер Бейтса: перед скобками — префикс, в квадратных скобках — начальный номер (сколько цифр — такой длины номер), после них — суффикс',
         hfMm: 'мм', hfHelpInline: 'Щёлкните по колонтитулу в превью, чтобы изменить его прямо там: Enter — готово, Esc — отмена.', hfHelpDrag: 'Линии отступов в превью можно перетаскивать мышью; с Shift — точнее.',
         hfNoText: 'Введите текст хотя бы одного колонтитула',
@@ -10139,12 +10175,13 @@
         hfTitle: 'Header & footer', hfHeader: 'Header', hfFooter: 'Footer',
         hfLeft: 'Left', hfCenter: 'Center', hfRight: 'Right',
         hfPageNumber: 'Page number', hfDate: 'Date', hfBates: 'Bates numbering', hfInsert: 'Insert',
+        hfPickDate: 'Pick a date in the calendar', hfToday: 'Today', hfPrevMonth: 'Previous month', hfNextMonth: 'Next month',
         hfBatesPrefix: 'Prefix', hfBatesSuffix: 'Suffix', hfBatesStart: 'Start at', hfBatesDigits: 'Digits',
         hfMargins: 'Margins, mm', hfMarginTop: 'Top', hfMarginBottom: 'Bottom', hfMarginLeft: 'Left', hfMarginRight: 'Right',
         hfFmtPage: 'Page {page}', hfFmtPageOf: 'Page {page} of {pages}', hfFmtNumOf: '{page} of {pages}',
         hfHelpVars: 'Variables are written right in the text in curly braces — move them and surround them with any text. The Insert buttons add them where the cursor is.',
         hfHelpPage: 'page number and page count',
-        hfHelpDate: 'date; D, DD — day, M, MM — month as a number, MMM, MMMM — month as a word, YY, YYYY — year',
+        hfHelpDate: 'date (today or the one picked in the calendar); D, DD — day, M, MM — month as a number, MMM, MMMM — month as a word, YY, YYYY — year',
         hfHelpBates: 'Bates number: the prefix before the brackets, the start number in square brackets (as many digits as the number should have), the suffix after them',
         hfMm: 'mm', hfHelpInline: 'Click a header or footer in the preview to edit it right there: Enter to finish, Esc to undo.', hfHelpDrag: 'Drag the margin lines in the preview with the mouse; hold Shift for finer steps.',
         hfNoText: 'Enter the text of at least one header or footer',
@@ -10611,12 +10648,13 @@
         hfTitle: 'Encabezado y pie', hfHeader: 'Encabezado', hfFooter: 'Pie',
         hfLeft: 'Izquierda', hfCenter: 'Centro', hfRight: 'Derecha',
         hfPageNumber: 'Número de página', hfDate: 'Fecha', hfBates: 'Numeración Bates', hfInsert: 'Insertar',
+        hfPickDate: 'Elegir una fecha en el calendario', hfToday: 'Hoy', hfPrevMonth: 'Mes anterior', hfNextMonth: 'Mes siguiente',
         hfBatesPrefix: 'Prefijo', hfBatesSuffix: 'Sufijo', hfBatesStart: 'Empezar en', hfBatesDigits: 'Dígitos',
         hfMargins: 'Márgenes, mm', hfMarginTop: 'Arriba', hfMarginBottom: 'Abajo', hfMarginLeft: 'Izquierda', hfMarginRight: 'Derecha',
         hfFmtPage: 'Página {page}', hfFmtPageOf: 'Página {page} de {pages}', hfFmtNumOf: '{page} de {pages}',
         hfHelpVars: 'Las variables se escriben en el propio texto entre llaves: puedes moverlas y rodearlas de cualquier texto. Los botones Insertar las añaden donde está el cursor.',
         hfHelpPage: 'número de página y número de páginas',
-        hfHelpDate: 'fecha; D, DD — día, M, MM — mes en número, MMM, MMMM — mes en letras, YY, YYYY — año',
+        hfHelpDate: 'fecha (la de hoy o la elegida en el calendario); D, DD — día, M, MM — mes en número, MMM, MMMM — mes en letras, YY, YYYY — año',
         hfHelpBates: 'número Bates: el prefijo antes de los corchetes, el número inicial entre corchetes (con tantas cifras como deba tener el número), el sufijo después',
         hfMm: 'mm', hfHelpInline: 'Haz clic en un encabezado o pie de la vista previa para editarlo allí mismo: Enter para terminar, Esc para deshacer.', hfHelpDrag: 'Arrastra las líneas de margen en la vista previa con el ratón; con Shift, con más precisión.',
         hfNoText: 'Escribe el texto de al menos un encabezado o pie',
@@ -11133,12 +11171,13 @@
         hfTitle: '页眉和页脚', hfHeader: '页眉', hfFooter: '页脚',
         hfLeft: '左', hfCenter: '中', hfRight: '右',
         hfPageNumber: '页码', hfDate: '日期', hfBates: '贝茨编号', hfInsert: '插入',
+        hfPickDate: '在日历中选择日期', hfToday: '今天', hfPrevMonth: '上个月', hfNextMonth: '下个月',
         hfBatesPrefix: '前缀', hfBatesSuffix: '后缀', hfBatesStart: '起始号', hfBatesDigits: '位数',
         hfMargins: '边距（毫米）', hfMarginTop: '上', hfMarginBottom: '下', hfMarginLeft: '左', hfMarginRight: '右',
         hfFmtPage: '第 {page} 页', hfFmtPageOf: '第 {page} 页，共 {pages} 页', hfFmtNumOf: '{page} / {pages}',
         hfHelpVars: '变量直接以花括号写在文本中，可以移动并在其前后添加任意文字。“插入”按钮会将其插入光标所在位置。',
         hfHelpPage: '页码和总页数',
-        hfHelpDate: '日期；D、DD — 日，M、MM — 数字月份，MMM、MMMM — 文字月份，YY、YYYY — 年',
+        hfHelpDate: '日期（今天或在日历中选择的日期）；D、DD — 日，M、MM — 数字月份，MMM、MMMM — 文字月份，YY、YYYY — 年',
         hfHelpBates: '贝茨编号：方括号前为前缀，方括号内为起始编号（位数即编号长度），方括号后为后缀',
         hfMm: '毫米', hfHelpInline: '单击预览中的页眉或页脚即可直接编辑：Enter 完成，Esc 取消。', hfHelpDrag: '可用鼠标拖动预览中的边距线；按住 Shift 可更精确地移动。',
         hfNoText: '请至少输入一个页眉或页脚的文本',
@@ -66222,8 +66261,11 @@ function pmHfRunDialog() {
     let lastSlot = 'fc';            // where "Insert" puts a variable
     let busy = false;
     const esc = escapeHtml;
-    // A date variable always gives the current date.
-    const dateOf = () => new Date();
+    // The date the date variables give: today unless another day is picked
+    // in the calendar (for this run of the dialog - it opens on today).
+    const todayDate = () => { const n = new Date(); return new Date(n.getFullYear(), n.getMonth(), n.getDate()); };
+    let pickedDate = todayDate();
+    const dateOf = () => new Date(pickedDate.getTime());
 
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay-active pm-wm-overlay';
@@ -66262,6 +66304,7 @@ function pmHfRunDialog() {
               <button type="button" class="pm-wm-tbtn" id="pmHfInsPage">${esc(t('hfInsert'))}</button>
             </div>
             <div class="pm-wm-row"><span class="pm-wm-label">${esc(t('hfDate'))}</span>
+              <button type="button" class="pm-wm-tbtn pm-hf-cal-btn" id="pmHfDatePick" aria-haspopup="dialog" aria-expanded="false" aria-label="${esc(t('hfPickDate'))}"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="16.5" rx="2"/><line x1="3" y1="9.5" x2="21" y2="9.5"/><line x1="8" y1="2.5" x2="8" y2="6.5"/><line x1="16" y1="2.5" x2="16" y2="6.5"/><rect x="7" y="13" width="3" height="3" rx="0.5" fill="currentColor" stroke="none"/></svg></button>
               <select id="pmHfDateFmt" class="pm-hf-grow"></select>
               <button type="button" class="pm-wm-tbtn" id="pmHfInsDate">${esc(t('hfInsert'))}</button>
             </div>
@@ -66909,6 +66952,122 @@ function pmHfRunDialog() {
     pageFmtSel.addEventListener('change', () => { s.pageFormat = Number(pageFmtSel.value) || 0; });
     dateFmtSel.addEventListener('change', () => { s.dateFormat = dateFmtSel.value; });
 
+    // ---- date: the calendar under the square button ------------------------
+    const calBtn = $('pmHfDatePick');
+    let cal = null;          // the open calendar
+    let calMonth = null;     // first day of the month it shows
+    const sameDay = (a, b) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+    // Weeks start on Monday, in the US on Sunday.
+    const weekStart = () => (pmLocale === 'en' ? 0 : 1);
+    // A day other than today shows on the button (blue) and in its tooltip.
+    function syncCalBtn() {
+      calBtn.classList.toggle('pm-hf-cal-custom', !sameDay(pickedDate, todayDate()));
+      calBtn.title = t('hfPickDate') + ': ' + pmHfFormatDate(pickedDate, 'D MMMM YYYY');
+    }
+    function pickDate(d) {
+      pickedDate = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      syncCalBtn();
+      fillFormatLists();
+      drawSoon();
+      closeCal();
+      calBtn.focus();
+    }
+    function renderCal() {
+      const loc = pmHfIntlLocale();
+      let title;
+      try {
+        title = new Intl.DateTimeFormat(loc, { month: 'long', year: 'numeric' }).format(calMonth);
+      } catch (_) {
+        title = (calMonth.getMonth() + 1) + '.' + calMonth.getFullYear();
+      }
+      // "Октябрь 2026", not "октябрь 2026 г.".
+      title = title.replace(/\s*г\.$/, '');
+      title = title.charAt(0).toUpperCase() + title.slice(1);
+      const ws = weekStart();
+      const wd = [];
+      for (let i = 0; i < 7; i++) {
+        // 1 January 2023 was a Sunday.
+        const d = new Date(2023, 0, 1 + ((ws + i) % 7));
+        try { wd.push(new Intl.DateTimeFormat(loc, { weekday: 'short' }).format(d)); } catch (_) { wd.push(''); }
+      }
+      // Six weeks from the one the 1st falls in; days of the months around
+      // it are dimmed but can be picked too.
+      const first = new Date(calMonth.getFullYear(), calMonth.getMonth(), 1);
+      const lead = (first.getDay() - ws + 7) % 7;
+      const today = todayDate();
+      let days = '';
+      for (let i = 0; i < 42; i++) {
+        const d = new Date(first.getFullYear(), first.getMonth(), 1 - lead + i);
+        const cls = ['pm-hf-cal-day'];
+        if (d.getMonth() !== first.getMonth()) cls.push('pm-hf-cal-out');
+        if (sameDay(d, today)) cls.push('pm-hf-cal-today');
+        if (sameDay(d, pickedDate)) cls.push('pm-hf-cal-sel');
+        days += `<button type="button" class="${cls.join(' ')}" data-date="${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}"` +
+          ` title="${esc(pmHfFormatDate(d, 'D MMMM YYYY'))}">${d.getDate()}</button>`;
+      }
+      cal.innerHTML =
+        `<div class="pm-hf-cal-head">` +
+          `<button type="button" class="pm-hf-cal-nav" data-nav="-1" title="${esc(t('hfPrevMonth'))}" aria-label="${esc(t('hfPrevMonth'))}">‹</button>` +
+          `<span class="pm-hf-cal-title">${esc(title)}</span>` +
+          `<button type="button" class="pm-hf-cal-nav" data-nav="1" title="${esc(t('hfNextMonth'))}" aria-label="${esc(t('hfNextMonth'))}">›</button>` +
+        `</div>` +
+        `<div class="pm-hf-cal-grid">${wd.map(w => `<span class="pm-hf-cal-wd">${esc(w)}</span>`).join('')}${days}</div>` +
+        `<div class="pm-hf-cal-foot"><button type="button" class="pm-wm-tbtn" data-today="1">${esc(t('hfToday'))}</button></div>`;
+    }
+    // Under the button (above it if there is no room below), kept on screen.
+    function placeCal() {
+      if (!cal) return;
+      const r = calBtn.getBoundingClientRect();
+      const w = cal.offsetWidth, h = cal.offsetHeight;
+      let top = r.bottom + 4;
+      if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 4);
+      cal.style.left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) + 'px';
+      cal.style.top = top + 'px';
+    }
+    function openCal() {
+      if (cal) return;
+      calMonth = new Date(pickedDate.getFullYear(), pickedDate.getMonth(), 1);
+      cal = document.createElement('div');
+      cal.className = 'pm-hf-cal';
+      cal.setAttribute('role', 'dialog');
+      cal.setAttribute('aria-label', t('hfPickDate'));
+      renderCal();
+      box.appendChild(cal);
+      placeCal();
+      calBtn.setAttribute('aria-expanded', 'true');
+      const sel = cal.querySelector('.pm-hf-cal-sel');
+      if (sel) sel.focus();
+      cal.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const nav = e.target.closest('[data-nav]');
+        if (nav) {
+          calMonth = new Date(calMonth.getFullYear(), calMonth.getMonth() + Number(nav.dataset.nav), 1);
+          renderCal();
+          placeCal();
+          return;
+        }
+        if (e.target.closest('[data-today]')) { pickDate(todayDate()); return; }
+        const day = e.target.closest('[data-date]');
+        if (day) {
+          const [y, m, d] = day.dataset.date.split('-').map(Number);
+          pickDate(new Date(y, m - 1, d));
+        }
+      });
+    }
+    function closeCal() {
+      if (!cal) return;
+      cal.remove();
+      cal = null;
+      calBtn.setAttribute('aria-expanded', 'false');
+    }
+    calBtn.addEventListener('click', (e) => { e.stopPropagation(); if (cal) closeCal(); else openCal(); });
+    // A press anywhere else closes it; the dialog scrolling moves it along.
+    overlay.addEventListener('pointerdown', (e) => {
+      if (cal && !cal.contains(e.target) && !calBtn.contains(e.target)) closeCal();
+    }, true);
+    box.addEventListener('scroll', () => { if (cal) placeCal(); }, { passive: true });
+    syncCalBtn();
+
     fontSel.addEventListener('change', () => { s.font = fontSel.value; changed(); });
     bindNumber(sizeIn, 4, 72, () => s.size, v => { s.size = v; });
     boldBtn.addEventListener('click', () => { s.bold = !s.bold; changed(); });
@@ -66985,7 +67144,7 @@ function pmHfRunDialog() {
       }
       if (e.key === 'Escape') {
         e.preventDefault(); e.stopPropagation();
-        if (!helpPop.hidden) setHelp(false); else close(false);
+        if (cal) { closeCal(); calBtn.focus(); } else if (!helpPop.hidden) setHelp(false); else close(false);
         return;
       }
       if (e.key === 'Enter' && e.target && e.target.tagName === 'INPUT' && ['text', 'number'].includes(e.target.type)) {
