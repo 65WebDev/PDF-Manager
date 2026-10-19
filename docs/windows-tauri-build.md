@@ -358,6 +358,17 @@ APK для телефонов и планшетов на ARM (64- и 32-битн
 
 ### Один раз: установить и настроить
 
+0. **Папка проекта — путь только из латиницы**, лучше без пробелов, например
+   `C:\Build\PDF-Manager`. С кириллицей в пути (`…\Сборка\PDF-Manager`)
+   компоновщик NDK и Gradle на Windows не работают; скрипт проверяет это в
+   самом начале. Перенести готовую папку можно целиком (вместе с
+   `keystore.properties`):
+
+   ```powershell
+   mkdir C:\Build -Force
+   Move-Item "C:\Users\<вы>\Desktop\PDF Manager\Сборка\PDF-Manager" "C:\Build\PDF-Manager"
+   ```
+
 1. **Android Studio**: https://developer.android.com/studio — установить с
    настройками по умолчанию, запустить один раз (мастер скачает SDK).
 2. В Android Studio: **More Actions → SDK Manager** (или Settings →
@@ -368,11 +379,21 @@ APK для телефонов и планшетов на ARM (64- и 32-битн
      **Android SDK Platform-Tools**;
    - **Apply** и дождаться загрузки. Вверху окна виден путь
      **Android SDK Location** — обычно `C:\Users\<вы>\AppData\Local\Android\Sdk`.
-3. Переменные среды (PowerShell, один раз; если путь к SDK другой —
+3. **JDK 21.** Gradle Android-проекта (8.14) работает на Java 17–24, а
+   встроенная Java Android Studio (папка `jbr`) в свежих версиях — уже
+   Java 25 (ошибка `Unsupported class file major version 69`). Поэтому
+   отдельно:
+
+   ```powershell
+   winget install --id EclipseAdoptium.Temurin.21.JDK -e
+   ```
+
+4. Переменные среды (PowerShell, один раз; если путь к SDK другой —
    подставьте его):
 
    ```powershell
-   [Environment]::SetEnvironmentVariable("JAVA_HOME", "C:\Program Files\Android\Android Studio\jbr", "User")
+   $jdk = Get-ChildItem "C:\Program Files\Eclipse Adoptium" -Directory -Filter "jdk-21*" | Sort-Object Name | Select-Object -Last 1
+   [Environment]::SetEnvironmentVariable("JAVA_HOME", $jdk.FullName, "User")
    [Environment]::SetEnvironmentVariable("ANDROID_HOME", "$env:LocalAppData\Android\Sdk", "User")
    $ndk = Get-ChildItem "$env:LocalAppData\Android\Sdk\ndk" -Directory | Sort-Object Name | Select-Object -Last 1
    $ndk.FullName   # должен вывести ...\Sdk\ndk\<версия>
@@ -383,15 +404,18 @@ APK для телефонов и планшетов на ARM (64- и 32-битн
    установлен (пункт 2, **NDK (Side by side)**). Скрипт сборки, кстати, сам
    найдёт самый новый NDK в SDK, если `NDK_HOME` не задан.
 
-   Затем **новое** окно PowerShell и проверка (все три — `True`):
+   Затем **новое** окно PowerShell и проверка (Java — `21.0.…`, остальные — `True`):
 
    ```powershell
-   Test-Path "$env:JAVA_HOME\bin\java.exe"
+   & "$env:JAVA_HOME\bin\java.exe" -version
    Test-Path "$env:ANDROID_HOME\platform-tools"
    Test-Path "$env:NDK_HOME\source.properties"
    ```
 
-4. Rust-цели для Android скрипт добавляет сам (`rustup target add
+   Android Studio от этого не меняется — она пользуется своей Java, не
+   `JAVA_HOME`. Версию Java скрипт тоже проверяет в начале сборки.
+
+5. Rust-цели для Android скрипт добавляет сам (`rustup target add
    aarch64-linux-android armv7-linux-androideabi`).
 
 ### Один раз: ключ подписи (только у вас, не в репозитории)
@@ -553,7 +577,9 @@ NSIS‑установщик регистрирует приложение как
 | Внутри WSL: `rustc`/`node` не найдены | Поставить их **внутри WSL** (не путать с Windows-версиями) — см. раздел 4a «Once». |
 | Linux-сборка просит sudo-пароль на каждый запуск | Нормально при первом запуске (доустановка apt-пакетов). Если пакеты уже стоят, `build-linux.sh` больше `apt-get` не вызывает. |
 | `.AppImage` не запускается («permission denied») | `chmod +x dist-linux/*.AppImage` перед запуском — GitHub/Windows не сохраняют исполняемый бит. |
-| `-Android`: `JAVA_HOME is not set to a JDK` / `ANDROID_HOME …` / `Android NDK not found` | Раздел 4b «Один раз»: Android Studio + SDK Manager (NDK), переменные среды, **новое** окно PowerShell. |
+| `-Android`: `JAVA_HOME is not set to a JDK` / `ANDROID_HOME …` / `Android NDK not found` | Раздел 4b «Один раз»: Android Studio + SDK Manager (NDK), JDK 21, переменные среды, **новое** окно PowerShell. |
+| `-Android`: `Android cannot be built from this folder` / `ld.lld: error: cannot open …\xd1\xe1…` | В пути к папке проекта кириллица (`…\Сборка\…`) — перенести репозиторий, например в `C:\Build\PDF-Manager` (раздел 4b, пункт 0). |
+| `-Android`: `JAVA_HOME is Java 25…` / Gradle: `Unsupported class file major version 69` | `JAVA_HOME` указывает на Java 25 (встроенную в Android Studio) — поставить JDK 21 и указать её (раздел 4b, пункты 3–4). |
 | `-Android`: `Get-ChildItem … \Sdk\ndk … не существует` при настройке | NDK не установлен: SDK Manager → SDK Tools → **NDK (Side by side)** → Apply; затем повторить команду с `NDK_HOME`. |
 | `-Android`: `No signing key` | Нет `src-tauri\gen\android\keystore.properties` — создать ключ и файл (раздел 4b) или собрать с `-Local`. |
 | Gradle: `SDK location not found` / нет `platforms;android-36` | SDK Manager → SDK Platforms → **Android 16 (API 36)**; проверить `ANDROID_HOME`. |
@@ -571,7 +597,7 @@ NSIS‑установщик регистрирует приложение как
 5. Запустить `src-tauri\target\release\PDF Manager.exe`  
 6. Установить NSIS‑сборку и проверить «Открыть с помощью» для PDF  
 7. Заодно и Linux (`.deb`/`.AppImage`)? `.\scripts\build-windows-exe.ps1 -Linux` (нужен WSL2, см. раздел 4a)  
-8. Android (`.apk`)? Android Studio + ключ подписи (раздел 4b), затем `.\scripts\build-windows-exe.ps1 -AndroidOnly`  
+8. Android (`.apk`)? Папка с латинским путём, Android Studio, JDK 21 + ключ подписи (раздел 4b), затем `.\scripts\build-windows-exe.ps1 -AndroidOnly`  
 
 ---
 
