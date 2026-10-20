@@ -4922,11 +4922,18 @@
       max-height: calc(100vh - 16px);
       overflow-y: auto;
       padding: 6px;
+      /*A light frame, a dark outline and a lighter fill: the menu opens
+        over the top bar, and in the bar's own colour the two ran together.*/
+      border: 2px solid #6f93b6;
       border-radius: 12px;
-      background: #2c3e50;
+      background: #34495e;
       color: #fff;
-      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.38);
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 10px 30px rgba(0, 0, 0, 0.5);
       font-family: inherit;
+      /*Holding an item shows its tooltip - not a text selection.*/
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
     }
     #pmPopMenu .pm-pop-title {
       padding: 6px 12px 4px;
@@ -14550,7 +14557,13 @@
       e.stopPropagation();
       pmClosePopMenu();
     }
-    /** items: [{ icon (Element or null), label, disabled, onClick }].
+    // How long a finger rests on a control before its tooltip shows
+    // (initTouchTooltips).
+    const PM_TOUCH_TIP_MS = 450;
+    /** items: [{ icon (Element or null), label, tip, disabled, onClick }].
+     * tip - the desktop tooltip of the control the item stands for, shown
+     * while a finger rests on the item (initTouchTooltips); lifting it then
+     * does not run the item.
      * opts.title - a heading line; opts.place 'below' for a top-row button
      * (default: above the button, for the bottom bar). */
     function pmShowPopMenu(anchor, items, opts) {
@@ -14564,6 +14577,7 @@
       const menu = document.createElement('div');
       menu.id = 'pmPopMenu';
       menu.setAttribute('role', 'menu');
+      menu.addEventListener('contextmenu', (e) => e.preventDefault());
       if (opts.title) {
         const head = document.createElement('div');
         head.className = 'pm-pop-title';
@@ -14585,7 +14599,17 @@
         const label = document.createElement('span');
         label.textContent = it.label;
         b.appendChild(label);
-        b.addEventListener('click', () => { pmClosePopMenu(); it.onClick(); });
+        let downAt = 0;
+        if (it.tip) {
+          b.title = it.tip;
+          b.addEventListener('pointerdown', () => { downAt = performance.now(); });
+        }
+        b.addEventListener('click', () => {
+          // Held until its tooltip showed: the finger was reading, not choosing.
+          if (downAt && performance.now() - downAt >= PM_TOUCH_TIP_MS) { downAt = 0; return; }
+          pmClosePopMenu();
+          it.onClick();
+        });
         menu.appendChild(b);
       }
       document.body.appendChild(backdrop);
@@ -14630,7 +14654,7 @@
         const btn = e.currentTarget;
         toggleMenu(btn, () => pmShowPopMenu(btn, TOOLS.map(([id, key]) => {
           const src = $(id);
-          return { icon: pmIconOf(src), label: t(key), disabled: !src || src.disabled, onClick: () => src.click() };
+          return { icon: pmIconOf(src), label: t(key), tip: src && src.getAttribute('title'), disabled: !src || src.disabled, onClick: () => src.click() };
         }), { title: t('bbTools') }));
       });
 
@@ -14652,8 +14676,8 @@
         const selected = selectedPages.size ? getOperableSelectedIndices().length : 0;
         if (!selected) { printPDF(); return; }
         toggleMenu(btn, () => pmShowPopMenu(btn, [
-          { icon: pmIconOf(btn), label: t('bbPrintDocument'), onClick: () => printPDF() },
-          { icon: pmIconOf($('printSelectedBtn')), label: t('bbPrintSelected', { n: selected }), onClick: () => printSelectedPages() },
+          { icon: pmIconOf(btn), label: t('bbPrintDocument'), tip: $('printBtn') && $('printBtn').getAttribute('title'), onClick: () => printPDF() },
+          { icon: pmIconOf($('printSelectedBtn')), label: t('bbPrintSelected', { n: selected }), tip: t('printSelectedPages'), onClick: () => printSelectedPages() },
         ], { title: t('bbPrint') }));
       });
 
@@ -14692,6 +14716,7 @@
             pmShowPopMenu(btn, variants.map(v => ({
               icon: pmIconOf(v),
               label: v.getAttribute('aria-label') || '',
+              tip: v.getAttribute('title'),
               disabled: v.disabled || v.classList.contains('pm-compress-unavailable'),
               onClick: () => v.click()
             })), { title: btn.getAttribute('title') ? btn.title.replace(/\s*\([^)]*\)\s*$/, '') : '', place: 'below' });
@@ -32085,11 +32110,20 @@
       const doc = await pdfjsLib.getDocument({ data: pdfBytes.slice(0) }).promise;
       try {
         const scale = PM_PRINT_DPI / 72;
+        let firstLandscape = null;
         for (let i = 1; i <= doc.numPages; i++) {
           showLoading(`${t('loadingPreparingPrint')} ${i} ${t('ofCount')} ${doc.numPages}`);
           const page = await doc.getPage(i);
-          const vp1 = page.getViewport({ scale: 1 });
-          const viewport = page.getViewport({ scale });
+          let vp1 = page.getViewport({ scale: 1 });
+          const landscape = vp1.width > vp1.height;
+          if (firstLandscape == null) firstLandscape = landscape;
+          // In this page itself (phones) a page turned the other way from
+          // the first one is drawn turned, so that every sheet is laid out
+          // alike and no CSS rotation is needed (see flowCss below).
+          const rotation = inDocument && landscape !== firstLandscape
+            ? (page.rotate + 90) % 360 : page.rotate;
+          vp1 = page.getViewport({ scale: 1, rotation });
+          const viewport = page.getViewport({ scale, rotation });
           const canvas = document.createElement('canvas');
           canvas.width = Math.ceil(viewport.width);
           canvas.height = Math.ceil(viewport.height);
@@ -32123,6 +32157,19 @@
         + p + ' .sheet img{display:block;width:100vw;height:100vh;object-fit:contain;flex:none}'
         + '@media (orientation:portrait){' + p + ' .sheet.l img{width:100vh;height:100vw;transform:rotate(90deg)}}'
         + '@media (orientation:landscape){' + p + ' .sheet.p img{width:100vh;height:100vw;transform:rotate(90deg)}}';
+      // The same in this page itself, without viewport units: a phone
+      // browser counts its address bar into 100vh, when printing too, so a
+      // sheet that tall ran past the paper - the end of every page spilled
+      // onto a sheet of its own and the next page started one sheet later.
+      // A sheet takes the paper's width and the first page's proportions
+      // (the paper is the first page's size, @page), a hair shorter so that
+      // rounding cannot push it over; pages are already turned to match.
+      const flowCss = (p) => '@page{size:' + first.w + 'pt ' + first.h + 'pt;margin:0}'
+        + 'html,body{margin:0;padding:0;background:#fff}'
+        + p + ' .sheet{position:relative;width:100%;aspect-ratio:' + first.w + '/' + (first.h * 0.995).toFixed(2)
+        + ';overflow:hidden;break-after:page;break-inside:avoid}'
+        + p + ' .sheet:last-child{break-after:auto}'
+        + p + ' .sheet img{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:contain}';
       if (inDocument) {
         // The sheets go into this page, shown only when printing, with the
         // rest of the page hidden from the printout.
@@ -32138,7 +32185,7 @@
         style.textContent = '@media screen{#pmPrintSheets{display:none}}'
           + '@media print{body>*:not(#pmPrintSheets){display:none!important}'
           + 'body{display:block!important;height:auto!important;overflow:visible!important}'
-          + sheetCss('#pmPrintSheets') + '}';
+          + flowCss('#pmPrintSheets') + '}';
         document.head.appendChild(style);
         document.body.appendChild(host);
         await Promise.all(Array.from(host.querySelectorAll('img')).map(img => img.decode().catch(() => {})));
@@ -35520,7 +35567,7 @@
         // Holding Save / Export opens their variants instead (initSaveVariantHold).
         if (el.hasAttribute('data-pm-hold-menu')) return;
         clearTimeout(tipTimer);
-        tipTimer = setTimeout(() => showTipFor(el), 450);
+        tipTimer = setTimeout(() => showTipFor(el), PM_TOUCH_TIP_MS);
       }, { passive: true });
 
       document.addEventListener('touchend', hideTip);
