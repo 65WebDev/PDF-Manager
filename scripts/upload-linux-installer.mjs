@@ -225,6 +225,13 @@ function buildReleaseNotes({ version, tag, debName, appImageName, releaseUrl }) 
   return `${en}\n\n---\n\n${ru}`;
 }
 
+// README.md download links of a Linux release (any repository, any linux-v* tag).
+const LINUX_DEB_URL_RE =
+  /https:\/\/github\.com\/[^\s"'<>|()]+?\/releases\/download\/linux-v[^\s"'<>|()/]+\/[^\s"'<>|()/]+?\.deb\b/g;
+const LINUX_APPIMAGE_URL_RE =
+  /https:\/\/github\.com\/[^\s"'<>|()]+?\/releases\/download\/linux-v[^\s"'<>|()/]+\/[^\s"'<>|()/]+?\.AppImage\b/g;
+const LINUX_TAG_URL_RE = /https:\/\/github\.com\/[^\s"'<>|()]+?\/releases\/tag\/linux-v[^\s"'<>|()]+/g;
+
 function updateReadmeLinuxLinks({ version, tag, debName, appImageName }) {
   if (!existsSync(README_PATH)) {
     console.warn('README.md не найден — пропускаю обновление ссылок.');
@@ -240,42 +247,15 @@ function updateReadmeLinuxLinks({ version, tag, debName, appImageName }) {
   let text = readFileSync(README_PATH, 'utf8');
   const before = text;
 
-  const hasLinuxRow = /\|\s*\*\*Linux: `\.deb`\*\*/.test(text);
-  if (hasLinuxRow) {
-    // Match the row by its label, replacing whatever URL currently sits in the
-    // cell — covers both the initial generic /releases placeholder and any
-    // previously-published linux-v* URL.
-    //
-    // Global (/g): README.md carries a bilingual RU/EN copy of this table.
-    // "Linux: `.deb`" / "Linux: `.AppImage`" are identical in both languages
-    // (technical terms, not translated), so both rows match here and both get
-    // updated. The release-tag row's label does differ by language (Релиз
-    // Linux / Linux release), so that one alternates and preserves whichever
-    // label matched - a non-global replace here would silently leave the
-    // second-language row on the previous release's (soon 404) URL.
-    text = text.replace(
-      /(\|\s*\*\*Linux: `\.deb`\*\*\s*\|\s*)[^\n|]+(\s*\|)/g,
-      `$1${debUrl}$2`,
-    );
-    text = text.replace(
-      /(\|\s*\*\*Linux: `\.AppImage`\*\*\s*\|\s*)[^\n|]+(\s*\|)/g,
-      `$1${appImageUrl}$2`,
-    );
-    text = text.replace(
-      /\|\s*\*\*(Релиз Linux|Linux release)\*\*\s*\|\s*[^\n|]+\s*\|/g,
-      (_m, label) => `| **${label}** | ${tagUrl} |`,
-    );
-  } else {
-    // First-ever Linux release: insert rows right after the Windows portable row.
-    text = text.replace(
-      /(\|\s*\*\*Windows: portable `\.exe`\*\*\s*\|[^\n]+\|\n)/,
-      `$1| **Linux: \`.deb\`** | ${debUrl} |\n| **Linux: \`.AppImage\`** | ${appImageUrl} |\n`,
-    );
-    text = text.replace(
-      /(\|\s*\*\*Релиз Windows\*\*\s*\|[^\n]+\|\n)/,
-      `$1| **Релиз Linux** | ${tagUrl} |\n`,
-    );
+  // Matched by URL, not by the markup around it: README.md links each
+  // download from an icon and the release pages from a line below the
+  // icons, once in English and once in Russian - hence global.
+  if (text.search(LINUX_DEB_URL_RE) < 0 || text.search(LINUX_APPIMAGE_URL_RE) < 0) {
+    console.warn('README.md: ссылки на .deb / .AppImage не найдены — проверьте блок «Download / Скачать».');
   }
+  text = text.replace(LINUX_DEB_URL_RE, debUrl);
+  text = text.replace(LINUX_APPIMAGE_URL_RE, appImageUrl);
+  text = text.replace(LINUX_TAG_URL_RE, tagUrl);
 
   if (text === before) {
     console.log('README.md уже содержит актуальные Linux-ссылки.');

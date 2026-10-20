@@ -117,34 +117,29 @@ function buildReleaseNotes({ version, tag, apkName, releaseUrl }) {
   return `${en}\n\n---\n\n${ru}`;
 }
 
+// README.md download links of an Android release (any repository, any
+// android-v* tag).
+const ANDROID_APK_URL_RE =
+  /https:\/\/github\.com\/[^\s"'<>|()]+?\/releases\/download\/android-v[^\s"'<>|()/]+\/[^\s"'<>|()/]+?\.apk\b/g;
+const ANDROID_TAG_URL_RE = /https:\/\/github\.com\/[^\s"'<>|()]+?\/releases\/tag\/android-v[^\s"'<>|()]+/g;
+
+/**
+ * Matched by URL, not by the markup around it: README.md links the APK from
+ * an icon and the release page from a line below the icons, once in English
+ * and once in Russian - hence global.
+ */
 export function readmeWithAndroidLinks(text, { tag, apkName }) {
   const apkUrl = downloadUrl(tag, apkName);
   const tagUrl = `https://github.com/${REPO_SLUG}/releases/tag/${tag}`;
-  if (/\|\s*\*\*Android: `\.apk`\*\*/.test(text)) {
-    // Global: README.md carries an English and a Russian copy of the table.
-    text = text.replace(/(\|\s*\*\*Android: `\.apk`\*\*\s*\|\s*)[^\s|]+(\s*\|)/g, `$1${apkUrl}$2`);
-    text = text.replace(
-      /\|\s*\*\*(Релиз Android|Android release)\*\*\s*\|\s*[^\n|]+\s*\|/g,
-      (_m, label) => `| **${label}** | ${tagUrl} |`,
-    );
-  } else {
-    // First Android release: rows after the Linux .AppImage row and after the
-    // Linux release row (both languages).
-    text = text.replace(
-      /(\|\s*\*\*Linux: `\.AppImage`\*\*\s*\|[^\n]+\|\n)/g,
-      `$1| **Android: \`.apk\`** | ${apkUrl} |\n`,
-    );
-    text = text.replace(
-      /(\|\s*\*\*(Релиз Linux|Linux release)\*\*\s*\|[^\n]+\|\n)/g,
-      (m, _row, label) => `${m}| **${label === 'Релиз Linux' ? 'Релиз Android' : 'Android release'}** | ${tagUrl} |\n`,
-    );
-  }
-  return text;
+  return text.replace(ANDROID_APK_URL_RE, apkUrl).replace(ANDROID_TAG_URL_RE, tagUrl);
 }
 
 function updateReadmeAndroidLinks(info) {
   if (!existsSync(README_PATH)) return false;
   const before = readFileSync(README_PATH, 'utf8');
+  if (before.search(ANDROID_APK_URL_RE) < 0) {
+    console.warn('README.md: ссылка на APK не найдена — проверьте блок «Download / Скачать».');
+  }
   const text = readmeWithAndroidLinks(before, info);
   if (text === before) {
     console.log('README.md уже содержит актуальные Android-ссылки.');

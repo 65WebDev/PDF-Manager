@@ -35,19 +35,23 @@
 
 ### Download
 
-| Method | Link |
-|--------|------|
-| **Open online** | https://65WebDev.github.io/PDF-Manager/PDF_manager_online.html |
-| **Download online version** | https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_online.html |
-| **Download offline version** | https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_offline.html |
-| **Windows: installer** | https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.47/PDF.Manager_0.1.47_x64-setup.exe |
-| **Windows: portable `.exe`** | https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.47/pdf-manager.exe |
-| **Linux: `.deb`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.47/PDF.Manager_0.1.47_amd64.deb|
-| **Linux: `.AppImage`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.47/PDF.Manager_0.1.47_amd64.AppImage|
-| **Android: `.apk`** | https://github.com/65WebDev/PDF-Manager/releases/download/android-v0.1.47/PDF-Manager_0.1.47.apk |
-| **Windows release** | https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.47 |
-| **Linux release** | https://github.com/65WebDev/PDF-Manager/releases/tag/linux-v0.1.47 |
-| **Android release** | https://github.com/65WebDev/PDF-Manager/releases/tag/android-v0.1.47 |
+<p>
+<a href="https://65WebDev.github.io/PDF-Manager/PDF_manager_online.html" title="Open online: runs right in the browser, nothing to install"><img src="docs/download-icons/web.svg" width="76" alt="Open online"></a>
+<a href="https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_online.html" title="Online version, PDF_manager_online.html: a compact file, libraries load from a CDN"><img src="docs/download-icons/html-online.svg" width="76" alt="Online version (HTML)"></a>
+<a href="https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_offline.html" title="Offline version, PDF_manager_offline.html: everything is inside the file, works without internet"><img src="docs/download-icons/html-offline.svg" width="76" alt="Offline version (HTML)"></a>
+&emsp;
+<a href="https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.47/PDF.Manager_0.1.47_x64-setup.exe" title="Windows: installer (x64)"><img src="docs/download-icons/windows-setup.svg" width="76" alt="Windows installer"></a>
+<a href="https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.47/pdf-manager.exe" title="Windows: portable .exe, runs without installation"><img src="docs/download-icons/windows-portable.svg" width="76" alt="Windows portable .exe"></a>
+&emsp;
+<a href="https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.47/PDF.Manager_0.1.47_amd64.deb" title="Linux: .deb package for Debian, Ubuntu and their derivatives (x64)"><img src="docs/download-icons/linux-deb.svg" width="76" alt="Linux .deb"></a>
+<a href="https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.47/PDF.Manager_0.1.47_amd64.AppImage" title="Linux: AppImage, runs on most distributions without installation (x64)"><img src="docs/download-icons/linux-appimage.svg" width="76" alt="Linux AppImage"></a>
+&emsp;
+<a href="https://github.com/65WebDev/PDF-Manager/releases/download/android-v0.1.47/PDF-Manager_0.1.47.apk" title="Android: app (.apk), Android 7.0+"><img src="docs/download-icons/android-apk.svg" width="76" alt="Android .apk"></a>
+</p>
+
+*Click an icon to download the file (WEB opens the editor online); hover over it for a description.*
+
+Release pages: [Windows](https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.47) · [Linux](https://github.com/65WebDev/PDF-Manager/releases/tag/linux-v0.1.47) · [Android](https://github.com/65WebDev/PDF-Manager/releases/tag/android-v0.1.47)
 
 After downloading, open the HTML file in your browser. The online version loads its libraries from a CDN; the offline version bundles everything inside the file and works without internet access.
 
@@ -118,19 +122,23 @@ Android app: Android 7.0+, phones and tablets. Open the downloaded `.apk` on the
 
 ### Скачать
 
-| Способ | Ссылка |
-|--------|--------|
-| **Открыть онлайн** | https://65WebDev.github.io/PDF-Manager/PDF_manager_online.html |
-| **Скачать онлайн-версию** | https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_online.html |
-| **Скачать офлайн-версию** | https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_offline.html |
-| **Windows: установщик** | https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.47/PDF.Manager_0.1.47_x64-setup.exe |
-| **Windows: portable `.exe`** | https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.47/pdf-manager.exe |
-| **Linux: `.deb`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.47/PDF.Manager_0.1.47_amd64.deb|
-| **Linux: `.AppImage`** | https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.47/PDF.Manager_0.1.47_amd64.AppImage|
-| **Android: `.apk`** | https://github.com/65WebDev/PDF-Manager/releases/download/android-v0.1.47/PDF-Manager_0.1.47.apk |
-| **Релиз Windows** | https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.47 |
-| **Релиз Linux** | https://github.com/65WebDev/PDF-Manager/releases/tag/linux-v0.1.47 |
-| **Релиз Android** | https://github.com/65WebDev/PDF-Manager/releases/tag/android-v0.1.47 |
+<p>
+<a href="https://65WebDev.github.io/PDF-Manager/PDF_manager_online.html" title="Открыть онлайн: работает прямо в браузере, ничего устанавливать не нужно"><img src="docs/download-icons/web.svg" width="76" alt="Открыть онлайн"></a>
+<a href="https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_online.html" title="Онлайн-версия, PDF_manager_online.html: компактный файл, библиотеки подгружаются из CDN"><img src="docs/download-icons/html-online.svg" width="76" alt="Онлайн-версия (HTML)"></a>
+<a href="https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_offline.html" title="Офлайн-версия, PDF_manager_offline.html: всё встроено в файл, работает без интернета"><img src="docs/download-icons/html-offline.svg" width="76" alt="Офлайн-версия (HTML)"></a>
+&emsp;
+<a href="https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.47/PDF.Manager_0.1.47_x64-setup.exe" title="Windows: установщик (x64)"><img src="docs/download-icons/windows-setup.svg" width="76" alt="Windows: установщик"></a>
+<a href="https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.47/pdf-manager.exe" title="Windows: portable .exe, запускается без установки"><img src="docs/download-icons/windows-portable.svg" width="76" alt="Windows: portable .exe"></a>
+&emsp;
+<a href="https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.47/PDF.Manager_0.1.47_amd64.deb" title="Linux: пакет .deb для Debian, Ubuntu и производных (x64)"><img src="docs/download-icons/linux-deb.svg" width="76" alt="Linux: .deb"></a>
+<a href="https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.47/PDF.Manager_0.1.47_amd64.AppImage" title="Linux: AppImage, запускается без установки на большинстве дистрибутивов (x64)"><img src="docs/download-icons/linux-appimage.svg" width="76" alt="Linux: AppImage"></a>
+&emsp;
+<a href="https://github.com/65WebDev/PDF-Manager/releases/download/android-v0.1.47/PDF-Manager_0.1.47.apk" title="Android: приложение (.apk), Android 7.0+"><img src="docs/download-icons/android-apk.svg" width="76" alt="Android: .apk"></a>
+</p>
+
+*Нажмите на иконку, чтобы скачать файл (WEB открывает редактор онлайн); при наведении появится пояснение.*
+
+Страницы релизов: [Windows](https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.47) · [Linux](https://github.com/65WebDev/PDF-Manager/releases/tag/linux-v0.1.47) · [Android](https://github.com/65WebDev/PDF-Manager/releases/tag/android-v0.1.47)
 
 После скачивания откройте HTML-файл в браузере. Онлайн-версия подгружает библиотеки из CDN; офлайн-версия содержит все зависимости внутри файла и работает без интернета.
 
