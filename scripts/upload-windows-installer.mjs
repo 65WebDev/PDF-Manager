@@ -275,8 +275,17 @@ function buildReleaseNotes({ version, tag, setupName, portableName, releaseUrl }
   return `${en}\n\n---\n\n${ru}`;
 }
 
+// README.md download links of a Windows release (any repository, any
+// windows-v* tag): the installer (*-setup.exe), the portable .exe (any other
+// .exe) and the release page.
+const WINDOWS_SETUP_URL_RE =
+  /https:\/\/github\.com\/[^\s"'<>|()]+?\/releases\/download\/windows-v[^\s"'<>|()/]+\/[^\s"'<>|()/]+?-setup\.exe\b/g;
+const WINDOWS_PORTABLE_URL_RE =
+  /https:\/\/github\.com\/[^\s"'<>|()]+?\/releases\/download\/windows-v[^\s"'<>|()/]+\/(?![^\s"'<>|()/]*-setup\.exe)[^\s"'<>|()/]+?\.exe\b/g;
+const WINDOWS_TAG_URL_RE = /https:\/\/github\.com\/[^\s"'<>|()]+?\/releases\/tag\/windows-v[^\s"'<>|()]+/g;
+
 /**
- * Rewrite Windows download rows / “актуальная версия” line in README.md.
+ * Rewrite the Windows download links / “актуальная версия” line in README.md.
  * Returns true if the file changed.
  */
 function updateReadmeWindowsLinks({ version, tag, setupName, portableName }) {
@@ -295,24 +304,15 @@ function updateReadmeWindowsLinks({ version, tag, setupName, portableName }) {
   let text = readFileSync(README_PATH, 'utf8');
   const before = text;
 
-  // Global (/g): README.md carries a bilingual RU/EN copy of this table, so
-  // every one of these patterns can legitimately appear twice. A non-global
-  // replace only touches the first (RU) row and leaves the EN copy with a
-  // stale, eventually-404 URL after the next release. The setup/tag rows use
-  // an RU|EN alternation and pick the matching label back out so each row
-  // keeps its own language.
-  text = text.replace(
-    /\|\s*\*\*Windows: (установщик|installer)\*\*\s*\|\s*https:\/\/github\.com\/[^|\s]+\/releases\/download\/windows-v[^|\s]+\/[^\s|]+\s*\|/g,
-    (_m, label) => `| **Windows: ${label}** | ${setupUrl} |`,
-  );
-  text = text.replace(
-    /\|\s*\*\*Windows: portable `\.exe`\*\*\s*\|\s*https:\/\/github\.com\/[^|\s]+\/releases\/download\/windows-v[^|\s]+\/[^\s|]+\s*\|/g,
-    `| **Windows: portable \`.exe\`** | ${portableUrl} |`,
-  );
-  text = text.replace(
-    /\|\s*\*\*(Релиз Windows|Windows release)\*\*\s*\|\s*https:\/\/github\.com\/[^|\s]+\/releases\/tag\/windows-v[^|\s]+\s*\|/g,
-    (_m, label) => `| **${label}** | ${tagUrl} |`,
-  );
+  // Matched by URL, not by the markup around it: README.md links each
+  // download from an icon and the release page from a line below the icons,
+  // once in English and once in Russian - hence global.
+  if (text.search(WINDOWS_SETUP_URL_RE) < 0) {
+    console.warn('README.md: ссылка на установщик Windows не найдена — проверьте блок «Download / Скачать».');
+  }
+  text = text.replace(WINDOWS_SETUP_URL_RE, setupUrl);
+  text = text.replace(WINDOWS_PORTABLE_URL_RE, portableUrl);
+  text = text.replace(WINDOWS_TAG_URL_RE, tagUrl);
   text = text.replace(
     /Актуальная версия сейчас:\s*\[[^\]]*\]\([^)]+\)/g,
     `Актуальная версия сейчас: [${tag}](${tagUrl})`,
