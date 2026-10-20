@@ -4949,7 +4949,8 @@
        pmUpdateAutoPageSelection): its number under the preview takes the
        same blue as the selection frame, so which page is active reads at a
        glance even when the frame itself is mostly off screen. */
-    .page.pm-auto-page .page-title { color: #007bff; }
+    /* Not in reading mode: nothing is edited there, so no page is "active". */
+    body:not(.read-mode-active) .page.pm-auto-page .page-title { color: #007bff; }
     /* RMB context menu target: subtle white halo showing which page the menu
        applies to. An outline (not border-color/box-shadow) so it doesn't
        fight with .selected's blue ring when both apply at once. */
@@ -6889,6 +6890,13 @@
       /*Disable native pinch-zoom in the work area (we process the scale ourselves),
          leave scrolling.*/
       .main { touch-action: pan-x pan-y; }
+      /*A finger drag scrolls exactly the way it moves. Without this the browser
+         (Chrome / Android WebView) pins a drag that starts within ~30° of the
+         vertical or horizontal to that axis for the whole gesture, so a zoomed
+         page would not follow the finger sideways. Strictly vertical scrolling
+         while the page fits the width stays (pm-vertical-scroll-lock).
+         Chrome / WebView 153+; elsewhere the property is ignored.*/
+      .main { scroll-axis-lock: none; }
       /*While dragging a page, block native scrolling with a gesture*/
       .main.drag-scroll-locked {
         touch-action: none;
@@ -14982,27 +14990,40 @@
     // out should re-engage it.
     function pmNoVisiblePageOverflowsWidth(avail) {
       const host = scrollContainer.getBoundingClientRect();
-      const pages = pagesContainer.querySelectorAll('.page');
-      for (const p of pages) {
-        if (p.style.display === 'none') continue;
-        const r = p.getBoundingClientRect();
-        if (r.bottom <= host.top || r.top >= host.bottom) continue; // not in the viewport
-        const img = p.querySelector('.img-wrapper img');
+      const pages = Array.from(pagesContainer.querySelectorAll('.page'))
+        .filter(p => p.style.display !== 'none');
+      // Both callers have checked for a single column, so the cards run top
+      // to bottom in DOM order: bisect to the first one reaching into the
+      // viewport rather than measuring every card of the document on every
+      // scroll tick.
+      let lo = 0, hi = pages.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (pages[mid].getBoundingClientRect().bottom <= host.top) lo = mid + 1;
+        else hi = mid;
+      }
+      for (let i = lo; i < pages.length; i++) {
+        if (pages[i].getBoundingClientRect().top >= host.bottom) break;
+        const img = pages[i].querySelector('.img-wrapper img');
         if (img && img.getBoundingClientRect().width > avail + 1) return false;
       }
       return true;
     }
 
     // Mobile counterpart: there's no wheel/slider "magnet" concept on touch
-    // (pinch zoom uses its own separate fill-snap mechanism instead), so
-    // rather than checking currentScale against a computed target, this ties
-    // the lock directly to fitWidthToggleOn - explicitly fit-width via
-    // double-tap/dblclick/the toolbar button is the one deliberate "I want a
-    // clean vertical read" gesture on touch. Pinch already clears
-    // fitWidthToggleOn at gesture start (see the pinch touchstart handler),
-    // so starting a manual pinch releases the lock immediately.
+    // (pinch zoom uses its own separate fill-snap mechanism instead), so the
+    // rule is simply the page itself: whenever the pages sit one per row and
+    // every one on screen fits the width, a drag scrolls only vertically -
+    // after fit-width, in reading mode, and after a pinch that leaves the
+    // page narrower than the screen alike. The card around a page is wider
+    // than the page, so without the lock a drag a few degrees off the
+    // vertical would slide the page sideways into that margin (the browser
+    // no longer pins such drags to one axis, see scroll-axis-lock on .main).
+    // Never during a pinch: the gesture moves the view freely, and
+    // applyScale re-checks the lock once the new scale is applied.
     function pmShouldLockHorizontalScrollMobile() {
-      if (!fitWidthToggleOn || !pdfDoc || !pagesContainer || !scrollContainer) return false;
+      if (!pdfDoc || !pagesContainer || !scrollContainer) return false;
+      if (document.body.classList.contains('pinch-zooming')) return false;
       if (typeof isPagesSingleColumnLayout !== 'function' || !isPagesSingleColumnLayout()) return false;
       const avail = getScrollAvailWidth();
       if (avail <= 0) return false;
@@ -15278,11 +15299,39 @@
             pagesContainer.classList.remove('pages-row-overflow');
             updatePagesRowOverflow();
           }
-          if (!pagesContainer.classList.contains('pages-row-overflow') && scrollContainer.scrollLeft !== 0) {
-            scrollContainer.scrollLeft = 0;
+          if (!pagesContainer.classList.contains('pages-row-overflow')) {
+            if (scrollContainer.scrollLeft !== 0) scrollContainer.scrollLeft = 0;
+            return;
           }
+          // Still wider than the screen: a wider (landscape) page elsewhere
+          // in the document keeps the row overflowing even though the
+          // fitted page itself fits. Centre the column on the page in view -
+          // all cards are the same width with the image in the middle, so
+          // that page fits edge to edge and wider ones stick out evenly on
+          // both sides. Done here, last: updatePagesRowOverflow() above
+          // shifts scrollLeft when it switches the row's alignment, so a
+          // position set any earlier does not survive it.
+          const page = pmPageAtViewportMiddle();
+          if (!page) return;
+          const maxLeft = Math.max(0, scrollContainer.scrollWidth - scrollContainer.clientWidth);
+          const left = Math.round(Math.max(0, Math.min(pmCenteredScrollLeft(page), maxLeft)));
+          if (Math.abs(scrollContainer.scrollLeft - left) >= 1) scrollContainer.scrollLeft = left;
         });
       });
+    }
+
+    function pmPageAtViewportMiddle() {
+      const host = scrollContainer.getBoundingClientRect();
+      const midY = host.top + host.height / 2;
+      let best = null, bestDist = Infinity;
+      for (const p of pagesContainer.querySelectorAll('.page')) {
+        if (p.style.display === 'none') continue;
+        const r = p.getBoundingClientRect();
+        if (r.bottom <= host.top || r.top >= host.bottom) continue;
+        const d = midY < r.top ? r.top - midY : (midY > r.bottom ? midY - r.bottom : 0);
+        if (d < bestDist) { bestDist = d; best = p; }
+      }
+      return best;
     }
 
     // "Fit page width" is a live-tracking mode, not a one-shot scale - call
@@ -15409,19 +15458,41 @@
     // aligning it (fine for a tall portrait page you'd scroll down through)
     // instead leaves a large empty gap below and reads as "misplaced", so
     // center it vertically in the viewport like a single framed page.
+    //
+    // Horizontally the page is centred as well. When a wider (landscape)
+    // page makes the row wider than the screen, the scroll position the
+    // zoom left behind - e.g. after a double-tap on a page in the right-hand
+    // column of the grid - kept the fitted page partly off the left edge.
     function scrollFitWidthPageIntoView(pageEl) {
       if (!pageEl || !scrollContainer) return;
-      if (!pageEl.classList.contains('page-rotated')) {
-        scrollPageIntoViewTop(pageEl);
-        return;
-      }
       const containerRect = scrollContainer.getBoundingClientRect();
       const targetRect = pageEl.getBoundingClientRect();
-      const targetTop = scrollContainer.scrollTop + (targetRect.top - containerRect.top)
-        - (containerRect.height - targetRect.height) / 2;
+      let targetTop = scrollContainer.scrollTop + (targetRect.top - containerRect.top);
+      if (pageEl.classList.contains('page-rotated')) {
+        targetTop -= (containerRect.height - targetRect.height) / 2;
+      }
       const maxTop = Math.max(0, scrollContainer.scrollHeight - scrollContainer.clientHeight);
-      scrollContainer.scrollTo({ top: Math.max(0, Math.min(targetTop, maxTop)), behavior: 'auto' });
+      const maxLeft = Math.max(0, scrollContainer.scrollWidth - scrollContainer.clientWidth);
+      scrollContainer.scrollTo({
+        top: Math.max(0, Math.min(targetTop, maxTop)),
+        left: Math.max(0, Math.min(pmCenteredScrollLeft(pageEl), maxLeft)),
+        behavior: 'auto'
+      });
       if (typeof syncScrollLockFromContainer === 'function') syncScrollLockFromContainer();
+    }
+
+    // scrollLeft that puts the page's image in the middle of the work area
+    // (between the container's paddings - the bookmarks gutter is one).
+    function pmCenteredScrollLeft(pageEl) {
+      const img = pageEl.querySelector('.img-wrapper img');
+      const r = (img || pageEl).getBoundingClientRect();
+      const host = scrollContainer.getBoundingClientRect();
+      const cs = getComputedStyle(scrollContainer);
+      const padL = parseFloat(cs.paddingLeft) || 0;
+      const padR = parseFloat(cs.paddingRight) || 0;
+      const viewCenter = host.left + scrollContainer.clientLeft + padL
+        + (scrollContainer.clientWidth - padL - padR) / 2;
+      return scrollContainer.scrollLeft + (r.left + r.width / 2) - viewCenter;
     }
 
     // Where a desktop double-click at fit-width zooms back out to, when
@@ -17468,8 +17539,9 @@
       // between two heavy rasters, and a fresh zoom cancels it like any other.
       const escalate = !!(opts && opts.escalate);
       // A fresh pass means the zoom moved, so a raster still being drawn for
-      // the old one is work nobody is waiting for any more.
-      if (!escalate) hqCancelActiveRender();
+      // the old one is work nobody is waiting for any more. Not so for a
+      // scroll (opts.scroll): the page being drawn is still the right size.
+      if (!escalate && !(opts && opts.scroll)) hqCancelActiveRender();
       hqScheduleTimer = setTimeout(() => runHQUpgrade({ force, escalate }),
         force ? 60 : (escalate ? 600 : 180));
     }
@@ -17505,6 +17577,19 @@
         return r.bottom > host.top && r.top < host.bottom;
       });
       if (!visible.length) return;
+      // Phone: then the next two pages and the one before, so the page a
+      // swipe brings in is already sharp instead of arriving as its base
+      // thumbnail and sharpening only once the scrolling stops. Only pages
+      // whose base thumbnail is in: the lazy loader would draw that over
+      // an earlier HQ raster.
+      if (isTouchDevice) {
+        const first = pages.indexOf(visible[0]);
+        const last = pages.indexOf(visible[visible.length - 1]);
+        for (const i of [last + 1, last + 2, first - 1]) {
+          const p = pages[i];
+          if (p && p.classList.contains('page-lazy-loaded')) visible.push(p);
+        }
+      }
 
       const doc = await getHQPdfjsDoc(token);
       if (!doc || token !== hqPdfjsToken) return;
@@ -19102,7 +19187,7 @@
       // During page-nav auto-scroll HQ is driven by pmNavRequestVisibleHQ (direct, not
       // debounced) — calling scheduleHQUpgrade here would keep resetting that debounce.
       if (typeof scheduleHQUpgrade === 'function' && !pmNavAutoDir) {
-        scheduleHQUpgrade();
+        scheduleHQUpgrade({ scroll: true });
       }
     }, { passive: true });
 
@@ -19569,6 +19654,12 @@
       longPressActive = false;
       pageSelectStageFired = false;
       pagePointerId = null;
+      // The pointer listeners are gone, so onPagePointerUp will not clear
+      // this for the gesture. Left set, it stalled runHQUpgrade until the
+      // next tap: after a swipe every page stayed on its blurrier base
+      // thumbnail. The finger itself still holds rasters back while it is
+      // down (hqFingerHoldsRasters).
+      pageTouchActive = false;
       endScrollLock();
       unlockScrollForDrag();
     }
