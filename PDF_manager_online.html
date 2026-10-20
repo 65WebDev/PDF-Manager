@@ -4949,7 +4949,8 @@
        pmUpdateAutoPageSelection): its number under the preview takes the
        same blue as the selection frame, so which page is active reads at a
        glance even when the frame itself is mostly off screen. */
-    .page.pm-auto-page .page-title { color: #007bff; }
+    /* Not in reading mode: nothing is edited there, so no page is "active". */
+    body:not(.read-mode-active) .page.pm-auto-page .page-title { color: #007bff; }
     /* RMB context menu target: subtle white halo showing which page the menu
        applies to. An outline (not border-color/box-shadow) so it doesn't
        fight with .selected's blue ring when both apply at once. */
@@ -14989,12 +14990,21 @@
     // out should re-engage it.
     function pmNoVisiblePageOverflowsWidth(avail) {
       const host = scrollContainer.getBoundingClientRect();
-      const pages = pagesContainer.querySelectorAll('.page');
-      for (const p of pages) {
-        if (p.style.display === 'none') continue;
-        const r = p.getBoundingClientRect();
-        if (r.bottom <= host.top || r.top >= host.bottom) continue; // not in the viewport
-        const img = p.querySelector('.img-wrapper img');
+      const pages = Array.from(pagesContainer.querySelectorAll('.page'))
+        .filter(p => p.style.display !== 'none');
+      // Both callers have checked for a single column, so the cards run top
+      // to bottom in DOM order: bisect to the first one reaching into the
+      // viewport rather than measuring every card of the document on every
+      // scroll tick.
+      let lo = 0, hi = pages.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (pages[mid].getBoundingClientRect().bottom <= host.top) lo = mid + 1;
+        else hi = mid;
+      }
+      for (let i = lo; i < pages.length; i++) {
+        if (pages[i].getBoundingClientRect().top >= host.bottom) break;
+        const img = pages[i].querySelector('.img-wrapper img');
         if (img && img.getBoundingClientRect().width > avail + 1) return false;
       }
       return true;
@@ -15289,11 +15299,39 @@
             pagesContainer.classList.remove('pages-row-overflow');
             updatePagesRowOverflow();
           }
-          if (!pagesContainer.classList.contains('pages-row-overflow') && scrollContainer.scrollLeft !== 0) {
-            scrollContainer.scrollLeft = 0;
+          if (!pagesContainer.classList.contains('pages-row-overflow')) {
+            if (scrollContainer.scrollLeft !== 0) scrollContainer.scrollLeft = 0;
+            return;
           }
+          // Still wider than the screen: a wider (landscape) page elsewhere
+          // in the document keeps the row overflowing even though the
+          // fitted page itself fits. Centre the column on the page in view -
+          // all cards are the same width with the image in the middle, so
+          // that page fits edge to edge and wider ones stick out evenly on
+          // both sides. Done here, last: updatePagesRowOverflow() above
+          // shifts scrollLeft when it switches the row's alignment, so a
+          // position set any earlier does not survive it.
+          const page = pmPageAtViewportMiddle();
+          if (!page) return;
+          const maxLeft = Math.max(0, scrollContainer.scrollWidth - scrollContainer.clientWidth);
+          const left = Math.round(Math.max(0, Math.min(pmCenteredScrollLeft(page), maxLeft)));
+          if (Math.abs(scrollContainer.scrollLeft - left) >= 1) scrollContainer.scrollLeft = left;
         });
       });
+    }
+
+    function pmPageAtViewportMiddle() {
+      const host = scrollContainer.getBoundingClientRect();
+      const midY = host.top + host.height / 2;
+      let best = null, bestDist = Infinity;
+      for (const p of pagesContainer.querySelectorAll('.page')) {
+        if (p.style.display === 'none') continue;
+        const r = p.getBoundingClientRect();
+        if (r.bottom <= host.top || r.top >= host.bottom) continue;
+        const d = midY < r.top ? r.top - midY : (midY > r.bottom ? midY - r.bottom : 0);
+        if (d < bestDist) { bestDist = d; best = p; }
+      }
+      return best;
     }
 
     // "Fit page width" is a live-tracking mode, not a one-shot scale - call
@@ -15420,19 +15458,41 @@
     // aligning it (fine for a tall portrait page you'd scroll down through)
     // instead leaves a large empty gap below and reads as "misplaced", so
     // center it vertically in the viewport like a single framed page.
+    //
+    // Horizontally the page is centred as well. When a wider (landscape)
+    // page makes the row wider than the screen, the scroll position the
+    // zoom left behind - e.g. after a double-tap on a page in the right-hand
+    // column of the grid - kept the fitted page partly off the left edge.
     function scrollFitWidthPageIntoView(pageEl) {
       if (!pageEl || !scrollContainer) return;
-      if (!pageEl.classList.contains('page-rotated')) {
-        scrollPageIntoViewTop(pageEl);
-        return;
-      }
       const containerRect = scrollContainer.getBoundingClientRect();
       const targetRect = pageEl.getBoundingClientRect();
-      const targetTop = scrollContainer.scrollTop + (targetRect.top - containerRect.top)
-        - (containerRect.height - targetRect.height) / 2;
+      let targetTop = scrollContainer.scrollTop + (targetRect.top - containerRect.top);
+      if (pageEl.classList.contains('page-rotated')) {
+        targetTop -= (containerRect.height - targetRect.height) / 2;
+      }
       const maxTop = Math.max(0, scrollContainer.scrollHeight - scrollContainer.clientHeight);
-      scrollContainer.scrollTo({ top: Math.max(0, Math.min(targetTop, maxTop)), behavior: 'auto' });
+      const maxLeft = Math.max(0, scrollContainer.scrollWidth - scrollContainer.clientWidth);
+      scrollContainer.scrollTo({
+        top: Math.max(0, Math.min(targetTop, maxTop)),
+        left: Math.max(0, Math.min(pmCenteredScrollLeft(pageEl), maxLeft)),
+        behavior: 'auto'
+      });
       if (typeof syncScrollLockFromContainer === 'function') syncScrollLockFromContainer();
+    }
+
+    // scrollLeft that puts the page's image in the middle of the work area
+    // (between the container's paddings - the bookmarks gutter is one).
+    function pmCenteredScrollLeft(pageEl) {
+      const img = pageEl.querySelector('.img-wrapper img');
+      const r = (img || pageEl).getBoundingClientRect();
+      const host = scrollContainer.getBoundingClientRect();
+      const cs = getComputedStyle(scrollContainer);
+      const padL = parseFloat(cs.paddingLeft) || 0;
+      const padR = parseFloat(cs.paddingRight) || 0;
+      const viewCenter = host.left + scrollContainer.clientLeft + padL
+        + (scrollContainer.clientWidth - padL - padR) / 2;
+      return scrollContainer.scrollLeft + (r.left + r.width / 2) - viewCenter;
     }
 
     // Where a desktop double-click at fit-width zooms back out to, when
@@ -17479,8 +17539,9 @@
       // between two heavy rasters, and a fresh zoom cancels it like any other.
       const escalate = !!(opts && opts.escalate);
       // A fresh pass means the zoom moved, so a raster still being drawn for
-      // the old one is work nobody is waiting for any more.
-      if (!escalate) hqCancelActiveRender();
+      // the old one is work nobody is waiting for any more. Not so for a
+      // scroll (opts.scroll): the page being drawn is still the right size.
+      if (!escalate && !(opts && opts.scroll)) hqCancelActiveRender();
       hqScheduleTimer = setTimeout(() => runHQUpgrade({ force, escalate }),
         force ? 60 : (escalate ? 600 : 180));
     }
@@ -17516,6 +17577,19 @@
         return r.bottom > host.top && r.top < host.bottom;
       });
       if (!visible.length) return;
+      // Phone: then the next two pages and the one before, so the page a
+      // swipe brings in is already sharp instead of arriving as its base
+      // thumbnail and sharpening only once the scrolling stops. Only pages
+      // whose base thumbnail is in: the lazy loader would draw that over
+      // an earlier HQ raster.
+      if (isTouchDevice) {
+        const first = pages.indexOf(visible[0]);
+        const last = pages.indexOf(visible[visible.length - 1]);
+        for (const i of [last + 1, last + 2, first - 1]) {
+          const p = pages[i];
+          if (p && p.classList.contains('page-lazy-loaded')) visible.push(p);
+        }
+      }
 
       const doc = await getHQPdfjsDoc(token);
       if (!doc || token !== hqPdfjsToken) return;
@@ -19113,7 +19187,7 @@
       // During page-nav auto-scroll HQ is driven by pmNavRequestVisibleHQ (direct, not
       // debounced) — calling scheduleHQUpgrade here would keep resetting that debounce.
       if (typeof scheduleHQUpgrade === 'function' && !pmNavAutoDir) {
-        scheduleHQUpgrade();
+        scheduleHQUpgrade({ scroll: true });
       }
     }, { passive: true });
 
@@ -19580,6 +19654,12 @@
       longPressActive = false;
       pageSelectStageFired = false;
       pagePointerId = null;
+      // The pointer listeners are gone, so onPagePointerUp will not clear
+      // this for the gesture. Left set, it stalled runHQUpgrade until the
+      // next tap: after a swipe every page stayed on its blurrier base
+      // thumbnail. The finger itself still holds rasters back while it is
+      // down (hqFingerHoldsRasters).
+      pageTouchActive = false;
       endScrollLock();
       unlockScrollForDrag();
     }
@@ -20014,6 +20094,168 @@
       scrollContainer.addEventListener('touchend', pmEndActiveTouchScrollFallback);
       scrollContainer.addEventListener('touchcancel', pmEndActiveTouchScrollFallback);
     }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // A swipe during a coast must not stack the speed
+    // ═══════════════════════════════════════════════════════════════════
+    // Chrome and Android WebView "boost" a fling: a swipe in the same
+    // direction while the page is still coasting starts a coast at the new
+    // swipe's speed PLUS what was left of the old one, so a few light swipes
+    // build up a runaway speed. A page cannot turn that off, but it can see
+    // it: right after the release the coast is far faster than the finger
+    // was moving. Then the browser's coast is ended (overflow:hidden for a
+    // few frames does that) and the page coasts on at the finger's own speed,
+    // slowing down along Android's fling curve (OverScroller). An ordinary
+    // coast is left entirely to the browser.
+    (function pmInitFlingBoostGuard() {
+      if (!isTouchDevice || !scrollContainer) return;
+      const FINGER_MS = 60;        // finger speed: the last 60ms of contact
+      const CHECK_MS = 30;         // coast speed: the first ~2 frames after release
+      const MIN_FINGER = 150;      // px/s; a slower release does not coast
+      // A boost adds at least 350 px/s on top of the swipe; this much faster
+      // than the finger is not the browser's own reading of the same swipe.
+      const BOOST_RATIO = 1.8, BOOST_EXTRA = 600;
+      const KILL_MS = 60;          // overflow:hidden this long ends a browser coast
+
+      // Android's OverScroller spline (same constants), in dp = CSS px.
+      const INFLEXION = 0.35;
+      const DECEL = Math.log(0.78) / Math.log(0.9);
+      const FRICTION = 0.015 * 9.80665 * 39.37 * 160 * 0.84;
+      const SPLINE = (() => {
+        const n = 100, p1 = 0.175, p2 = 0.35, pos = new Float64Array(n + 1);
+        let xMin = 0;
+        for (let i = 0; i < n; i++) {
+          const alpha = i / n;
+          let xMax = 1, x, coef;
+          for (;;) {
+            x = xMin + (xMax - xMin) / 2;
+            coef = 3 * x * (1 - x);
+            const tx = coef * ((1 - x) * p1 + x * p2) + x * x * x;
+            if (Math.abs(tx - alpha) < 1e-5) break;
+            if (tx > alpha) xMax = x; else xMin = x;
+          }
+          pos[i] = coef * ((1 - x) * 0.5 + x) + x * x * x;
+        }
+        pos[n] = 1;
+        return pos;
+      })();
+      const splineAt = (f) => {
+        const n = SPLINE.length - 1;
+        const i = Math.min(n - 1, Math.floor(n * f));
+        return SPLINE[i] + (n * f - i) * (SPLINE[i + 1] - SPLINE[i]);
+      };
+
+      let fingers = 0, gestureOk = true;
+      let samples = [];            // [t, left, top] while a finger is down
+      let watch = null;            // release point and finger velocity
+      let coast = 0;               // rAF of the page's own coast
+      let killTimer = 0;
+
+      const now = () => performance.now();
+      const pos = () => [scrollContainer.scrollLeft, scrollContainer.scrollTop];
+
+      function stopCoast() {
+        if (coast) cancelAnimationFrame(coast);
+        coast = 0;
+      }
+
+      function fingerVelocity() {
+        if (samples.length < 2) return null;
+        const last = samples[samples.length - 1];
+        // A finger that stopped before lifting has no speed left.
+        if (now() - last[0] > 80) return { vx: 0, vy: 0 };
+        let first = null;
+        for (const s of samples) if (last[0] - s[0] <= FINGER_MS) { first = s; break; }
+        if (!first || first === last) first = samples[Math.max(0, samples.length - 3)];
+        const dt = (last[0] - first[0]) / 1000;
+        if (!(dt > 0)) return null;
+        return { vx: (last[1] - first[1]) / dt, vy: (last[2] - first[2]) / dt };
+      }
+
+      function startCoast(vx, vy) {
+        const speed = Math.hypot(vx, vy);
+        // End the browser's coast; ours drives scrollLeft/Top meanwhile.
+        clearTimeout(killTimer);
+        scrollContainer.style.overflow = 'hidden';
+        killTimer = setTimeout(() => { scrollContainer.style.overflow = ''; }, KILL_MS);
+        const l = Math.log(INFLEXION * speed / FRICTION);
+        const durMs = 1000 * Math.exp(l / (DECEL - 1));
+        const dist = FRICTION * Math.exp(DECEL / (DECEL - 1) * l);
+        const [x0, y0] = pos();
+        const ux = vx / speed, uy = vy / speed;
+        const t0 = now();
+        const scale0 = currentScale;
+        let lastX = x0, lastY = y0;
+        stopCoast();
+        const step = () => {
+          coast = 0;
+          // Zoom, or something else moving the page, ends the coast.
+          if (currentScale !== scale0 ||
+              Math.abs(scrollContainer.scrollLeft - lastX) > 2 ||
+              Math.abs(scrollContainer.scrollTop - lastY) > 2) return;
+          const f = Math.min(1, (now() - t0) / durMs);
+          const d = dist * splineAt(f);
+          scrollContainer.scrollLeft = x0 + ux * d;
+          scrollContainer.scrollTop = y0 + uy * d;
+          lastX = scrollContainer.scrollLeft;
+          lastY = scrollContainer.scrollTop;
+          if (f < 1) coast = requestAnimationFrame(step);
+        };
+        coast = requestAnimationFrame(step);
+      }
+
+      scrollContainer.addEventListener('touchstart', (e) => {
+        stopCoast();
+        watch = null;
+        fingers = e.touches.length;
+        if (fingers === 1) {
+          gestureOk = true;
+          samples = [[now(), ...pos()]];
+        } else {
+          gestureOk = false;
+        }
+      }, { capture: true, passive: true });
+
+      const lift = (e) => {
+        fingers = e.touches ? e.touches.length : 0;
+        if (fingers) return;
+        const ok = gestureOk && e.type === 'touchend' &&
+          !pinchActive && !isDragActive && !longPressActive &&
+          !(typeof rubberActive !== 'undefined' && rubberActive);
+        const v = ok ? fingerVelocity() : null;
+        samples = [];
+        if (!v || Math.hypot(v.vx, v.vy) < MIN_FINGER) return;
+        const [x, y] = pos();
+        watch = { t: now(), x, y, vx: v.vx, vy: v.vy };
+      };
+      scrollContainer.addEventListener('touchend', lift, { capture: true, passive: true });
+      scrollContainer.addEventListener('touchcancel', lift, { capture: true, passive: true });
+
+      scrollContainer.addEventListener('scroll', () => {
+        const t = now();
+        if (fingers) {
+          samples.push([t, ...pos()]);
+          while (samples.length > 2 && t - samples[0][0] > 200) samples.shift();
+          return;
+        }
+        if (!watch || coast) return;
+        const dt = t - watch.t;
+        if (dt > 150) { watch = null; return; }
+        if (dt < CHECK_MS) return;
+        const w = watch;
+        watch = null;
+        const [x, y] = pos();
+        const speed = Math.hypot(w.vx, w.vy);
+        // Coast speed along the swipe's own direction.
+        const along = ((x - w.x) * w.vx + (y - w.y) * w.vy) / speed / (dt / 1000);
+        if (along > Math.max(speed * BOOST_RATIO, speed + BOOST_EXTRA)) startCoast(w.vx, w.vy);
+      }, { passive: true });
+
+      // Any other input takes the page back from the coast.
+      for (const type of ['wheel', 'keydown', 'mousedown']) {
+        window.addEventListener(type, stopCoast, { capture: true, passive: true });
+      }
+    })();
 
     // ═══════════════════════════════════════════════════════════════════
     // Pinch-to-zoom (zoom with two fingers) - instead of the slider on mobile
