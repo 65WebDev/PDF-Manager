@@ -18011,7 +18011,9 @@
           // (and without marking hqUpgraded/hqRenderedScale) so a later pass
           // retries against the settled document instead of racing this one.
           if (token !== hqPdfjsToken || pdfDocCriticalWriterActive) return;
-          img.src = canvas.toDataURL('image/jpeg', 0.92);
+          const hqSrc = await pmCanvasToDataUrl(canvas, 'image/jpeg', 0.92);
+          if (token !== hqPdfjsToken || pdfDocCriticalWriterActive) return;
+          img.src = hqSrc;
           // Everything from the render through the JPEG encode is main-thread
           // work the user is sitting through, so that whole span is what the
           // budget is measured against.
@@ -20424,6 +20426,10 @@
     // content - what the live preview needs to stop at the document's edges
     // (see applyPinchVisualScale).
     let pinchPagesTop0 = 0, pinchScrollTop0 = 0, pinchPagesH0 = 0, pinchTail0 = 0, pinchViewBottom0 = 0;
+    // The work area's width, read once per gesture: reading it per finger
+    // move (getComputedStyle + clientWidth) forced a style and layout pass
+    // in every touchmove.
+    let pinchAvailW0 = 0;
 
     function getPinchAnchorPage() {
       if (pinchAnchorIndex == null) return null;
@@ -20527,6 +20533,7 @@
       pinchTail0 = Math.max(0, scrollContainer.scrollHeight -
         (pinchScrollTop0 + (pagesRect.top - host.top) + pagesRect.height));
       pinchViewBottom0 = host.top + scrollContainer.clientHeight;
+      pinchAvailW0 = getScrollAvailWidth();
     }
 
     function applyPinchVisualScale() {
@@ -20550,7 +20557,7 @@
       const restTop = pinchPagesTop0 + pinchScrollTop0;               // ...at scroll 0
       const h = ratio * pinchPagesH0;
       const colsKept = !isTouchDevice || pinchStartCols <= 0 ||
-        mobileColsThatFit(currentScale, getScrollAvailWidth()) === pinchStartCols;
+        mobileColsThatFit(currentScale, pinchAvailW0 || getScrollAvailWidth()) === pinchStartCols;
       if (colsKept && restTop + h + pinchTail0 > pinchViewBottom0) {
         const B = T + h;                                              // grid bottom on screen
         const minB = pinchViewBottom0 - pinchTail0;                   // ...at the end of the scroll
@@ -20738,6 +20745,13 @@
         pinchStartCols = 0;
         pinchLastMidX = null;
         pinchLastMidY = null;
+        // Page renders held back during the gesture go on, once the new
+        // scale's layout has settled (unless another pinch began by then).
+        setTimeout(() => {
+          if (pinchActive) return;
+          pmReleasePinchHeldRenders();
+          pumpLazyThumbnailQueue();
+        }, 150);
       }
     }
     scrollContainer.addEventListener('touchend', endPinch);
@@ -24288,6 +24302,11 @@
     }
 
     function pumpLazyThumbnailQueue() {
+      // Two-finger zoom: every main-thread millisecond goes to the gesture.
+      // A page render is a single 100+ ms block on a heavy (scanned) page,
+      // so starting one mid-pinch makes the zoom jump. The queue waits and
+      // is pumped again when the fingers lift (endPinch).
+      if (pinchActive) return;
       const limit = lazyThumbConcurrency();
       // High-priority jobs - pages the user is actually looking at right
       // now (initial visible/critical wait, or freshly scrolled into
@@ -24317,6 +24336,7 @@
         lazyThumbPendingIdle++;
         pmRequestIdle(() => {
           lazyThumbPendingIdle--;
+          if (pinchActive) return;   // the job stays queued; see above
           // Skip anything that went stale (loaded/loading/cancelled)
           // while this callback was waiting for idle time.
           let job = lazyThumbQueueLow.shift();
@@ -25245,7 +25265,7 @@
       // CPU-backed buffer, trading GPU compositing for consistent readback.
       const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: true });
       const rasterStartedAt = performance.now();
-      await page.render({ canvasContext: ctx, viewport, annotationMode: 0 }).promise;
+      await pmHoldRenderDuringPinch(page.render({ canvasContext: ctx, viewport, annotationMode: 0 })).promise;
       // This render happens for every page as the document is shown, long
       // before anyone zooms - which makes it the free sample that tells
       // runHQUpgrade how expensive this page is, so the very FIRST upgrade
@@ -25262,10 +25282,50 @@
 
       const hasEditorObjs = pdfPageIndex != null && typeof peLoadPageEditorObjects === 'function' &&
         peLoadPageEditorObjects(pdfPageIndex).length > 0;
-      img.src = hasEditorObjs
-        ? canvas.toDataURL('image/png')
-        : canvas.toDataURL('image/jpeg', THUMBNAIL_JPEG_QUALITY);
+      const src = hasEditorObjs
+        ? await pmCanvasToDataUrl(canvas, 'image/png')
+        : await pmCanvasToDataUrl(canvas, 'image/jpeg', THUMBNAIL_JPEG_QUALITY);
+      if (isLoadingCancelled || operationId !== activeOperationId) return false;
+      img.src = src;
       return true;
+    }
+
+    // canvas.toDataURL() encodes the whole raster in one main-thread block
+    // (100+ ms for a large page on a phone), which is a visible stall in a
+    // scroll or a pinch that happens to be under way. toBlob() encodes the
+    // same image in idle time between frames; reading the blob back gives
+    // the same data: URL, so nothing that uses img.src changes.
+    function pmCanvasToDataUrl(canvas, type, quality) {
+      if (typeof canvas.toBlob !== 'function' || typeof FileReader === 'undefined') {
+        return Promise.resolve(canvas.toDataURL(type, quality));
+      }
+      return new Promise((resolve) => {
+        canvas.toBlob((blob) => {
+          if (!blob) { resolve(canvas.toDataURL(type, quality)); return; }
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => resolve(canvas.toDataURL(type, quality));
+          reader.readAsDataURL(blob);
+        }, type, quality);
+      });
+    }
+
+    // Two-finger zoom: a page render already under way when the fingers
+    // come down stops between its pdf.js steps (one step of a scanned page
+    // is a single 100+ ms image draw) and goes on once they lift (endPinch);
+    // see also pumpLazyThumbnailQueue.
+    let pinchHeldRenderSteps = [];
+    function pmHoldRenderDuringPinch(renderTask) {
+      renderTask.onContinue = (cont) => {
+        if (pinchActive) pinchHeldRenderSteps.push(cont);
+        else cont();
+      };
+      return renderTask;
+    }
+    function pmReleasePinchHeldRenders() {
+      const steps = pinchHeldRenderSteps;
+      pinchHeldRenderSteps = [];
+      for (const cont of steps) cont();
     }
 
     async function createThumbnailElement(idx, pdfjsDoc) {
