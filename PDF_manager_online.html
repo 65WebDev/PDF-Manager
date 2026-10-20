@@ -22981,12 +22981,22 @@
       // First we get the file(s)
       let files = null;
       let fileHandles = null;
+      // Phone / tablet (and the Android app): opening lists only PDFs, so
+      // the system picker shows just those instead of every document and
+      // picture on the device. Word, Excel, mail and images still come in
+      // by merging - "Insert from file" between pages, Merge, Replace -
+      // which keep the full list.
+      const pdfOnly = isTouchDevice;
+
       if (window.showOpenFilePicker) {
         try {
           const pickerOpts = {
             id: PICKER_ID_OPEN,
             multiple: multi,
-            types: [{
+            types: pdfOnly ? [{
+              description: t('filePickerDescPdf'),
+              accept: { 'application/pdf': ['.pdf'] }
+            }] : [{
               description: t('filePickerDescDocsImages'),
               accept: {
                 'application/pdf': ['.pdf'],
@@ -23025,7 +23035,10 @@
           const inp = document.createElement('input');
           inp.type = 'file';
           inp.multiple = multi;
-          inp.accept = '.pdf,.docx,.xls,.xlsx,.eml,.msg,.png,.jpg,.jpeg,.bmp,.gif,.webp,.tif,.tiff';
+          // The MIME type is what the Android picker filters by.
+          inp.accept = pdfOnly
+            ? 'application/pdf,.pdf'
+            : '.pdf,.docx,.xls,.xlsx,.eml,.msg,.png,.jpg,.jpeg,.bmp,.gif,.webp,.tif,.tiff';
           inp.onchange = () => resolve(inp.files && inp.files.length ? Array.from(inp.files) : null);
           inp.click();
         });
