@@ -458,8 +458,8 @@ Android попросит разрешить установку из этого �
 ### Тестовая сборка в GitHub Actions
 
 Workflow **Android APK** (`.github/workflows/android.yml`) собирает APK
-на каждый PR, который меняет `src-tauri/` или мост Tauri, и вручную:
-**Actions → Android APK → Run workflow**.
+только по запуску вручную: **Actions → Android APK → Run workflow** (выбрать
+ветку). Обычно APK, как и приложение Windows, собирается локально.
 
 Где взять готовый APK:
 
