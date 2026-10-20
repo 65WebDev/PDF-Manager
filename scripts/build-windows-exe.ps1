@@ -25,9 +25,10 @@
 
   With -Android (or -AndroidOnly), the same commit is also built as an
   Android APK (ARM phones and tablets) on this machine. Needs Android Studio
-  (SDK + NDK), JAVA_HOME / ANDROID_HOME / NDK_HOME and your signing key in
-  src-tauri\gen\android\keystore.properties — see docs\windows-tauri-build.md,
-  section Android. Unless -Local, the APK is uploaded to GitHub Release
+  (SDK + NDK), JDK 17-24 (21 recommended) in JAVA_HOME, ANDROID_HOME /
+  NDK_HOME, the repository in a folder whose path has Latin letters only, and
+  your signing key in src-tauri\gen\android\keystore.properties — see
+  docs\windows-tauri-build.md, section Android. Unless -Local, the APK is uploaded to GitHub Release
   android-v{version} (scripts\upload-android-apk.mjs).
 
   Output:
@@ -289,6 +290,62 @@ Then rerun this script. Or build without upload:
   Write-Ok ("gh - logged in as {0}" -f $login)
 }
 
+# -Android / -AndroidOnly: checked before anything is built. Both problems
+# otherwise only show up deep inside the Android build (NDK linker, Gradle),
+# after the Windows / Linux builds have already run.
+function Assert-AndroidPrereqs {
+  Write-Step "Android pre-flight"
+
+  # The NDK linker and the Android Gradle plugin cannot handle non-Latin
+  # letters in the path on Windows (e.g. "...\Сборка\PDF-Manager").
+  $repoPath = [string]$RepoRoot
+  if ($repoPath -match '[^\x20-\x7E]') {
+    Write-Fail ("Android cannot be built from this folder: {0}" -f $repoPath)
+    Write-Host @"
+The path has non-Latin letters, which the Android tools on Windows cannot
+handle. Move the repository to a Latin-only path, e.g.:
+  Move-Item "$repoPath" "C:\Build\PDF-Manager"
+and run the script from there. See docs\windows-tauri-build.md, section Android.
+"@ -ForegroundColor Yellow
+    exit 1
+  }
+  Write-Ok ("Path - {0}" -f $repoPath)
+
+  # JDK: Gradle 8.14 (src-tauri\gen\android) runs on Java 17-24. Android
+  # Studio's own Java (its jbr folder) is Java 25 in recent versions.
+  $jdkHint = @"
+Install JDK 21 and point JAVA_HOME at it (once), then open a NEW PowerShell window:
+  winget install --id EclipseAdoptium.Temurin.21.JDK -e
+  `$jdk = Get-ChildItem "C:\Program Files\Eclipse Adoptium" -Directory -Filter "jdk-21*" | Sort-Object Name | Select-Object -Last 1
+  [Environment]::SetEnvironmentVariable("JAVA_HOME", `$jdk.FullName, "User")
+See docs\windows-tauri-build.md, section Android.
+"@
+  if (-not $env:JAVA_HOME -or -not (Test-Path -LiteralPath (Join-Path $env:JAVA_HOME 'bin\java.exe'))) {
+    Write-Fail "JAVA_HOME is not set to a JDK."
+    Write-Host $jdkHint -ForegroundColor Yellow
+    exit 1
+  }
+  $javaVersion = $null
+  $releaseFile = Join-Path $env:JAVA_HOME 'release'
+  if (Test-Path -LiteralPath $releaseFile) {
+    $line = Select-String -LiteralPath $releaseFile -Pattern '^JAVA_VERSION="([^"]+)"' | Select-Object -First 1
+    if ($line) { $javaVersion = $line.Matches[0].Groups[1].Value }
+  }
+  $javaMajor = 0
+  if ($javaVersion -match '^1\.(\d+)') {
+    $javaMajor = [int]$Matches[1]
+  } elseif ($javaVersion -match '^(\d+)') {
+    $javaMajor = [int]$Matches[1]
+  }
+  if ($javaMajor -and ($javaMajor -lt 17 -or $javaMajor -gt 24)) {
+    Write-Fail ("JAVA_HOME is Java {0} ({1}); the Android build needs Java 17-24 (21 recommended)." -f $javaVersion, $env:JAVA_HOME)
+    Write-Host $jdkHint -ForegroundColor Yellow
+    exit 1
+  }
+  if (-not $javaVersion) { $javaVersion = 'version unknown' }
+  Write-Ok ("JAVA_HOME - {0} ({1})" -f $env:JAVA_HOME, $javaVersion)
+}
+
 function Ensure-LatestMain {
   Assert-Cmd 'git' @"
 Git is required to sync the latest main before build.
@@ -421,6 +478,10 @@ if (-not $SkipGitSync) {
       Write-Host ("Building from {0} @ {1}" -f $branch, $head) -ForegroundColor DarkGray
     }
   }
+}
+
+if ($Android -or $AndroidOnly) {
+  Assert-AndroidPrereqs
 }
 
 if ($skipWindows -and $doUpload) {
@@ -712,17 +773,7 @@ Install Rust (stable): https://rustup.rs/
 New terminal after rustup-init.exe.
 "@
 
-  # JDK: Android Studio's own (its jbr folder) is fine.
-  if (-not $env:JAVA_HOME -or -not (Test-Path -LiteralPath (Join-Path $env:JAVA_HOME 'bin\java.exe'))) {
-    Write-Fail "JAVA_HOME is not set to a JDK."
-    Write-Host @"
-Point it at Android Studio's JDK (once), then open a NEW PowerShell window:
-  [Environment]::SetEnvironmentVariable("JAVA_HOME", "C:\Program Files\Android\Android Studio\jbr", "User")
-See docs\windows-tauri-build.md, section Android.
-"@ -ForegroundColor Yellow
-    exit 1
-  }
-  Write-Ok ("JAVA_HOME - {0}" -f $env:JAVA_HOME)
+  # Path and JAVA_HOME: Assert-AndroidPrereqs, before the Windows build.
 
   $sdk = $env:ANDROID_HOME
   if (-not $sdk) { $sdk = $env:ANDROID_SDK_ROOT }
