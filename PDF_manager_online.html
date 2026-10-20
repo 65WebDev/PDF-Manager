@@ -6889,6 +6889,13 @@
       /*Disable native pinch-zoom in the work area (we process the scale ourselves),
          leave scrolling.*/
       .main { touch-action: pan-x pan-y; }
+      /*A finger drag scrolls exactly the way it moves. Without this the browser
+         (Chrome / Android WebView) pins a drag that starts within ~30° of the
+         vertical or horizontal to that axis for the whole gesture, so a zoomed
+         page would not follow the finger sideways. Strictly vertical scrolling
+         while the page fits the width stays (pm-vertical-scroll-lock).
+         Chrome / WebView 153+; elsewhere the property is ignored.*/
+      .main { scroll-axis-lock: none; }
       /*While dragging a page, block native scrolling with a gesture*/
       .main.drag-scroll-locked {
         touch-action: none;
@@ -14994,15 +15001,19 @@
     }
 
     // Mobile counterpart: there's no wheel/slider "magnet" concept on touch
-    // (pinch zoom uses its own separate fill-snap mechanism instead), so
-    // rather than checking currentScale against a computed target, this ties
-    // the lock directly to fitWidthToggleOn - explicitly fit-width via
-    // double-tap/dblclick/the toolbar button is the one deliberate "I want a
-    // clean vertical read" gesture on touch. Pinch already clears
-    // fitWidthToggleOn at gesture start (see the pinch touchstart handler),
-    // so starting a manual pinch releases the lock immediately.
+    // (pinch zoom uses its own separate fill-snap mechanism instead), so the
+    // rule is simply the page itself: whenever the pages sit one per row and
+    // every one on screen fits the width, a drag scrolls only vertically -
+    // after fit-width, in reading mode, and after a pinch that leaves the
+    // page narrower than the screen alike. The card around a page is wider
+    // than the page, so without the lock a drag a few degrees off the
+    // vertical would slide the page sideways into that margin (the browser
+    // no longer pins such drags to one axis, see scroll-axis-lock on .main).
+    // Never during a pinch: the gesture moves the view freely, and
+    // applyScale re-checks the lock once the new scale is applied.
     function pmShouldLockHorizontalScrollMobile() {
-      if (!fitWidthToggleOn || !pdfDoc || !pagesContainer || !scrollContainer) return false;
+      if (!pdfDoc || !pagesContainer || !scrollContainer) return false;
+      if (document.body.classList.contains('pinch-zooming')) return false;
       if (typeof isPagesSingleColumnLayout !== 'function' || !isPagesSingleColumnLayout()) return false;
       const avail = getScrollAvailWidth();
       if (avail <= 0) return false;
