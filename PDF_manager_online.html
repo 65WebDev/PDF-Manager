@@ -4890,6 +4890,7 @@
       #pmBottomBar button:disabled { opacity: 0.38; }
       #pmBottomBar button:active:not(:disabled),
       #pmBottomBar button.pm-bb-open { background: #3498db; }
+      #pmBottomBar button.pm-bb-open { box-shadow: 0 0 0 2px #6f93b6; }
       #pmBottomBar .pm-bb-sep {
         flex: none;
         width: 1px;
@@ -4899,6 +4900,11 @@
       /*Share: the Android app's system share sheet.*/
       #pmBottomBar #pmBbShare { display: none; }
       body.pm-android-app #pmBottomBar #pmBbShare { display: inline-flex; }
+      /*The page number tab sits at the bottom edge of the screen - on top
+        of the bar while it is up. It shows only while the bar is folded away.*/
+      body.pm-bottom-bar-on:not(.pm-menu-collapsed):not(.read-mode-active) #pageNumTab {
+        display: none !important;
+      }
       /*The short message at the bottom stays clear of the bar.*/
       body.pm-bottom-bar-on:not(.pm-menu-collapsed):not(.read-mode-active) #pmToast {
         bottom: calc(82px + env(safe-area-inset-bottom, 0px));
@@ -6478,6 +6484,31 @@
       }
       .top-menu #deleteBtn.menu-tap-feedback:not(:disabled) {
         background: #cc3d40 !important;
+      }
+      /*Held open: while its menu is up the button stays pressed (pmShowPopMenu
+        sets pm-bb-open), ringed in the menu's frame colour - the menu below
+        belongs to it.*/
+      .top-menu button.pm-bb-open:not(:disabled) {
+        background: #3498db !important;
+        box-shadow: 0 0 0 2px #6f93b6;
+      }
+      .top-menu .save-btn.pm-bb-open:not(:disabled) {
+        background: #2ecc71 !important;
+      }
+      /*A long press on these opens a menu (pmHoldMenu): a small mark in the
+        corner, as on toolbars with a menu behind a hold.*/
+      button[data-pm-hold-menu] { position: relative; }
+      button[data-pm-hold-menu]::after {
+        content: '';
+        position: absolute;
+        right: 4px;
+        bottom: 4px;
+        width: 0;
+        height: 0;
+        border-left: 6px solid transparent;
+        border-bottom: 6px solid currentColor;
+        opacity: 0.8;
+        pointer-events: none;
       }
 
       /*File name blind: without text selection, long press tooltip*/
@@ -9283,6 +9314,12 @@
     //Tooltip “which pages have changed” for step-by-step fixation of rotations
     //(each turn is a separate step in the story, even with quick presses in a row).
     let historyChangeHint = null;
+    // What the next history step does, for the undo / redo menus on phones
+    // (pmHistoryStepLabel): { key, pages } - an i18n key and the page
+    // indices it touched. The action sets it right before it marks the
+    // document dirty; a step without one is described from how it differs
+    // from the step before it.
+    let historyActionLabel = null;
     let historyCommitChain = Promise.resolve();
     let selectedPages = new Set();
     let markedForDeletion = new Set();
@@ -10166,6 +10203,15 @@
         bbPrint: 'Печать', bbPrintDocument: 'Весь документ', bbPrintSelected: 'Выделенные страницы ({n})',
         bbToolWatermark: 'Водяной знак', bbToolHeaderFooter: 'Колонтитулы', bbToolPageFormat: 'Единый формат страниц',
         bbToolAutoCrop: 'Обрезать белые поля', bbToolFindBlank: 'Найти пустые страницы',
+        histUndoMenu: 'Отменить', histRedoMenu: 'Повторить',
+        histRotate: 'Поворот', histFormField: 'Заполнение поля', histWatermark: 'Водяной знак',
+        histHeaderFooter: 'Колонтитулы', histPageFormat: 'Единый формат', histAutoCrop: 'Обрезка полей',
+        histMarkup: 'Пометка текста', histRedact: 'Закрашивание текста', histPageEdit: 'Редактирование',
+        histSelect: 'Выделение', histDeselect: 'Снятие выделения', histSelectNone: 'Снятие всего выделения',
+        histDelete: 'Удаление', histRestore: 'Восстановление', histInsert: 'Добавлено страниц: {n}',
+        histRemove: 'Убрано страниц: {n}', histMove: 'Перемещение страниц', histEdit: 'Изменение',
+        histChange: 'Изменение документа', histGoToPage: 'Переход к стр. {n}', histScroll: 'Прокрутка', histScrollOnPage: 'Прокрутка на стр. {n}',
+        histPagesList: 'стр. {list}', histPagesCount: '{n} стр.',
         printAllFilePrefix: 'для_печати_',
         alertPreparePrintAllError: 'Ошибка при подготовке документа к печати',
         alertNoDocument: 'Нет документа',
@@ -10647,6 +10693,15 @@
         bbPrint: 'Print', bbPrintDocument: 'Whole document', bbPrintSelected: 'Selected pages ({n})',
         bbToolWatermark: 'Watermark', bbToolHeaderFooter: 'Headers and footers', bbToolPageFormat: 'One page size',
         bbToolAutoCrop: 'Crop white margins', bbToolFindBlank: 'Find blank pages',
+        histUndoMenu: 'Undo', histRedoMenu: 'Redo',
+        histRotate: 'Rotate', histFormField: 'Form field', histWatermark: 'Watermark',
+        histHeaderFooter: 'Headers & footers', histPageFormat: 'Uniform page size', histAutoCrop: 'Crop margins',
+        histMarkup: 'Text markup', histRedact: 'Text redaction', histPageEdit: 'Page edit',
+        histSelect: 'Select', histDeselect: 'Deselect', histSelectNone: 'Clear selection',
+        histDelete: 'Delete', histRestore: 'Restore', histInsert: 'Pages added: {n}',
+        histRemove: 'Pages removed: {n}', histMove: 'Move pages', histEdit: 'Change',
+        histChange: 'Document change', histGoToPage: 'Go to page {n}', histScroll: 'Scroll', histScrollOnPage: 'Scroll on page {n}',
+        histPagesList: 'p. {list}', histPagesCount: '{n} pages',
         printAllFilePrefix: 'for_print_',
         alertPreparePrintAllError: 'Error preparing the document for printing',
         alertNoDocument: 'No document',
@@ -11128,6 +11183,15 @@
         bbPrint: 'Imprimir', bbPrintDocument: 'Todo el documento', bbPrintSelected: 'Páginas seleccionadas ({n})',
         bbToolWatermark: 'Marca de agua', bbToolHeaderFooter: 'Encabezados y pies de página', bbToolPageFormat: 'Mismo tamaño de página',
         bbToolAutoCrop: 'Recortar márgenes blancos', bbToolFindBlank: 'Buscar páginas en blanco',
+        histUndoMenu: 'Deshacer', histRedoMenu: 'Rehacer',
+        histRotate: 'Girar', histFormField: 'Campo de formulario', histWatermark: 'Marca de agua',
+        histHeaderFooter: 'Encabezados y pies', histPageFormat: 'Tamaño uniforme', histAutoCrop: 'Recortar márgenes',
+        histMarkup: 'Marcado de texto', histRedact: 'Ocultar texto', histPageEdit: 'Edición de página',
+        histSelect: 'Seleccionar', histDeselect: 'Deseleccionar', histSelectNone: 'Quitar selección',
+        histDelete: 'Eliminar', histRestore: 'Restaurar', histInsert: 'Páginas añadidas: {n}',
+        histRemove: 'Páginas quitadas: {n}', histMove: 'Mover páginas', histEdit: 'Cambio',
+        histChange: 'Cambio del documento', histGoToPage: 'Ir a la pág. {n}', histScroll: 'Desplazamiento', histScrollOnPage: 'Desplazamiento en la pág. {n}',
+        histPagesList: 'pág. {list}', histPagesCount: '{n} págs.',
         printAllFilePrefix: 'para_imprimir_',
         alertPreparePrintAllError: 'Error al preparar el documento para imprimir',
         alertNoDocument: 'No hay documento',
@@ -11684,6 +11748,15 @@
         bbPrint: '打印', bbPrintDocument: '整个文档', bbPrintSelected: '所选页面 ({n})',
         bbToolWatermark: '水印', bbToolHeaderFooter: '页眉和页脚', bbToolPageFormat: '统一页面尺寸',
         bbToolAutoCrop: '裁剪白边', bbToolFindBlank: '查找空白页',
+        histUndoMenu: '撤销', histRedoMenu: '重做',
+        histRotate: '旋转', histFormField: '表单字段', histWatermark: '水印',
+        histHeaderFooter: '页眉页脚', histPageFormat: '统一页面尺寸', histAutoCrop: '裁剪边距',
+        histMarkup: '文本标注', histRedact: '涂黑文本', histPageEdit: '编辑页面',
+        histSelect: '选择', histDeselect: '取消选择', histSelectNone: '清除选择',
+        histDelete: '删除', histRestore: '恢复', histInsert: '已添加页面：{n}',
+        histRemove: '已移除页面：{n}', histMove: '移动页面', histEdit: '更改',
+        histChange: '文档更改', histGoToPage: '转到第 {n} 页', histScroll: '滚动', histScrollOnPage: '在第 {n} 页滚动',
+        histPagesList: '第 {list} 页', histPagesCount: '{n} 页',
         printAllFilePrefix: '打印_',
         alertPreparePrintAllError: '准备打印文档时出错',
         alertNoDocument: '没有文档',
@@ -13836,8 +13909,21 @@
       try { return !!peState; } catch (_) { return false; }
     }
 
+    function pmLabelNextHistoryStep(key, pages) {
+      historyActionLabel = { key, pages: pages ? pages.slice() : null };
+    }
+    function pmTakeHistoryActionLabel() {
+      const label = historyActionLabel;
+      historyActionLabel = null;
+      return label;
+    }
+
     function scheduleHistoryPush() {
-      if (historyPushSuspended || undoRedoBusy || !pdfDoc || pmPageEditorOpen()) { historyChangeHint = null; return; }
+      if (historyPushSuspended || undoRedoBusy || !pdfDoc || pmPageEditorOpen()) {
+        historyChangeHint = null;
+        historyActionLabel = null;
+        return;
+      }
       flushSelectionHistorySync();
       //Step-by-step branch for turns: we fix the bytes of the document IMMEDIATELY (at the moment
       //operation) without waiting for the animation to finish. Otherwise, quick turns in a row
@@ -13845,6 +13931,7 @@
       if (historyChangeHint) {
         const hint = historyChangeHint.slice();
         historyChangeHint = null;
+        const label = pmTakeHistoryActionLabel();
         const marked = [...markedForDeletion].sort((x, y) => x - y);
         // Serialize saves on the commit chain and wait until history thumbnail
         // fills release the live pdfDoc — overlapping pdfDoc.save() during a
@@ -13856,7 +13943,7 @@
             const savePromise = (typeof saveLivePdfBytes === 'function')
               ? saveLivePdfBytes()
               : pdfDoc.save().then(b => new Uint8Array(b));
-            return commitHistoryStep(savePromise, marked, hint);
+            return commitHistoryStep(savePromise, marked, hint, { label });
           })
           .catch(e => console.error(e));
         return;
@@ -14032,7 +14119,8 @@
       }
       docHistory = docHistory.slice(0, docHistoryIndex + 1);
       const sel = captureSelectionState();
-      docHistory.push({ pdfBytes, marked, pages, pendingIdx, selected: sel.selected, lastSel: sel.lastSel });
+      docHistory.push({ pdfBytes, marked, pages, pendingIdx, selected: sel.selected, lastSel: sel.lastSel,
+        label: (opts && opts.label) || null });
       trimDocHistory();
       docHistoryIndex = docHistory.length - 1;
       syncDirtyFromHistory();
@@ -14113,7 +14201,8 @@
           pages: cur.pages ? cur.pages.map(p => ({ src: p.src, rotated: p.rotated })) : null,
           pendingIdx: cur.pendingIdx ? cur.pendingIdx.slice() : undefined,
           selected: sel.selected,
-          lastSel: sel.lastSel
+          lastSel: sel.lastSel,
+          selOnly: true
         };
       } else {
         return;
@@ -14146,8 +14235,10 @@
           markedArraysEqual(cur.marked, snap.marked) &&
           selectedArraysEqual(cur.selected, snap.selected) &&
           cur.lastSel === snap.lastSel) {
+        historyActionLabel = null;
         return;
       }
+      snap.label = pmTakeHistoryActionLabel();
       docHistory = docHistory.slice(0, docHistoryIndex + 1);
       docHistory.push(snap);
       trimDocHistory();
@@ -14167,8 +14258,10 @@
           markedArraysEqual(cur.marked, snap.marked) &&
           selectedArraysEqual(cur.selected, snap.selected) &&
           cur.lastSel === snap.lastSel) {
+        historyActionLabel = null;
         return;
       }
+      snap.label = pmTakeHistoryActionLabel();
       docHistory = docHistory.slice(0, docHistoryIndex + 1);
       docHistory.push(snap);
       trimDocHistory();
@@ -14513,14 +14606,150 @@
       if (typeof updateZoomPanHandBadge === 'function') updateZoomPanHandBadge();
     }
 
+    const pmUndoRedoTimeline = () => typeof pmNavTimelineActive === 'function' && pmNavTimelineActive();
+    /** One step of the smartphone undo (dir -1) / redo (dir 1) buttons. */
+    function pmMobileUndoRedoStep(dir) {
+      if (pmUndoRedoTimeline()) return pmNavTimelineStep(dir);
+      return dir < 0 ? undoDocument() : redoDocument();
+    }
     function initMobileUndoRedo() {
       const undoBtn = document.getElementById('mobileUndoBtn');
       const redoBtn = document.getElementById('mobileRedoBtn');
-      const timeline = () => typeof pmNavTimelineActive === 'function' && pmNavTimelineActive();
-      if (undoBtn) undoBtn.addEventListener('click', () => { if (timeline()) pmNavTimelineStep(-1); else undoDocument(); });
-      if (redoBtn) redoBtn.addEventListener('click', () => { if (timeline()) pmNavTimelineStep(1); else redoDocument(); });
+      if (undoBtn) undoBtn.addEventListener('click', () => pmMobileUndoRedoStep(-1));
+      if (redoBtn) redoBtn.addEventListener('click', () => pmMobileUndoRedoStep(1));
     }
     initMobileUndoRedo();
+
+    // ─── What an undo / redo step did, in words (the hold menus below) ───
+    // The number a page shows under its preview: marked pages are hidden on
+    // phones and get no number, so the pages after them count down.
+    function pmHistoryPageNumber(idx, marked) {
+      if (!deletedPagesHidden || !marked) return idx + 1;
+      let n = idx + 1;
+      for (const m of marked) if (m < idx) n--;
+      return n;
+    }
+    function pmHistoryPagesText(pages, marked) {
+      if (!pages || !pages.length) return '';
+      const nums = pages.slice().sort((a, b) => a - b).map(i => pmHistoryPageNumber(i, marked));
+      return nums.length <= 3 ? t('histPagesList', { list: nums.join(', ') }) : t('histPagesCount', { n: nums.length });
+    }
+    function pmHistoryLabelText(key, pages, marked, n) {
+      const what = t(key, { n });
+      const where = pmHistoryPagesText(pages, marked);
+      return where ? what + ': ' + where : what;
+    }
+    /**
+     * The step from docHistory entry `prev` to `snap`. Actions that label
+     * themselves (pmLabelNextHistoryStep) are named; anything else is read
+     * from what changed: the selection, the pages marked for deletion, the
+     * page count, the order or the pictures of the pages.
+     */
+    function pmHistoryStepLabel(prev, snap) {
+      if (!snap) return '';
+      const marked = prev ? prev.marked : snap.marked;
+      if (snap.label) return pmHistoryLabelText(snap.label.key, snap.label.pages, marked);
+      if (!prev) return t('histChange');
+      if (snap.selOnly) {
+        const was = new Set(prev.selected || []);
+        const now = snap.selected || [];
+        if (!now.length) return t('histSelectNone');
+        const added = now.filter(i => !was.has(i));
+        return added.length
+          ? pmHistoryLabelText('histSelect', added, marked)
+          : pmHistoryLabelText('histDeselect', (prev.selected || []).filter(i => now.indexOf(i) < 0), marked);
+      }
+      const pagesBefore = prev.pages, pagesAfter = snap.pages;
+      if (pagesBefore && pagesAfter && pagesBefore.length !== pagesAfter.length) {
+        const n = Math.abs(pagesAfter.length - pagesBefore.length);
+        return t(pagesAfter.length > pagesBefore.length ? 'histInsert' : 'histRemove', { n });
+      }
+      const wasMarked = new Set(prev.marked || []);
+      const nowMarked = new Set(snap.marked || []);
+      const newlyMarked = [...nowMarked].filter(i => !wasMarked.has(i));
+      if (newlyMarked.length) return pmHistoryLabelText('histDelete', newlyMarked, prev.marked);
+      const unmarked = [...wasMarked].filter(i => !nowMarked.has(i));
+      if (unmarked.length) return pmHistoryLabelText('histRestore', unmarked, snap.marked);
+      if (pagesBefore && pagesAfter) {
+        const changed = [];
+        pagesAfter.forEach((p, i) => {
+          const q = pagesBefore[i];
+          if (!q || p.pending || p.src !== q.src || p.rotated !== q.rotated) changed.push(i);
+        });
+        if (changed.length) {
+          // The same pictures in another order: pages were moved.
+          const before = changed.map(i => pagesBefore[i].src).sort();
+          const after = changed.map(i => pagesAfter[i].src).sort();
+          if (before.every((s, k) => s && s === after[k])) return t('histMove');
+          return pmHistoryLabelText('histEdit', changed, marked);
+        }
+      }
+      return t('histChange');
+    }
+    /** Where a timeline 'pos' step took the user (from spot `prev`). */
+    function pmHistorySpotLabel(prev, spot) {
+      if (!spot || spot.idx == null) return t('histScroll');
+      const cur = docHistoryIndex >= 0 ? docHistory[docHistoryIndex] : null;
+      const n = pmHistoryPageNumber(spot.idx, cur ? cur.marked : null);
+      return t(prev && prev.idx === spot.idx ? 'histScrollOnPage' : 'histGoToPage', { n });
+    }
+
+    /**
+     * The next steps the undo (dir -1) or redo (dir 1) button would take,
+     * nearest first, at most `max`, each { label }. Mirrors
+     * pmNavTimelineStep, including the steps it would skip.
+     */
+    function pmUndoRedoSteps(dir, max) {
+      const out = [];
+      if (pmUndoRedoTimeline()) {
+        pmNavTimelineSyncDoc();
+        // pmNavTimelineStep would record a spot the user scrolled to but has
+        // not rested on yet before stepping away from it: so do we.
+        if (dir < 0 && pmNavTimelineSaveTimer && !pmNavTimelineJumping) pmNavTimelineRecordPos();
+        let k = pmNavTimelineIndex;
+        let d = docHistoryIndex;
+        while (out.length < max && (dir < 0 ? k >= 0 : k < pmNavTimeline.length - 1)) {
+          const e = pmNavTimeline[dir < 0 ? k : k + 1];
+          k += dir;
+          if (e.kind === 'pos') { out.push({ label: pmHistorySpotLabel(e.prev, e.at) }); continue; }
+          const applicable = dir < 0
+            ? docHistory[d] === e.snap && docHistory[d - 1] === e.prev
+            : docHistory[d] === e.prev && docHistory[d + 1] === e.snap;
+          if (!applicable) continue;
+          d += dir;
+          out.push({ label: pmHistoryStepLabel(e.prev, e.snap) });
+        }
+        return out;
+      }
+      for (let d = docHistoryIndex; out.length < max; d += dir) {
+        const from = dir < 0 ? d - 1 : d, to = dir < 0 ? d : d + 1;
+        if (from < 0 || to >= docHistory.length) break;
+        out.push({ label: pmHistoryStepLabel(docHistory[from], docHistory[to]) });
+      }
+      return out;
+    }
+
+    // Holding undo / redo: the last (next) five steps; choosing one takes
+    // the document back (forward) through every step up to it.
+    const PM_UNDO_MENU_STEPS = 5;
+    async function pmUndoRedoGo(dir, count) {
+      for (let i = 0; i < count; i++) {
+        const can = pmUndoRedoTimeline() ? (dir < 0 ? pmNavTimelineCanUndo() : pmNavTimelineCanRedo())
+          : (dir < 0 ? canUndoDoc() : canRedoDoc());
+        if (!can) break;
+        await pmMobileUndoRedoStep(dir);
+      }
+    }
+    function pmShowUndoRedoMenu(btn, dir) {
+      if (!pdfDoc || isLoading || undoRedoBusy) return false;
+      const steps = pmUndoRedoSteps(dir, PM_UNDO_MENU_STEPS);
+      if (!steps.length) return false;
+      pmShowPopMenu(btn, steps.map((s, i) => ({
+        label: s.label,
+        onClick: () => pmUndoRedoGo(dir, i + 1)
+      })), { title: t(dir < 0 ? 'histUndoMenu' : 'histRedoMenu') });
+      return true;
+    }
 
     // ─── Bottom bar (touch layouts) ───
     // Undo / redo, page selection, tools, search, print and (in the Android
@@ -14684,43 +14913,42 @@
       $('pmBbShare').addEventListener('click', () => { if (pdfDoc) pmShareDocument(); });
     })();
 
-    // Save / Export, held on a touch screen: their variants (as images, by
-    // pages, compressed, with a password) - the buttons the desktop pops up
-    // on hover - in a menu with captions. The release that ends the hold
-    // does not also save.
-    (function initSaveVariantHold() {
-      if (!isTouchDevice) return;
-      const HOLD_MS = 450, MOVE_PX = 10;
-      let timer = null, x0 = 0, y0 = 0, held = false;
+    // A long press on a touch screen opens a menu instead of tapping the
+    // button. The release that ends the hold does not also tap it, and such
+    // a button gets the corner mark (CSS) instead of the plain touch tooltip
+    // (initTouchTooltips). open(btn) shows the menu; returning false (nothing
+    // to show) leaves the release to tap the button as usual.
+    const pmHoldMenu = (function () {
+      const MOVE_PX = 10;
       // The click the release makes after a hold lands on whatever is under
       // the finger by then - the menu's backdrop - and would close the menu
       // it just opened. It is swallowed, whatever its target; a browser that
       // sends none has the next finger-down drop the wait.
       let swallowUntil = 0;
-      const cancel = () => { clearTimeout(timer); timer = null; };
-      for (const id of ['saveBtn', 'exportBtn']) {
-        const btn = document.getElementById(id);
-        if (!btn) continue;
-        // Not the touch tooltip for these two (initTouchTooltips).
+      if (isTouchDevice) {
+        document.addEventListener('pointerdown', () => { swallowUntil = 0; }, true);
+        document.addEventListener('click', (e) => {
+          if (performance.now() >= swallowUntil) return;
+          swallowUntil = 0;
+          e.preventDefault();
+          e.stopPropagation();
+        }, true);
+      }
+      return function (btn, open) {
+        if (!isTouchDevice || !btn) return;
+        let timer = null, x0 = 0, y0 = 0, held = false;
+        const cancel = () => { clearTimeout(timer); timer = null; };
         btn.setAttribute('data-pm-hold-menu', '');
         btn.addEventListener('pointerdown', (e) => {
-          if (e.pointerType !== 'touch' || btn.disabled || !pdfDoc || isLoading) return;
+          if (e.pointerType !== 'touch' || btn.disabled) return;
           held = false;
           x0 = e.clientX;
           y0 = e.clientY;
           cancel();
           timer = setTimeout(() => {
             timer = null;
-            held = true;
-            const variants = Array.from(btn.parentElement.querySelectorAll('.img-save-btn'));
-            pmShowPopMenu(btn, variants.map(v => ({
-              icon: pmIconOf(v),
-              label: v.getAttribute('aria-label') || '',
-              tip: v.getAttribute('title'),
-              disabled: v.disabled || v.classList.contains('pm-compress-unavailable'),
-              onClick: () => v.click()
-            })), { title: btn.getAttribute('title') ? btn.title.replace(/\s*\([^)]*\)\s*$/, '') : '', place: 'below' });
-          }, HOLD_MS);
+            held = open(btn) !== false;
+          }, PM_TOUCH_TIP_MS);
         });
         btn.addEventListener('pointermove', (e) => {
           if (timer && Math.hypot(e.clientX - x0, e.clientY - y0) > MOVE_PX) cancel();
@@ -14732,15 +14960,28 @@
         });
         btn.addEventListener('pointercancel', () => { cancel(); held = false; });
         btn.addEventListener('contextmenu', (e) => e.preventDefault());
-      }
-      document.addEventListener('pointerdown', () => { swallowUntil = 0; }, true);
-      document.addEventListener('click', (e) => {
-        if (performance.now() >= swallowUntil) return;
-        swallowUntil = 0;
-        e.preventDefault();
-        e.stopPropagation();
-      }, true);
+      };
     })();
+
+    // Save / Export, held: their variants (as images, by pages, compressed,
+    // with a password) - the buttons the desktop pops up on hover - in a
+    // menu with captions.
+    for (const id of ['saveBtn', 'exportBtn']) {
+      pmHoldMenu(document.getElementById(id), (btn) => {
+        if (!pdfDoc || isLoading) return false;
+        const variants = Array.from(btn.parentElement.querySelectorAll('.img-save-btn'));
+        pmShowPopMenu(btn, variants.map(v => ({
+          icon: pmIconOf(v),
+          label: v.getAttribute('aria-label') || '',
+          tip: v.getAttribute('title'),
+          disabled: v.disabled || v.classList.contains('pm-compress-unavailable'),
+          onClick: () => v.click()
+        })), { title: btn.getAttribute('title') ? btn.title.replace(/\s*\([^)]*\)\s*$/, '') : '', place: 'below' });
+      });
+    }
+    // Undo / redo, held: the last (next) steps (pmShowUndoRedoMenu).
+    pmHoldMenu(document.getElementById('mobileUndoBtn'), (btn) => pmShowUndoRedoMenu(btn, -1));
+    pmHoldMenu(document.getElementById('mobileRedoBtn'), (btn) => pmShowUndoRedoMenu(btn, 1));
 
     function updateInfo() {
       if (pdfDoc) {
@@ -17333,6 +17574,7 @@
     // switches - see the .pm-form-layer CSS rule.
     function pmFormCommitField(pageIndex) {
       historyChangeHint = [pageIndex];
+      pmLabelNextHistoryStep('histFormField', [pageIndex]);
       setDocumentDirty(true);
     }
 
@@ -29896,6 +30138,7 @@
         peRotatePagesEditorMeta(indices, degrees);
       }
       historyChangeHint = indices.slice();
+      pmLabelNextHistoryStep('histRotate', indices);
       setDocumentDirty(true);
       invalidateHQ();
     }
@@ -29914,6 +30157,7 @@
         peRotatePagesEditorMeta([idx], degrees);
       }
       historyChangeHint = [idx];
+      pmLabelNextHistoryStep('histRotate', [idx]);
       setDocumentDirty(true);
       invalidateHQ();
     }
@@ -31840,9 +32084,14 @@
           if (deletedPagesHidden) div.style.display = 'none';
         }
         markedForDeletion.add(idx);
-        setDocumentDirty(true);
-        selectedPages.delete(idx); // remove from the set of selected
       });
+      // One history step for the whole deletion. The document is marked
+      // dirty before the pages leave the selection: marking it dirty first
+      // commits any selection change still pending as a step of its own, so
+      // deselecting page by page in between used to leave a "deselect" step
+      // per page in front of the deletion.
+      if (toMark.length) setDocumentDirty(true);
+      toMark.forEach(idx => selectedPages.delete(idx)); // remove from the set of selected
       // Pages already marked for deletion and previously selected remain selected
 
       refreshCheckboxes();
@@ -35577,7 +35826,7 @@
         if (!el) return;
         // We do not show previews for the pages themselves
         if (el.closest('.page')) return;
-        // Holding Save / Export opens their variants instead (initSaveVariantHold).
+        // Holding these opens a menu instead (pmHoldMenu).
         if (el.hasAttribute('data-pm-hold-menu')) return;
         clearTimeout(tipTimer);
         tipTimer = setTimeout(() => showTipFor(el), PM_TOUCH_TIP_MS);
@@ -44313,7 +44562,7 @@ function editSelectedPage() {
         const marked = (typeof markedForDeletion !== 'undefined')
           ? [...markedForDeletion].sort((x, y) => x - y) : [];
         historyCommitChain = historyCommitChain
-          .then(() => commitHistoryStep(Promise.resolve(bytesBeforeReload), marked, [pageIdx]))
+          .then(() => commitHistoryStep(Promise.resolve(bytesBeforeReload), marked, [pageIdx], { label: { key: 'histMarkup', pages: [pageIdx] } }))
           .catch(e => console.warn('history commit error', e));
         if (typeof documentDirty !== 'undefined') documentDirty = true;
         if (typeof updateInfo === 'function') updateInfo();
@@ -44390,7 +44639,7 @@ function editSelectedPage() {
         const marked = (typeof markedForDeletion !== 'undefined')
           ? [...markedForDeletion].sort((x, y) => x - y) : [];
         historyCommitChain = historyCommitChain
-          .then(() => commitHistoryStep(Promise.resolve(bytes), marked, [pageIdx]))
+          .then(() => commitHistoryStep(Promise.resolve(bytes), marked, [pageIdx], { label: { key: 'histMarkup', pages: [pageIdx] } }))
           .catch(e => console.warn('history commit error', e));
         if (typeof documentDirty !== 'undefined') documentDirty = true;
         if (typeof updateInfo === 'function') updateInfo();
@@ -44480,7 +44729,7 @@ function editSelectedPage() {
         const marked = (typeof markedForDeletion !== 'undefined')
           ? [...markedForDeletion].sort((x, y) => x - y) : [];
         historyCommitChain = historyCommitChain
-          .then(() => commitHistoryStep(Promise.resolve(bytesBeforeReload), marked, [pageIdx]))
+          .then(() => commitHistoryStep(Promise.resolve(bytesBeforeReload), marked, [pageIdx], { label: { key: 'histRedact', pages: [pageIdx] } }))
           .catch(e => console.warn('history commit error', e));
         if (typeof documentDirty !== 'undefined') documentDirty = true;
         if (typeof updateInfo === 'function') updateInfo();
@@ -45053,7 +45302,8 @@ function pePushPageEditHistoryBytes(pdfBytes, pageIdx, opts) {
     pages,
     pendingIdx,
     selected: sel.selected,
-    lastSel: sel.lastSel
+    lastSel: sel.lastSel,
+    label: { key: 'histPageEdit', pages: [pageIdx] }
   });
   trimDocHistory();
   docHistoryIndex = docHistory.length - 1;
@@ -65886,7 +66136,8 @@ async function pmWmApply(s, indices) {
   const marked = [...markedForDeletion].sort((x, y) => x - y);
   const historyBytes = bytes.slice();
   historyCommitChain = historyCommitChain
-    .then(() => commitHistoryStep(Promise.resolve(historyBytes), marked, indices, { lazyPages: true }))
+    .then(() => commitHistoryStep(Promise.resolve(historyBytes), marked, indices,
+      { lazyPages: true, label: { key: 'histWatermark', pages: indices } }))
     .catch(e => console.warn('history commit error', e));
   documentDirty = true;
   if (typeof updateInfo === 'function') updateInfo();
@@ -66940,7 +67191,7 @@ async function pmHfApply(s, indices, date) {
   const marked = [...markedForDeletion].sort((x, y) => x - y);
   const historyBytes = bytes.slice();
   historyCommitChain = historyCommitChain
-    .then(() => commitHistoryStep(Promise.resolve(historyBytes), marked, done, { lazyPages: true }))
+    .then(() => commitHistoryStep(Promise.resolve(historyBytes), marked, done, { lazyPages: true, label: { key: 'histHeaderFooter', pages: done } }))
     .catch(e => console.warn('history commit error', e));
   documentDirty = true;
   if (typeof updateInfo === 'function') updateInfo();
@@ -68357,7 +68608,7 @@ async function pmPfApply(plans) {
   const marked = [...markedForDeletion].sort((x, y) => x - y);
   const historyBytes = bytes.slice();
   historyCommitChain = historyCommitChain
-    .then(() => commitHistoryStep(Promise.resolve(historyBytes), marked, done, { lazyPages: true }))
+    .then(() => commitHistoryStep(Promise.resolve(historyBytes), marked, done, { lazyPages: true, label: { key: 'histPageFormat', pages: done } }))
     .catch(e => console.warn('history commit error', e));
   documentDirty = true;
   if (typeof updateInfo === 'function') updateInfo();
@@ -68976,7 +69227,7 @@ async function pmAcApply(plans) {
   const marked = [...markedForDeletion].sort((x, y) => x - y);
   const historyBytes = bytes.slice();
   historyCommitChain = historyCommitChain
-    .then(() => commitHistoryStep(Promise.resolve(historyBytes), marked, done, { lazyPages: true }))
+    .then(() => commitHistoryStep(Promise.resolve(historyBytes), marked, done, { lazyPages: true, label: { key: 'histAutoCrop', pages: done } }))
     .catch(e => console.warn('history commit error', e));
   documentDirty = true;
   if (typeof updateInfo === 'function') updateInfo();
