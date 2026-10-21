@@ -6980,6 +6980,36 @@
         will-change: transform;
       }
 
+      /*Double tap: the work area's new picture grows (or shrinks) out of the
+        old one around the tapped page - see pmAnimatedTapZoom. Clipped to
+        the work area; the rest of the screen does not change and is not
+        cross-faded.*/
+      html.pm-tap-zoom::view-transition-group(pm-tap-zoom) {
+        animation: none;
+        overflow: clip;
+      }
+      html.pm-tap-zoom::view-transition-old(pm-tap-zoom),
+      html.pm-tap-zoom::view-transition-new(pm-tap-zoom) {
+        transform-origin: 0 0;
+        mix-blend-mode: normal;
+        animation-duration: 220ms;
+        animation-timing-function: cubic-bezier(0.25, 0.8, 0.35, 1);
+        animation-fill-mode: both;
+      }
+      html.pm-tap-zoom::view-transition-old(pm-tap-zoom) { animation-name: pm-tap-zoom-old; }
+      html.pm-tap-zoom::view-transition-new(pm-tap-zoom) { animation-name: pm-tap-zoom-new; }
+      html.pm-tap-zoom::view-transition-old(root) { display: none; }
+      html.pm-tap-zoom::view-transition-new(root) { animation: none; }
+      @keyframes pm-tap-zoom-old {
+        from { transform: none; }
+        to { transform: var(--pm-tap-zoom-old); }
+      }
+      @keyframes pm-tap-zoom-new {
+        from { transform: var(--pm-tap-zoom-new); opacity: 0; }
+        60% { opacity: 1; }
+        to { transform: none; opacity: 1; }
+      }
+
       /*In the mobile version, remove the scale slider - the scale changes with a pinch*/
       .scale-wrapper { display: none !important; }
 
@@ -15910,44 +15940,47 @@
     // (rAF) pass (see applyZoomLayoutAndRestore).
     function pmRecenterFitWidthPage() {
       requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          if (!scrollContainer || !pagesContainer) return;
-          // updatePagesRowOverflow()'s hysteresis is biased to STAY
-          // "overflowing" once already there (avoids flicker during a
-          // gradual zoom drag) - its -16px margin means it can never clear
-          // pages-row-overflow after a fit-width jump FROM a heavily
-          // zoomed-in state, even once the page genuinely fits, because the
-          // fit-width target width is always right around (sometimes
-          // fractionally over) avail, never 16px under it. Fit-width is a
-          // deliberate snap, not a gradual drag, so force a fresh,
-          // hysteresis-free re-check here rather than trusting whatever the
-          // sticky class was left at - otherwise flex-start alignment stays
-          // stuck on, leaving the page uncentered with real content pushed
-          // off the right edge instead of the centered layout scenario this
-          // is supposed to produce.
-          if (typeof updatePagesRowOverflow === 'function') {
-            pagesContainer.classList.remove('pages-row-overflow');
-            updatePagesRowOverflow();
-          }
-          if (!pagesContainer.classList.contains('pages-row-overflow')) {
-            if (scrollContainer.scrollLeft !== 0) scrollContainer.scrollLeft = 0;
-            return;
-          }
-          // Still wider than the screen: a wider (landscape) page elsewhere
-          // in the document keeps the row overflowing even though the
-          // fitted page itself fits. Centre the column on the page in view -
-          // all cards are the same width with the image in the middle, so
-          // that page fits edge to edge and wider ones stick out evenly on
-          // both sides. Done here, last: updatePagesRowOverflow() above
-          // shifts scrollLeft when it switches the row's alignment, so a
-          // position set any earlier does not survive it.
-          const page = pmPageAtViewportMiddle();
-          if (!page) return;
-          const maxLeft = Math.max(0, scrollContainer.scrollWidth - scrollContainer.clientWidth);
-          const left = Math.round(Math.max(0, Math.min(pmCenteredScrollLeft(page), maxLeft)));
-          if (Math.abs(scrollContainer.scrollLeft - left) >= 1) scrollContainer.scrollLeft = left;
-        });
+        requestAnimationFrame(pmRecenterFitWidthPageNow);
       });
+    }
+    // The same, right away - for a zoom that has to be in its final place
+    // before the next frame (the double-tap animation, pmAnimatedTapZoom).
+    function pmRecenterFitWidthPageNow() {
+      if (!scrollContainer || !pagesContainer) return;
+      // updatePagesRowOverflow()'s hysteresis is biased to STAY
+      // "overflowing" once already there (avoids flicker during a
+      // gradual zoom drag) - its -16px margin means it can never clear
+      // pages-row-overflow after a fit-width jump FROM a heavily
+      // zoomed-in state, even once the page genuinely fits, because the
+      // fit-width target width is always right around (sometimes
+      // fractionally over) avail, never 16px under it. Fit-width is a
+      // deliberate snap, not a gradual drag, so force a fresh,
+      // hysteresis-free re-check here rather than trusting whatever the
+      // sticky class was left at - otherwise flex-start alignment stays
+      // stuck on, leaving the page uncentered with real content pushed
+      // off the right edge instead of the centered layout scenario this
+      // is supposed to produce.
+      if (typeof updatePagesRowOverflow === 'function') {
+        pagesContainer.classList.remove('pages-row-overflow');
+        updatePagesRowOverflow();
+      }
+      if (!pagesContainer.classList.contains('pages-row-overflow')) {
+        if (scrollContainer.scrollLeft !== 0) scrollContainer.scrollLeft = 0;
+        return;
+      }
+      // Still wider than the screen: a wider (landscape) page elsewhere
+      // in the document keeps the row overflowing even though the
+      // fitted page itself fits. Centre the column on the page in view -
+      // all cards are the same width with the image in the middle, so
+      // that page fits edge to edge and wider ones stick out evenly on
+      // both sides. Done here, last: updatePagesRowOverflow() above
+      // shifts scrollLeft when it switches the row's alignment, so a
+      // position set any earlier does not survive it.
+      const page = pmPageAtViewportMiddle();
+      if (!page) return;
+      const maxLeft = Math.max(0, scrollContainer.scrollWidth - scrollContainer.clientWidth);
+      const left = Math.round(Math.max(0, Math.min(pmCenteredScrollLeft(page), maxLeft)));
+      if (Math.abs(scrollContainer.scrollLeft - left) >= 1) scrollContainer.scrollLeft = left;
     }
 
     function pmPageAtViewportMiddle() {
@@ -16158,6 +16191,24 @@
       // Capture the nearest page BEFORE scale changes reflow the layout.
       const anchorPage = findNearestPageToPoint(ptrX, ptrY);
       const anchorIdx = anchorPage ? parseInt(anchorPage.dataset.index, 10) : NaN;
+      const bringAnchorIntoView = () => {
+        let page = null;
+        if (!Number.isNaN(anchorIdx)) {
+          page = pagesContainer.querySelector('.page[data-index="' + anchorIdx + '"]');
+        }
+        if (!page) page = findNearestPageToPoint(ptrX, ptrY);
+        if (page) scrollFitWidthPageIntoView(page);
+      };
+      // opts.settleNow: the view is put in its final place right away as
+      // well, in the order the frames would have done it - the double-tap
+      // animation (pmAnimatedTapZoom) pictures it before the next frame. The
+      // passes still queued for those frames then find nothing to move.
+      // (applyZoomScaleAtPoint settles right away on its own.)
+      const settleNow = (scaled) => {
+        if (!opts.settleNow) return;
+        bringAnchorIntoView();
+        if (scaled) pmRecenterFitWidthPageNow();
+      };
       const fitWidthTarget = computeFitWidthScale(anchorPage);
       // A repeat gesture only means "zoom in further to max" when it lands
       // on the SAME page fit-width is currently anchored to - the toggle
@@ -16222,17 +16273,10 @@
           fitWidthMaxZoomActive = false;
           fitWidthContentZoomActive = false;
           fitWidthMaxZoomRestoreScale = null;
-          if (restore != null && Math.abs(restore - currentScale) > 0.25) {
-            applyFitWidthScaleValue(restore);
-          }
-          requestAnimationFrame(() => {
-            let page = null;
-            if (!Number.isNaN(anchorIdx)) {
-              page = pagesContainer.querySelector('.page[data-index="' + anchorIdx + '"]');
-            }
-            if (!page) page = findNearestPageToPoint(ptrX, ptrY);
-            if (page) scrollFitWidthPageIntoView(page);
-          });
+          const scaled = restore != null && Math.abs(restore - currentScale) > 0.25;
+          if (scaled) applyFitWidthScaleValue(restore);
+          requestAnimationFrame(bringAnchorIntoView);
+          settleNow(scaled);
           return;
         }
         // On a phone, a repeat tap on the fit-width anchor always zooms in
@@ -16272,20 +16316,73 @@
       const target = fitWidthTarget;
       fitWidthToggleOn = true;
       updateFitWidthBtnUI();
-      if (Math.abs(target - currentScale) > 0.25) {
-        applyFitWidthScaleValue(target);
-      }
+      const scaled = Math.abs(target - currentScale) > 0.25;
+      if (scaled) applyFitWidthScaleValue(target);
       // After reflow (or immediately if scale unchanged), bring the anchor page into view.
-      requestAnimationFrame(() => {
-        let page = null;
-        if (!Number.isNaN(anchorIdx)) {
-          page = pagesContainer.querySelector('.page[data-index="' + anchorIdx + '"]');
-        }
-        if (!page) page = findNearestPageToPoint(ptrX, ptrY);
-        if (page) scrollFitWidthPageIntoView(page);
-      });
+      requestAnimationFrame(bringAnchorIntoView);
+      settleNow(scaled);
     }
     window.toggleFitWidthScale = toggleFitWidthScale;
+
+    // Phones: a double tap zooms with a short animation instead of jumping.
+    // A view transition: the browser keeps a picture of the work area as it
+    // was, the zoom is applied for real at once underneath, and the new
+    // picture grows (or shrinks) out of the old one so that the tapped page
+    // goes from where it was to where it lands. The pages themselves are
+    // never transformed, so nothing that measures them meanwhile is misled.
+    // Without view transitions, or with reduced motion asked for, the zoom
+    // just happens, as before.
+    let pmTapZoomToken = null;
+    function pmAnimatedTapZoom(clientX, clientY, run) {
+      const anchor = findNearestPageToPoint(clientX, clientY);
+      const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (!anchor || reduce || typeof document.startViewTransition !== 'function' || !scrollContainer) {
+        run();
+        return;
+      }
+      const idx = anchor.dataset.index;
+      const imgBox = (page) => {
+        const img = page.querySelector('.img-wrapper img');
+        const r = (img || page).getBoundingClientRect();
+        return r.width > 0 && r.height > 0 ? r : null;
+      };
+      const before = imgBox(anchor);
+      const root = document.documentElement;
+      // A new transition skips the one still running; that one's end must
+      // not undo what the new one has just set up.
+      const token = pmTapZoomToken = {};
+      const finish = () => {
+        if (pmTapZoomToken !== token) return;
+        scrollContainer.style.viewTransitionName = '';
+        root.classList.remove('pm-tap-zoom');
+      };
+      scrollContainer.style.viewTransitionName = 'pm-tap-zoom';
+      root.classList.add('pm-tap-zoom');
+      let vt;
+      try {
+        vt = document.startViewTransition(() => {
+          run();
+          const page = pagesContainer.querySelector('.page[data-index="' + idx + '"]');
+          const after = page ? imgBox(page) : null;
+          const box = scrollContainer.getBoundingClientRect();
+          const k = before && after ? after.width / before.width : 1;
+          // The work area's own coordinates, scaled about its top left
+          // corner: the old picture is carried to where the page lands, the
+          // new one starts from where it was.
+          const ox = before ? before.left - box.left : 0, oy = before ? before.top - box.top : 0;
+          const nx = after ? after.left - box.left : ox, ny = after ? after.top - box.top : oy;
+          root.style.setProperty('--pm-tap-zoom-old',
+            'translate(' + (nx - k * ox) + 'px, ' + (ny - k * oy) + 'px) scale(' + k + ')');
+          root.style.setProperty('--pm-tap-zoom-new',
+            'translate(' + (ox - nx / k) + 'px, ' + (oy - ny / k) + 'px) scale(' + (1 / k) + ')');
+        });
+      } catch (_) {
+        finish();
+        run();
+        return;
+      }
+      vt.finished.then(finish, finish);
+    }
 
     // Track pointer for fit-width from context menus (no middle-click hook).
     (function initFitWidthPointerTracker() {
@@ -20724,7 +20821,8 @@
             if (markedForDeletion.has(tapIdx)) {
               pmUnmarkPageDeletion(tapIdx, pageDiv);
             } else if (typeof toggleFitWidthScale === 'function') {
-              toggleFitWidthScale({ clientX: e.clientX, clientY: e.clientY });
+              const x = e.clientX, y = e.clientY;
+              pmAnimatedTapZoom(x, y, () => toggleFitWidthScale({ clientX: x, clientY: y, settleNow: true }));
             }
           } else {
             // Single-column: released before PAGE_SELECT_HOLD_MS - a plain
@@ -21719,6 +21817,7 @@
     // selection following the scroll.
     const PM_AUTO_SELECT_MIN_INTERVAL_MS = 120;
     let pmAutoSelectLastRunAt = 0;
+    let pmAutoSelectTrailTimer = null;
 
     /** Re-evaluate the auto-selection. Safe to call on every scroll frame -
      * it rate-limits itself. Pass force for gesture paths that need the
@@ -21728,7 +21827,20 @@
       if (isDragActive || rubberActive || rubberArmed || pinchActive) return;
       const now = (typeof performance !== 'undefined' && performance.now)
         ? performance.now() : Date.now();
-      if (!force && now - pmAutoSelectLastRunAt < PM_AUTO_SELECT_MIN_INTERVAL_MS) return;
+      if (!force && now - pmAutoSelectLastRunAt < PM_AUTO_SELECT_MIN_INTERVAL_MS) {
+        // Once more after the pause: the last frames of a scroll (or a zoom)
+        // came inside it, and the page left in view was never picked - an
+        // earlier page from on the way stayed selected.
+        if (!pmAutoSelectTrailTimer) {
+          pmAutoSelectTrailTimer = setTimeout(() => {
+            pmAutoSelectTrailTimer = null;
+            pmUpdateAutoPageSelection();
+          }, PM_AUTO_SELECT_MIN_INTERVAL_MS - (now - pmAutoSelectLastRunAt));
+        }
+        return;
+      }
+      clearTimeout(pmAutoSelectTrailTimer);
+      pmAutoSelectTrailTimer = null;
       pmAutoSelectLastRunAt = now;
       const page = pmAutoSelectCandidatePage();
       if (!page) {
@@ -28845,6 +28957,10 @@
           return;
         }
 
+        // The second tap of a double tap that has just started the zoom
+        // animation: the transition's picture covers the screen, so the point
+        // finds no page under it - it is not a tap on the empty area.
+        if (document.documentElement.classList.contains('pm-tap-zoom')) return;
         const el = document.elementFromPoint(ct.clientX, ct.clientY);
         if (el && el.closest && el.closest('.top-menu, #pageCountBox, #menuToggleBtn, .pm-page-nav-btn, #pmAutoScrollSpeed, #pmAutoScrollPauseBtn')) return;
         // The empty area around the pages: show / hide the menus. A page
