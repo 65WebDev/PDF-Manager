@@ -23866,6 +23866,7 @@
         else pagesContainer.after(el);
         pmMenuSpacerEls[which] = el;
       }
+      if (el.style.transition) el.style.transition = '';   // see pmFoldMenuSpacer
       el.style.height = h + 'px';
       pmMenuSpacerH[which] = h;
       // Content below a top spacer moved: the loading strip re-measures.
@@ -23877,6 +23878,14 @@
       const d = pagesContainer.getBoundingClientRect().top - anchorY;   // > 0: they slid down
       if (Math.abs(d) < 0.5) return;
       let target = scrollContainer.scrollTop + d;
+      // Slid down with a spacer above them: the spacer gives that room back
+      // first, so the scroll stays where the view was left (0 at the top of
+      // the document) - pmTrimMenuSpacers takes any scroll for the user's.
+      if (d > 0 && pmMenuSpacerH.top > 0) {
+        const give = Math.min(pmMenuSpacerH.top, d);
+        pmSetMenuSpacer('top', pmMenuSpacerH.top - give);
+        target -= give;
+      }
       if (target < 0) {
         // Above the top of the document: the spacer pushes the pages down by
         // what the scroll cannot, and the scroll goes to 0.
@@ -23946,24 +23955,45 @@
     function pmMenuHoldFingerDown() {
       return typeof hqFingerHoldsRasters === 'function' && hqFingerHoldsRasters();
     }
-    /** Drop what of the spacers is out of view - invisible, so it can go any
-     * time the view is at rest. */
+    /** A spacer stays while the view stays where the menus left it. Once the
+     * document has been scrolled away from it, it goes, at rest: the part
+     * out of view at once (invisible), the rest folding away. Trimming only
+     * the part out of view left a gap above the file name after a scroll
+     * shorter than the spacer. */
     function pmTrimMenuSpacers() {
-      if (!scrollContainer || performance.now() < pmMenuHoldUntil) return;
-      if (typeof hqFingerHoldsRasters === 'function' && hqFingerHoldsRasters()) return;
+      if (!scrollContainer) return;
+      if (performance.now() < pmMenuHoldUntil ||
+          (typeof hqFingerHoldsRasters === 'function' && hqFingerHoldsRasters())) {
+        // Still settling, or a finger on the pages: again once at rest - a
+        // finger that stops and lifts sends no further scroll event.
+        pmScheduleTrimMenuSpacers();
+        return;
+      }
       if (pmMenuSpacerH.top > 0) {
         const st = scrollContainer.scrollTop;
-        const cut = Math.min(pmMenuSpacerH.top, st);
-        if (cut >= 1) {
+        if (st >= 1) {
+          const cut = Math.min(pmMenuSpacerH.top, st);
           pmSetMenuSpacer('top', pmMenuSpacerH.top - cut);
           scrollContainer.scrollTop = st - cut;
+          if (pmMenuSpacerH.top > 0) pmFoldMenuSpacer('top');
         }
       }
       if (pmMenuSpacerH.bottom > 0) {
         const below = scrollContainer.scrollHeight - scrollContainer.clientHeight - scrollContainer.scrollTop;
-        const cut = Math.min(pmMenuSpacerH.bottom, below);
-        if (cut >= 1) pmSetMenuSpacer('bottom', pmMenuSpacerH.bottom - cut);
+        if (below >= 1) {
+          pmSetMenuSpacer('bottom', pmMenuSpacerH.bottom - Math.min(pmMenuSpacerH.bottom, below));
+          if (pmMenuSpacerH.bottom > 0) pmFoldMenuSpacer('bottom');
+        }
       }
+    }
+    // What is left of a spacer in view folds away rather than the pages
+    // jumping by its height.
+    function pmFoldMenuSpacer(which) {
+      const el = pmMenuSpacerEls[which];
+      pmSetMenuSpacer(which, 0);
+      // Set along with the new height: the change from the height last drawn
+      // is animated (pmSetMenuSpacer drops it again for the next change).
+      if (el) el.style.transition = 'height 0.22s ease';
     }
     var pmTrimMenuSpacersTimer = null;
     function pmScheduleTrimMenuSpacers() {
