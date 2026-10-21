@@ -9961,6 +9961,7 @@
         ctxLoupeMode: 'Режим увеличения',
         ctxViewMode: 'Режим просмотра',
         linkFollow: 'Перейти по ссылке',
+        linkConfirm: 'Подтвердите переход по ссылке', linkConfirmOk: 'ОК', linkConfirmCancel: 'Отмена',
         popCapLang: 'Язык интерфейса', popCapRestoreHelp: 'Вернуть подсказку', popCapDeletedHidden: 'Удалённые скрыты (Shift+H)', popCapDeletedShown: 'Удалённые показаны (Shift+H)',
         ctxSelectBlank: 'Выбрать пустые', blankMark: 'Пометить пустые страницы',
         blankSearching: 'Поиск пустых страниц: {i} из {total}…', blankFound: 'Пустых страниц найдено и выделено: {n}', blankNone: 'Пустых страниц не найдено',
@@ -10451,6 +10452,7 @@
         ctxLoupeMode: 'Magnifier mode',
         ctxViewMode: 'View mode',
         linkFollow: 'Open link',
+        linkConfirm: 'Confirm opening the link', linkConfirmOk: 'OK', linkConfirmCancel: 'Cancel',
         popCapLang: 'Interface language', popCapRestoreHelp: 'Restore hints', popCapDeletedHidden: 'Deleted hidden (Shift+H)', popCapDeletedShown: 'Deleted shown (Shift+H)',
         ctxSelectBlank: 'Select blank', blankMark: 'Mark blank pages',
         blankSearching: 'Looking for blank pages: {i} of {total}…', blankFound: 'Blank pages found and selected: {n}', blankNone: 'No blank pages found',
@@ -10941,6 +10943,7 @@
         ctxLoupeMode: 'Modo lupa',
         ctxViewMode: 'Modo de vista',
         linkFollow: 'Abrir enlace',
+        linkConfirm: 'Confirme que desea abrir el enlace', linkConfirmOk: 'Aceptar', linkConfirmCancel: 'Cancelar',
         popCapLang: 'Idioma de la interfaz', popCapRestoreHelp: 'Restaurar ayuda', popCapDeletedHidden: 'Eliminadas ocultas (Shift+H)', popCapDeletedShown: 'Eliminadas visibles (Shift+H)',
         ctxSelectBlank: 'Seleccionar en blanco', blankMark: 'Marcar páginas en blanco',
         blankSearching: 'Buscando páginas en blanco: {i} de {total}…', blankFound: 'Páginas en blanco encontradas y seleccionadas: {n}', blankNone: 'No se encontraron páginas en blanco',
@@ -11497,6 +11500,7 @@
         ctxLoupeMode: '放大镜模式',
         ctxViewMode: '查看模式',
         linkFollow: '打开链接',
+        linkConfirm: '请确认打开链接', linkConfirmOk: '确定', linkConfirmCancel: '取消',
         popCapLang: '界面语言', popCapRestoreHelp: '恢复提示', popCapDeletedHidden: '已隐藏删除页 (Shift+H)', popCapDeletedShown: '已显示删除页 (Shift+H)',
         ctxSelectBlank: '选择空白页', blankMark: '标记空白页',
         blankSearching: '正在查找空白页：{i} / {total}…', blankFound: '已找到并选中空白页：{n}', blankNone: '未找到空白页',
@@ -17420,12 +17424,41 @@
       a.addEventListener('dragstart', (e) => e.preventDefault());
       a.addEventListener('click', (e) => {
         e.stopPropagation();
+        // The link opens only once the user has confirmed it (pmConfirmOpenLink).
+        e.preventDefault();
         const moved = down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4;
         down = null;
-        if (moved || e.button !== 0) e.preventDefault();
+        if (moved || e.button !== 0) return;
+        pmConfirmOpenLink(link.url);
+      });
+      // A middle click would open a new tab past the confirmation.
+      a.addEventListener('auxclick', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.button === 1) pmConfirmOpenLink(link.url);
       });
       a.addEventListener('dblclick', (e) => e.stopPropagation());
       return a;
+    }
+
+    // A web link in a document leaves the editor only once the user agrees:
+    // "Confirm opening the link <address>", OK / Cancel. OK follows it the
+    // way the link itself would - a new browser tab; in the desktop and
+    // Android apps the shell hands it to the system browser (pm-links).
+    async function pmConfirmOpenLink(url) {
+      const ok = await showConfirmDialog(
+        escapeHtml(t('linkConfirm')) + '<div style="margin-top:8px; font-size:14px; font-weight:400;'
+          + ' color:#2980b9; word-break:break-all;">' + escapeHtml(url) + '</div>',
+        { html: true, yesText: t('linkConfirmOk'), noText: t('linkConfirmCancel'), yesBg: '#3498db' });
+      if (!ok) return;
+      const a = document.createElement('a');
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
     }
 
     let pmLinksBuildTimer = null;
@@ -30792,7 +30825,7 @@
           <div style="font-size:17px; color:#2c3e50; margin-bottom:20px; font-weight:600; line-height:1.4;">${msgHtml}</div>
           <div style="display:flex; gap:12px; justify-content:center;">
             <button id="cfmYes" style="padding:10px 28px; border:none; border-radius:6px;
-              background:#cc3d40; color:#fff; font-weight:bold; cursor:pointer; font-size:15px;">${escapeHtml(yesText)}</button>
+              background:${opts.yesBg || '#cc3d40'}; color:#fff; font-weight:bold; cursor:pointer; font-size:15px;">${escapeHtml(yesText)}</button>
             <button id="cfmNo" style="padding:10px 28px; border:1px solid #ccc; border-radius:6px;
               background:#fff; color:#333; cursor:pointer; font-size:15px;">${escapeHtml(noText)}</button>
           </div>`;
