@@ -20597,6 +20597,7 @@
             (now - lastPageTapTime) < PAGE_DOUBLE_TAP_MS &&
             Math.hypot(e.clientX - lastPageTapX, e.clientY - lastPageTapY) < PAGE_DOUBLE_TAP_MOVE_MAX;
           if (isFastDoubleTap) {
+            pmCancelTapMenuToggle();
             // Consume it (don't chain into a triple-tap) and undo the first
             // tap's selection toggle - handlePageClick's multi-select
             // collapse isn't reversible by just calling it again, so the
@@ -20628,7 +20629,17 @@
             // intermittently push a genuine double-tap outside
             // PAGE_DOUBLE_TAP_MS.
             preTapSelectionSnapshot = { selected: new Set(selectedPages), last: lastSelectedIndex };
-            if (!pageSelectSingleColumnAtDown || selectedPages.has(tapIdx)) handlePageClick(tapIdx, pageDiv, e);
+            // At high zoom the page in view selects itself (pmUpdateAutoPageSelection):
+            // a tap on it, its mini-tools not up, is no request to deselect it.
+            const autoSelectedOnly = pmAutoSelectModeOn && pmAutoSelectedIdx === tapIdx
+              && pmQuickActionsShownIdx !== tapIdx;
+            if (!pageSelectSingleColumnAtDown || (selectedPages.has(tapIdx) && !autoSelectedOnly)) {
+              handlePageClick(tapIdx, pageDiv, e);
+            } else {
+              // A tap selects nothing on a touch screen (pages are selected
+              // by holding): it shows / hides the menus.
+              pmScheduleTapMenuToggle();
+            }
             lastPageTapTime = now;
             lastPageTapIdx = tapIdx;
             lastPageTapX = e.clientX;
@@ -20665,7 +20676,6 @@
           if (pmAutoSelectModeOn) pmQuickActionsRequestedIdx = null;
           pmUpdateAutoPageSelection();
           updateMobileQuickActions();
-          pmMaybeAutoHideTopMenu();
         });
       }, { passive: true });
 
@@ -23530,53 +23540,27 @@
     function checkHintVisibility() { /*the hint is now on the “?” button*/ }
 
     // Hide/show the top menu (mobile version). The button remains visible.
-    // ---- Top menu auto-hide on scroll (touch) ---------------------------
-    // Scrolling the document down folds the menu away into the floating
-    // hamburger. Bringing it back by hand suspends that for
-    // PM_MENU_AUTOHIDE_REARM_MS - otherwise the very next flick of the
-    // scroll would take it away again, and it would be impossible to use.
-    const PM_MENU_AUTOHIDE_REARM_MS = 15000;
-    const PM_MENU_AUTOHIDE_DOWN_PX = 48;
-    let pmMenuAutoHideArmed = true;
-    let pmMenuAutoHideRearmTimer = null;
-    let pmMenuAutoHideLastTop = 0;
-
-    function pmSuspendMenuAutoHide() {
-      pmMenuAutoHideArmed = false;
-      clearTimeout(pmMenuAutoHideRearmTimer);
-      pmMenuAutoHideRearmTimer = setTimeout(() => {
-        pmMenuAutoHideRearmTimer = null;
-        pmMenuAutoHideArmed = true;
-      }, PM_MENU_AUTOHIDE_REARM_MS);
+    // ---- Phones: a single tap folds the menus away / brings them back ----
+    // As in Acrobat: a tap on the empty area around the pages, or on a page
+    // in the one-page-per-row view (where a tap selects nothing), hides the
+    // top menu and the bottom bar or shows them again; scrolling leaves them
+    // as they are. The tap waits out the double-tap window first, so the
+    // second tap of a double-tap (fit width) cancels it.
+    let pmTapMenuTimer = null;
+    function pmScheduleTapMenuToggle() {
+      if (!isTouchDevice || !pdfDoc) return;
+      clearTimeout(pmTapMenuTimer);
+      pmTapMenuTimer = setTimeout(() => {
+        pmTapMenuTimer = null;
+        if (!pdfDoc || isLoading || pinchActive || isDragActive) return;
+        if (typeof readModeActive !== 'undefined' && readModeActive) return;
+        if (document.querySelector('.modal-overlay-active')) return;
+        toggleTopMenu();
+      }, PAGE_DOUBLE_TAP_MS);
     }
-
-    /** Using any control in the open top menu means the user is working up
-     * here, so the suspension starts over - otherwise the delay could run out
-     * mid-task and the next flick of the scroll would fold the menu away.
-     * The two menu-toggle buttons are left to toggleTopMenu(), which must not
-     * re-arm a menu the user has just chosen to hide. */
-    function pmNoteTopMenuInteraction(e) {
-      if (!isTouchDevice) return;
-      const menu = document.getElementById('topMenu');
-      if (!menu || menu.classList.contains('collapsed')) return;
-      const el = (e.target instanceof Element)
-        ? e.target.closest('button, a, input, select, textarea, label, [role="button"]')
-        : null;
-      if (!el || !menu.contains(el)) return;
-      if (el.id === 'menuToggleBtn' || el.id === 'desktopMenuToggleBtn') return;
-      pmSuspendMenuAutoHide();
-    }
-
-    {
-      const pmTopMenuEl = document.getElementById('topMenu');
-      if (pmTopMenuEl) {
-        // Capture phase: a handler that stops propagation must not be able to
-        // hide the tap from us. `input`/`change` too, because a slider drag or
-        // a select may never produce a click of its own.
-        pmTopMenuEl.addEventListener('click', pmNoteTopMenuInteraction, true);
-        pmTopMenuEl.addEventListener('input', pmNoteTopMenuInteraction, true);
-        pmTopMenuEl.addEventListener('change', pmNoteTopMenuInteraction, true);
-      }
+    function pmCancelTapMenuToggle() {
+      clearTimeout(pmTapMenuTimer);
+      pmTapMenuTimer = null;
     }
 
     // A page selected (its mini-tools up) while the menu is folded away:
@@ -23600,27 +23584,6 @@
         if (performance.now() < until) requestAnimationFrame(hold);
       };
       requestAnimationFrame(hold);
-    }
-
-    function pmMaybeAutoHideTopMenu() {
-      if (!isTouchDevice || !scrollContainer) return;
-      const top = scrollContainer.scrollTop;
-      const delta = top - pmMenuAutoHideLastTop;
-      // Tracked unconditionally: a delta measured against a stale top from
-      // whenever the last check happened to pass would fire on the sum of
-      // several small scrolls, or on a scroll back up.
-      pmMenuAutoHideLastTop = top;
-      if (!pmMenuAutoHideArmed || !pdfDoc) return;
-      if (delta <= 0 || top < PM_MENU_AUTOHIDE_DOWN_PX) return;
-      if (isDragActive || rubberActive || rubberArmed || pinchActive) return;
-      if (typeof readModeActive !== 'undefined' && readModeActive) return;
-      if (document.getElementById('pageEditModal')?.classList.contains('open')) return;
-      // Selecting pages works with the menu's tools: it stays while the
-      // multi-select mode is on, or while a page has its mini-tools up.
-      if (multiSelectMode || pmQuickActionsShownIdx != null) return;
-      const menu = document.getElementById('topMenu');
-      if (!menu || menu.classList.contains('collapsed')) return;
-      toggleTopMenu();
     }
 
     /** Ease the mobile menu between its two heights. The CSS collapse is a
@@ -23661,8 +23624,7 @@
       document.body.classList.toggle('pm-menu-collapsed', collapsed);
       if (isTouchDevice) {
         pmAnimateTopMenuHeight(menu, heightBefore, menu.getBoundingClientRect().height);
-        // Brought back by hand: leave it alone for a while (see above).
-        if (!collapsed) pmSuspendMenuAutoHide();
+        pmCancelTapMenuToggle();
       }
       if (collapsed) {
         const area = document.getElementById('logoMenuArea');
@@ -28577,6 +28539,10 @@
 
         const el = document.elementFromPoint(ct.clientX, ct.clientY);
         if (el && el.closest && el.closest('.top-menu, #pageCountBox, #menuToggleBtn, .pm-page-nav-btn, #pmAutoScrollSpeed, #pmAutoScrollPauseBtn')) return;
+        // The empty area around the pages: show / hide the menus. A page
+        // handles its own taps (onPagePointerUp), controls theirs.
+        if (el && el.closest && el.closest('.page, #mobileScrollRail, #insertIndicator, button, a, input, label, select, textarea, [role="button"]')) return;
+        pmScheduleTapMenuToggle();
       }, { passive: true, capture: true });
     })();
 
