@@ -4900,6 +4900,11 @@
       /*Share: the Android app's system share sheet.*/
       #pmBottomBar #pmBbShare { display: none; }
       body.pm-android-app #pmBottomBar #pmBbShare { display: inline-flex; }
+      /*Panning a wide page to its edge must not run on into the browser:
+        on a phone that overscroll is the "back" swipe, which left the
+        editor (and a horizontal or vertical overscroll pulled the whole
+        page / pull-to-refresh).*/
+      #scrollContainer { overscroll-behavior: contain; }
       /*The page number tab sits at the bottom edge of the screen - on top
         of the bar while it is up. It shows only while the bar is folded away.*/
       body.pm-bottom-bar-on:not(.pm-menu-collapsed):not(.read-mode-active) #pageNumTab {
@@ -5552,16 +5557,20 @@
        for history (rAF-only animation used to freeze and look like an instant flip).*/
     .page .img-wrapper {
       transform-origin: center center;
-      backface-visibility: hidden;
     }
     .page.rotate-anim-active {
       position: relative;
       z-index: 6;
       overflow: visible;
     }
+    /*backface-visibility only while a page spins: on every wrapper at all
+      times it made each preview a compositor layer of its own (and the page
+      number over it another, for overlapping it) - hundreds of layers that
+      a two-finger zoom had to re-layerize on every frame.*/
     .page.rotate-anim-active .img-wrapper {
       overflow: visible;
       will-change: transform;
+      backface-visibility: hidden;
     }
 
     /*── “My drag option”: crossfade of preview squares ──*/
@@ -6952,7 +6961,10 @@
         -webkit-touch-callout: none !important;
         pointer-events: none !important;
       }
-      body.page-touch-armed .page.page-press-pending {
+      /* Only the pressed page's class in the selector: with .page in it,
+         arming on every touch made the browser restyle every page of the
+         document at the start and end of each swipe. */
+      body.page-touch-armed .page-press-pending {
         touch-action: none;
       }
 
@@ -6966,6 +6978,36 @@
         they already scale for free as part of the promoted parent layer.*/
       body.pinch-zooming .pages {
         will-change: transform;
+      }
+
+      /*Double tap: the work area's new picture grows (or shrinks) out of the
+        old one around the tapped page - see pmAnimatedTapZoom. Clipped to
+        the work area; the rest of the screen does not change and is not
+        cross-faded.*/
+      html.pm-tap-zoom::view-transition-group(pm-tap-zoom) {
+        animation: none;
+        overflow: clip;
+      }
+      html.pm-tap-zoom::view-transition-old(pm-tap-zoom),
+      html.pm-tap-zoom::view-transition-new(pm-tap-zoom) {
+        transform-origin: 0 0;
+        mix-blend-mode: normal;
+        animation-duration: 220ms;
+        animation-timing-function: cubic-bezier(0.25, 0.8, 0.35, 1);
+        animation-fill-mode: both;
+      }
+      html.pm-tap-zoom::view-transition-old(pm-tap-zoom) { animation-name: pm-tap-zoom-old; }
+      html.pm-tap-zoom::view-transition-new(pm-tap-zoom) { animation-name: pm-tap-zoom-new; }
+      html.pm-tap-zoom::view-transition-old(root) { display: none; }
+      html.pm-tap-zoom::view-transition-new(root) { animation: none; }
+      @keyframes pm-tap-zoom-old {
+        from { transform: none; }
+        to { transform: var(--pm-tap-zoom-old); }
+      }
+      @keyframes pm-tap-zoom-new {
+        from { transform: var(--pm-tap-zoom-new); opacity: 0; }
+        60% { opacity: 1; }
+        to { transform: none; opacity: 1; }
       }
 
       /*In the mobile version, remove the scale slider - the scale changes with a pinch*/
@@ -9961,6 +10003,7 @@
         ctxLoupeMode: 'Режим увеличения',
         ctxViewMode: 'Режим просмотра',
         linkFollow: 'Перейти по ссылке',
+        linkConfirm: 'Подтвердите переход по ссылке', linkConfirmOk: 'ОК', linkConfirmCancel: 'Отмена',
         popCapLang: 'Язык интерфейса', popCapRestoreHelp: 'Вернуть подсказку', popCapDeletedHidden: 'Удалённые скрыты (Shift+H)', popCapDeletedShown: 'Удалённые показаны (Shift+H)',
         ctxSelectBlank: 'Выбрать пустые', blankMark: 'Пометить пустые страницы',
         blankSearching: 'Поиск пустых страниц: {i} из {total}…', blankFound: 'Пустых страниц найдено и выделено: {n}', blankNone: 'Пустых страниц не найдено',
@@ -10451,6 +10494,7 @@
         ctxLoupeMode: 'Magnifier mode',
         ctxViewMode: 'View mode',
         linkFollow: 'Open link',
+        linkConfirm: 'Confirm opening the link', linkConfirmOk: 'OK', linkConfirmCancel: 'Cancel',
         popCapLang: 'Interface language', popCapRestoreHelp: 'Restore hints', popCapDeletedHidden: 'Deleted hidden (Shift+H)', popCapDeletedShown: 'Deleted shown (Shift+H)',
         ctxSelectBlank: 'Select blank', blankMark: 'Mark blank pages',
         blankSearching: 'Looking for blank pages: {i} of {total}…', blankFound: 'Blank pages found and selected: {n}', blankNone: 'No blank pages found',
@@ -10941,6 +10985,7 @@
         ctxLoupeMode: 'Modo lupa',
         ctxViewMode: 'Modo de vista',
         linkFollow: 'Abrir enlace',
+        linkConfirm: 'Confirme que desea abrir el enlace', linkConfirmOk: 'Aceptar', linkConfirmCancel: 'Cancelar',
         popCapLang: 'Idioma de la interfaz', popCapRestoreHelp: 'Restaurar ayuda', popCapDeletedHidden: 'Eliminadas ocultas (Shift+H)', popCapDeletedShown: 'Eliminadas visibles (Shift+H)',
         ctxSelectBlank: 'Seleccionar en blanco', blankMark: 'Marcar páginas en blanco',
         blankSearching: 'Buscando páginas en blanco: {i} de {total}…', blankFound: 'Páginas en blanco encontradas y seleccionadas: {n}', blankNone: 'No se encontraron páginas en blanco',
@@ -11497,6 +11542,7 @@
         ctxLoupeMode: '放大镜模式',
         ctxViewMode: '查看模式',
         linkFollow: '打开链接',
+        linkConfirm: '请确认打开链接', linkConfirmOk: '确定', linkConfirmCancel: '取消',
         popCapLang: '界面语言', popCapRestoreHelp: '恢复提示', popCapDeletedHidden: '已隐藏删除页 (Shift+H)', popCapDeletedShown: '已显示删除页 (Shift+H)',
         ctxSelectBlank: '选择空白页', blankMark: '标记空白页',
         blankSearching: '正在查找空白页：{i} / {total}…', blankFound: '已找到并选中空白页：{n}', blankNone: '未找到空白页',
@@ -14760,6 +14806,7 @@
       if (!bar) return;
       bar.hidden = noDocument;
       document.body.classList.toggle('pm-bottom-bar-on', !noDocument);
+      if (noDocument && typeof pmClearMenuSpacers === 'function') pmClearMenuSpacers();
       for (const id of ['pmBbSelect', 'pmBbTools', 'pmBbSearch', 'pmBbPrint', 'pmBbShare']) {
         const b = document.getElementById(id);
         if (b) b.disabled = baseDisabled;
@@ -15435,9 +15482,11 @@
     // Locks it out at the CSS level (see body.pm-vertical-scroll-lock)
     // rather than each mode's own scroll/pan/swipe handler having to
     // individually refuse to move sideways.
+    var pmVerticalLockRowKey = ''; // var: the lock is first checked before this line runs
     function pmUpdateVerticalOnlyScrollLock() {
       const shouldLock = pmShouldLockHorizontalScroll();
       document.body.classList.toggle('pm-vertical-scroll-lock', shouldLock);
+      if (!shouldLock) pmVerticalLockRowKey = '';
       // Engaging the lock via the fit-width BUTTON always arrives through
       // pmRecenterFitWidthPage(), which explicitly re-centers scrollLeft to
       // 0 first - but engaging it by organically wheel/slider-zooming onto
@@ -15475,7 +15524,13 @@
         // visibly shifted right of true center - same root cause as the
         // high-zoom "Fit page width" bug fixed in pmRecenterFitWidthPage,
         // fixed the same way: force a fresh, hysteresis-free re-check.
-        if (typeof updatePagesRowOverflow === 'function' && pagesContainer) {
+        // Once per engagement, width, scale and document version, though -
+        // re-done on every scroll frame, taking the class off and putting it
+        // back made the browser restyle the pages each frame.
+        const rowKey = getScrollAvailWidth() + '|' + currentScale + '|' + pmSearchDocVersion + '|' +
+          (pagesContainer ? pagesContainer.childElementCount : 0);
+        if (rowKey !== pmVerticalLockRowKey && typeof updatePagesRowOverflow === 'function' && pagesContainer) {
+          pmVerticalLockRowKey = rowKey;
           pagesContainer.classList.remove('pages-row-overflow');
           updatePagesRowOverflow();
         }
@@ -15546,6 +15601,7 @@
     function pmShouldLockHorizontalScroll() {
       if (isTouchDevice) return pmShouldLockHorizontalScrollMobile();
       if (!pdfDoc || !pagesContainer || !scrollContainer) return false;
+      if (pmDocHasMixedOrientation()) return false;
       if (typeof isPagesSingleColumnLayout !== 'function' || !isPagesSingleColumnLayout()) return false;
       const avail = getScrollAvailWidth();
       if (avail <= 0) return false;
@@ -15596,8 +15652,37 @@
     // no longer pins such drags to one axis, see scroll-axis-lock on .main).
     // Never during a pinch: the gesture moves the view freely, and
     // applyScale re-checks the lock once the new scale is applied.
+    // Pages of both orientations in the document (as shown: /Rotate
+    // counted, pages marked for deletion left out). Such a document is
+    // never locked to vertical scrolling or recentred as it is scrolled: a
+    // landscape page coming into view flipped the lock and the row's
+    // alignment, and the view jumped sideways - which left the left part of
+    // a wide page out of reach as well. Cached per document version (every
+    // edit, rotation or undo bumps pmSearchDocVersion).
+    let pmMixedOrientationCache = { doc: null, ver: -1, value: false };
+    function pmDocHasMixedOrientation() {
+      if (!pdfDoc) return false;
+      const c = pmMixedOrientationCache;
+      if (c.doc === pdfDoc && c.ver === pmSearchDocVersion) return c.value;
+      let portrait = false, landscape = false;
+      try {
+        const n = pdfDoc.getPageCount();
+        for (let i = 0; i < n && !(portrait && landscape); i++) {
+          if (markedForDeletion.has(i)) continue;
+          const page = pdfDoc.getPage(i);
+          const { width, height } = page.getSize();
+          const quarter = (((page.getRotation().angle || 0) % 180) + 180) % 180 === 90;
+          if (quarter ? height > width : width > height) landscape = true;
+          else portrait = true;
+        }
+      } catch (_) { /* a document mid-change - assume not mixed */ }
+      pmMixedOrientationCache = { doc: pdfDoc, ver: pmSearchDocVersion, value: portrait && landscape };
+      return portrait && landscape;
+    }
+
     function pmShouldLockHorizontalScrollMobile() {
       if (!pdfDoc || !pagesContainer || !scrollContainer) return false;
+      if (pmDocHasMixedOrientation()) return false;
       if (document.body.classList.contains('pinch-zooming')) return false;
       if (typeof isPagesSingleColumnLayout !== 'function' || !isPagesSingleColumnLayout()) return false;
       const avail = getScrollAvailWidth();
@@ -15855,44 +15940,47 @@
     // (rAF) pass (see applyZoomLayoutAndRestore).
     function pmRecenterFitWidthPage() {
       requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          if (!scrollContainer || !pagesContainer) return;
-          // updatePagesRowOverflow()'s hysteresis is biased to STAY
-          // "overflowing" once already there (avoids flicker during a
-          // gradual zoom drag) - its -16px margin means it can never clear
-          // pages-row-overflow after a fit-width jump FROM a heavily
-          // zoomed-in state, even once the page genuinely fits, because the
-          // fit-width target width is always right around (sometimes
-          // fractionally over) avail, never 16px under it. Fit-width is a
-          // deliberate snap, not a gradual drag, so force a fresh,
-          // hysteresis-free re-check here rather than trusting whatever the
-          // sticky class was left at - otherwise flex-start alignment stays
-          // stuck on, leaving the page uncentered with real content pushed
-          // off the right edge instead of the centered layout scenario this
-          // is supposed to produce.
-          if (typeof updatePagesRowOverflow === 'function') {
-            pagesContainer.classList.remove('pages-row-overflow');
-            updatePagesRowOverflow();
-          }
-          if (!pagesContainer.classList.contains('pages-row-overflow')) {
-            if (scrollContainer.scrollLeft !== 0) scrollContainer.scrollLeft = 0;
-            return;
-          }
-          // Still wider than the screen: a wider (landscape) page elsewhere
-          // in the document keeps the row overflowing even though the
-          // fitted page itself fits. Centre the column on the page in view -
-          // all cards are the same width with the image in the middle, so
-          // that page fits edge to edge and wider ones stick out evenly on
-          // both sides. Done here, last: updatePagesRowOverflow() above
-          // shifts scrollLeft when it switches the row's alignment, so a
-          // position set any earlier does not survive it.
-          const page = pmPageAtViewportMiddle();
-          if (!page) return;
-          const maxLeft = Math.max(0, scrollContainer.scrollWidth - scrollContainer.clientWidth);
-          const left = Math.round(Math.max(0, Math.min(pmCenteredScrollLeft(page), maxLeft)));
-          if (Math.abs(scrollContainer.scrollLeft - left) >= 1) scrollContainer.scrollLeft = left;
-        });
+        requestAnimationFrame(pmRecenterFitWidthPageNow);
       });
+    }
+    // The same, right away - for a zoom that has to be in its final place
+    // before the next frame (the double-tap animation, pmAnimatedTapZoom).
+    function pmRecenterFitWidthPageNow() {
+      if (!scrollContainer || !pagesContainer) return;
+      // updatePagesRowOverflow()'s hysteresis is biased to STAY
+      // "overflowing" once already there (avoids flicker during a
+      // gradual zoom drag) - its -16px margin means it can never clear
+      // pages-row-overflow after a fit-width jump FROM a heavily
+      // zoomed-in state, even once the page genuinely fits, because the
+      // fit-width target width is always right around (sometimes
+      // fractionally over) avail, never 16px under it. Fit-width is a
+      // deliberate snap, not a gradual drag, so force a fresh,
+      // hysteresis-free re-check here rather than trusting whatever the
+      // sticky class was left at - otherwise flex-start alignment stays
+      // stuck on, leaving the page uncentered with real content pushed
+      // off the right edge instead of the centered layout scenario this
+      // is supposed to produce.
+      if (typeof updatePagesRowOverflow === 'function') {
+        pagesContainer.classList.remove('pages-row-overflow');
+        updatePagesRowOverflow();
+      }
+      if (!pagesContainer.classList.contains('pages-row-overflow')) {
+        if (scrollContainer.scrollLeft !== 0) scrollContainer.scrollLeft = 0;
+        return;
+      }
+      // Still wider than the screen: a wider (landscape) page elsewhere
+      // in the document keeps the row overflowing even though the
+      // fitted page itself fits. Centre the column on the page in view -
+      // all cards are the same width with the image in the middle, so
+      // that page fits edge to edge and wider ones stick out evenly on
+      // both sides. Done here, last: updatePagesRowOverflow() above
+      // shifts scrollLeft when it switches the row's alignment, so a
+      // position set any earlier does not survive it.
+      const page = pmPageAtViewportMiddle();
+      if (!page) return;
+      const maxLeft = Math.max(0, scrollContainer.scrollWidth - scrollContainer.clientWidth);
+      const left = Math.round(Math.max(0, Math.min(pmCenteredScrollLeft(page), maxLeft)));
+      if (Math.abs(scrollContainer.scrollLeft - left) >= 1) scrollContainer.scrollLeft = left;
     }
 
     function pmPageAtViewportMiddle() {
@@ -16103,6 +16191,24 @@
       // Capture the nearest page BEFORE scale changes reflow the layout.
       const anchorPage = findNearestPageToPoint(ptrX, ptrY);
       const anchorIdx = anchorPage ? parseInt(anchorPage.dataset.index, 10) : NaN;
+      const bringAnchorIntoView = () => {
+        let page = null;
+        if (!Number.isNaN(anchorIdx)) {
+          page = pagesContainer.querySelector('.page[data-index="' + anchorIdx + '"]');
+        }
+        if (!page) page = findNearestPageToPoint(ptrX, ptrY);
+        if (page) scrollFitWidthPageIntoView(page);
+      };
+      // opts.settleNow: the view is put in its final place right away as
+      // well, in the order the frames would have done it - the double-tap
+      // animation (pmAnimatedTapZoom) pictures it before the next frame. The
+      // passes still queued for those frames then find nothing to move.
+      // (applyZoomScaleAtPoint settles right away on its own.)
+      const settleNow = (scaled) => {
+        if (!opts.settleNow) return;
+        bringAnchorIntoView();
+        if (scaled) pmRecenterFitWidthPageNow();
+      };
       const fitWidthTarget = computeFitWidthScale(anchorPage);
       // A repeat gesture only means "zoom in further to max" when it lands
       // on the SAME page fit-width is currently anchored to - the toggle
@@ -16167,17 +16273,10 @@
           fitWidthMaxZoomActive = false;
           fitWidthContentZoomActive = false;
           fitWidthMaxZoomRestoreScale = null;
-          if (restore != null && Math.abs(restore - currentScale) > 0.25) {
-            applyFitWidthScaleValue(restore);
-          }
-          requestAnimationFrame(() => {
-            let page = null;
-            if (!Number.isNaN(anchorIdx)) {
-              page = pagesContainer.querySelector('.page[data-index="' + anchorIdx + '"]');
-            }
-            if (!page) page = findNearestPageToPoint(ptrX, ptrY);
-            if (page) scrollFitWidthPageIntoView(page);
-          });
+          const scaled = restore != null && Math.abs(restore - currentScale) > 0.25;
+          if (scaled) applyFitWidthScaleValue(restore);
+          requestAnimationFrame(bringAnchorIntoView);
+          settleNow(scaled);
           return;
         }
         // On a phone, a repeat tap on the fit-width anchor always zooms in
@@ -16217,20 +16316,73 @@
       const target = fitWidthTarget;
       fitWidthToggleOn = true;
       updateFitWidthBtnUI();
-      if (Math.abs(target - currentScale) > 0.25) {
-        applyFitWidthScaleValue(target);
-      }
+      const scaled = Math.abs(target - currentScale) > 0.25;
+      if (scaled) applyFitWidthScaleValue(target);
       // After reflow (or immediately if scale unchanged), bring the anchor page into view.
-      requestAnimationFrame(() => {
-        let page = null;
-        if (!Number.isNaN(anchorIdx)) {
-          page = pagesContainer.querySelector('.page[data-index="' + anchorIdx + '"]');
-        }
-        if (!page) page = findNearestPageToPoint(ptrX, ptrY);
-        if (page) scrollFitWidthPageIntoView(page);
-      });
+      requestAnimationFrame(bringAnchorIntoView);
+      settleNow(scaled);
     }
     window.toggleFitWidthScale = toggleFitWidthScale;
+
+    // Phones: a double tap zooms with a short animation instead of jumping.
+    // A view transition: the browser keeps a picture of the work area as it
+    // was, the zoom is applied for real at once underneath, and the new
+    // picture grows (or shrinks) out of the old one so that the tapped page
+    // goes from where it was to where it lands. The pages themselves are
+    // never transformed, so nothing that measures them meanwhile is misled.
+    // Without view transitions, or with reduced motion asked for, the zoom
+    // just happens, as before.
+    let pmTapZoomToken = null;
+    function pmAnimatedTapZoom(clientX, clientY, run) {
+      const anchor = findNearestPageToPoint(clientX, clientY);
+      const reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+      if (!anchor || reduce || typeof document.startViewTransition !== 'function' || !scrollContainer) {
+        run();
+        return;
+      }
+      const idx = anchor.dataset.index;
+      const imgBox = (page) => {
+        const img = page.querySelector('.img-wrapper img');
+        const r = (img || page).getBoundingClientRect();
+        return r.width > 0 && r.height > 0 ? r : null;
+      };
+      const before = imgBox(anchor);
+      const root = document.documentElement;
+      // A new transition skips the one still running; that one's end must
+      // not undo what the new one has just set up.
+      const token = pmTapZoomToken = {};
+      const finish = () => {
+        if (pmTapZoomToken !== token) return;
+        scrollContainer.style.viewTransitionName = '';
+        root.classList.remove('pm-tap-zoom');
+      };
+      scrollContainer.style.viewTransitionName = 'pm-tap-zoom';
+      root.classList.add('pm-tap-zoom');
+      let vt;
+      try {
+        vt = document.startViewTransition(() => {
+          run();
+          const page = pagesContainer.querySelector('.page[data-index="' + idx + '"]');
+          const after = page ? imgBox(page) : null;
+          const box = scrollContainer.getBoundingClientRect();
+          const k = before && after ? after.width / before.width : 1;
+          // The work area's own coordinates, scaled about its top left
+          // corner: the old picture is carried to where the page lands, the
+          // new one starts from where it was.
+          const ox = before ? before.left - box.left : 0, oy = before ? before.top - box.top : 0;
+          const nx = after ? after.left - box.left : ox, ny = after ? after.top - box.top : oy;
+          root.style.setProperty('--pm-tap-zoom-old',
+            'translate(' + (nx - k * ox) + 'px, ' + (ny - k * oy) + 'px) scale(' + k + ')');
+          root.style.setProperty('--pm-tap-zoom-new',
+            'translate(' + (ox - nx / k) + 'px, ' + (oy - ny / k) + 'px) scale(' + (1 / k) + ')');
+        });
+      } catch (_) {
+        finish();
+        run();
+        return;
+      }
+      vt.finished.then(finish, finish);
+    }
 
     // Track pointer for fit-width from context menus (no middle-click hook).
     (function initFitWidthPointerTracker() {
@@ -16497,6 +16649,22 @@
       return applyMobilePinchScaleSnap(target, page, anchorFx, anchorFy, midX, midY);
     }
 
+    /** Pages across the first row as laid out. A grid fills its rows in
+     * order, so that is its column count - found from the first few cards
+     * instead of measuring every one of them (measureMobileDomCols), which
+     * on a long document made the first frame of a pinch a long one. */
+    function pmDomColsInFirstRow() {
+      let first = null, n = 0;
+      for (const p of pagesContainer.children) {
+        if (!p.classList || !p.classList.contains('page') || p.style.display === 'none') continue;
+        const r = p.getBoundingClientRect();
+        if (!first) { first = r; n = 1; continue; }
+        if (pagesShareRow(first, r)) n++;
+        else break;
+      }
+      return n;
+    }
+
     /** Column count from the laid-out DOM (source of truth for what the user sees). */
     function measureMobileDomCols() {
       const pages = getVisiblePages();
@@ -16589,22 +16757,25 @@
       }
       if (endCols < 1 || endCols === startCols) return false;
 
-      // One column step per gesture: overshooting 3→1 still lands on 2-col
-      // fill (and 2→1 on the next pinch). Same when pinching out.
-      const nPages = pdfDoc.getPageCount();
-      let cols = endCols;
-      if (endCols < startCols) cols = startCols - 1;
-      else if (endCols > startCols) cols = startCols + 1;
-      cols = Math.max(1, Math.min(nPages, cols));
-
-      const pages = getVisiblePages();
-      const page = (anchorEl && anchorEl.isConnected) ? anchorEl : pages[0];
-      if (!page) return false;
-
-      const target = computeMobileScaleForCols(cols, page);
-      if (!(target > 0) || target === currentScale) return false;
-
+      const target = pmPinchFillScale(startCols, endCols, anchorEl);
+      if (!target) return false;
+      const page = (anchorEl && anchorEl.isConnected) ? anchorEl : getVisiblePages()[0];
       return applyMobilePinchScaleSnap(target, page, anchorFx, anchorFy, midX, midY);
+    }
+
+    /** The fill-width scale a pinch from startCols to endCols columns settles
+     * on, or 0 when the count did not change (or the scale is already it).
+     * One column step per gesture: overshooting 3→1 still lands on 2-col
+     * fill (and 2→1 on the next pinch). Same when pinching out. Reads no
+     * layout, so endPinch can use it before laying the pages out. */
+    function pmPinchFillScale(startCols, endCols, anchorEl) {
+      if (!pdfDoc || !(startCols > 0) || endCols < 1 || endCols === startCols) return 0;
+      const nPages = pdfDoc.getPageCount();
+      const cols = Math.max(1, Math.min(nPages, endCols < startCols ? startCols - 1 : startCols + 1));
+      const page = (anchorEl && anchorEl.isConnected) ? anchorEl : getVisiblePages()[0];
+      if (!page) return 0;
+      const target = computeMobileScaleForCols(cols, page);
+      return target > 0 && target !== currentScale ? target : 0;
     }
 
     //Maximum zoom-out (pinch): the largest scale at which the target row will still fit.
@@ -16883,7 +17054,12 @@
           .map((img) => img.getBoundingClientRect().width);
         // No page actually in view (mid-transition) - fall back to the
         // conservative full-card width rather than treating 0 as "fits".
-        const cardW = inViewportWidths.length > 0 ? Math.max(...inViewportWidths) : cardRowWidth(currentScale, 1);
+        let cardW = inViewportWidths.length > 0 ? Math.max(...inViewportWidths) : cardRowWidth(currentScale, 1);
+        // Both orientations in the document: measured against its widest
+        // page (a landscape one, width capped to the long-side budget)
+        // wherever the view is, so the row's alignment does not flip - and
+        // shift the view sideways - each time a landscape page scrolls in.
+        if (pmDocHasMixedOrientation()) cardW = Math.max(cardW, pmPreviewLongPx(currentScale));
         const hyst = pagesContainer.classList.contains('pages-row-overflow') ? -16 : 16;
         overflow = cardW > avail + hyst;
       } else {
@@ -17420,12 +17596,41 @@
       a.addEventListener('dragstart', (e) => e.preventDefault());
       a.addEventListener('click', (e) => {
         e.stopPropagation();
+        // The link opens only once the user has confirmed it (pmConfirmOpenLink).
+        e.preventDefault();
         const moved = down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4;
         down = null;
-        if (moved || e.button !== 0) e.preventDefault();
+        if (moved || e.button !== 0) return;
+        pmConfirmOpenLink(link.url);
+      });
+      // A middle click would open a new tab past the confirmation.
+      a.addEventListener('auxclick', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.button === 1) pmConfirmOpenLink(link.url);
       });
       a.addEventListener('dblclick', (e) => e.stopPropagation());
       return a;
+    }
+
+    // A web link in a document leaves the editor only once the user agrees:
+    // "Confirm opening the link <address>", OK / Cancel. OK follows it the
+    // way the link itself would - a new browser tab; in the desktop and
+    // Android apps the shell hands it to the system browser (pm-links).
+    async function pmConfirmOpenLink(url) {
+      const ok = await showConfirmDialog(
+        escapeHtml(t('linkConfirm')) + '<div style="margin-top:8px; font-size:14px; font-weight:400;'
+          + ' color:#2980b9; word-break:break-all;">' + escapeHtml(url) + '</div>',
+        { html: true, yesText: t('linkConfirmOk'), noText: t('linkConfirmCancel'), yesBg: '#3498db' });
+      if (!ok) return;
+      const a = document.createElement('a');
+      a.href = url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
     }
 
     let pmLinksBuildTimer = null;
@@ -18764,32 +18969,39 @@
         return;
       }
 
+      // Every read first, then only the writes that change something: this
+      // runs on every frame of a scroll, and a write between two reads
+      // (here or in the next scroll handler) makes the second read lay the
+      // page out again.
       const rect = el.getBoundingClientRect();
       const railW = rail.offsetWidth || 48;
-      rail.style.top = rect.top + 'px';
-      rail.style.left = (rect.right - railW) + 'px';
-      rail.style.height = rect.height + 'px';
-      rail.style.width = '';
-      rail.classList.add('visible');
-      rail.setAttribute('aria-hidden', 'false');
-      document.body.classList.add('mobile-rail-visible');
+      const scrollTop = el.scrollTop;
+      const portrait = window.matchMedia('(orientation: portrait)').matches;
+
+      const setStyle = (node, prop, value) => { if (node.style[prop] !== value) node.style[prop] = value; };
+      setStyle(rail, 'top', rect.top + 'px');
+      setStyle(rail, 'left', (rect.right - railW) + 'px');
+      setStyle(rail, 'height', rect.height + 'px');
+      setStyle(rail, 'width', '');
+      if (!rail.classList.contains('visible')) rail.classList.add('visible');
+      if (rail.getAttribute('aria-hidden') !== 'false') rail.setAttribute('aria-hidden', 'false');
+      if (!document.body.classList.contains('mobile-rail-visible')) document.body.classList.add('mobile-rail-visible');
       pokeMobileScrollRail();
 
       const pad = MOBILE_SCROLL_RAIL_PAD;
       const trackH = Math.max(0, rect.height - pad * 2);
-      track.style.top = pad + 'px';
-      track.style.height = trackH + 'px';
+      setStyle(track, 'top', pad + 'px');
+      setStyle(track, 'height', trackH + 'px');
 
-      const portrait = window.matchMedia('(orientation: portrait)').matches;
       const thumbMin = portrait ? MOBILE_SCROLL_THUMB_MIN_PORTRAIT : MOBILE_SCROLL_THUMB_MIN;
       const thumbRatio = clientH / scrollH;
       const thumbH = Math.max(thumbMin, trackH * thumbRatio);
       const maxThumbTop = Math.max(0, trackH - thumbH);
       const scrollMax = scrollH - clientH;
-      const thumbTop = scrollMax > 0 ? (el.scrollTop / scrollMax) * maxThumbTop : 0;
+      const thumbTop = scrollMax > 0 ? (scrollTop / scrollMax) * maxThumbTop : 0;
 
-      thumb.style.height = thumbH + 'px';
-      thumb.style.top = thumbTop + 'px';
+      setStyle(thumb, 'height', thumbH + 'px');
+      setStyle(thumb, 'top', thumbTop + 'px');
     }
 
     function initMobileScrollRail() {
@@ -18936,13 +19148,22 @@
       const viewTop = host.top, viewBottom = host.bottom;
 
       // We are looking for the page that the user is currently viewing: the one that occupies
-      // the largest visible area in the window.
+      // the largest visible area in the window. One column, so the pages run top to
+      // bottom: start at the first one reaching into the window instead of measuring
+      // every page of the document on every scroll frame.
+      let lo = 0, hi = pages.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (pages[mid].getBoundingClientRect().bottom <= viewTop) lo = mid + 1;
+        else hi = mid;
+      }
       let best = null, bestVisible = 0;
-      for (const p of pages) {
-        const r = p.getBoundingClientRect();
+      for (let i = lo; i < pages.length; i++) {
+        const r = pages[i].getBoundingClientRect();
+        if (r.top >= viewBottom) break;
         const visible = Math.max(0, Math.min(r.bottom, viewBottom) - Math.max(r.top, viewTop));
         const frac = r.height > 0 ? visible / r.height : 0;
-        if (frac > bestVisible) { bestVisible = frac; best = p; }
+        if (frac > bestVisible) { bestVisible = frac; best = pages[i]; }
       }
       if (!best) { tab.classList.remove('visible'); return; }
 
@@ -18959,15 +19180,25 @@
       // We show the curtain if >= 25% of the page is visible AND its number is not yet visible.
       // We take the number directly from the sheet signature (.page-title) so that it matches.
       if (bestVisible >= 0.25 && !numberVisible && titleEl && titleEl.textContent) {
-        tab.textContent = titleEl.textContent;
-        tab.classList.add('visible');
+        // Written only when something changes: this runs on every scroll frame,
+        // and rewriting the text, then measuring it, laid the page out each time.
+        const label = titleEl.textContent;
+        const shown = tab.classList.contains('visible');
+        if (tab.textContent !== label) tab.textContent = label;
+        if (!shown) tab.classList.add('visible');
         // Positioned in the center of the SQUARE of the page being viewed (horizontally)
         const centerX = r.left + r.width / 2;
         // We will find out the width of the die after the display
-        const tabW = tab.offsetWidth;
+        const sizeKey = label + '|' + window.innerWidth;
+        // (0 while the bottom bar hides the tab: measured again once it shows)
+        if (!shown || tab._pmSizeKey !== sizeKey || !(tab._pmTabW > 0)) {
+          tab._pmTabW = tab.offsetWidth;
+          tab._pmSizeKey = sizeKey;
+        }
+        const tabW = tab._pmTabW;
         let left = centerX - tabW / 2;
         left = Math.max(4, Math.min(left, window.innerWidth - tabW - 4)); // don't go off screen
-        tab.style.left = left + 'px';
+        if (tab.style.left !== left + 'px') tab.style.left = left + 'px';
       } else {
         tab.classList.remove('visible');
       }
@@ -19411,6 +19642,18 @@
       return true;
     }
 
+    // Runs on every scroll frame: stop only what is running and leave the
+    // buttons alone otherwise - stopping rewrites their icons and titles, and
+    // doing that each frame made the browser restyle every page of the
+    // document while the finger was scrolling.
+    function pmHidePageNavButtons(prevBtn, nextBtn) {
+      if (pmNavAutoDir || pmNavHoldDir || pmNavAutoRaf || pmNavHoldTimer || pmNavRingTimer) {
+        pmStopPageNavAutoScroll();
+      }
+      if (prevBtn.classList.contains('visible')) prevBtn.classList.remove('visible');
+      if (nextBtn.classList.contains('visible')) nextBtn.classList.remove('visible');
+    }
+
     function pmUpdatePageNavButtons() {
       const prevBtn = document.getElementById('pmPagePrevBtn');
       const nextBtn = document.getElementById('pmPageNextBtn');
@@ -19419,22 +19662,16 @@
       // below rather than just letting CSS hide them - that sweep runs on
       // every scroll frame and reads layout for nothing here.
       if (isTouchDevice) {
-        pmStopPageNavAutoScroll();
-        prevBtn.classList.remove('visible');
-        nextBtn.classList.remove('visible');
+        pmHidePageNavButtons(prevBtn, nextBtn);
         return;
       }
       if (!pdfDoc || pdfDoc.getPageCount() <= 1) {
-        pmStopPageNavAutoScroll();
-        prevBtn.classList.remove('visible');
-        nextBtn.classList.remove('visible');
+        pmHidePageNavButtons(prevBtn, nextBtn);
         return;
       }
       const pages = pmVisiblePageEls();
       if (pages.length < 2 || !isSingleColumn(pages)) {
-        pmStopPageNavAutoScroll();
-        prevBtn.classList.remove('visible');
-        nextBtn.classList.remove('visible');
+        pmHidePageNavButtons(prevBtn, nextBtn);
         return;
       }
       prevBtn.classList.add('visible');
@@ -19838,6 +20075,10 @@
     // the height of two lines, although the content fits in one.
     setInterval(() => {
       if (document.hidden) return;
+      // Not under a finger: a whole relayout of the top UI landing in the
+      // middle of a two-finger zoom or a scroll is a dropped frame, and
+      // nothing here is urgent - the next tick will do.
+      if (pinchActive || (typeof hqFingerHoldsRasters === 'function' && hqFingerHoldsRasters())) return;
       relayoutTopUI();
     }, 2000);
     initMobileScrollRail();
@@ -20102,6 +20343,14 @@
     const PAGE_DOUBLE_TAP_MOVE_MAX = 40;
     let lastPageTapTime = 0;
     let lastPageTapIdx = null;
+    // When the touch happened, not when its handler ran: in a zoomed-out
+    // grid the main thread is busy drawing previews, a handler can run well
+    // after its tap, and two quick taps then measured more than
+    // PAGE_DOUBLE_TAP_MS apart - the double tap there almost never counted.
+    // (performance.now()'s time base, like Event.timeStamp.)
+    function pmTapTime(e) {
+      return e && e.timeStamp > 0 ? e.timeStamp : performance.now();
+    }
     let lastPageTapX = 0, lastPageTapY = 0;
     // Set by onPagePointerDown when IT decides (using tap-tracking state as
     // of before this same event) that this touch is the second half of a
@@ -20132,6 +20381,10 @@
     // suppressing the native gesture doesn't cost the ability to scroll.
     let pmActiveTouchScrollFallback = false;
     let pmActiveTouchLastX = null, pmActiveTouchLastY = null;
+    let pmActiveTouchStartX = 0, pmActiveTouchStartY = 0, pmActiveTouchScrolling = false;
+    // One-finger zoom armed by a double tap's second touch (see
+    // pmArmOneFingerZoom): { x, y, active }.
+    let pmOneFingerZoom = null;
     // Selection state from just before the most recent single tap's
     // handlePageClick() - restored verbatim if that tap turns out to be the
     // first half of a fast double-tap, so the zoom leaves selection exactly
@@ -20160,7 +20413,7 @@
       const hostIdx = hostPage ? parseInt(hostPage.dataset.index, 10) : NaN;
       if (Number.isNaN(hostIdx)) return false;
       return lastPageTapIdx === hostIdx &&
-        (Date.now() - lastPageTapTime) < PAGE_DOUBLE_TAP_MS &&
+        (pmTapTime(e) - lastPageTapTime) < PAGE_DOUBLE_TAP_MS &&
         Math.hypot(e.clientX - lastPageTapX, e.clientY - lastPageTapY) < PAGE_DOUBLE_TAP_MOVE_MAX;
     }
 
@@ -20175,10 +20428,49 @@
       const hostIdx = hostPage ? parseInt(hostPage.dataset.index, 10) : NaN;
       if (Number.isNaN(hostIdx)) return;
       preTapSelectionSnapshot = { selected: new Set(selectedPages), last: lastSelectedIndex };
-      lastPageTapTime = Date.now();
+      lastPageTapTime = pmTapTime(e);
       lastPageTapIdx = hostIdx;
       lastPageTapX = e.clientX;
       lastPageTapY = e.clientY;
+    }
+
+    // Phones: a touch on the text of a page at high zoom is left to the
+    // browser (a long press selects the text), but a short tap there is
+    // still a tap on the page - it shows / hides the menus, or does what a
+    // tap does on that page (multi-select ticks it, a page selected by a
+    // hold is let go). Only watched to its end; nothing is armed. A tap that
+    // only dismisses a text selection does nothing else.
+    let pmTextTap = null;
+    function pmWatchTextTap(hostPage, e) {
+      if (!isTouchDevice || !hostPage) return;
+      const sel = window.getSelection && window.getSelection();
+      pmTextTap = {
+        page: hostPage, id: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now(),
+        sx: scrollContainer.scrollLeft, sy: scrollContainer.scrollTop,
+        hadSel: !!(sel && !sel.isCollapsed && (sel.toString() || '').trim())
+      };
+      document.addEventListener('pointerup', pmTextTapEnd, true);
+      document.addEventListener('pointercancel', pmTextTapEnd, true);
+    }
+    function pmTextTapEnd(e) {
+      const s = pmTextTap;
+      if (!s || e.pointerId !== s.id) return;
+      pmTextTap = null;
+      document.removeEventListener('pointerup', pmTextTapEnd, true);
+      document.removeEventListener('pointercancel', pmTextTapEnd, true);
+      if (e.type !== 'pointerup' || s.hadSel || !s.page.isConnected) return;
+      if (isLoading || pinchActive || rubberArmed || rubberActive || isDragActive) return;
+      if (Date.now() - s.t > LONG_PRESS_MS) return;
+      if (Math.hypot(e.clientX - s.x, e.clientY - s.y) > TAP_MOVE_MAX) return;
+      if (Math.abs(scrollContainer.scrollLeft - s.sx) > TAP_SCROLL_MAX ||
+          Math.abs(scrollContainer.scrollTop - s.sy) > TAP_SCROLL_MAX) return;
+      const idx = parseInt(s.page.dataset.index, 10);
+      if (Number.isNaN(idx)) return;
+      // The same choice as a tap on the page itself (onPagePointerUp).
+      const autoSelectedOnly = pmAutoSelectModeOn && pmAutoSelectedIdx === idx
+        && pmQuickActionsShownIdx !== idx;
+      if (multiSelectMode || (selectedPages.has(idx) && !autoSelectedOnly)) handlePageClick(idx, s.page, e);
+      else pmScheduleTapMenuToggle(pmTapTime(e));
     }
 
     function lockScrollForDrag() {
@@ -20308,6 +20600,7 @@
         const hostPage = e.target.closest('.page');
         if (!pmLooksLikeFastDoubleTapOn(hostPage, e)) {
           pmRecordSoloTapOn(hostPage, e);
+          pmWatchTextTap(hostPage, e);
           return;
         }
         pmPendingDoubleTapPreventDefault = true;
@@ -20354,7 +20647,7 @@
       // right on top of it, looking like the page "zooms out by itself" or
       // jumps.
       if (lastPageTapIdx === pageIdx &&
-          (Date.now() - lastPageTapTime) < PAGE_DOUBLE_TAP_MS &&
+          (pmTapTime(e) - lastPageTapTime) < PAGE_DOUBLE_TAP_MS &&
           Math.hypot(e.clientX - lastPageTapX, e.clientY - lastPageTapY) < PAGE_DOUBLE_TAP_MOVE_MAX) {
         pmPendingDoubleTapPreventDefault = true;
         e.preventDefault();
@@ -20442,7 +20735,7 @@
               pendingDiv.classList.add('page-drag-charge-fill');
             }
           });
-          lastPageTapTime = Date.now();
+          lastPageTapTime = performance.now();
           lastPageTapIdx = pageIdx;
           lastPageTapX = touchLastX;
           lastPageTapY = touchLastY;
@@ -20559,11 +20852,12 @@
             !isPointInMobileQuickActions(e.clientX, e.clientY) &&
             !computeInsertAt(e.clientX, e.clientY)) {
           const tapIdx = parseInt(pageDiv.dataset.index, 10);
-          const now = Date.now();
+          const now = pmTapTime(e);
           const isFastDoubleTap = lastPageTapIdx === tapIdx && preTapSelectionSnapshot &&
             (now - lastPageTapTime) < PAGE_DOUBLE_TAP_MS &&
             Math.hypot(e.clientX - lastPageTapX, e.clientY - lastPageTapY) < PAGE_DOUBLE_TAP_MOVE_MAX;
           if (isFastDoubleTap) {
+            pmCancelTapMenuToggle(now);
             // Consume it (don't chain into a triple-tap) and undo the first
             // tap's selection toggle - handlePageClick's multi-select
             // collapse isn't reversible by just calling it again, so the
@@ -20579,7 +20873,8 @@
             if (markedForDeletion.has(tapIdx)) {
               pmUnmarkPageDeletion(tapIdx, pageDiv);
             } else if (typeof toggleFitWidthScale === 'function') {
-              toggleFitWidthScale({ clientX: e.clientX, clientY: e.clientY });
+              const x = e.clientX, y = e.clientY;
+              pmAnimatedTapZoom(x, y, () => toggleFitWidthScale({ clientX: x, clientY: y, settleNow: true }));
             }
           } else {
             // Single-column: released before PAGE_SELECT_HOLD_MS - a plain
@@ -20595,7 +20890,17 @@
             // intermittently push a genuine double-tap outside
             // PAGE_DOUBLE_TAP_MS.
             preTapSelectionSnapshot = { selected: new Set(selectedPages), last: lastSelectedIndex };
-            if (!pageSelectSingleColumnAtDown || selectedPages.has(tapIdx)) handlePageClick(tapIdx, pageDiv, e);
+            // At high zoom the page in view selects itself (pmUpdateAutoPageSelection):
+            // a tap on it, its mini-tools not up, is no request to deselect it.
+            const autoSelectedOnly = pmAutoSelectModeOn && pmAutoSelectedIdx === tapIdx
+              && pmQuickActionsShownIdx !== tapIdx;
+            if (!pageSelectSingleColumnAtDown || (selectedPages.has(tapIdx) && !autoSelectedOnly)) {
+              handlePageClick(tapIdx, pageDiv, e);
+            } else {
+              // A tap selects nothing on a touch screen (pages are selected
+              // by holding): it shows / hides the menus.
+              pmScheduleTapMenuToggle(now);
+            }
             lastPageTapTime = now;
             lastPageTapIdx = tapIdx;
             lastPageTapX = e.clientX;
@@ -20632,7 +20937,7 @@
           if (pmAutoSelectModeOn) pmQuickActionsRequestedIdx = null;
           pmUpdateAutoPageSelection();
           updateMobileQuickActions();
-          pmMaybeAutoHideTopMenu();
+          pmScheduleTrimMenuSpacers();
         });
       }, { passive: true });
 
@@ -20653,8 +20958,19 @@
         // frame entirely once it takes over; scrolling while drawing one
         // makes no sense anyway (rubberTouchMove already preventDefaults
         // the native scroll for exactly this reason).
-        if (rubberArmed || rubberActive || isDragActive || pinchActive) return;
+        if (rubberArmed || rubberActive || isDragActive || pinchActive || pmOneFingerZoom) return;
         const t = e.touches[0];
+        // The browser's own slop: no scrolling before the finger has gone
+        // further than a tap may. Scrolling on the first pixels moved the
+        // view by a trembling finger's few pixels, and the double tap no
+        // longer counted as one (the view must not move during a tap).
+        if (!pmActiveTouchScrolling) {
+          if (Math.hypot(t.clientX - pmActiveTouchStartX, t.clientY - pmActiveTouchStartY) <= TAP_MOVE_MAX) return;
+          pmActiveTouchScrolling = true;
+          pmActiveTouchLastX = t.clientX;
+          pmActiveTouchLastY = t.clientY;
+          return;
+        }
         if (pmActiveTouchLastX != null) {
           if (!document.body.classList.contains('pm-vertical-scroll-lock')) {
             scrollContainer.scrollLeft += pmActiveTouchLastX - t.clientX;
@@ -20666,6 +20982,7 @@
       }, { passive: true });
       const pmEndActiveTouchScrollFallback = () => {
         pmActiveTouchScrollFallback = false;
+        pmActiveTouchScrolling = false;
         pmActiveTouchLastX = null;
         pmActiveTouchLastY = null;
       };
@@ -20902,52 +21219,59 @@
     scrollContainer.addEventListener('touchstart', (e) => {
       if (!isTouchDevice || isLoading || !pdfDoc) return;
       if (e.touches.length === 2) {
-        // Start of pinch - cancel possible drag/long press
-        cancelPageTouchDrag();
-        // A second finger joining mid-touch turns this into a pinch instead
-        // of whatever the first finger's touch was tracking - stop the
-        // manual-scroll takeover (see the div-level touchstart listener) so
-        // it doesn't resume with stale coordinates once the pinch ends.
-        pmActiveTouchScrollFallback = false;
-        pmActiveTouchLastX = null;
-        pmActiveTouchLastY = null;
-        // A manual pinch is a deliberate zoom action, same as dragging the
-        // (desktop) slider or wheel-zooming - both of those already exit
-        // fit-width mode via changeScale()/setScaleProgrammatic()'s own
-        // clearFitWidthToggle() call. Pinch was the one manual-zoom path
-        // that didn't: fitWidthToggleOn stayed true through applyPinchScale-
-        // Change(), so any later live re-track (pmReapplyFitWidthIfActive -
-        // e.g. the very next thumbnail to finish decoding) fought the pinch
-        // by silently re-snapping the scale back to fit-width's own target -
-        // anchored to whatever page fit-width was ORIGINALLY toggled on for,
-        // not the page just pinched, which is what looked like a scroll
-        // jump back to that first page.
-        if (typeof clearFitWidthToggle === 'function') clearFitWidthToggle();
-        pinchActive = true;
-        pinchStartScale = currentScale;
-        // What the user actually sees at gesture start (DOM), with math fallback.
-        try { void pagesContainer.offsetHeight; } catch (_) {}
-        const startDomCols = measureMobileDomCols();
-        pinchStartCols = startDomCols > 0
-          ? startDomCols
-          : mobileColsThatFit(currentScale, getScrollAvailWidth());
-        mobileMinScale = computeMobilePinchMinScale();
-        document.body.classList.add('pinch-zooming');
-        pinchStartDist = touchDist(e.touches[0], e.touches[1]);
-
+        pmOneFingerZoom = null;   // a second finger: the pinch proper takes over
         const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
         const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-        pinchStartMidX = midX;
-        pinchStartMidY = midY;
-        pinchLastMidX = midX;
-        pinchLastMidY = midY;
-
-        setPinchAnchorFromPage(findPinchAnchorPageAt(midX, midY), midX, midY);
-        setPinchTransformOrigin(midX, midY);
-        applyPinchVisualScale();
+        pmBeginPinch(midX, midY);
+        pinchStartDist = touchDist(e.touches[0], e.touches[1]);
         e.preventDefault();
       }
     }, { passive: false });
+
+    // The start of a zoom gesture about (midX, midY): two fingers, or one
+    // after a double tap (pmOneFingerZoom).
+    function pmBeginPinch(midX, midY) {
+      // Start of pinch - cancel possible drag/long press
+      cancelPageTouchDrag();
+      // A second finger joining mid-touch turns this into a pinch instead
+      // of whatever the first finger's touch was tracking - stop the
+      // manual-scroll takeover (see the div-level touchstart listener) so
+      // it doesn't resume with stale coordinates once the pinch ends.
+      pmActiveTouchScrollFallback = false;
+      pmActiveTouchLastX = null;
+      pmActiveTouchLastY = null;
+      // A manual pinch is a deliberate zoom action, same as dragging the
+      // (desktop) slider or wheel-zooming - both of those already exit
+      // fit-width mode via changeScale()/setScaleProgrammatic()'s own
+      // clearFitWidthToggle() call. Pinch was the one manual-zoom path
+      // that didn't: fitWidthToggleOn stayed true through applyPinchScale-
+      // Change(), so any later live re-track (pmReapplyFitWidthIfActive -
+      // e.g. the very next thumbnail to finish decoding) fought the pinch
+      // by silently re-snapping the scale back to fit-width's own target -
+      // anchored to whatever page fit-width was ORIGINALLY toggled on for,
+      // not the page just pinched, which is what looked like a scroll
+      // jump back to that first page.
+      if (typeof clearFitWidthToggle === 'function') clearFitWidthToggle();
+      pinchActive = true;
+      pinchStartScale = currentScale;
+      // What the user actually sees at gesture start (DOM), with math fallback.
+      try { void pagesContainer.offsetHeight; } catch (_) {}
+      const startDomCols = pmDomColsInFirstRow();
+      pinchStartCols = startDomCols > 0
+        ? startDomCols
+        : mobileColsThatFit(currentScale, getScrollAvailWidth());
+      mobileMinScale = computeMobilePinchMinScale();
+      document.body.classList.add('pinch-zooming');
+
+      pinchStartMidX = midX;
+      pinchStartMidY = midY;
+      pinchLastMidX = midX;
+      pinchLastMidY = midY;
+
+      setPinchAnchorFromPage(findPinchAnchorPageAt(midX, midY), midX, midY);
+      setPinchTransformOrigin(midX, midY);
+      applyPinchVisualScale();
+    }
 
     scrollContainer.addEventListener('touchmove', (e) => {
       if (!pinchActive || e.touches.length !== 2) return;
@@ -20984,11 +21308,25 @@
         pinchActive = false;
         document.body.classList.remove('pinch-zooming');
 
+        // Column count changed during the pinch → the scale settles on the
+        // new column count's exact fill-width scale. That scale follows from
+        // the numbers alone, so it is set before the pages are laid out:
+        // one relayout of the whole grid on release instead of two (the
+        // pinch's scale, then the snap's) - on a long document the one
+        // visible hitch of the gesture.
+        const availW = pinchAvailW0 || getScrollAvailWidth();
+        const startCols = pinchStartCols > 0 ? pinchStartCols : mobileColsThatFit(pinchStartScale, availW);
+        const fillScale = isTouchDevice && availW > 0
+          ? pmPinchFillScale(startCols, mobileColsThatFit(currentScale, availW), anchorEl) : 0;
+        if (fillScale) {
+          currentScale = clampScale(fillScale);
+          if (scaleSlider) scaleSlider.value = Math.max(0, Math.min(200, scaleToSlider(currentScale)));
+        }
         applyScale({ afterPinch: true, overflowAnchor: anchorEl });
-        // Column count changed during the pinch → fill-snap to the new
-        // column count's exact fill-width scale (regardless of delta).
-        // Column count unchanged → only the small crop-snap may apply.
-        if (!snapMobileFillWidthAfterPinch(anchorEl, anchorFx, anchorFy, midX, midY)) {
+        // Otherwise the fill-snap may still apply (the laid-out grid can wrap
+        // differently from the arithmetic), and with the column count
+        // unchanged only the small crop-snap.
+        if (!fillScale && !snapMobileFillWidthAfterPinch(anchorEl, anchorFx, anchorFy, midX, midY)) {
           snapMobilePageScaleAfterPinch(anchorEl, anchorFx, anchorFy, midX, midY);
         }
 
@@ -21023,6 +21361,46 @@
     }
     scrollContainer.addEventListener('touchend', endPinch);
     scrollContainer.addEventListener('touchcancel', endPinch);
+
+    // ── One-finger zoom (phones, one page a row) ──
+    // Double tap and keep the finger down, then slide it: below the line of
+    // the tap zooms in, above it zooms out, the further the more - as on
+    // mobile maps. Let go without sliding, it stays an ordinary double tap
+    // (fit width, onPagePointerUp). Runs on the pinch: the pages are scaled
+    // as a picture about the tapped point while the finger moves and laid
+    // out once on release (endPinch, which the touchend above runs).
+    const PM_ONE_FINGER_ZOOM_PX = 150;   // finger travel that doubles / halves the scale
+    function pmArmOneFingerZoom(x, y, t) {
+      pmOneFingerZoom = null;
+      if (!isTouchDevice || isLoading || !pdfDoc || pinchActive) return;
+      if (typeof readModeActive !== 'undefined' && readModeActive) return;
+      if (document.querySelector('.modal-overlay-active')) return;
+      if (typeof isPagesSingleColumnLayout !== 'function' || !isPagesSingleColumnLayout()) return;
+      pmOneFingerZoom = { x, y, t, active: false };
+    }
+    scrollContainer.addEventListener('touchmove', (e) => {
+      const z = pmOneFingerZoom;
+      if (!z || e.touches.length !== 1) return;
+      const t = e.touches[0];
+      if (!z.active) {
+        // A trembling finger is still a double tap.
+        if (Math.hypot(t.clientX - z.x, t.clientY - z.y) <= TAP_MOVE_MAX) return;
+        z.active = true;
+        pmCancelTapMenuToggle(z.t);   // the first tap's
+        pmBeginPinch(z.x, z.y);
+      }
+      if (!pinchActive) return;
+      // Distance from the tap's line, less the dead zone just crossed, so
+      // the scale starts moving from where it was.
+      const dy = t.clientY - z.y;
+      const travel = Math.sign(dy) * Math.max(0, Math.abs(dy) - TAP_MOVE_MAX);
+      const minS = mobileMinScale || computeMobilePinchMinScale();
+      applyPinchScaleChange(Math.max(minS, Math.min(700,
+        Math.round(pinchStartScale * Math.pow(2, travel / PM_ONE_FINGER_ZOOM_PX)))));
+    }, { passive: true });
+    const pmEndOneFingerZoom = () => { pmOneFingerZoom = null; };
+    scrollContainer.addEventListener('touchend', pmEndOneFingerZoom);
+    scrollContainer.addEventListener('touchcancel', pmEndOneFingerZoom);
 
     // ═══════════════════════════════════════════════════════════════════
     // Frame (rubber) selection of pages in selection mode
@@ -21125,7 +21503,7 @@
       const t = e.touches[0];
       if (!canStartRubberTouch(t.target || e.target)) { lastTapTime = 0; return; }
 
-      const now = Date.now();
+      const now = pmTapTime(e);   // the touch's own time, see pmTapTime
       const dt = now - lastTapTime;
       const dist = Math.hypot(t.clientX - lastTapX, t.clientY - lastTapY);
 
@@ -21135,7 +21513,18 @@
       if (pmAutoSelectModeOn) { lastTapTime = 0; return; }
 
       if (dt < DOUBLE_TAP_MS && dist < DOUBLE_TAP_DIST) {
-        // Double tap - arm the frame selection
+        // One page a row: double tap, hold and slide is the one-finger zoom
+        // there (pmOneFingerZoom) - the frame is the grid's.
+        if (pmOneFingerZoom ||
+            (typeof isPagesSingleColumnLayout === 'function' && isPagesSingleColumnLayout())) {
+          lastTapTime = 0;
+          return;
+        }
+        // Double tap - arm the frame selection. Its first tap was taken for
+        // a single one and is about to show / hide the menus: cancelled, or
+        // they folded away under the finger drawing the frame (at the top of
+        // the document leaving a blank spacer and shifting the frame's start).
+        pmCancelTapMenuToggle(now);
         rubberArmed = true;
         rubberStartX = t.clientX;
         rubberStartY = t.clientY;
@@ -21164,6 +21553,11 @@
       if (e.touches.length !== 1) return;
       const t = e.touches[0];
       if (rubberArmed && !rubberActive) {
+        // Not before the finger has gone further than a tap may: a real
+        // finger trembles a few pixels, and the frame starting on the first
+        // of those moves took every double tap in the grid for a frame
+        // around one page instead of the zoom.
+        if (Math.hypot(t.clientX - rubberStartX, t.clientY - rubberStartY) <= TAP_MOVE_MAX) return;
         cancelPageTouchDrag();
         rubberActive = true;
         document.body.classList.add('rubber-selecting');
@@ -21550,6 +21944,7 @@
     // selection following the scroll.
     const PM_AUTO_SELECT_MIN_INTERVAL_MS = 120;
     let pmAutoSelectLastRunAt = 0;
+    let pmAutoSelectTrailTimer = null;
 
     /** Re-evaluate the auto-selection. Safe to call on every scroll frame -
      * it rate-limits itself. Pass force for gesture paths that need the
@@ -21559,7 +21954,20 @@
       if (isDragActive || rubberActive || rubberArmed || pinchActive) return;
       const now = (typeof performance !== 'undefined' && performance.now)
         ? performance.now() : Date.now();
-      if (!force && now - pmAutoSelectLastRunAt < PM_AUTO_SELECT_MIN_INTERVAL_MS) return;
+      if (!force && now - pmAutoSelectLastRunAt < PM_AUTO_SELECT_MIN_INTERVAL_MS) {
+        // Once more after the pause: the last frames of a scroll (or a zoom)
+        // came inside it, and the page left in view was never picked - an
+        // earlier page from on the way stayed selected.
+        if (!pmAutoSelectTrailTimer) {
+          pmAutoSelectTrailTimer = setTimeout(() => {
+            pmAutoSelectTrailTimer = null;
+            pmUpdateAutoPageSelection();
+          }, PM_AUTO_SELECT_MIN_INTERVAL_MS - (now - pmAutoSelectLastRunAt));
+        }
+        return;
+      }
+      clearTimeout(pmAutoSelectTrailTimer);
+      pmAutoSelectTrailTimer = null;
       pmAutoSelectLastRunAt = now;
       const page = pmAutoSelectCandidatePage();
       if (!page) {
@@ -21978,6 +22386,18 @@
         if (e.kind === 'doc') break;
       }
       pmNavTimelineReset();
+    }
+
+    /** The spot the timeline cursor stands on becomes the current view -
+     * for scrolling that kept the view where it was on screen (the menus
+     * folding away, pmHoldPagesWhileMenusMove). */
+    function pmNavTimelineRebaseSpot() {
+      const spot = pmNavTimelineSpot();
+      if (!spot) return;
+      for (let k = pmNavTimelineIndex; k >= 0; k--) {
+        if (pmNavTimeline[k].kind === 'pos') { pmNavTimeline[k].at = spot; return; }
+      }
+      pmNavTimelineBaseSpot = spot;
     }
 
     function pmNavTimelineRecordPos() {
@@ -23497,52 +23917,62 @@
     function checkHintVisibility() { /*the hint is now on the “?” button*/ }
 
     // Hide/show the top menu (mobile version). The button remains visible.
-    // ---- Top menu auto-hide on scroll (touch) ---------------------------
-    // Scrolling the document down folds the menu away into the floating
-    // hamburger. Bringing it back by hand suspends that for
-    // PM_MENU_AUTOHIDE_REARM_MS - otherwise the very next flick of the
-    // scroll would take it away again, and it would be impossible to use.
-    const PM_MENU_AUTOHIDE_REARM_MS = 15000;
-    const PM_MENU_AUTOHIDE_DOWN_PX = 48;
-    let pmMenuAutoHideArmed = true;
-    let pmMenuAutoHideRearmTimer = null;
-    let pmMenuAutoHideLastTop = 0;
-
-    function pmSuspendMenuAutoHide() {
-      pmMenuAutoHideArmed = false;
-      clearTimeout(pmMenuAutoHideRearmTimer);
-      pmMenuAutoHideRearmTimer = setTimeout(() => {
-        pmMenuAutoHideRearmTimer = null;
-        pmMenuAutoHideArmed = true;
-      }, PM_MENU_AUTOHIDE_REARM_MS);
+    // ---- Phones: a single tap folds the menus away / brings them back ----
+    // As in Acrobat: a tap on the empty area around the pages, or on a page
+    // in the one-page-per-row view (where a tap selects nothing), hides the
+    // top menu and the bottom bar or shows them again; scrolling leaves them
+    // as they are. The tap waits out the double-tap window first, so the
+    // second tap of a double-tap (fit width) cancels it.
+    let pmTapMenuTimer = null;
+    // The tap whose toggle has run: { tap: its time } (see pmCancelTapMenuToggle).
+    let pmTapMenuFired = null;
+    /** tapTime: when the tap happened (pmTapTime of its event). */
+    function pmScheduleTapMenuToggle(tapTime) {
+      if (!isTouchDevice || !pdfDoc) return;
+      if (tapTime == null) tapTime = performance.now();
+      // A second tap inside the window: a double tap, which leaves the menus
+      // as they are - also when the first one's toggle has already run.
+      if (pmTapMenuTimer || (pmTapMenuFired && tapTime - pmTapMenuFired.tap < PAGE_DOUBLE_TAP_MS)) {
+        pmCancelTapMenuToggle(tapTime);
+        return;
+      }
+      // A busy page (previews being drawn) runs this late, after a second
+      // tap has already come in but before its handlers have run - that tap
+      // goes first (it may be the double tap, which cancels this), and so,
+      // for a while, does a finger already back on the page.
+      const fingerDeadline = performance.now() + 2 * PAGE_DOUBLE_TAP_MS;
+      const fire = () => {
+        const sched = navigator.scheduling;
+        if (sched && typeof sched.isInputPending === 'function' && sched.isInputPending()) {
+          pmTapMenuTimer = setTimeout(fire, 0);
+          return;
+        }
+        if (pageTouchActive && performance.now() < fingerDeadline) {
+          pmTapMenuTimer = setTimeout(fire, 40);
+          return;
+        }
+        pmTapMenuTimer = null;
+        if (!pdfDoc || isLoading || pinchActive || isDragActive) return;
+        if (rubberArmed || rubberActive) return;
+        if (typeof readModeActive !== 'undefined' && readModeActive) return;
+        if (document.querySelector('.modal-overlay-active')) return;
+        toggleTopMenu();
+        pmTapMenuFired = { tap: tapTime };
+      };
+      pmTapMenuTimer = setTimeout(fire, PAGE_DOUBLE_TAP_MS);
     }
-
-    /** Using any control in the open top menu means the user is working up
-     * here, so the suspension starts over - otherwise the delay could run out
-     * mid-task and the next flick of the scroll would fold the menu away.
-     * The two menu-toggle buttons are left to toggleTopMenu(), which must not
-     * re-arm a menu the user has just chosen to hide. */
-    function pmNoteTopMenuInteraction(e) {
-      if (!isTouchDevice) return;
-      const menu = document.getElementById('topMenu');
-      if (!menu || menu.classList.contains('collapsed')) return;
-      const el = (e.target instanceof Element)
-        ? e.target.closest('button, a, input, select, textarea, label, [role="button"]')
-        : null;
-      if (!el || !menu.contains(el)) return;
-      if (el.id === 'menuToggleBtn' || el.id === 'desktopMenuToggleBtn') return;
-      pmSuspendMenuAutoHide();
-    }
-
-    {
-      const pmTopMenuEl = document.getElementById('topMenu');
-      if (pmTopMenuEl) {
-        // Capture phase: a handler that stops propagation must not be able to
-        // hide the tap from us. `input`/`change` too, because a slider drag or
-        // a select may never produce a click of its own.
-        pmTopMenuEl.addEventListener('click', pmNoteTopMenuInteraction, true);
-        pmTopMenuEl.addEventListener('input', pmNoteTopMenuInteraction, true);
-        pmTopMenuEl.addEventListener('change', pmNoteTopMenuInteraction, true);
+    /** tapTime: the second tap's time, when a second tap is what cancels. A
+     * page too busy to tell in time may have run the first tap's toggle
+     * before this tap's handlers - though the finger made the two a double
+     * tap. Then it is put back (before anything is painted: both happen in
+     * the same stretch of work). */
+    function pmCancelTapMenuToggle(tapTime) {
+      clearTimeout(pmTapMenuTimer);
+      pmTapMenuTimer = null;
+      const fired = pmTapMenuFired;
+      pmTapMenuFired = null;
+      if (fired && tapTime != null && tapTime >= fired.tap && tapTime - fired.tap < PAGE_DOUBLE_TAP_MS) {
+        toggleTopMenu();
       }
     }
 
@@ -23556,38 +23986,178 @@
       if (typeof readModeActive !== 'undefined' && readModeActive) return;
       const menu = document.getElementById('topMenu');
       if (!menu || !menu.classList.contains('collapsed')) return;
-      const top0 = pageEl ? pageEl.getBoundingClientRect().top : null;
+      // The pages are held where they are on screen while it slides in
+      // (pmHoldPagesWhileMenusMove, from toggleTopMenu).
       toggleTopMenu();
-      if (top0 == null) return;
-      const until = performance.now() + 450;
+    }
+
+    // ---- Phones: the pages stay put while the menus fold away / come back ----
+    // The top menu folding moves the work area's top edge up by its height
+    // (and the bottom bar's going lets the area grow downwards), which carried
+    // the pages up with it. While the menus animate, the scroll position
+    // follows that edge, so the pages stay where they were on screen. Where
+    // the document has no room left to scroll - its very top or its end - a
+    // blank spacer makes the room, the way Acrobat leaves the space its
+    // toolbar took. A spacer goes again once it is out of view (or when the
+    // menus come back and it is no longer needed).
+    // var, not const/let: pmSyncBottomBar can clear the spacers during
+    // script init (updateUIState), before this line has run.
+    var pmMenuSpacerEls = { top: null, bottom: null };
+    var pmMenuSpacerH = { top: 0, bottom: 0 };
+    var pmMenuHoldUntil = 0;
+    var pmMenuHoldAnchorY = null;
+    var pmMenuHoldObserver = null;
+    function pmSetMenuSpacer(which, h) {
+      h = Math.max(0, Math.round(h));
+      let el = pmMenuSpacerEls[which];
+      if (!el) {
+        if (!h || !scrollContainer || !pagesContainer) return;
+        el = document.createElement('div');
+        el.className = 'pm-menu-spacer';
+        el.setAttribute('aria-hidden', 'true');
+        if (which === 'top') scrollContainer.insertBefore(el, scrollContainer.firstChild);
+        else pagesContainer.after(el);
+        pmMenuSpacerEls[which] = el;
+      }
+      if (el.style.transition) el.style.transition = '';   // see pmFoldMenuSpacer
+      el.style.height = h + 'px';
+      pmMenuSpacerH[which] = h;
+      // Content below a top spacer moved: the loading strip re-measures.
+      if (which === 'top') pmLoadBarGeom = null;
+    }
+    /** Scroll so that the pages' top edge is back at anchorY on screen,
+     * making room with a spacer where the scroll range ends. */
+    function pmHoldPagesAt(anchorY) {
+      const d = pagesContainer.getBoundingClientRect().top - anchorY;   // > 0: they slid down
+      if (Math.abs(d) < 0.5) return;
+      let target = scrollContainer.scrollTop + d;
+      // Slid down with a spacer above them: the spacer gives that room back
+      // first, so the scroll stays where the view was left (0 at the top of
+      // the document) - pmTrimMenuSpacers takes any scroll for the user's.
+      if (d > 0 && pmMenuSpacerH.top > 0) {
+        const give = Math.min(pmMenuSpacerH.top, d);
+        pmSetMenuSpacer('top', pmMenuSpacerH.top - give);
+        target -= give;
+      }
+      if (target < 0) {
+        // Above the top of the document: the spacer pushes the pages down by
+        // what the scroll cannot, and the scroll goes to 0.
+        pmSetMenuSpacer('top', pmMenuSpacerH.top - target);
+        target = 0;
+      }
+      const max = scrollContainer.scrollHeight - scrollContainer.clientHeight;
+      if (target > max) pmSetMenuSpacer('bottom', pmMenuSpacerH.bottom + (target - max));
+      scrollContainer.scrollTop = target;
+    }
+    function pmHoldPagesWhileMenusMove(anchorY) {
+      // Start from no spacers: whatever room the new layout needs is made
+      // again right here, before anything is painted.
+      if (pmMenuSpacerH.top) {
+        const st = scrollContainer.scrollTop;
+        const top = pmMenuSpacerH.top;
+        pmSetMenuSpacer('top', 0);
+        scrollContainer.scrollTop = st - top;
+      }
+      // The smartphone undo/redo steps through the places the user scrolled
+      // to (pmNavTimeline): a scroll still settling is one of them, kept
+      // before this starts; the scrolling done here to hold the pages is not.
+      const timeline = typeof pmNavTimelineActive === 'function' && pmNavTimelineActive();
+      if (timeline) {
+        if (pmNavTimelineSaveTimer && !pmNavTimelineJumping) pmNavTimelineRecordPos();
+        pmNavTimelineJumping = true;
+        clearTimeout(pmNavTimelineJumpGuardTimer);
+        clearTimeout(pmNavTimelineSaveTimer);
+        pmNavTimelineSaveTimer = null;
+      }
+      pmSetMenuSpacer('bottom', 0);
+      pmHoldPagesAt(anchorY);
+      pmMenuHoldAnchorY = anchorY;
+      pmMenuHoldUntil = performance.now() + 480;   // the menu / bar animations take 220 ms
+      // The work area changes size on every frame of the animation; a
+      // ResizeObserver runs after that frame's layout and before its paint,
+      // so the correction is never a frame late (a requestAnimationFrame
+      // runs before the transition moves, and the pages visibly lagged).
+      if (!pmMenuHoldObserver && typeof ResizeObserver === 'function') {
+        pmMenuHoldObserver = new ResizeObserver(() => {
+          if (pmMenuHoldAnchorY == null) return;
+          if (performance.now() > pmMenuHoldUntil || pmMenuHoldFingerDown()) { pmMenuHoldAnchorY = null; return; }
+          pmHoldPagesAt(pmMenuHoldAnchorY);
+        });
+        pmMenuHoldObserver.observe(scrollContainer);
+      }
+      // ...and once a frame as well, in case the size settles early.
+      const done = () => {
+        pmMenuHoldAnchorY = null;
+        if (!timeline) return;
+        // The view did not move for the user: the place the timeline stands
+        // on is this one now, or the held scroll would read as a step back.
+        pmNavTimelineRebaseSpot();
+        clearTimeout(pmNavTimelineJumpGuardTimer);
+        pmNavTimelineJumpGuardTimer = setTimeout(() => { pmNavTimelineJumping = false; }, 100);
+      };
       const hold = () => {
-        if (!pageEl.isConnected) return;
-        const d = pageEl.getBoundingClientRect().top - top0;
-        if (Math.abs(d) >= 0.5) scrollContainer.scrollTop += d;
-        if (performance.now() < until) requestAnimationFrame(hold);
+        if (pmMenuHoldAnchorY == null) return;
+        if (pmMenuHoldFingerDown()) { done(); return; }
+        pmHoldPagesAt(pmMenuHoldAnchorY);
+        if (performance.now() < pmMenuHoldUntil) requestAnimationFrame(hold);
+        else done();
       };
       requestAnimationFrame(hold);
     }
-
-    function pmMaybeAutoHideTopMenu() {
-      if (!isTouchDevice || !scrollContainer) return;
-      const top = scrollContainer.scrollTop;
-      const delta = top - pmMenuAutoHideLastTop;
-      // Tracked unconditionally: a delta measured against a stale top from
-      // whenever the last check happened to pass would fire on the sum of
-      // several small scrolls, or on a scroll back up.
-      pmMenuAutoHideLastTop = top;
-      if (!pmMenuAutoHideArmed || !pdfDoc) return;
-      if (delta <= 0 || top < PM_MENU_AUTOHIDE_DOWN_PX) return;
-      if (isDragActive || rubberActive || rubberArmed || pinchActive) return;
-      if (typeof readModeActive !== 'undefined' && readModeActive) return;
-      if (document.getElementById('pageEditModal')?.classList.contains('open')) return;
-      // Selecting pages works with the menu's tools: it stays while the
-      // multi-select mode is on, or while a page has its mini-tools up.
-      if (multiSelectMode || pmQuickActionsShownIdx != null) return;
-      const menu = document.getElementById('topMenu');
-      if (!menu || menu.classList.contains('collapsed')) return;
-      toggleTopMenu();
+    // A finger on the pages takes the scroll over.
+    function pmMenuHoldFingerDown() {
+      return typeof hqFingerHoldsRasters === 'function' && hqFingerHoldsRasters();
+    }
+    /** A spacer stays while the view stays where the menus left it. Once the
+     * document has been scrolled away from it, it goes, at rest: the part
+     * out of view at once (invisible), the rest folding away. Trimming only
+     * the part out of view left a gap above the file name after a scroll
+     * shorter than the spacer. */
+    function pmTrimMenuSpacers() {
+      if (!scrollContainer) return;
+      if (performance.now() < pmMenuHoldUntil ||
+          (typeof hqFingerHoldsRasters === 'function' && hqFingerHoldsRasters())) {
+        // Still settling, or a finger on the pages: again once at rest - a
+        // finger that stops and lifts sends no further scroll event.
+        pmScheduleTrimMenuSpacers();
+        return;
+      }
+      if (pmMenuSpacerH.top > 0) {
+        const st = scrollContainer.scrollTop;
+        if (st >= 1) {
+          const cut = Math.min(pmMenuSpacerH.top, st);
+          pmSetMenuSpacer('top', pmMenuSpacerH.top - cut);
+          scrollContainer.scrollTop = st - cut;
+          if (pmMenuSpacerH.top > 0) pmFoldMenuSpacer('top');
+        }
+      }
+      if (pmMenuSpacerH.bottom > 0) {
+        const below = scrollContainer.scrollHeight - scrollContainer.clientHeight - scrollContainer.scrollTop;
+        if (below >= 1) {
+          pmSetMenuSpacer('bottom', pmMenuSpacerH.bottom - Math.min(pmMenuSpacerH.bottom, below));
+          if (pmMenuSpacerH.bottom > 0) pmFoldMenuSpacer('bottom');
+        }
+      }
+    }
+    // What is left of a spacer in view folds away rather than the pages
+    // jumping by its height.
+    function pmFoldMenuSpacer(which) {
+      const el = pmMenuSpacerEls[which];
+      pmSetMenuSpacer(which, 0);
+      // Set along with the new height: the change from the height last drawn
+      // is animated (pmSetMenuSpacer drops it again for the next change).
+      if (el) el.style.transition = 'height 0.22s ease';
+    }
+    var pmTrimMenuSpacersTimer = null;
+    function pmScheduleTrimMenuSpacers() {
+      if (!pmMenuSpacerH.top && !pmMenuSpacerH.bottom) return;
+      clearTimeout(pmTrimMenuSpacersTimer);
+      pmTrimMenuSpacersTimer = setTimeout(pmTrimMenuSpacers, 250);
+    }
+    function pmClearMenuSpacers() {
+      if (!pmMenuSpacerEls) return;   // script init, see above
+      pmSetMenuSpacer('top', 0);
+      pmSetMenuSpacer('bottom', 0);
     }
 
     /** Ease the mobile menu between its two heights. The CSS collapse is a
@@ -23623,13 +24193,16 @@
       const menu = document.getElementById('topMenu');
       if (!menu) return;
       const heightBefore = isTouchDevice ? menu.getBoundingClientRect().height : 0;
+      // Where the pages are on screen, to keep them there (see pmHoldPagesAt).
+      const pagesAnchorY = isTouchDevice && pdfDoc && !readModeActive && !_readModeToggleGuard && pagesContainer
+        ? pagesContainer.getBoundingClientRect().top : null;
       const collapsed = menu.classList.toggle('collapsed');
       // The bottom bar folds away with it (#pmBottomBar).
       document.body.classList.toggle('pm-menu-collapsed', collapsed);
       if (isTouchDevice) {
         pmAnimateTopMenuHeight(menu, heightBefore, menu.getBoundingClientRect().height);
-        // Brought back by hand: leave it alone for a while (see above).
-        if (!collapsed) pmSuspendMenuAutoHide();
+        pmCancelTapMenuToggle();
+        if (pagesAnchorY != null) pmHoldPagesWhileMenusMove(pagesAnchorY);
       }
       if (collapsed) {
         const area = document.getElementById('logoMenuArea');
@@ -24732,7 +25305,13 @@
     }
     function pmLoadBarSchedule() {
       if (pmLoadBarRaf) return;
-      pmLoadBarRaf = requestAnimationFrame(() => { pmLoadBarRaf = 0; pmLoadBarUpdate(); });
+      pmLoadBarRaf = requestAnimationFrame(() => {
+        pmLoadBarRaf = 0;
+        // Two-finger zoom: the bar waits (its layout reads would cost the
+        // gesture a frame); it catches up shortly after the fingers lift.
+        if (pinchActive) { setTimeout(pmLoadBarSchedule, 200); return; }
+        pmLoadBarUpdate();
+      });
     }
     function pmLoadBarUpdate() {
       const bar = document.getElementById('pmLoadBar');
@@ -24877,28 +25456,57 @@
       let top = sc.top + GAP;
       const header = document.querySelector('.content-header');
       const nameBox = (infoDiv && infoDiv.style.display !== 'none') ? infoDiv : header;
+      let nameBottom = -Infinity;
       if (nameBox) {
         // Just under the name: the gap down to the first row of pages is
         // only a few pixels on a desktop.
         const r = nameBox.getBoundingClientRect();
-        if (r.height) top = Math.max(top, r.bottom + 2);
+        if (r.height) { nameBottom = r.bottom; top = Math.max(top, r.bottom + 2); }
       }
+      const baseTop = top;
       // Buttons that float over the top-right corner of the workspace (the
       // menu button once the menu is tucked away, the reading-mode zoom).
+      let mayMeetButton = false;
       ['menuToggleBtn', 'desktopMenuToggleBtn', 'readModeScaleOverlay'].forEach(id => {
         const el = document.getElementById(id);
         if (!el || getComputedStyle(el).position !== 'fixed') return;
         const r = el.getBoundingClientRect();
+        if (r.width && r.height && r.left < right && r.right > right - w) mayMeetButton = true;
         if (r.width && r.height && r.left < right && r.right > right - w && r.top < top + 4 + GAP && r.bottom + GAP > top) {
           top = r.bottom + GAP;
         }
       });
+      // What a scroll changes is only where the name is: kept here for
+      // pmLoadBarPlaceOnScroll, unless a floating button shares the
+      // strip's column (then a scroll can change which way it has to go).
+      pmLoadBarGeom = mayMeetButton ? null : {
+        x: Math.round(right - w),
+        minTop: sc.top + GAP,
+        nameBottomInContent: nameBottom + scrollContainer.scrollTop,
+        lastTop: Math.round(baseTop)
+      };
       // `top` is where the strip itself goes; the element starts its
       // transparent hover margin above that.
       bar.style.transform = 'translate(' + Math.round(right - w) + 'px,' + Math.round(top - PM_LOAD_BAR_HIT) + 'px)';
       pmLoadBarTipSync();
     }
-    scrollContainer.addEventListener('scroll', () => { if (pmLoadBarShown) pmLoadBarPlace(); }, { passive: true });
+    // Scrolling only moves the name the strip sits under: its new place
+    // follows from scrollTop, with no layout reads on every frame of a
+    // scroll - which, while previews were still loading (the only time the
+    // strip shows), made scrolling through the document stutter.
+    // var: assigned by pmLoadBarPlace above.
+    var pmLoadBarGeom = null;
+    function pmLoadBarPlaceOnScroll() {
+      const g = pmLoadBarGeom;
+      if (!g) { pmLoadBarPlace(); return; }
+      const top = Math.round(Math.max(g.minTop, g.nameBottomInContent - scrollContainer.scrollTop + 2));
+      if (top === g.lastTop) return;
+      g.lastTop = top;
+      const bar = document.getElementById('pmLoadBar');
+      if (bar) bar.style.transform = 'translate(' + g.x + 'px,' + (top - PM_LOAD_BAR_HIT) + 'px)';
+      pmLoadBarTipSync();
+    }
+    scrollContainer.addEventListener('scroll', () => { if (pmLoadBarShown) pmLoadBarPlaceOnScroll(); }, { passive: true });
     window.addEventListener('resize', () => { if (pmLoadBarShown) pmLoadBarPlace(); });
     if (typeof ResizeObserver === 'function') {
       // The menu collapsing/expanding resizes the workspace without a scroll.
@@ -25357,8 +25965,12 @@
           // touchend listeners near cancelPageTouchDrag) so a touch that
           // turns out to be a scroll-start, not a double-tap, still works.
           pmActiveTouchScrollFallback = true;
-          pmActiveTouchLastX = e.touches[0].clientX;
-          pmActiveTouchLastY = e.touches[0].clientY;
+          pmActiveTouchScrolling = false;
+          pmActiveTouchStartX = pmActiveTouchLastX = e.touches[0].clientX;
+          pmActiveTouchStartY = pmActiveTouchLastY = e.touches[0].clientY;
+          // One page a row: holding the finger down after the second tap and
+          // sliding it zooms (pmOneFingerZoom) - the pinch's job otherwise.
+          pmArmOneFingerZoom(e.touches[0].clientX, e.touches[0].clientY, pmTapTime(e));
         }
       }, { passive: false });
 
@@ -26799,6 +27411,8 @@
             // would have nothing to match against and two taps on text could
             // never be recognized as a double-tap at all.
             if (typeof pmRecordSoloTapOn === 'function') pmRecordSoloTapOn(hostPage, e);
+            // ...and a short tap on the text is still a tap on the page.
+            if (e.pointerType === 'touch' && typeof pmWatchTextTap === 'function') pmWatchTextTap(hostPage, e);
           }
           e.stopPropagation();
         }, true);
@@ -28542,8 +29156,16 @@
           return;
         }
 
+        // The second tap of a double tap that has just started the zoom
+        // animation: the transition's picture covers the screen, so the point
+        // finds no page under it - it is not a tap on the empty area.
+        if (document.documentElement.classList.contains('pm-tap-zoom')) return;
         const el = document.elementFromPoint(ct.clientX, ct.clientY);
         if (el && el.closest && el.closest('.top-menu, #pageCountBox, #menuToggleBtn, .pm-page-nav-btn, #pmAutoScrollSpeed, #pmAutoScrollPauseBtn')) return;
+        // The empty area around the pages: show / hide the menus. A page
+        // handles its own taps (onPagePointerUp), controls theirs.
+        if (el && el.closest && el.closest('.page, #mobileScrollRail, #insertIndicator, button, a, input, label, select, textarea, [role="button"]')) return;
+        pmScheduleTapMenuToggle(pmTapTime(e));
       }, { passive: true, capture: true });
     })();
 
@@ -30792,7 +31414,7 @@
           <div style="font-size:17px; color:#2c3e50; margin-bottom:20px; font-weight:600; line-height:1.4;">${msgHtml}</div>
           <div style="display:flex; gap:12px; justify-content:center;">
             <button id="cfmYes" style="padding:10px 28px; border:none; border-radius:6px;
-              background:#cc3d40; color:#fff; font-weight:bold; cursor:pointer; font-size:15px;">${escapeHtml(yesText)}</button>
+              background:${opts.yesBg || '#cc3d40'}; color:#fff; font-weight:bold; cursor:pointer; font-size:15px;">${escapeHtml(yesText)}</button>
             <button id="cfmNo" style="padding:10px 28px; border:1px solid #ccc; border-radius:6px;
               background:#fff; color:#333; cursor:pointer; font-size:15px;">${escapeHtml(noText)}</button>
           </div>`;
@@ -44183,7 +44805,12 @@ function editSelectedPage() {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { hideMenu(); hideTextCopyMenu(); }
   }, true);
-  scrollContainer.addEventListener('scroll', () => { hideMenu(); hideTextCopyMenu(); }, { passive: true });
+  // Every scroll frame: hide the copy menu only when it is open - hiding
+  // rewrites its items, which restyled the page on each frame of a scroll.
+  scrollContainer.addEventListener('scroll', () => {
+    hideMenu();
+    if (textCopyMenu && textCopyMenu.classList.contains('visible')) hideTextCopyMenu();
+  }, { passive: true });
   window.addEventListener('resize', () => { hideMenu(); hideTextCopyMenu(); });
 
   // Selection geometry (in the grid/preview's own text layer) -> PDF-space
