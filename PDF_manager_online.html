@@ -4900,6 +4900,11 @@
       /*Share: the Android app's system share sheet.*/
       #pmBottomBar #pmBbShare { display: none; }
       body.pm-android-app #pmBottomBar #pmBbShare { display: inline-flex; }
+      /*Panning a wide page to its edge must not run on into the browser:
+        on a phone that overscroll is the "back" swipe, which left the
+        editor (and a horizontal or vertical overscroll pulled the whole
+        page / pull-to-refresh).*/
+      #scrollContainer { overscroll-behavior: contain; }
       /*The page number tab sits at the bottom edge of the screen - on top
         of the bar while it is up. It shows only while the bar is folded away.*/
       body.pm-bottom-bar-on:not(.pm-menu-collapsed):not(.read-mode-active) #pageNumTab {
@@ -6956,7 +6961,10 @@
         -webkit-touch-callout: none !important;
         pointer-events: none !important;
       }
-      body.page-touch-armed .page.page-press-pending {
+      /* Only the pressed page's class in the selector: with .page in it,
+         arming on every touch made the browser restyle every page of the
+         document at the start and end of each swipe. */
+      body.page-touch-armed .page-press-pending {
         touch-action: none;
       }
 
@@ -15444,9 +15452,11 @@
     // Locks it out at the CSS level (see body.pm-vertical-scroll-lock)
     // rather than each mode's own scroll/pan/swipe handler having to
     // individually refuse to move sideways.
+    var pmVerticalLockRowKey = ''; // var: the lock is first checked before this line runs
     function pmUpdateVerticalOnlyScrollLock() {
       const shouldLock = pmShouldLockHorizontalScroll();
       document.body.classList.toggle('pm-vertical-scroll-lock', shouldLock);
+      if (!shouldLock) pmVerticalLockRowKey = '';
       // Engaging the lock via the fit-width BUTTON always arrives through
       // pmRecenterFitWidthPage(), which explicitly re-centers scrollLeft to
       // 0 first - but engaging it by organically wheel/slider-zooming onto
@@ -15484,7 +15494,13 @@
         // visibly shifted right of true center - same root cause as the
         // high-zoom "Fit page width" bug fixed in pmRecenterFitWidthPage,
         // fixed the same way: force a fresh, hysteresis-free re-check.
-        if (typeof updatePagesRowOverflow === 'function' && pagesContainer) {
+        // Once per engagement, width, scale and document version, though -
+        // re-done on every scroll frame, taking the class off and putting it
+        // back made the browser restyle the pages each frame.
+        const rowKey = getScrollAvailWidth() + '|' + currentScale + '|' + pmSearchDocVersion + '|' +
+          (pagesContainer ? pagesContainer.childElementCount : 0);
+        if (rowKey !== pmVerticalLockRowKey && typeof updatePagesRowOverflow === 'function' && pagesContainer) {
+          pmVerticalLockRowKey = rowKey;
           pagesContainer.classList.remove('pages-row-overflow');
           updatePagesRowOverflow();
         }
@@ -15555,6 +15571,7 @@
     function pmShouldLockHorizontalScroll() {
       if (isTouchDevice) return pmShouldLockHorizontalScrollMobile();
       if (!pdfDoc || !pagesContainer || !scrollContainer) return false;
+      if (pmDocHasMixedOrientation()) return false;
       if (typeof isPagesSingleColumnLayout !== 'function' || !isPagesSingleColumnLayout()) return false;
       const avail = getScrollAvailWidth();
       if (avail <= 0) return false;
@@ -15605,8 +15622,37 @@
     // no longer pins such drags to one axis, see scroll-axis-lock on .main).
     // Never during a pinch: the gesture moves the view freely, and
     // applyScale re-checks the lock once the new scale is applied.
+    // Pages of both orientations in the document (as shown: /Rotate
+    // counted, pages marked for deletion left out). Such a document is
+    // never locked to vertical scrolling or recentred as it is scrolled: a
+    // landscape page coming into view flipped the lock and the row's
+    // alignment, and the view jumped sideways - which left the left part of
+    // a wide page out of reach as well. Cached per document version (every
+    // edit, rotation or undo bumps pmSearchDocVersion).
+    let pmMixedOrientationCache = { doc: null, ver: -1, value: false };
+    function pmDocHasMixedOrientation() {
+      if (!pdfDoc) return false;
+      const c = pmMixedOrientationCache;
+      if (c.doc === pdfDoc && c.ver === pmSearchDocVersion) return c.value;
+      let portrait = false, landscape = false;
+      try {
+        const n = pdfDoc.getPageCount();
+        for (let i = 0; i < n && !(portrait && landscape); i++) {
+          if (markedForDeletion.has(i)) continue;
+          const page = pdfDoc.getPage(i);
+          const { width, height } = page.getSize();
+          const quarter = (((page.getRotation().angle || 0) % 180) + 180) % 180 === 90;
+          if (quarter ? height > width : width > height) landscape = true;
+          else portrait = true;
+        }
+      } catch (_) { /* a document mid-change - assume not mixed */ }
+      pmMixedOrientationCache = { doc: pdfDoc, ver: pmSearchDocVersion, value: portrait && landscape };
+      return portrait && landscape;
+    }
+
     function pmShouldLockHorizontalScrollMobile() {
       if (!pdfDoc || !pagesContainer || !scrollContainer) return false;
+      if (pmDocHasMixedOrientation()) return false;
       if (document.body.classList.contains('pinch-zooming')) return false;
       if (typeof isPagesSingleColumnLayout !== 'function' || !isPagesSingleColumnLayout()) return false;
       const avail = getScrollAvailWidth();
@@ -16911,7 +16957,12 @@
           .map((img) => img.getBoundingClientRect().width);
         // No page actually in view (mid-transition) - fall back to the
         // conservative full-card width rather than treating 0 as "fits".
-        const cardW = inViewportWidths.length > 0 ? Math.max(...inViewportWidths) : cardRowWidth(currentScale, 1);
+        let cardW = inViewportWidths.length > 0 ? Math.max(...inViewportWidths) : cardRowWidth(currentScale, 1);
+        // Both orientations in the document: measured against its widest
+        // page (a landscape one, width capped to the long-side budget)
+        // wherever the view is, so the row's alignment does not flip - and
+        // shift the view sideways - each time a landscape page scrolls in.
+        if (pmDocHasMixedOrientation()) cardW = Math.max(cardW, pmPreviewLongPx(currentScale));
         const hyst = pagesContainer.classList.contains('pages-row-overflow') ? -16 : 16;
         overflow = cardW > avail + hyst;
       } else {
@@ -18821,32 +18872,39 @@
         return;
       }
 
+      // Every read first, then only the writes that change something: this
+      // runs on every frame of a scroll, and a write between two reads
+      // (here or in the next scroll handler) makes the second read lay the
+      // page out again.
       const rect = el.getBoundingClientRect();
       const railW = rail.offsetWidth || 48;
-      rail.style.top = rect.top + 'px';
-      rail.style.left = (rect.right - railW) + 'px';
-      rail.style.height = rect.height + 'px';
-      rail.style.width = '';
-      rail.classList.add('visible');
-      rail.setAttribute('aria-hidden', 'false');
-      document.body.classList.add('mobile-rail-visible');
+      const scrollTop = el.scrollTop;
+      const portrait = window.matchMedia('(orientation: portrait)').matches;
+
+      const setStyle = (node, prop, value) => { if (node.style[prop] !== value) node.style[prop] = value; };
+      setStyle(rail, 'top', rect.top + 'px');
+      setStyle(rail, 'left', (rect.right - railW) + 'px');
+      setStyle(rail, 'height', rect.height + 'px');
+      setStyle(rail, 'width', '');
+      if (!rail.classList.contains('visible')) rail.classList.add('visible');
+      if (rail.getAttribute('aria-hidden') !== 'false') rail.setAttribute('aria-hidden', 'false');
+      if (!document.body.classList.contains('mobile-rail-visible')) document.body.classList.add('mobile-rail-visible');
       pokeMobileScrollRail();
 
       const pad = MOBILE_SCROLL_RAIL_PAD;
       const trackH = Math.max(0, rect.height - pad * 2);
-      track.style.top = pad + 'px';
-      track.style.height = trackH + 'px';
+      setStyle(track, 'top', pad + 'px');
+      setStyle(track, 'height', trackH + 'px');
 
-      const portrait = window.matchMedia('(orientation: portrait)').matches;
       const thumbMin = portrait ? MOBILE_SCROLL_THUMB_MIN_PORTRAIT : MOBILE_SCROLL_THUMB_MIN;
       const thumbRatio = clientH / scrollH;
       const thumbH = Math.max(thumbMin, trackH * thumbRatio);
       const maxThumbTop = Math.max(0, trackH - thumbH);
       const scrollMax = scrollH - clientH;
-      const thumbTop = scrollMax > 0 ? (el.scrollTop / scrollMax) * maxThumbTop : 0;
+      const thumbTop = scrollMax > 0 ? (scrollTop / scrollMax) * maxThumbTop : 0;
 
-      thumb.style.height = thumbH + 'px';
-      thumb.style.top = thumbTop + 'px';
+      setStyle(thumb, 'height', thumbH + 'px');
+      setStyle(thumb, 'top', thumbTop + 'px');
     }
 
     function initMobileScrollRail() {
@@ -18993,13 +19051,22 @@
       const viewTop = host.top, viewBottom = host.bottom;
 
       // We are looking for the page that the user is currently viewing: the one that occupies
-      // the largest visible area in the window.
+      // the largest visible area in the window. One column, so the pages run top to
+      // bottom: start at the first one reaching into the window instead of measuring
+      // every page of the document on every scroll frame.
+      let lo = 0, hi = pages.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (pages[mid].getBoundingClientRect().bottom <= viewTop) lo = mid + 1;
+        else hi = mid;
+      }
       let best = null, bestVisible = 0;
-      for (const p of pages) {
-        const r = p.getBoundingClientRect();
+      for (let i = lo; i < pages.length; i++) {
+        const r = pages[i].getBoundingClientRect();
+        if (r.top >= viewBottom) break;
         const visible = Math.max(0, Math.min(r.bottom, viewBottom) - Math.max(r.top, viewTop));
         const frac = r.height > 0 ? visible / r.height : 0;
-        if (frac > bestVisible) { bestVisible = frac; best = p; }
+        if (frac > bestVisible) { bestVisible = frac; best = pages[i]; }
       }
       if (!best) { tab.classList.remove('visible'); return; }
 
@@ -19016,15 +19083,25 @@
       // We show the curtain if >= 25% of the page is visible AND its number is not yet visible.
       // We take the number directly from the sheet signature (.page-title) so that it matches.
       if (bestVisible >= 0.25 && !numberVisible && titleEl && titleEl.textContent) {
-        tab.textContent = titleEl.textContent;
-        tab.classList.add('visible');
+        // Written only when something changes: this runs on every scroll frame,
+        // and rewriting the text, then measuring it, laid the page out each time.
+        const label = titleEl.textContent;
+        const shown = tab.classList.contains('visible');
+        if (tab.textContent !== label) tab.textContent = label;
+        if (!shown) tab.classList.add('visible');
         // Positioned in the center of the SQUARE of the page being viewed (horizontally)
         const centerX = r.left + r.width / 2;
         // We will find out the width of the die after the display
-        const tabW = tab.offsetWidth;
+        const sizeKey = label + '|' + window.innerWidth;
+        // (0 while the bottom bar hides the tab: measured again once it shows)
+        if (!shown || tab._pmSizeKey !== sizeKey || !(tab._pmTabW > 0)) {
+          tab._pmTabW = tab.offsetWidth;
+          tab._pmSizeKey = sizeKey;
+        }
+        const tabW = tab._pmTabW;
         let left = centerX - tabW / 2;
         left = Math.max(4, Math.min(left, window.innerWidth - tabW - 4)); // don't go off screen
-        tab.style.left = left + 'px';
+        if (tab.style.left !== left + 'px') tab.style.left = left + 'px';
       } else {
         tab.classList.remove('visible');
       }
@@ -19468,6 +19545,18 @@
       return true;
     }
 
+    // Runs on every scroll frame: stop only what is running and leave the
+    // buttons alone otherwise - stopping rewrites their icons and titles, and
+    // doing that each frame made the browser restyle every page of the
+    // document while the finger was scrolling.
+    function pmHidePageNavButtons(prevBtn, nextBtn) {
+      if (pmNavAutoDir || pmNavHoldDir || pmNavAutoRaf || pmNavHoldTimer || pmNavRingTimer) {
+        pmStopPageNavAutoScroll();
+      }
+      if (prevBtn.classList.contains('visible')) prevBtn.classList.remove('visible');
+      if (nextBtn.classList.contains('visible')) nextBtn.classList.remove('visible');
+    }
+
     function pmUpdatePageNavButtons() {
       const prevBtn = document.getElementById('pmPagePrevBtn');
       const nextBtn = document.getElementById('pmPageNextBtn');
@@ -19476,22 +19565,16 @@
       // below rather than just letting CSS hide them - that sweep runs on
       // every scroll frame and reads layout for nothing here.
       if (isTouchDevice) {
-        pmStopPageNavAutoScroll();
-        prevBtn.classList.remove('visible');
-        nextBtn.classList.remove('visible');
+        pmHidePageNavButtons(prevBtn, nextBtn);
         return;
       }
       if (!pdfDoc || pdfDoc.getPageCount() <= 1) {
-        pmStopPageNavAutoScroll();
-        prevBtn.classList.remove('visible');
-        nextBtn.classList.remove('visible');
+        pmHidePageNavButtons(prevBtn, nextBtn);
         return;
       }
       const pages = pmVisiblePageEls();
       if (pages.length < 2 || !isSingleColumn(pages)) {
-        pmStopPageNavAutoScroll();
-        prevBtn.classList.remove('visible');
-        nextBtn.classList.remove('visible');
+        pmHidePageNavButtons(prevBtn, nextBtn);
         return;
       }
       prevBtn.classList.add('visible');
@@ -23663,6 +23746,8 @@
       }
       el.style.height = h + 'px';
       pmMenuSpacerH[which] = h;
+      // Content below a top spacer moved: the loading strip re-measures.
+      if (which === 'top') pmLoadBarGeom = null;
     }
     /** Scroll so that the pages' top edge is back at anchorY on screen,
      * making room with a spacer where the scroll range ends. */
@@ -25066,28 +25151,57 @@
       let top = sc.top + GAP;
       const header = document.querySelector('.content-header');
       const nameBox = (infoDiv && infoDiv.style.display !== 'none') ? infoDiv : header;
+      let nameBottom = -Infinity;
       if (nameBox) {
         // Just under the name: the gap down to the first row of pages is
         // only a few pixels on a desktop.
         const r = nameBox.getBoundingClientRect();
-        if (r.height) top = Math.max(top, r.bottom + 2);
+        if (r.height) { nameBottom = r.bottom; top = Math.max(top, r.bottom + 2); }
       }
+      const baseTop = top;
       // Buttons that float over the top-right corner of the workspace (the
       // menu button once the menu is tucked away, the reading-mode zoom).
+      let mayMeetButton = false;
       ['menuToggleBtn', 'desktopMenuToggleBtn', 'readModeScaleOverlay'].forEach(id => {
         const el = document.getElementById(id);
         if (!el || getComputedStyle(el).position !== 'fixed') return;
         const r = el.getBoundingClientRect();
+        if (r.width && r.height && r.left < right && r.right > right - w) mayMeetButton = true;
         if (r.width && r.height && r.left < right && r.right > right - w && r.top < top + 4 + GAP && r.bottom + GAP > top) {
           top = r.bottom + GAP;
         }
       });
+      // What a scroll changes is only where the name is: kept here for
+      // pmLoadBarPlaceOnScroll, unless a floating button shares the
+      // strip's column (then a scroll can change which way it has to go).
+      pmLoadBarGeom = mayMeetButton ? null : {
+        x: Math.round(right - w),
+        minTop: sc.top + GAP,
+        nameBottomInContent: nameBottom + scrollContainer.scrollTop,
+        lastTop: Math.round(baseTop)
+      };
       // `top` is where the strip itself goes; the element starts its
       // transparent hover margin above that.
       bar.style.transform = 'translate(' + Math.round(right - w) + 'px,' + Math.round(top - PM_LOAD_BAR_HIT) + 'px)';
       pmLoadBarTipSync();
     }
-    scrollContainer.addEventListener('scroll', () => { if (pmLoadBarShown) pmLoadBarPlace(); }, { passive: true });
+    // Scrolling only moves the name the strip sits under: its new place
+    // follows from scrollTop, with no layout reads on every frame of a
+    // scroll - which, while previews were still loading (the only time the
+    // strip shows), made scrolling through the document stutter.
+    // var: assigned by pmLoadBarPlace above.
+    var pmLoadBarGeom = null;
+    function pmLoadBarPlaceOnScroll() {
+      const g = pmLoadBarGeom;
+      if (!g) { pmLoadBarPlace(); return; }
+      const top = Math.round(Math.max(g.minTop, g.nameBottomInContent - scrollContainer.scrollTop + 2));
+      if (top === g.lastTop) return;
+      g.lastTop = top;
+      const bar = document.getElementById('pmLoadBar');
+      if (bar) bar.style.transform = 'translate(' + g.x + 'px,' + (top - PM_LOAD_BAR_HIT) + 'px)';
+      pmLoadBarTipSync();
+    }
+    scrollContainer.addEventListener('scroll', () => { if (pmLoadBarShown) pmLoadBarPlaceOnScroll(); }, { passive: true });
     window.addEventListener('resize', () => { if (pmLoadBarShown) pmLoadBarPlace(); });
     if (typeof ResizeObserver === 'function') {
       // The menu collapsing/expanding resizes the workspace without a scroll.
@@ -44376,7 +44490,12 @@ function editSelectedPage() {
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') { hideMenu(); hideTextCopyMenu(); }
   }, true);
-  scrollContainer.addEventListener('scroll', () => { hideMenu(); hideTextCopyMenu(); }, { passive: true });
+  // Every scroll frame: hide the copy menu only when it is open - hiding
+  // rewrites its items, which restyled the page on each frame of a scroll.
+  scrollContainer.addEventListener('scroll', () => {
+    hideMenu();
+    if (textCopyMenu && textCopyMenu.classList.contains('visible')) hideTextCopyMenu();
+  }, { passive: true });
   window.addEventListener('resize', () => { hideMenu(); hideTextCopyMenu(); });
 
   // Selection geometry (in the grid/preview's own text layer) -> PDF-space
