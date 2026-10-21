@@ -21402,7 +21402,11 @@
       if (pmAutoSelectModeOn) { lastTapTime = 0; return; }
 
       if (dt < DOUBLE_TAP_MS && dist < DOUBLE_TAP_DIST) {
-        // Double tap - arm the frame selection
+        // Double tap - arm the frame selection. Its first tap was taken for
+        // a single one and is about to show / hide the menus: cancelled, or
+        // they folded away under the finger drawing the frame (at the top of
+        // the document leaving a blank spacer and shifting the frame's start).
+        pmCancelTapMenuToggle();
         rubberArmed = true;
         rubberStartX = t.clientX;
         rubberStartY = t.clientY;
@@ -23799,10 +23803,16 @@
     let pmTapMenuTimer = null;
     function pmScheduleTapMenuToggle() {
       if (!isTouchDevice || !pdfDoc) return;
-      clearTimeout(pmTapMenuTimer);
+      // A second tap inside the window: a double tap, which leaves the menus
+      // as they are.
+      if (pmTapMenuTimer) {
+        pmCancelTapMenuToggle();
+        return;
+      }
       pmTapMenuTimer = setTimeout(() => {
         pmTapMenuTimer = null;
         if (!pdfDoc || isLoading || pinchActive || isDragActive) return;
+        if (rubberArmed || rubberActive) return;
         if (typeof readModeActive !== 'undefined' && readModeActive) return;
         if (document.querySelector('.modal-overlay-active')) return;
         toggleTopMenu();
