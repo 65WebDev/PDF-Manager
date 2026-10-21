@@ -4918,19 +4918,39 @@
         cursor: pointer;
         -webkit-tap-highlight-color: transparent;
       }
-      /*Bookmarks on a phone: a sheet over the pages, across the screen,
-        instead of the desktop's column beside them (no gutter - see
-        pmBookmarksUpdateScrollGutter). A tap beside it closes it.*/
+      /*Bookmarks on a phone: a sheet at the bottom of the work area, above
+        the bottom bar and across the screen, instead of the desktop's
+        column beside the pages (no gutter - see pmBookmarksUpdateScrollGutter).
+        At most a third of the work area high (pmBookmarksUpdateListMaxHeight);
+        a longer list scrolls, with a scrollbar that stays in sight.*/
       #pmBookmarksPanel.pm-bookmarks-panel {
         width: auto;
         right: 8px;
         max-width: 560px;
       }
-      #pmBookmarksBackdrop {
-        position: fixed;
-        inset: 0;
-        z-index: 9199;
-        background: rgba(0, 0, 0, 0.18);
+      /*A phone's own scrollbar is an overlay that shows only while the list
+        moves (and ignores ::-webkit-scrollbar): the sheet draws its own,
+        always there while the list does not fit, and a finger can drag it
+        (pmBookmarksUpdateThumb).*/
+      #pmBookmarksList { scrollbar-width: none; }
+      #pmBookmarksList::-webkit-scrollbar { display: none; }
+      .pm-bookmarks-thumb {
+        position: absolute;
+        right: 3px;
+        width: 5px;
+        border-radius: 3px;
+        background: rgba(255, 255, 255, 0.45);
+        display: none;
+        touch-action: none;
+        z-index: 1;
+      }
+      .pm-bookmarks-thumb.visible { display: block; }
+      .pm-bookmarks-thumb.dragging { background: rgba(52, 152, 219, 0.95); }
+      /*A wider grip than the 5px it shows.*/
+      .pm-bookmarks-thumb::before {
+        content: '';
+        position: absolute;
+        inset: -6px -3px -6px -16px;
       }
       /*The short message at the bottom stays clear of the bar.*/
       body.pm-bottom-bar-on:not(.pm-menu-collapsed):not(.read-mode-active) #pmToast {
@@ -20062,6 +20082,7 @@
       if (typeof pmBookmarksState !== 'undefined' && pmBookmarksState.open &&
           typeof pmBookmarksPositionPanel === 'function') {
         pmBookmarksPositionPanel();
+        pmBookmarksCheckLanded();
       }
       // Unpinned counter block is hidden when scrolling (only visible at the top)
       refreshPageCountVisibility();
@@ -39898,12 +39919,22 @@ function pmBookmarksReferenceBottom() {
 function pmBookmarksPositionPanel() {
   const panel = document.getElementById('pmBookmarksPanel');
   if (!panel) return;
-  const top = pmBookmarksReferenceBottom() + (isTouchDevice ? 8 : 12);
+  if (isTouchDevice && typeof scrollContainer !== 'undefined' && scrollContainer) {
+    // Phones: a sheet at the bottom of the work area, just above the bottom
+    // bar (or the screen's edge with the bar folded away), across the
+    // screen with 8px either side (the right edge is in the CSS).
+    const work = scrollContainer.getBoundingClientRect();
+    const below = Math.max(0, window.innerHeight - (work.top + scrollContainer.clientHeight));
+    panel.style.top = 'auto';
+    panel.style.bottom = Math.round(below + 8) + 'px';
+    panel.style.left = '8px';
+    pmBookmarksUpdateListMaxHeight();
+    return;
+  }
+  panel.style.bottom = '';
+  const top = pmBookmarksReferenceBottom() + 12;
   panel.style.top = Math.round(top) + 'px';
-  // pressed against the working area's left edge - keep in sync with
-  // pmBookmarksUpdateScrollGutter()'s own "4"; a phone's sheet spans the
-  // screen with 8px either side (its right edge is in the CSS)
-  panel.style.left = isTouchDevice ? '8px' : '4px';
+  panel.style.left = '4px'; // pressed against the working area's left edge - keep in sync with pmBookmarksUpdateScrollGutter()'s own "4"
   // The panel itself never moves for the page-nav arrows any more - they
   // move out of its way instead (see pmPositionPageNavButtons).
   if (typeof pmPositionPageNavButtons === 'function') pmPositionPageNavButtons();
@@ -39928,6 +39959,22 @@ function pmBookmarksUpdateListMaxHeight() {
   if (!list) return;
   const listTop = list.getBoundingClientRect().top;
   const statusHeight = status ? status.getBoundingClientRect().height : 0;
+  if (isTouchDevice && typeof scrollContainer !== 'undefined' && scrollContainer) {
+    // Phones: the whole sheet takes at most a third of the work area; a
+    // longer list scrolls inside it.
+    // Everything of the sheet but the list's content - its header above,
+    // what is below the list, the list's own padding - comes off the cap.
+    const panel = document.getElementById('pmBookmarksPanel');
+    const lr = list.getBoundingClientRect();
+    const pr = panel ? panel.getBoundingClientRect() : lr;
+    const cs = getComputedStyle(list);
+    const padV = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0) +
+      (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
+    const cap = scrollContainer.clientHeight / 3;
+    list.style.maxHeight = Math.max(60, Math.floor(cap - (lr.top - pr.top) - (pr.bottom - lr.bottom) - padV)) + 'px';
+    pmBookmarksUpdateThumb();
+    return;
+  }
   const bottomMargin = 8;
   const workAreaBottom = (typeof scrollContainer !== 'undefined' && scrollContainer)
     ? scrollContainer.getBoundingClientRect().top + scrollContainer.clientHeight
@@ -39936,6 +39983,53 @@ function pmBookmarksUpdateListMaxHeight() {
   const available = bottomLimit - listTop - statusHeight - bottomMargin;
   list.style.maxHeight = Math.max(60, Math.round(available)) + 'px';
 }
+
+// Phones: the list's scrollbar, drawn by the sheet itself (see the CSS of
+// .pm-bookmarks-thumb) - shown while the list does not fit, following its
+// scroll, and draggable with a finger.
+function pmBookmarksUpdateThumb() {
+  const thumb = document.getElementById('pmBookmarksThumb');
+  const list = document.getElementById('pmBookmarksList');
+  if (!thumb || !list) return;
+  const view = list.clientHeight, full = list.scrollHeight;
+  if (!pmBookmarksState.open || full <= view + 1) { thumb.classList.remove('visible'); return; }
+  const h = Math.max(28, Math.round(view * view / full));
+  const top = list.offsetTop + Math.round((view - h) * list.scrollTop / (full - view));
+  thumb.style.height = h + 'px';
+  thumb.style.top = top + 'px';
+  thumb.classList.add('visible');
+}
+(function pmBookmarksInitThumb() {
+  if (!isTouchDevice) return;
+  const panel = document.getElementById('pmBookmarksPanel');
+  const list = document.getElementById('pmBookmarksList');
+  if (!panel || !list) return;
+  const thumb = document.createElement('div');
+  thumb.id = 'pmBookmarksThumb';
+  thumb.className = 'pm-bookmarks-thumb';
+  thumb.setAttribute('aria-hidden', 'true');
+  panel.appendChild(thumb);
+  list.addEventListener('scroll', pmBookmarksUpdateThumb, { passive: true });
+  let drag = null;
+  thumb.addEventListener('pointerdown', (e) => {
+    drag = { id: e.pointerId, y: e.clientY, top: list.scrollTop };
+    try { thumb.setPointerCapture(e.pointerId); } catch (_) {}
+    thumb.classList.add('dragging');
+    e.preventDefault();
+  });
+  thumb.addEventListener('pointermove', (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const travel = list.clientHeight - thumb.offsetHeight;
+    if (travel > 0) list.scrollTop = drag.top + (e.clientY - drag.y) * (list.scrollHeight - list.clientHeight) / travel;
+  });
+  const end = (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    drag = null;
+    thumb.classList.remove('dragging');
+  };
+  thumb.addEventListener('pointerup', end);
+  thumb.addEventListener('pointercancel', end);
+})();
 
 // key: an i18n key, or '' to clear. Kept in data-i18n so a language switch
 // (pmApplyI18n) re-translates a status that is already on screen.
@@ -40060,6 +40154,7 @@ function pmBookmarksApplyVisibility() {
     const visible = pmBookmarksIsVisible(row.dataset.path, pmBookmarksState.collapsedPaths);
     row.classList.toggle('pm-bookmarks-hidden', !visible);
   });
+  pmBookmarksUpdateThumb();   // the list grew or shrank
 }
 
 function pmBookmarksToggleGroup(path) {
@@ -40238,10 +40333,9 @@ function pmBookmarksRenderList(flatItems) {
       // only jump to the page on a plain click, same as a file manager.
       if (!e.shiftKey && !e.ctrlKey && !e.metaKey) {
         pmBookmarksGoTo(node.pageIndex);
-        // A phone's sheet covers the page it went to: it goes, as an
-        // outline does in a reader app (a long press still opens the
-        // bookmark's own menu).
-        if (isTouchDevice) pmBookmarksClose();
+        // Phones: the sheet stays open, the bookmark lit until the page is
+        // moved (pmBookmarksCheckLanded).
+        if (isTouchDevice) pmBookmarksMarkLanded(node.pageIndex);
       }
     });
     if (typeof peBindPointerDown === 'function') {
@@ -41405,30 +41499,43 @@ function pmBookmarksToggle() {
   pmBookmarksOpen();
 }
 
-// Phones: the panel is a sheet over the pages (CSS), opened from the bottom
-// bar's Bookmarks button, which stays lit meanwhile. A transparent backdrop
-// under it closes it on a tap beside it, keeps that tap off the pages (a
-// .modal-overlay-active: the pages' own taps stand back for it) and makes
-// the Android back key close it too, the way it closes a dialog.
+// Phones: the panel is a sheet at the bottom of the work area (CSS,
+// pmBookmarksPositionPanel), opened and closed by the bottom bar's
+// Bookmarks button, which stays lit meanwhile, or closed by its own cross.
+// The pages stay usable above it.
 function pmBookmarksSyncPhoneSheet(open) {
   const bb = document.getElementById('pmBbBookmarks');
   if (bb) {
     bb.classList.toggle('pm-bb-open', !!open);
     bb.setAttribute('aria-pressed', open ? 'true' : 'false');
   }
-  let backdrop = document.getElementById('pmBookmarksBackdrop');
-  if (!open || !isTouchDevice) {
-    if (backdrop) backdrop.remove();
-    return;
-  }
-  if (!backdrop) {
-    backdrop = document.createElement('div');
-    backdrop.id = 'pmBookmarksBackdrop';
-    backdrop.className = 'modal-overlay-active';
-    backdrop.addEventListener('click', () => pmBookmarksClose());
-    backdrop.addEventListener('contextmenu', (e) => e.preventDefault());
-    document.body.appendChild(backdrop);
-  }
+  if (!open) pmBookmarksLanded = null;
+}
+
+// Phones: the bookmark tapped stays lit - "you are here" - while the page it
+// went to stays where the jump put it on screen; moving the page (a scroll,
+// a zoom) lets it go. Measured on the page itself, not the scroll position:
+// the menus folding away change the scroll but hold the pages in place.
+// var: pmBookmarksClose (and so pmBookmarksSyncPhoneSheet) can run during
+// script init (updateUIState), before this line.
+var pmBookmarksLanded = null;   // { pageEl, top, left }
+function pmBookmarksMarkLanded(pageIndex) {
+  const pageEl = pagesContainer.querySelector('.page[data-index="' + pageIndex + '"]');
+  if (!pageEl) { pmBookmarksLanded = null; return; }
+  const r = pageEl.getBoundingClientRect();
+  pmBookmarksLanded = { pageEl, top: r.top, left: r.left };
+}
+function pmBookmarksCheckLanded() {
+  const l = pmBookmarksLanded;
+  if (!l) return;
+  const r = l.pageEl.isConnected ? l.pageEl.getBoundingClientRect() : null;
+  if (r && Math.abs(r.top - l.top) <= 6 && Math.abs(r.left - l.left) <= 6) return;
+  pmBookmarksLanded = null;
+  pmBookmarksState.selectedIds = new Set();
+  pmBookmarksState.selectedId = null;
+  document.querySelectorAll('#pmBookmarksList .pm-bookmarks-row.pm-bookmarks-selected')
+    .forEach((el) => el.classList.remove('pm-bookmarks-selected'));
+  pmBookmarksUpdateDeleteBtnState();
 }
 
 (function pmBookmarksInit() {
