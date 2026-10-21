@@ -21876,6 +21876,12 @@
     const PM_AUTO_SELECT_EXIT = 0.45;
     let pmAutoSelectModeOn = false;
     let pmAutoSelectedIdx = null;
+    // The page the mode had selected when it was zoomed out of: it stays
+    // selected (and shows its mini-tools, as any selected page does), but
+    // nobody picked it, so the folded-away menus do not come back for it
+    // (see updateMobileQuickActions). Dropped once the selection changes.
+    // var: updateMobileQuickActions runs during script init, before this line.
+    var pmAutoKeptIdx = null;
     // Set by the hold gesture to let the mini-tools through for that one
     // page - an auto-selection on its own must never pop them up.
     let pmQuickActionsRequestedIdx = null;
@@ -21951,6 +21957,15 @@
      * answer right now (the hold's select stage). */
     function pmUpdateAutoPageSelection(force) {
       if (!isTouchDevice) return;
+      // Multi-select is ticking pages by tap: nothing selects itself there.
+      if (multiSelectMode) {
+        if (pmAutoSelectModeOn || pmAutoSelectedIdx != null) {
+          pmAutoSelectModeOn = false;
+          pmAutoSelectedIdx = null;
+          pmMarkAutoSelectedPage(null);
+        }
+        return;
+      }
       if (isDragActive || rubberActive || rubberArmed || pinchActive) return;
       const now = (typeof performance !== 'undefined' && performance.now)
         ? performance.now() : Date.now();
@@ -21971,6 +21986,10 @@
       pmAutoSelectLastRunAt = now;
       const page = pmAutoSelectCandidatePage();
       if (!page) {
+        if (pmAutoSelectModeOn && pmAutoSelectedIdx != null &&
+            selectedPages.size === 1 && selectedPages.has(pmAutoSelectedIdx)) {
+          pmAutoKeptIdx = pmAutoSelectedIdx;
+        }
         pmAutoSelectModeOn = false;
         pmAutoSelectedIdx = null;
         pmMarkAutoSelectedPage(null);
@@ -21979,6 +21998,7 @@
       const idx = parseInt(page.dataset.index, 10);
       if (Number.isNaN(idx)) return;
       pmAutoSelectModeOn = true;
+      pmAutoKeptIdx = null;
       if (markedForDeletion.has(idx)) {
         // Cannot be selected, so it must not be tinted either - the tint
         // means "this is the active page", and disagreeing with the
@@ -22018,6 +22038,9 @@
       // return it takes.
       const shownBefore = pmQuickActionsShownIdx;
       pmQuickActionsShownIdx = null;
+      if (pmAutoKeptIdx != null && !(selectedPages.size === 1 && selectedPages.has(pmAutoKeptIdx))) {
+        pmAutoKeptIdx = null;
+      }
       document.querySelectorAll('.page.mobile-quick-visible, .page.keep-actions-visible')
         .forEach(p => {
           p.classList.remove('mobile-quick-visible', 'keep-actions-visible', 'actions-fading');
@@ -22052,7 +22075,9 @@
       // tools comes back too if it had folded away (once per appearance -
       // this runs on every scroll frame while they stay up).
       pmQuickActionsShownIdx = idx;
-      if (shownBefore !== idx) pmRevealTopMenuForSelection(page);
+      if (shownBefore !== idx && !(idx === pmAutoKeptIdx && pmQuickActionsRequestedIdx !== idx)) {
+        pmRevealTopMenuForSelection(page);
+      }
 
       const gap = 6;
       const pageRect = page.getBoundingClientRect();
@@ -23399,6 +23424,9 @@
       refreshCheckboxes();
       updateUIState();
       if (hadSelection) notifySelectionChanged();
+      // High zoom: switched on, nothing selects itself any more; switched
+      // off, the page in view does again, without waiting for a scroll.
+      if (typeof pmUpdateAutoPageSelection === 'function') pmUpdateAutoPageSelection(true);
     }
 
     function refreshCheckboxes() {
