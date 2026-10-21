@@ -7091,6 +7091,12 @@
         touch-action: none;
         overscroll-behavior: none;
       }
+      /*A pinch joining a finger that was already scrolling: that scroll stops
+        for the pinch (see the pinch's touchstart) - not scrollable, so the
+        browser's gesture has nothing left to move.*/
+      .main.pm-pinch-scroll-stopped {
+        overflow: hidden !important;
+      }
       .pages.dragging-active .page {
         touch-action: none;
       }
@@ -21220,6 +21226,14 @@
       if (!isTouchDevice || isLoading || !pdfDoc) return;
       if (e.touches.length === 2) {
         pmOneFingerZoom = null;   // a second finger: the pinch proper takes over
+        // Joining a finger already down: the browser may be scrolling for
+        // it already, and a scroll under way is not stopped by
+        // preventDefault() - it went on moving the pages under the pinch,
+        // which moves them too, and both together jerked. The work area
+        // stops scrolling for the pinch instead (endPinch lets it go).
+        if (e.changedTouches.length < e.touches.length) {
+          scrollContainer.classList.add('pm-pinch-scroll-stopped');
+        }
         const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
         const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
         pmBeginPinch(midX, midY);
@@ -21307,6 +21321,7 @@
         clearPinchVisualScale();
         pinchActive = false;
         document.body.classList.remove('pinch-zooming');
+        scrollContainer.classList.remove('pm-pinch-scroll-stopped');
 
         // Column count changed during the pinch → the scale settles on the
         // new column count's exact fill-width scale. That scale follows from
