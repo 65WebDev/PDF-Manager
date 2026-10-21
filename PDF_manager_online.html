@@ -1359,6 +1359,8 @@
     #markBlankBtn:hover:not(:disabled) { background: #3498db; }
     #markBlankBtn svg { display: block; }
     @media (pointer: coarse) { #markBlankBtn { display: none !important; } }
+    /*Touch layouts: pages marked for deletion are always hidden - no eye.*/
+    @media (pointer: coarse) { #toggleDeletedBtn { display: none !important; } }
     /*Short message at the bottom of the window (pmShowToast).*/
     #pmToast {
       position: fixed; left: 50%; bottom: 28px; z-index: 100002;
@@ -1659,10 +1661,6 @@
     .mode-btn.active-mode { background: #3498db; }
     /*Mobile reading mode button - hidden on desktop*/
     #mobileReadModeBtn { display: none; }
-    /*Share - only in the Android app's touch toolbar (body.pm-android-app)*/
-    #shareBtn { display: none; }
-    /*In reading mode, the undo/redo mobile buttons are hidden*/
-    body.read-mode-active #mobileUndoRedoBar { display: none !important; }
 
     /*Floating Zoom Block - Desktop Only, Read Only*/
     #readModeScaleOverlay {
@@ -4836,10 +4834,148 @@
     /*The “hand” icon in the zoom-pan on mobile devices is hidden by default (styles in @media coarse)*/
     #zoomPanHandBadge { display: none; }
     /*Mobile Undo/Redo - only on touch devices (styles in @media coarse)*/
-    #mobileUndoRedoBar,
     #peMobileUndoRedoBar { display: none; }
     /*Mobile scroll slider - only on touch devices (styles in @media coarse)*/
     #mobileScrollRail { display: none; }
+    /*Bottom bar (touch layouts only): undo / redo, page selection, tools,
+       search, print, share. A flex item under the work area, so the pages
+       end above it; it folds away with the top menu (body.pm-menu-collapsed,
+       set by toggleTopMenu) and is not there in reading mode.*/
+    #pmBottomBar { display: none; }
+    @media (pointer: coarse) {
+      #pmBottomBar {
+        display: flex;
+        flex: none;
+        align-items: center;
+        justify-content: space-evenly;
+        gap: 4px;
+        box-sizing: border-box;
+        height: calc(54px + env(safe-area-inset-bottom, 0px));
+        padding: 6px max(6px, env(safe-area-inset-right, 0px))
+                 calc(6px + env(safe-area-inset-bottom, 0px)) max(6px, env(safe-area-inset-left, 0px));
+        background: #2c3e50;
+        box-shadow: 0 -2px 6px rgba(0, 0, 0, 0.18);
+        overflow: hidden;
+        position: relative;
+        z-index: 20;
+        transition: height 0.22s ease, padding 0.22s ease;
+      }
+      #pmBottomBar[hidden],
+      body.read-mode-active #pmBottomBar { display: none; }
+      body.pm-menu-collapsed #pmBottomBar {
+        height: 0;
+        padding-top: 0;
+        padding-bottom: 0;
+        box-shadow: none;
+      }
+      #pmBottomBar button {
+        flex: none;
+        width: 42px;
+        height: 42px;
+        padding: 0;
+        border: 0;
+        border-radius: 8px;
+        background: #34495e;
+        color: #fff;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        user-select: none;
+        -webkit-user-select: none;
+        -webkit-touch-callout: none;
+        -webkit-tap-highlight-color: transparent;
+        touch-action: manipulation;
+      }
+      #pmBottomBar button:disabled { opacity: 0.38; }
+      #pmBottomBar button:active:not(:disabled),
+      #pmBottomBar button.pm-bb-open { background: #3498db; }
+      #pmBottomBar button.pm-bb-open { box-shadow: 0 0 0 2px #6f93b6; }
+      #pmBottomBar .pm-bb-sep {
+        flex: none;
+        width: 1px;
+        height: 26px;
+        background: rgba(255, 255, 255, 0.2);
+      }
+      /*Share: the Android app's system share sheet.*/
+      #pmBottomBar #pmBbShare { display: none; }
+      body.pm-android-app #pmBottomBar #pmBbShare { display: inline-flex; }
+      /*The page number tab sits at the bottom edge of the screen - on top
+        of the bar while it is up. It shows only while the bar is folded away.*/
+      body.pm-bottom-bar-on:not(.pm-menu-collapsed):not(.read-mode-active) #pageNumTab {
+        display: none !important;
+      }
+      /*The short message at the bottom stays clear of the bar.*/
+      body.pm-bottom-bar-on:not(.pm-menu-collapsed):not(.read-mode-active) #pmToast {
+        bottom: calc(82px + env(safe-area-inset-bottom, 0px));
+      }
+    }
+    /*Menu that a bar button or a held Save / Export opens (pmShowPopMenu):
+       icons with captions. It stays after the finger lifts; a tap anywhere
+       else (on the backdrop) closes it.*/
+    #pmPopMenuBackdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 100003;
+      background: transparent;
+    }
+    #pmPopMenu {
+      position: fixed;
+      z-index: 100004;
+      box-sizing: border-box;
+      min-width: 210px;
+      max-width: calc(100vw - 16px);
+      max-height: calc(100vh - 16px);
+      overflow-y: auto;
+      padding: 6px;
+      /*A light frame, a dark outline and a lighter fill: the menu opens
+        over the top bar, and in the bar's own colour the two ran together.*/
+      border: 2px solid #6f93b6;
+      border-radius: 12px;
+      background: #34495e;
+      color: #fff;
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 10px 30px rgba(0, 0, 0, 0.5);
+      font-family: inherit;
+      /*Holding an item shows its tooltip - not a text selection.*/
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+    }
+    #pmPopMenu .pm-pop-title {
+      padding: 6px 12px 4px;
+      font-size: 12px;
+      color: #a9c4dc;
+    }
+    #pmPopMenu button {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      width: 100%;
+      min-height: 46px;
+      padding: 8px 12px;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      font-size: 15px;
+      line-height: 1.25;
+      text-align: left;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      touch-action: manipulation;
+    }
+    #pmPopMenu button:active:not(:disabled) { background: #3498db; }
+    #pmPopMenu button:disabled { opacity: 0.4; }
+    #pmPopMenu .pm-pop-ico {
+      flex: none;
+      width: 26px;
+      height: 26px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #pmPopMenu .pm-pop-ico svg { width: 22px; height: 22px; display: block; }
     /*File name text - normal size and style, without distortion*/
     #stickyFileBar .bar-text {
       font-size: 15px;
@@ -6186,13 +6322,8 @@
       /*Bookmarks popup: desktop-only for now, same as the mode-switch group next to it*/
       #bookmarksBtn { display: none !important; }
       #mobileReadModeBtn { display: inline-flex !important; }
-      /*Android app: Share after reading mode, Print back in the tool row -
-         a 6th column in both rows (the system share sheet / print dialog
-         are what a phone has instead of downloads and the browser's viewer).
-         Printing the selected pages stays in the page menu (long press).*/
-      body.pm-android-app #shareBtn { display: inline-flex !important; }
-      body.pm-android-app .print-wrapper { display: inline-flex !important; }
-      body.pm-android-app #printSelectedBtn { display: none !important; }
+      /*Android app: Share and Print are in the bottom bar (#pmBottomBar),
+         like Print in the browser.*/
       /*Merge button hidden on mobile (replaced with read button)*/
       #mergeBtn { display: none !important; }
       /*The hover on the touchscreen “sticks” after tapping - remove the constant blue backlight;
@@ -6229,15 +6360,6 @@
       /*We reduce the gaps and indentation under the logo so that 5 icons fit into a row*/
       .main-row { gap: 8px 8px; padding-right: 56px; }
       .left-actions, .right-actions, .centered-actions { gap: 8px; }
-      /*Android app on a narrower phone (360-391 px): 6 icons per row -
-         narrower gaps, and the row may run up to 6 px short of the logo
-         column (from 392 px the usual gaps fit).*/
-      @media (max-width: 391px) {
-        body.pm-android-app .main-row { gap: 8px 4px; padding-right: 48px; }
-        body.pm-android-app .left-actions,
-        body.pm-android-app .right-actions,
-        body.pm-android-app .centered-actions { gap: 4px; }
-      }
 
       /*We bring the icons of the central block to the same sizes as the file icons
          (40x40, padding 7px) so that both rows are aligned one to one.
@@ -6362,6 +6484,31 @@
       }
       .top-menu #deleteBtn.menu-tap-feedback:not(:disabled) {
         background: #cc3d40 !important;
+      }
+      /*Held open: while its menu is up the button stays pressed (pmShowPopMenu
+        sets pm-bb-open), ringed in the menu's frame colour - the menu below
+        belongs to it.*/
+      .top-menu button.pm-bb-open:not(:disabled) {
+        background: #3498db !important;
+        box-shadow: 0 0 0 2px #6f93b6;
+      }
+      .top-menu .save-btn.pm-bb-open:not(:disabled) {
+        background: #2ecc71 !important;
+      }
+      /*A long press on these opens a menu (pmHoldMenu): a small mark in the
+        corner, as on toolbars with a menu behind a hold.*/
+      button[data-pm-hold-menu] { position: relative; }
+      button[data-pm-hold-menu]::after {
+        content: '';
+        position: absolute;
+        right: 4px;
+        bottom: 4px;
+        width: 0;
+        height: 0;
+        border-left: 6px solid transparent;
+        border-bottom: 6px solid currentColor;
+        opacity: 0.8;
+        pointer-events: none;
       }
 
       /*File name blind: without text selection, long press tooltip*/
@@ -6951,7 +7098,6 @@
         transform: scale(0.955);
       }
       /*Undo/Redo - round buttons under the file name (top right)*/
-      #mobileUndoRedoBar.visible,
       #peMobileUndoRedoBar.visible {
         display: flex;
         position: fixed;
@@ -6964,7 +7110,6 @@
       }
       /* Page editor modal is its own stacking context — keep the bar above stage chrome. */
       #peMobileUndoRedoBar.visible { z-index: 80; }
-      #mobileUndoRedoBar button,
       #peMobileUndoRedoBar button {
         position: relative;
         width: 42px;
@@ -6985,20 +7130,17 @@
         -webkit-tap-highlight-color: transparent;
         touch-action: manipulation;
       }
-      #mobileUndoRedoBar button:active:not(:disabled),
       #peMobileUndoRedoBar button:active:not(:disabled) {
         background: #3498db;
         color: #fff;
         border-color: #3498db;
       }
-      #mobileUndoRedoBar button:disabled,
       #peMobileUndoRedoBar button:disabled {
         opacity: 0.38;
         pointer-events: none;
       }
       /*Tooltips for Undo/Redo - pop up ABOVE the buttons (buttons in the lower left
          corner, the native title is drawn at the bottom and would go off the edge of the screen).*/
-      #mobileUndoRedoBar button[data-tip]::after,
       #peMobileUndoRedoBar button[data-tip]::after {
         content: attr(data-tip);
         position: absolute;
@@ -7018,9 +7160,6 @@
         transition: opacity 0.14s ease, transform 0.14s ease;
         z-index: 1;
       }
-      #mobileUndoRedoBar button[data-tip]:hover::after,
-      #mobileUndoRedoBar button[data-tip]:focus-visible::after,
-      #mobileUndoRedoBar button[data-tip]:active::after,
       #peMobileUndoRedoBar button[data-tip]:hover::after,
       #peMobileUndoRedoBar button[data-tip]:focus-visible::after,
       #peMobileUndoRedoBar button[data-tip]:active::after {
@@ -7928,7 +8067,6 @@
           <button class="img-save-btn img-save-btn--encrypt img-save-btn--right" onclick="savePDF('encrypt')" title="Зашифровать паролем, который потребуется для открытия файла" aria-label="Зашифровать паролем" data-i18n-title="tipEncrypt" data-i18n-aria="encryptFileTooltip"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg></button>
         </div>
         <button id="mobileReadModeBtn" class="compact-btn" onclick="enterReadMode()" disabled title="Режим чтения" data-i18n-title="readMode"><span class="btn-ico"><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span></button>
-        <button id="shareBtn" class="compact-btn" onclick="pmShareDocument()" disabled title="Поделиться документом" aria-label="Поделиться документом" data-i18n-title="shareDocument" data-i18n-aria="shareDocument"><span class="btn-ico"><svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><line x1="8.3" y1="13.3" x2="15.7" y2="17.7"/><line x1="15.7" y1="6.3" x2="8.3" y2="10.7"/></svg></span></button>
       </div>
 
       <!--Scale is a separate block, moved independently-->
@@ -8476,11 +8614,6 @@
     <div id="mobileScrollTrack"><div id="mobileScrollThumb"></div></div>
   </div>
 
-  <!--Mobile Undo/Redo buttons (under the file name)-->
-  <div id="mobileUndoRedoBar" aria-hidden="true">
-    <button id="mobileUndoBtn" type="button" data-tip="Вернуть на шаг назад" data-i18n-title="undoMobile" aria-label="Вернуть на шаг назад" data-i18n-aria="undoMobile">←</button>
-    <button id="mobileRedoBtn" type="button" data-tip="Отмена возврата" data-i18n-title="redoMobile" aria-label="Отмена возврата" data-i18n-aria="redoMobile">→</button>
-  </div>
 
   <!--Small curtain with the current page number (only with one column)-->
   <div id="pageNumTab"></div>
@@ -8738,6 +8871,20 @@
       <div class="help-row" data-i18n-html="helpTabClose"><span class="hk">Ctrl + Del</span> — закрыть вкладку</div>
     </div>
   </div>
+
+  <!--Bottom bar (touch layouts): undo / redo, page selection, tools, search,
+      print (and share in the Android app) - what the two top rows have no
+      room for. It folds away together with the top menu.-->
+  <nav id="pmBottomBar" hidden>
+    <button id="mobileUndoBtn" type="button" disabled title="Вернуть на шаг назад" data-i18n-title="undoMobile" aria-label="Вернуть на шаг назад" data-i18n-aria="undoMobile"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg></button>
+    <button id="mobileRedoBtn" type="button" disabled title="Отмена возврата" data-i18n-title="redoMobile" aria-label="Отмена возврата" data-i18n-aria="redoMobile"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></svg></button>
+    <span class="pm-bb-sep" aria-hidden="true"></span>
+    <button id="pmBbSelect" type="button" disabled aria-haspopup="menu" title="Выбор страниц" data-i18n-title="bbSelectPages" aria-label="Выбор страниц" data-i18n-aria="bbSelectPages"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><path d="m4.8 6.6 1.5 1.5 2.6-2.8"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 6.5h7M14 17.5h7"/></svg></button>
+    <button id="pmBbTools" type="button" disabled aria-haspopup="menu" title="Инструменты" data-i18n-title="bbTools" aria-label="Инструменты" data-i18n-aria="bbTools"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg></button>
+    <button id="pmBbSearch" type="button" disabled title="Поиск по документу" data-i18n-title="bbSearch" aria-label="Поиск по документу" data-i18n-aria="bbSearch"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
+    <button id="pmBbPrint" type="button" disabled title="Печать" data-i18n-title="bbPrint" aria-label="Печать" data-i18n-aria="bbPrint"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg></button>
+    <button id="pmBbShare" type="button" disabled title="Поделиться документом" data-i18n-title="shareDocument" aria-label="Поделиться документом" data-i18n-aria="shareDocument"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="m8.6 13.5 6.8 4M15.4 6.5l-6.8 4"/></svg></button>
+  </nav>
 
   <!--LOADING OVERLAY-->
   <div id="loadingOverlay">
@@ -9167,6 +9314,12 @@
     //Tooltip “which pages have changed” for step-by-step fixation of rotations
     //(each turn is a separate step in the story, even with quick presses in a row).
     let historyChangeHint = null;
+    // What the next history step does, for the undo / redo menus on phones
+    // (pmHistoryStepLabel): { key, pages } - an i18n key and the page
+    // indices it touched. The action sets it right before it marks the
+    // document dirty; a step without one is described from how it differs
+    // from the step before it.
+    let historyActionLabel = null;
     let historyCommitChain = Promise.resolve();
     let selectedPages = new Set();
     let markedForDeletion = new Set();
@@ -10045,6 +10198,20 @@
         alertNoPagesToPrint: 'Нет страниц для печати',
         alertNoPagesToShare: 'Нет страниц, чтобы поделиться', shareDocument: 'Поделиться документом',
         shareError: 'Не удалось поделиться файлом',
+        bbSelectPages: 'Выбор страниц', bbSelectAll: 'Выбрать все', bbSelectNone: 'Снять выделение',
+        bbTools: 'Инструменты', bbSearch: 'Поиск по документу',
+        bbPrint: 'Печать', bbPrintDocument: 'Весь документ', bbPrintSelected: 'Выделенные страницы ({n})',
+        bbToolWatermark: 'Водяной знак', bbToolHeaderFooter: 'Колонтитулы', bbToolPageFormat: 'Единый формат страниц',
+        bbToolAutoCrop: 'Обрезать белые поля', bbToolFindBlank: 'Найти пустые страницы',
+        histUndoMenu: 'Отменить', histRedoMenu: 'Повторить',
+        histRotate: 'Поворот', histFormField: 'Заполнение поля', histWatermark: 'Водяной знак',
+        histHeaderFooter: 'Колонтитулы', histPageFormat: 'Единый формат', histAutoCrop: 'Обрезка полей',
+        histMarkup: 'Пометка текста', histRedact: 'Закрашивание текста', histPageEdit: 'Редактирование',
+        histSelect: 'Выделение', histDeselect: 'Снятие выделения', histSelectNone: 'Снятие всего выделения',
+        histDelete: 'Удаление', histRestore: 'Восстановление', histInsert: 'Добавлено страниц: {n}',
+        histRemove: 'Убрано страниц: {n}', histMove: 'Перемещение страниц', histEdit: 'Изменение',
+        histChange: 'Изменение документа', histGoToPage: 'Переход к стр. {n}', histScroll: 'Прокрутка', histScrollOnPage: 'Прокрутка на стр. {n}',
+        histPagesList: 'стр. {list}', histPagesCount: '{n} стр.',
         printAllFilePrefix: 'для_печати_',
         alertPreparePrintAllError: 'Ошибка при подготовке документа к печати',
         alertNoDocument: 'Нет документа',
@@ -10521,6 +10688,20 @@
         alertNoPagesToPrint: 'No pages to print',
         alertNoPagesToShare: 'No pages to share', shareDocument: 'Share document',
         shareError: 'Could not share the file',
+        bbSelectPages: 'Select pages', bbSelectAll: 'Select all', bbSelectNone: 'Clear selection',
+        bbTools: 'Tools', bbSearch: 'Search the document',
+        bbPrint: 'Print', bbPrintDocument: 'Whole document', bbPrintSelected: 'Selected pages ({n})',
+        bbToolWatermark: 'Watermark', bbToolHeaderFooter: 'Headers and footers', bbToolPageFormat: 'One page size',
+        bbToolAutoCrop: 'Crop white margins', bbToolFindBlank: 'Find blank pages',
+        histUndoMenu: 'Undo', histRedoMenu: 'Redo',
+        histRotate: 'Rotate', histFormField: 'Form field', histWatermark: 'Watermark',
+        histHeaderFooter: 'Headers & footers', histPageFormat: 'Uniform page size', histAutoCrop: 'Crop margins',
+        histMarkup: 'Text markup', histRedact: 'Text redaction', histPageEdit: 'Page edit',
+        histSelect: 'Select', histDeselect: 'Deselect', histSelectNone: 'Clear selection',
+        histDelete: 'Delete', histRestore: 'Restore', histInsert: 'Pages added: {n}',
+        histRemove: 'Pages removed: {n}', histMove: 'Move pages', histEdit: 'Change',
+        histChange: 'Document change', histGoToPage: 'Go to page {n}', histScroll: 'Scroll', histScrollOnPage: 'Scroll on page {n}',
+        histPagesList: 'p. {list}', histPagesCount: '{n} pages',
         printAllFilePrefix: 'for_print_',
         alertPreparePrintAllError: 'Error preparing the document for printing',
         alertNoDocument: 'No document',
@@ -10997,6 +11178,20 @@
         alertNoPagesToPrint: 'No hay páginas para imprimir',
         alertNoPagesToShare: 'No hay páginas para compartir', shareDocument: 'Compartir documento',
         shareError: 'No se pudo compartir el archivo',
+        bbSelectPages: 'Seleccionar páginas', bbSelectAll: 'Seleccionar todas', bbSelectNone: 'Quitar la selección',
+        bbTools: 'Herramientas', bbSearch: 'Buscar en el documento',
+        bbPrint: 'Imprimir', bbPrintDocument: 'Todo el documento', bbPrintSelected: 'Páginas seleccionadas ({n})',
+        bbToolWatermark: 'Marca de agua', bbToolHeaderFooter: 'Encabezados y pies de página', bbToolPageFormat: 'Mismo tamaño de página',
+        bbToolAutoCrop: 'Recortar márgenes blancos', bbToolFindBlank: 'Buscar páginas en blanco',
+        histUndoMenu: 'Deshacer', histRedoMenu: 'Rehacer',
+        histRotate: 'Girar', histFormField: 'Campo de formulario', histWatermark: 'Marca de agua',
+        histHeaderFooter: 'Encabezados y pies', histPageFormat: 'Tamaño uniforme', histAutoCrop: 'Recortar márgenes',
+        histMarkup: 'Marcado de texto', histRedact: 'Ocultar texto', histPageEdit: 'Edición de página',
+        histSelect: 'Seleccionar', histDeselect: 'Deseleccionar', histSelectNone: 'Quitar selección',
+        histDelete: 'Eliminar', histRestore: 'Restaurar', histInsert: 'Páginas añadidas: {n}',
+        histRemove: 'Páginas quitadas: {n}', histMove: 'Mover páginas', histEdit: 'Cambio',
+        histChange: 'Cambio del documento', histGoToPage: 'Ir a la pág. {n}', histScroll: 'Desplazamiento', histScrollOnPage: 'Desplazamiento en la pág. {n}',
+        histPagesList: 'pág. {list}', histPagesCount: '{n} págs.',
         printAllFilePrefix: 'para_imprimir_',
         alertPreparePrintAllError: 'Error al preparar el documento para imprimir',
         alertNoDocument: 'No hay documento',
@@ -11548,6 +11743,20 @@
         alertNoPagesToPrint: '没有可打印的页面',
         alertNoPagesToShare: '没有可分享的页面', shareDocument: '分享文档',
         shareError: '无法分享文件',
+        bbSelectPages: '选择页面', bbSelectAll: '全选', bbSelectNone: '取消选择',
+        bbTools: '工具', bbSearch: '在文档中搜索',
+        bbPrint: '打印', bbPrintDocument: '整个文档', bbPrintSelected: '所选页面 ({n})',
+        bbToolWatermark: '水印', bbToolHeaderFooter: '页眉和页脚', bbToolPageFormat: '统一页面尺寸',
+        bbToolAutoCrop: '裁剪白边', bbToolFindBlank: '查找空白页',
+        histUndoMenu: '撤销', histRedoMenu: '重做',
+        histRotate: '旋转', histFormField: '表单字段', histWatermark: '水印',
+        histHeaderFooter: '页眉页脚', histPageFormat: '统一页面尺寸', histAutoCrop: '裁剪边距',
+        histMarkup: '文本标注', histRedact: '涂黑文本', histPageEdit: '编辑页面',
+        histSelect: '选择', histDeselect: '取消选择', histSelectNone: '清除选择',
+        histDelete: '删除', histRestore: '恢复', histInsert: '已添加页面：{n}',
+        histRemove: '已移除页面：{n}', histMove: '移动页面', histEdit: '更改',
+        histChange: '文档更改', histGoToPage: '转到第 {n} 页', histScroll: '滚动', histScrollOnPage: '在第 {n} 页滚动',
+        histPagesList: '第 {list} 页', histPagesCount: '{n} 页',
         printAllFilePrefix: '打印_',
         alertPreparePrintAllError: '准备打印文档时出错',
         alertNoDocument: '没有文档',
@@ -11827,7 +12036,6 @@
     const toggleDeletedBtn = document.getElementById('toggleDeletedBtn');
     const printBtn = document.getElementById('printBtn');
     const printSelectedBtn = document.getElementById('printSelectedBtn');
-    const shareBtn = document.getElementById('shareBtn');
     const exportBtn = document.getElementById('exportBtn');
     const exportDragBtn = document.getElementById('exportDragBtn');
     const replaceBtn = document.getElementById('replaceBtn');
@@ -12426,7 +12634,8 @@
       const selectedNonDeleted = [...selectedPages].filter(i => !markedForDeletion.has(i));
       deleteBtn.disabled = baseDisabled || selectedNonDeleted.length === 0;
       printBtn.disabled = baseDisabled;
-      if (shareBtn) shareBtn.disabled = baseDisabled;
+      // Bottom bar (touch): there once a document is open.
+      if (isTouchDevice) pmSyncBottomBar(baseDisabled, noDocument);
       if (printSelectedBtn) printSelectedBtn.disabled = baseDisabled || selectedNonDeleted.length === 0;
       exportBtn.disabled = baseDisabled || selectedNonDeleted.length === 0;
       //Pop-up export buttons (like images + drag) repeat the export state
@@ -13700,8 +13909,21 @@
       try { return !!peState; } catch (_) { return false; }
     }
 
+    function pmLabelNextHistoryStep(key, pages) {
+      historyActionLabel = { key, pages: pages ? pages.slice() : null };
+    }
+    function pmTakeHistoryActionLabel() {
+      const label = historyActionLabel;
+      historyActionLabel = null;
+      return label;
+    }
+
     function scheduleHistoryPush() {
-      if (historyPushSuspended || undoRedoBusy || !pdfDoc || pmPageEditorOpen()) { historyChangeHint = null; return; }
+      if (historyPushSuspended || undoRedoBusy || !pdfDoc || pmPageEditorOpen()) {
+        historyChangeHint = null;
+        historyActionLabel = null;
+        return;
+      }
       flushSelectionHistorySync();
       //Step-by-step branch for turns: we fix the bytes of the document IMMEDIATELY (at the moment
       //operation) without waiting for the animation to finish. Otherwise, quick turns in a row
@@ -13709,6 +13931,7 @@
       if (historyChangeHint) {
         const hint = historyChangeHint.slice();
         historyChangeHint = null;
+        const label = pmTakeHistoryActionLabel();
         const marked = [...markedForDeletion].sort((x, y) => x - y);
         // Serialize saves on the commit chain and wait until history thumbnail
         // fills release the live pdfDoc — overlapping pdfDoc.save() during a
@@ -13720,7 +13943,7 @@
             const savePromise = (typeof saveLivePdfBytes === 'function')
               ? saveLivePdfBytes()
               : pdfDoc.save().then(b => new Uint8Array(b));
-            return commitHistoryStep(savePromise, marked, hint);
+            return commitHistoryStep(savePromise, marked, hint, { label });
           })
           .catch(e => console.error(e));
         return;
@@ -13896,7 +14119,8 @@
       }
       docHistory = docHistory.slice(0, docHistoryIndex + 1);
       const sel = captureSelectionState();
-      docHistory.push({ pdfBytes, marked, pages, pendingIdx, selected: sel.selected, lastSel: sel.lastSel });
+      docHistory.push({ pdfBytes, marked, pages, pendingIdx, selected: sel.selected, lastSel: sel.lastSel,
+        label: (opts && opts.label) || null });
       trimDocHistory();
       docHistoryIndex = docHistory.length - 1;
       syncDirtyFromHistory();
@@ -13977,7 +14201,8 @@
           pages: cur.pages ? cur.pages.map(p => ({ src: p.src, rotated: p.rotated })) : null,
           pendingIdx: cur.pendingIdx ? cur.pendingIdx.slice() : undefined,
           selected: sel.selected,
-          lastSel: sel.lastSel
+          lastSel: sel.lastSel,
+          selOnly: true
         };
       } else {
         return;
@@ -14010,8 +14235,10 @@
           markedArraysEqual(cur.marked, snap.marked) &&
           selectedArraysEqual(cur.selected, snap.selected) &&
           cur.lastSel === snap.lastSel) {
+        historyActionLabel = null;
         return;
       }
+      snap.label = pmTakeHistoryActionLabel();
       docHistory = docHistory.slice(0, docHistoryIndex + 1);
       docHistory.push(snap);
       trimDocHistory();
@@ -14031,8 +14258,10 @@
           markedArraysEqual(cur.marked, snap.marked) &&
           selectedArraysEqual(cur.selected, snap.selected) &&
           cur.lastSel === snap.lastSel) {
+        historyActionLabel = null;
         return;
       }
+      snap.label = pmTakeHistoryActionLabel();
       docHistory = docHistory.slice(0, docHistoryIndex + 1);
       docHistory.push(snap);
       trimDocHistory();
@@ -14355,26 +14584,14 @@
       }
     }
 
-    function positionMobileUndoRedoBar() {
-      //The position of the Undo/Redo panel is now completely set in CSS
-      //(fixed left-bottom corner), so we don't do anything here.
-    }
-
     function updateUndoRedoUI() {
-      const bar = document.getElementById('mobileUndoRedoBar');
       const undoBtn = document.getElementById('mobileUndoBtn');
       const redoBtn = document.getElementById('mobileRedoBtn');
-      if (!bar) return;
+      if (!undoBtn || !redoBtn || !isTouchDevice) return;
 
-      if (!isTouchDevice) {
-        bar.classList.remove('visible');
-        bar.setAttribute('aria-hidden', 'true');
-        return;
-      }
-
-      //While undo/redo is running, do not touch the panel - otherwise the button may
-      //hide briefly right under your finger (and the tap is “lost”). Final
-      //the state will be recalculated in the finally operation.
+      //While undo/redo is running, do not touch the buttons - otherwise one
+      //may be disabled briefly right under your finger (and the tap is
+      //“lost”). The final state is recalculated in the finally operation.
       if (undoRedoBusy) return;
 
       // The version for smartphones steps through edits and positions
@@ -14383,30 +14600,388 @@
       if (timeline) pmNavTimelineSyncDoc();
       const canUndo = timeline ? pmNavTimelineCanUndo() : canUndoDoc();
       const canRedo = timeline ? pmNavTimelineCanRedo() : canRedoDoc();
-      const showBar = canUndo || canRedo;
-      bar.classList.toggle('visible', showBar);
-      bar.setAttribute('aria-hidden', showBar ? 'false' : 'true');
-      if (undoBtn) {
-        //Slot is always occupied: Undo does not "jump" when Redo appears.
-        undoBtn.style.display = '';
-        undoBtn.disabled = !canUndo;
-      }
-      if (redoBtn) {
-        redoBtn.style.display = '';
-        redoBtn.disabled = !canRedo;
-      }
-      if (showBar) positionMobileUndoRedoBar();
+      // In the bottom bar both are always there, greyed out when idle.
+      undoBtn.disabled = !canUndo;
+      redoBtn.disabled = !canRedo;
       if (typeof updateZoomPanHandBadge === 'function') updateZoomPanHandBadge();
     }
 
+    const pmUndoRedoTimeline = () => typeof pmNavTimelineActive === 'function' && pmNavTimelineActive();
+    /** One step of the smartphone undo (dir -1) / redo (dir 1) buttons. */
+    function pmMobileUndoRedoStep(dir) {
+      if (pmUndoRedoTimeline()) return pmNavTimelineStep(dir);
+      return dir < 0 ? undoDocument() : redoDocument();
+    }
     function initMobileUndoRedo() {
       const undoBtn = document.getElementById('mobileUndoBtn');
       const redoBtn = document.getElementById('mobileRedoBtn');
-      const timeline = () => typeof pmNavTimelineActive === 'function' && pmNavTimelineActive();
-      if (undoBtn) undoBtn.addEventListener('click', () => { if (timeline()) pmNavTimelineStep(-1); else undoDocument(); });
-      if (redoBtn) redoBtn.addEventListener('click', () => { if (timeline()) pmNavTimelineStep(1); else redoDocument(); });
+      if (undoBtn) undoBtn.addEventListener('click', () => pmMobileUndoRedoStep(-1));
+      if (redoBtn) redoBtn.addEventListener('click', () => pmMobileUndoRedoStep(1));
     }
     initMobileUndoRedo();
+
+    // ─── What an undo / redo step did, in words (the hold menus below) ───
+    // The number a page shows under its preview: marked pages are hidden on
+    // phones and get no number, so the pages after them count down.
+    function pmHistoryPageNumber(idx, marked) {
+      if (!deletedPagesHidden || !marked) return idx + 1;
+      let n = idx + 1;
+      for (const m of marked) if (m < idx) n--;
+      return n;
+    }
+    function pmHistoryPagesText(pages, marked) {
+      if (!pages || !pages.length) return '';
+      const nums = pages.slice().sort((a, b) => a - b).map(i => pmHistoryPageNumber(i, marked));
+      return nums.length <= 3 ? t('histPagesList', { list: nums.join(', ') }) : t('histPagesCount', { n: nums.length });
+    }
+    function pmHistoryLabelText(key, pages, marked, n) {
+      const what = t(key, { n });
+      const where = pmHistoryPagesText(pages, marked);
+      return where ? what + ': ' + where : what;
+    }
+    /**
+     * The step from docHistory entry `prev` to `snap`. Actions that label
+     * themselves (pmLabelNextHistoryStep) are named; anything else is read
+     * from what changed: the selection, the pages marked for deletion, the
+     * page count, the order or the pictures of the pages.
+     */
+    function pmHistoryStepLabel(prev, snap) {
+      if (!snap) return '';
+      const marked = prev ? prev.marked : snap.marked;
+      if (snap.label) return pmHistoryLabelText(snap.label.key, snap.label.pages, marked);
+      if (!prev) return t('histChange');
+      if (snap.selOnly) {
+        const was = new Set(prev.selected || []);
+        const now = snap.selected || [];
+        if (!now.length) return t('histSelectNone');
+        const added = now.filter(i => !was.has(i));
+        return added.length
+          ? pmHistoryLabelText('histSelect', added, marked)
+          : pmHistoryLabelText('histDeselect', (prev.selected || []).filter(i => now.indexOf(i) < 0), marked);
+      }
+      const pagesBefore = prev.pages, pagesAfter = snap.pages;
+      if (pagesBefore && pagesAfter && pagesBefore.length !== pagesAfter.length) {
+        const n = Math.abs(pagesAfter.length - pagesBefore.length);
+        return t(pagesAfter.length > pagesBefore.length ? 'histInsert' : 'histRemove', { n });
+      }
+      const wasMarked = new Set(prev.marked || []);
+      const nowMarked = new Set(snap.marked || []);
+      const newlyMarked = [...nowMarked].filter(i => !wasMarked.has(i));
+      if (newlyMarked.length) return pmHistoryLabelText('histDelete', newlyMarked, prev.marked);
+      const unmarked = [...wasMarked].filter(i => !nowMarked.has(i));
+      if (unmarked.length) return pmHistoryLabelText('histRestore', unmarked, snap.marked);
+      if (pagesBefore && pagesAfter) {
+        const changed = [];
+        pagesAfter.forEach((p, i) => {
+          const q = pagesBefore[i];
+          if (!q || p.pending || p.src !== q.src || p.rotated !== q.rotated) changed.push(i);
+        });
+        if (changed.length) {
+          // The same pictures in another order: pages were moved.
+          const before = changed.map(i => pagesBefore[i].src).sort();
+          const after = changed.map(i => pagesAfter[i].src).sort();
+          if (before.every((s, k) => s && s === after[k])) return t('histMove');
+          return pmHistoryLabelText('histEdit', changed, marked);
+        }
+      }
+      return t('histChange');
+    }
+    /** Where a timeline 'pos' step took the user (from spot `prev`). */
+    function pmHistorySpotLabel(prev, spot) {
+      if (!spot || spot.idx == null) return t('histScroll');
+      const cur = docHistoryIndex >= 0 ? docHistory[docHistoryIndex] : null;
+      const n = pmHistoryPageNumber(spot.idx, cur ? cur.marked : null);
+      return t(prev && prev.idx === spot.idx ? 'histScrollOnPage' : 'histGoToPage', { n });
+    }
+
+    /**
+     * The next steps the undo (dir -1) or redo (dir 1) button would take,
+     * nearest first, at most `max`, each { label }. Mirrors
+     * pmNavTimelineStep, including the steps it would skip.
+     */
+    function pmUndoRedoSteps(dir, max) {
+      const out = [];
+      if (pmUndoRedoTimeline()) {
+        pmNavTimelineSyncDoc();
+        // pmNavTimelineStep would record a spot the user scrolled to but has
+        // not rested on yet before stepping away from it: so do we.
+        if (dir < 0 && pmNavTimelineSaveTimer && !pmNavTimelineJumping) pmNavTimelineRecordPos();
+        let k = pmNavTimelineIndex;
+        let d = docHistoryIndex;
+        while (out.length < max && (dir < 0 ? k >= 0 : k < pmNavTimeline.length - 1)) {
+          const e = pmNavTimeline[dir < 0 ? k : k + 1];
+          k += dir;
+          if (e.kind === 'pos') { out.push({ label: pmHistorySpotLabel(e.prev, e.at) }); continue; }
+          const applicable = dir < 0
+            ? docHistory[d] === e.snap && docHistory[d - 1] === e.prev
+            : docHistory[d] === e.prev && docHistory[d + 1] === e.snap;
+          if (!applicable) continue;
+          d += dir;
+          out.push({ label: pmHistoryStepLabel(e.prev, e.snap) });
+        }
+        return out;
+      }
+      for (let d = docHistoryIndex; out.length < max; d += dir) {
+        const from = dir < 0 ? d - 1 : d, to = dir < 0 ? d : d + 1;
+        if (from < 0 || to >= docHistory.length) break;
+        out.push({ label: pmHistoryStepLabel(docHistory[from], docHistory[to]) });
+      }
+      return out;
+    }
+
+    // Holding undo / redo: the last (next) five steps; choosing one takes
+    // the document back (forward) through every step up to it.
+    const PM_UNDO_MENU_STEPS = 5;
+    async function pmUndoRedoGo(dir, count) {
+      for (let i = 0; i < count; i++) {
+        const can = pmUndoRedoTimeline() ? (dir < 0 ? pmNavTimelineCanUndo() : pmNavTimelineCanRedo())
+          : (dir < 0 ? canUndoDoc() : canRedoDoc());
+        if (!can) break;
+        await pmMobileUndoRedoStep(dir);
+      }
+    }
+    function pmShowUndoRedoMenu(btn, dir) {
+      if (!pdfDoc || isLoading || undoRedoBusy) return false;
+      const steps = pmUndoRedoSteps(dir, PM_UNDO_MENU_STEPS);
+      if (!steps.length) return false;
+      pmShowPopMenu(btn, steps.map((s, i) => ({
+        label: s.label,
+        onClick: () => pmUndoRedoGo(dir, i + 1)
+      })), { title: t(dir < 0 ? 'histUndoMenu' : 'histRedoMenu') });
+      return true;
+    }
+
+    // ─── Bottom bar (touch layouts) ───
+    // Undo / redo, page selection, tools, search, print and (in the Android
+    // app) share: what the two top rows have no room for. It folds away with
+    // the top menu (toggleTopMenu sets body.pm-menu-collapsed).
+    function pmSyncBottomBar(baseDisabled, noDocument) {
+      const bar = document.getElementById('pmBottomBar');
+      if (!bar) return;
+      bar.hidden = noDocument;
+      document.body.classList.toggle('pm-bottom-bar-on', !noDocument);
+      for (const id of ['pmBbSelect', 'pmBbTools', 'pmBbSearch', 'pmBbPrint', 'pmBbShare']) {
+        const b = document.getElementById(id);
+        if (b) b.disabled = baseDisabled;
+      }
+    }
+
+    // A menu of icons with captions beside a button. It stays up when the
+    // finger lifts; a tap anywhere else lands on the transparent backdrop and
+    // only closes it, as do Esc and the Android back key (the backdrop counts
+    // as an open dialog for __pmAndroidBack).
+    let pmPopMenuAnchor = null;
+    function pmClosePopMenu() {
+      const menu = document.getElementById('pmPopMenu');
+      if (menu) menu.remove();
+      const backdrop = document.getElementById('pmPopMenuBackdrop');
+      if (backdrop) backdrop.remove();
+      if (pmPopMenuAnchor) pmPopMenuAnchor.classList.remove('pm-bb-open');
+      pmPopMenuAnchor = null;
+      document.removeEventListener('keydown', pmPopMenuOnKey, true);
+    }
+    function pmPopMenuOnKey(e) {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      pmClosePopMenu();
+    }
+    // How long a finger rests on a control before its tooltip shows
+    // (initTouchTooltips).
+    const PM_TOUCH_TIP_MS = 450;
+    /** items: [{ icon (Element or null), label, tip, disabled, onClick }].
+     * tip - the desktop tooltip of the control the item stands for, shown
+     * while a finger rests on the item (initTouchTooltips); lifting it then
+     * does not run the item.
+     * opts.title - a heading line; opts.place 'below' for a top-row button
+     * (default: above the button, for the bottom bar). */
+    function pmShowPopMenu(anchor, items, opts) {
+      opts = opts || {};
+      pmClosePopMenu();
+      const backdrop = document.createElement('div');
+      backdrop.id = 'pmPopMenuBackdrop';
+      backdrop.className = 'modal-overlay-active';
+      backdrop.addEventListener('click', pmClosePopMenu);
+      backdrop.addEventListener('contextmenu', (e) => e.preventDefault());
+      const menu = document.createElement('div');
+      menu.id = 'pmPopMenu';
+      menu.setAttribute('role', 'menu');
+      menu.addEventListener('contextmenu', (e) => e.preventDefault());
+      if (opts.title) {
+        const head = document.createElement('div');
+        head.className = 'pm-pop-title';
+        head.textContent = opts.title;
+        menu.appendChild(head);
+      }
+      const withIcons = items.some(it => it.icon);
+      for (const it of items) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.setAttribute('role', 'menuitem');
+        b.disabled = !!it.disabled;
+        if (withIcons) {
+          const ico = document.createElement('span');
+          ico.className = 'pm-pop-ico';
+          if (it.icon) ico.appendChild(it.icon);
+          b.appendChild(ico);
+        }
+        const label = document.createElement('span');
+        label.textContent = it.label;
+        b.appendChild(label);
+        let downAt = 0;
+        if (it.tip) {
+          b.title = it.tip;
+          b.addEventListener('pointerdown', () => { downAt = performance.now(); });
+        }
+        b.addEventListener('click', () => {
+          // Held until its tooltip showed: the finger was reading, not choosing.
+          if (downAt && performance.now() - downAt >= PM_TOUCH_TIP_MS) { downAt = 0; return; }
+          pmClosePopMenu();
+          it.onClick();
+        });
+        menu.appendChild(b);
+      }
+      document.body.appendChild(backdrop);
+      document.body.appendChild(menu);
+      pmPopMenuAnchor = anchor;
+      anchor.classList.add('pm-bb-open');
+      const r = anchor.getBoundingClientRect();
+      const M = 8, w = menu.offsetWidth, h = menu.offsetHeight;
+      const left = Math.max(M, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - M));
+      let top = opts.place === 'below' ? r.bottom + M : r.top - h - M;
+      if (top < M) top = r.bottom + M;
+      if (top + h > window.innerHeight - M) top = Math.max(M, window.innerHeight - h - M);
+      menu.style.left = left + 'px';
+      menu.style.top = top + 'px';
+      document.addEventListener('keydown', pmPopMenuOnKey, true);
+    }
+
+    // The icon of a (possibly hidden) toolbar button, for a menu item.
+    function pmIconOf(el) {
+      const svg = el && el.querySelector('svg');
+      return svg ? svg.cloneNode(true) : null;
+    }
+
+    (function initMobileBottomBar() {
+      if (!isTouchDevice) return;
+      const $ = (id) => document.getElementById(id);
+      const toggleMenu = (btn, build) => {
+        if (pmPopMenuAnchor === btn) { pmClosePopMenu(); return; }
+        build();
+      };
+
+      // Tools: the page-wide dialogs the desktop shows next to Edit / Delete,
+      // run through those buttons so their own state and checks apply.
+      const TOOLS = [
+        ['watermarkBtn', 'bbToolWatermark'],
+        ['headerFooterBtn', 'bbToolHeaderFooter'],
+        ['pageFormatBtn', 'bbToolPageFormat'],
+        ['autoCropBtn', 'bbToolAutoCrop'],
+        ['markBlankBtn', 'bbToolFindBlank'],
+      ];
+      $('pmBbTools').addEventListener('click', (e) => {
+        const btn = e.currentTarget;
+        toggleMenu(btn, () => pmShowPopMenu(btn, TOOLS.map(([id, key]) => {
+          const src = $(id);
+          return { icon: pmIconOf(src), label: t(key), tip: src && src.getAttribute('title'), disabled: !src || src.disabled, onClick: () => src.click() };
+        }), { title: t('bbTools') }));
+      });
+
+      $('pmBbSelect').addEventListener('click', (e) => {
+        const btn = e.currentTarget;
+        toggleMenu(btn, () => pmShowPopMenu(btn, [
+          { label: t('bbSelectAll'), onClick: () => selectAllPages() },
+          { label: t('ctxSelectEven'), onClick: () => selectPagesByParity(0) },
+          { label: t('ctxSelectOdd'), onClick: () => selectPagesByParity(1) },
+          { label: t('bbSelectNone'), disabled: selectedPages.size === 0, onClick: () => deselectAllPages() },
+        ], { title: t('bbSelectPages') }));
+      });
+
+      $('pmBbSearch').addEventListener('click', () => { if (pdfDoc) pmSearchToggleOpen(); });
+
+      // Print: the whole document, or - with pages selected - a choice.
+      $('pmBbPrint').addEventListener('click', (e) => {
+        const btn = e.currentTarget;
+        const selected = selectedPages.size ? getOperableSelectedIndices().length : 0;
+        if (!selected) { printPDF(); return; }
+        toggleMenu(btn, () => pmShowPopMenu(btn, [
+          { icon: pmIconOf(btn), label: t('bbPrintDocument'), tip: $('printBtn') && $('printBtn').getAttribute('title'), onClick: () => printPDF() },
+          { icon: pmIconOf($('printSelectedBtn')), label: t('bbPrintSelected', { n: selected }), tip: t('printSelectedPages'), onClick: () => printSelectedPages() },
+        ], { title: t('bbPrint') }));
+      });
+
+      $('pmBbShare').addEventListener('click', () => { if (pdfDoc) pmShareDocument(); });
+    })();
+
+    // A long press on a touch screen opens a menu instead of tapping the
+    // button. The release that ends the hold does not also tap it, and such
+    // a button gets the corner mark (CSS) instead of the plain touch tooltip
+    // (initTouchTooltips). open(btn) shows the menu; returning false (nothing
+    // to show) leaves the release to tap the button as usual.
+    const pmHoldMenu = (function () {
+      const MOVE_PX = 10;
+      // The click the release makes after a hold lands on whatever is under
+      // the finger by then - the menu's backdrop - and would close the menu
+      // it just opened. It is swallowed, whatever its target; a browser that
+      // sends none has the next finger-down drop the wait.
+      let swallowUntil = 0;
+      if (isTouchDevice) {
+        document.addEventListener('pointerdown', () => { swallowUntil = 0; }, true);
+        document.addEventListener('click', (e) => {
+          if (performance.now() >= swallowUntil) return;
+          swallowUntil = 0;
+          e.preventDefault();
+          e.stopPropagation();
+        }, true);
+      }
+      return function (btn, open) {
+        if (!isTouchDevice || !btn) return;
+        let timer = null, x0 = 0, y0 = 0, held = false;
+        const cancel = () => { clearTimeout(timer); timer = null; };
+        btn.setAttribute('data-pm-hold-menu', '');
+        btn.addEventListener('pointerdown', (e) => {
+          if (e.pointerType !== 'touch' || btn.disabled) return;
+          held = false;
+          x0 = e.clientX;
+          y0 = e.clientY;
+          cancel();
+          timer = setTimeout(() => {
+            timer = null;
+            held = open(btn) !== false;
+          }, PM_TOUCH_TIP_MS);
+        });
+        btn.addEventListener('pointermove', (e) => {
+          if (timer && Math.hypot(e.clientX - x0, e.clientY - y0) > MOVE_PX) cancel();
+        });
+        btn.addEventListener('pointerup', () => {
+          cancel();
+          if (held) swallowUntil = performance.now() + 600;
+          held = false;
+        });
+        btn.addEventListener('pointercancel', () => { cancel(); held = false; });
+        btn.addEventListener('contextmenu', (e) => e.preventDefault());
+      };
+    })();
+
+    // Save / Export, held: their variants (as images, by pages, compressed,
+    // with a password) - the buttons the desktop pops up on hover - in a
+    // menu with captions.
+    for (const id of ['saveBtn', 'exportBtn']) {
+      pmHoldMenu(document.getElementById(id), (btn) => {
+        if (!pdfDoc || isLoading) return false;
+        const variants = Array.from(btn.parentElement.querySelectorAll('.img-save-btn'));
+        pmShowPopMenu(btn, variants.map(v => ({
+          icon: pmIconOf(v),
+          label: v.getAttribute('aria-label') || '',
+          tip: v.getAttribute('title'),
+          disabled: v.disabled || v.classList.contains('pm-compress-unavailable'),
+          onClick: () => v.click()
+        })), { title: btn.getAttribute('title') ? btn.title.replace(/\s*\([^)]*\)\s*$/, '') : '', place: 'below' });
+      });
+    }
+    // Undo / redo, held: the last (next) steps (pmShowUndoRedoMenu).
+    pmHoldMenu(document.getElementById('mobileUndoBtn'), (btn) => pmShowUndoRedoMenu(btn, -1));
+    pmHoldMenu(document.getElementById('mobileRedoBtn'), (btn) => pmShowUndoRedoMenu(btn, 1));
 
     function updateInfo() {
       if (pdfDoc) {
@@ -16999,6 +17574,7 @@
     // switches - see the .pm-form-layer CSS rule.
     function pmFormCommitField(pageIndex) {
       historyChangeHint = [pageIndex];
+      pmLabelNextHistoryStep('histFormField', [pageIndex]);
       setDocumentDirty(true);
     }
 
@@ -17702,7 +18278,9 @@
           // (and without marking hqUpgraded/hqRenderedScale) so a later pass
           // retries against the settled document instead of racing this one.
           if (token !== hqPdfjsToken || pdfDocCriticalWriterActive) return;
-          img.src = canvas.toDataURL('image/jpeg', 0.92);
+          const hqSrc = await pmCanvasToDataUrl(canvas, 'image/jpeg', 0.92);
+          if (token !== hqPdfjsToken || pdfDocCriticalWriterActive) return;
+          img.src = hqSrc;
           // Everything from the render through the JPEG encode is main-thread
           // work the user is sitting through, so that whole span is what the
           // budget is measured against.
@@ -20115,6 +20693,10 @@
     // content - what the live preview needs to stop at the document's edges
     // (see applyPinchVisualScale).
     let pinchPagesTop0 = 0, pinchScrollTop0 = 0, pinchPagesH0 = 0, pinchTail0 = 0, pinchViewBottom0 = 0;
+    // The work area's width, read once per gesture: reading it per finger
+    // move (getComputedStyle + clientWidth) forced a style and layout pass
+    // in every touchmove.
+    let pinchAvailW0 = 0;
 
     function getPinchAnchorPage() {
       if (pinchAnchorIndex == null) return null;
@@ -20152,7 +20734,7 @@
 
     function findPinchAnchorPageAt(midX, midY) {
       const uiBlock = '#mobileScrollRail, #pageCountBox, #stickyFileBar, .top-menu, ' +
-        '#menuToggleBtn, #readModeScaleOverlay, #mobileUndoRedoBar, #zoomPanHandBadge, ' +
+        '#menuToggleBtn, #readModeScaleOverlay, #pmBottomBar, #zoomPanHandBadge, ' +
         '#exportDragHint, .content-header, #dropZone, .selection-checkbox';
 
       if (document.elementsFromPoint) {
@@ -20218,6 +20800,7 @@
       pinchTail0 = Math.max(0, scrollContainer.scrollHeight -
         (pinchScrollTop0 + (pagesRect.top - host.top) + pagesRect.height));
       pinchViewBottom0 = host.top + scrollContainer.clientHeight;
+      pinchAvailW0 = getScrollAvailWidth();
     }
 
     function applyPinchVisualScale() {
@@ -20241,7 +20824,7 @@
       const restTop = pinchPagesTop0 + pinchScrollTop0;               // ...at scroll 0
       const h = ratio * pinchPagesH0;
       const colsKept = !isTouchDevice || pinchStartCols <= 0 ||
-        mobileColsThatFit(currentScale, getScrollAvailWidth()) === pinchStartCols;
+        mobileColsThatFit(currentScale, pinchAvailW0 || getScrollAvailWidth()) === pinchStartCols;
       if (colsKept && restTop + h + pinchTail0 > pinchViewBottom0) {
         const B = T + h;                                              // grid bottom on screen
         const minB = pinchViewBottom0 - pinchTail0;                   // ...at the end of the scroll
@@ -20429,6 +21012,13 @@
         pinchStartCols = 0;
         pinchLastMidX = null;
         pinchLastMidY = null;
+        // Page renders held back during the gesture go on, once the new
+        // scale's layout has settled (unless another pinch began by then).
+        setTimeout(() => {
+          if (pinchActive) return;
+          pmReleasePinchHeldRenders();
+          pumpLazyThumbnailQueue();
+        }, 150);
       }
     }
     scrollContainer.addEventListener('touchend', endPinch);
@@ -22633,12 +23223,22 @@
       // First we get the file(s)
       let files = null;
       let fileHandles = null;
+      // Phone / tablet (and the Android app): opening lists only PDFs, so
+      // the system picker shows just those instead of every document and
+      // picture on the device. Word, Excel, mail and images still come in
+      // by merging - "Insert from file" between pages, Merge, Replace -
+      // which keep the full list.
+      const pdfOnly = isTouchDevice;
+
       if (window.showOpenFilePicker) {
         try {
           const pickerOpts = {
             id: PICKER_ID_OPEN,
             multiple: multi,
-            types: [{
+            types: pdfOnly ? [{
+              description: t('filePickerDescPdf'),
+              accept: { 'application/pdf': ['.pdf'] }
+            }] : [{
               description: t('filePickerDescDocsImages'),
               accept: {
                 'application/pdf': ['.pdf'],
@@ -22677,7 +23277,10 @@
           const inp = document.createElement('input');
           inp.type = 'file';
           inp.multiple = multi;
-          inp.accept = '.pdf,.docx,.xls,.xlsx,.eml,.msg,.png,.jpg,.jpeg,.bmp,.gif,.webp,.tif,.tiff';
+          // The MIME type is what the Android picker filters by.
+          inp.accept = pdfOnly
+            ? 'application/pdf,.pdf'
+            : '.pdf,.docx,.xls,.xlsx,.eml,.msg,.png,.jpg,.jpeg,.bmp,.gif,.webp,.tif,.tiff';
           inp.onchange = () => resolve(inp.files && inp.files.length ? Array.from(inp.files) : null);
           inp.click();
         });
@@ -23021,6 +23624,8 @@
       if (!menu) return;
       const heightBefore = isTouchDevice ? menu.getBoundingClientRect().height : 0;
       const collapsed = menu.classList.toggle('collapsed');
+      // The bottom bar folds away with it (#pmBottomBar).
+      document.body.classList.toggle('pm-menu-collapsed', collapsed);
       if (isTouchDevice) {
         pmAnimateTopMenuHeight(menu, heightBefore, menu.getBoundingClientRect().height);
         // Brought back by hand: leave it alone for a while (see above).
@@ -23977,6 +24582,11 @@
     }
 
     function pumpLazyThumbnailQueue() {
+      // Two-finger zoom: every main-thread millisecond goes to the gesture.
+      // A page render is a single 100+ ms block on a heavy (scanned) page,
+      // so starting one mid-pinch makes the zoom jump. The queue waits and
+      // is pumped again when the fingers lift (endPinch).
+      if (pinchActive) return;
       const limit = lazyThumbConcurrency();
       // High-priority jobs - pages the user is actually looking at right
       // now (initial visible/critical wait, or freshly scrolled into
@@ -24006,6 +24616,7 @@
         lazyThumbPendingIdle++;
         pmRequestIdle(() => {
           lazyThumbPendingIdle--;
+          if (pinchActive) return;   // the job stays queued; see above
           // Skip anything that went stale (loaded/loading/cancelled)
           // while this callback was waiting for idle time.
           let job = lazyThumbQueueLow.shift();
@@ -24934,7 +25545,7 @@
       // CPU-backed buffer, trading GPU compositing for consistent readback.
       const ctx = canvas.getContext('2d', { alpha: false, willReadFrequently: true });
       const rasterStartedAt = performance.now();
-      await page.render({ canvasContext: ctx, viewport, annotationMode: 0 }).promise;
+      await pmHoldRenderDuringPinch(page.render({ canvasContext: ctx, viewport, annotationMode: 0 })).promise;
       // This render happens for every page as the document is shown, long
       // before anyone zooms - which makes it the free sample that tells
       // runHQUpgrade how expensive this page is, so the very FIRST upgrade
@@ -24951,10 +25562,50 @@
 
       const hasEditorObjs = pdfPageIndex != null && typeof peLoadPageEditorObjects === 'function' &&
         peLoadPageEditorObjects(pdfPageIndex).length > 0;
-      img.src = hasEditorObjs
-        ? canvas.toDataURL('image/png')
-        : canvas.toDataURL('image/jpeg', THUMBNAIL_JPEG_QUALITY);
+      const src = hasEditorObjs
+        ? await pmCanvasToDataUrl(canvas, 'image/png')
+        : await pmCanvasToDataUrl(canvas, 'image/jpeg', THUMBNAIL_JPEG_QUALITY);
+      if (isLoadingCancelled || operationId !== activeOperationId) return false;
+      img.src = src;
       return true;
+    }
+
+    // canvas.toDataURL() encodes the whole raster in one main-thread block
+    // (100+ ms for a large page on a phone), which is a visible stall in a
+    // scroll or a pinch that happens to be under way. toBlob() encodes the
+    // same image in idle time between frames; reading the blob back gives
+    // the same data: URL, so nothing that uses img.src changes.
+    function pmCanvasToDataUrl(canvas, type, quality) {
+      if (typeof canvas.toBlob !== 'function' || typeof FileReader === 'undefined') {
+        return Promise.resolve(canvas.toDataURL(type, quality));
+      }
+      return new Promise((resolve) => {
+        canvas.toBlob((blob) => {
+          if (!blob) { resolve(canvas.toDataURL(type, quality)); return; }
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => resolve(canvas.toDataURL(type, quality));
+          reader.readAsDataURL(blob);
+        }, type, quality);
+      });
+    }
+
+    // Two-finger zoom: a page render already under way when the fingers
+    // come down stops between its pdf.js steps (one step of a scanned page
+    // is a single 100+ ms image draw) and goes on once they lift (endPinch);
+    // see also pumpLazyThumbnailQueue.
+    let pinchHeldRenderSteps = [];
+    function pmHoldRenderDuringPinch(renderTask) {
+      renderTask.onContinue = (cont) => {
+        if (pinchActive) pinchHeldRenderSteps.push(cont);
+        else cont();
+      };
+      return renderTask;
+    }
+    function pmReleasePinchHeldRenders() {
+      const steps = pinchHeldRenderSteps;
+      pinchHeldRenderSteps = [];
+      for (const cont of steps) cont();
     }
 
     async function createThumbnailElement(idx, pdfjsDoc) {
@@ -28511,6 +29162,8 @@
 
     function toggleDeletedVisibility() {
       if (!pdfDoc) return; // no document - nothing to switch
+      // Touch layouts: pages marked for deletion are always hidden.
+      if (isTouchDevice) return;
       deletedPagesHidden = !deletedPagesHidden;
       toggleDeletedBtn.innerHTML = deletedPagesHidden ? EYE_CLOSED_SVG : EYE_OPEN_SVG;
       toggleDeletedBtn.title = deletedPagesHidden
@@ -29485,6 +30138,7 @@
         peRotatePagesEditorMeta(indices, degrees);
       }
       historyChangeHint = indices.slice();
+      pmLabelNextHistoryStep('histRotate', indices);
       setDocumentDirty(true);
       invalidateHQ();
     }
@@ -29503,6 +30157,7 @@
         peRotatePagesEditorMeta([idx], degrees);
       }
       historyChangeHint = [idx];
+      pmLabelNextHistoryStep('histRotate', [idx]);
       setDocumentDirty(true);
       invalidateHQ();
     }
@@ -31429,9 +32084,14 @@
           if (deletedPagesHidden) div.style.display = 'none';
         }
         markedForDeletion.add(idx);
-        setDocumentDirty(true);
-        selectedPages.delete(idx); // remove from the set of selected
       });
+      // One history step for the whole deletion. The document is marked
+      // dirty before the pages leave the selection: marking it dirty first
+      // commits any selection change still pending as a step of its own, so
+      // deselecting page by page in between used to leave a "deselect" step
+      // per page in front of the deletion.
+      if (toMark.length) setDocumentDirty(true);
+      toMark.forEach(idx => selectedPages.delete(idx)); // remove from the set of selected
       // Pages already marked for deletion and previously selected remain selected
 
       refreshCheckboxes();
@@ -31655,6 +32315,19 @@
           currentFileName ? suggestPdfSaveFileName(currentFileName) : fallbackFileName);
         return;
       }
+      // Phone / tablet browser: a PDF opened in a new tab is downloaded
+      // there rather than shown, so it cannot be printed from it - print the
+      // pages from this page itself.
+      if (isTouchDevice && !isTauriDesktopApp()) {
+        try {
+          await pmPrintPdfInPage(pdfBytes, { inDocument: true });
+        } catch (e) {
+          console.error(e);
+          hideLoading();
+          alert(t('alertPrintWindowFailed'));
+        }
+        return;
+      }
       if (!isTauriDesktopApp()) {
         const url = URL.createObjectURL(new Blob([pdfBytes], { type: 'application/pdf' }));
         const printWindow = window.open(url, '_blank');
@@ -31690,7 +32363,8 @@
     }
 
     /** Build the print frame for pmPrintPdfBytes and open the print dialog. */
-    async function pmPrintPdfInPage(pdfBytes) {
+    async function pmPrintPdfInPage(pdfBytes, opts) {
+      const inDocument = !!(opts && opts.inDocument);
       const old = document.getElementById('pmPrintFrame');
       if (old) old.remove();
       const urls = [];
@@ -31698,11 +32372,20 @@
       const doc = await pdfjsLib.getDocument({ data: pdfBytes.slice(0) }).promise;
       try {
         const scale = PM_PRINT_DPI / 72;
+        let firstLandscape = null;
         for (let i = 1; i <= doc.numPages; i++) {
           showLoading(`${t('loadingPreparingPrint')} ${i} ${t('ofCount')} ${doc.numPages}`);
           const page = await doc.getPage(i);
-          const vp1 = page.getViewport({ scale: 1 });
-          const viewport = page.getViewport({ scale });
+          let vp1 = page.getViewport({ scale: 1 });
+          const landscape = vp1.width > vp1.height;
+          if (firstLandscape == null) firstLandscape = landscape;
+          // In this page itself (phones) a page turned the other way from
+          // the first one is drawn turned, so that every sheet is laid out
+          // alike and no CSS rotation is needed (see flowCss below).
+          const rotation = inDocument && landscape !== firstLandscape
+            ? (page.rotate + 90) % 360 : page.rotate;
+          vp1 = page.getViewport({ scale: 1, rotation });
+          const viewport = page.getViewport({ scale, rotation });
           const canvas = document.createElement('canvas');
           canvas.width = Math.ceil(viewport.width);
           canvas.height = Math.ceil(viewport.height);
@@ -31727,13 +32410,61 @@
       // paper size anyway, and Chromium applies them unreliably.)
       const first = sheets[0];
       const body = sheets.map(s => '<div class="sheet ' + (s.w > s.h ? 'l' : 'p') + '"><img src="' + s.url + '"></div>').join('');
-      const css = '@page{size:' + first.w + 'pt ' + first.h + 'pt;margin:0}'
+      // `p` scopes the sheet rules (the print frame's body, or the block
+      // added to this page).
+      const sheetCss = (p) => '@page{size:' + first.w + 'pt ' + first.h + 'pt;margin:0}'
         + 'html,body{margin:0;padding:0;background:#fff}'
-        + '.sheet{width:100vw;height:100vh;overflow:hidden;display:flex;align-items:center;justify-content:center;break-after:page;break-inside:avoid}'
-        + '.sheet:last-child{break-after:auto}'
-        + '.sheet img{display:block;width:100vw;height:100vh;object-fit:contain;flex:none}'
-        + '@media (orientation:portrait){.sheet.l img{width:100vh;height:100vw;transform:rotate(90deg)}}'
-        + '@media (orientation:landscape){.sheet.p img{width:100vh;height:100vw;transform:rotate(90deg)}}';
+        + p + ' .sheet{width:100vw;height:100vh;overflow:hidden;display:flex;align-items:center;justify-content:center;break-after:page;break-inside:avoid}'
+        + p + ' .sheet:last-child{break-after:auto}'
+        + p + ' .sheet img{display:block;width:100vw;height:100vh;object-fit:contain;flex:none}'
+        + '@media (orientation:portrait){' + p + ' .sheet.l img{width:100vh;height:100vw;transform:rotate(90deg)}}'
+        + '@media (orientation:landscape){' + p + ' .sheet.p img{width:100vh;height:100vw;transform:rotate(90deg)}}';
+      // The same in this page itself, without viewport units: a phone
+      // browser counts its address bar into 100vh, when printing too, so a
+      // sheet that tall ran past the paper - the end of every page spilled
+      // onto a sheet of its own and the next page started one sheet later.
+      // A sheet takes the paper's width and the first page's proportions
+      // (the paper is the first page's size, @page), a hair shorter so that
+      // rounding cannot push it over; pages are already turned to match.
+      const flowCss = (p) => '@page{size:' + first.w + 'pt ' + first.h + 'pt;margin:0}'
+        + 'html,body{margin:0;padding:0;background:#fff}'
+        + p + ' .sheet{position:relative;width:100%;aspect-ratio:' + first.w + '/' + (first.h * 0.995).toFixed(2)
+        + ';overflow:hidden;break-after:page;break-inside:avoid}'
+        + p + ' .sheet:last-child{break-after:auto}'
+        + p + ' .sheet img{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:contain}';
+      if (inDocument) {
+        // The sheets go into this page, shown only when printing, with the
+        // rest of the page hidden from the printout.
+        const prevHost = document.getElementById('pmPrintSheets');
+        if (prevHost) prevHost.remove();
+        const prevStyle = document.getElementById('pmPrintSheetsStyle');
+        if (prevStyle) prevStyle.remove();
+        const host = document.createElement('div');
+        host.id = 'pmPrintSheets';
+        host.innerHTML = body;
+        const style = document.createElement('style');
+        style.id = 'pmPrintSheetsStyle';
+        style.textContent = '@media screen{#pmPrintSheets{display:none}}'
+          + '@media print{body>*:not(#pmPrintSheets){display:none!important}'
+          + 'body{display:block!important;height:auto!important;overflow:visible!important}'
+          + flowCss('#pmPrintSheets') + '}';
+        document.head.appendChild(style);
+        document.body.appendChild(host);
+        await Promise.all(Array.from(host.querySelectorAll('img')).map(img => img.decode().catch(() => {})));
+        const cleanup = () => {
+          window.removeEventListener('afterprint', onAfterPrint);
+          host.remove();
+          style.remove();
+          urls.forEach(u => URL.revokeObjectURL(u));
+        };
+        const onAfterPrint = () => setTimeout(cleanup, 0);
+        window.addEventListener('afterprint', onAfterPrint);
+        hideLoading();
+        window.print();
+        setTimeout(() => { if (host.isConnected) cleanup(); }, 10 * 60 * 1000);
+        return;
+      }
+      const css = sheetCss('body');
       const frame = document.createElement('iframe');
       frame.id = 'pmPrintFrame';
       frame.setAttribute('aria-hidden', 'true');
@@ -35095,8 +35826,10 @@
         if (!el) return;
         // We do not show previews for the pages themselves
         if (el.closest('.page')) return;
+        // Holding these opens a menu instead (pmHoldMenu).
+        if (el.hasAttribute('data-pm-hold-menu')) return;
         clearTimeout(tipTimer);
-        tipTimer = setTimeout(() => showTipFor(el), 450);
+        tipTimer = setTimeout(() => showTipFor(el), PM_TOUCH_TIP_MS);
       }, { passive: true });
 
       document.addEventListener('touchend', hideTip);
@@ -43829,7 +44562,7 @@ function editSelectedPage() {
         const marked = (typeof markedForDeletion !== 'undefined')
           ? [...markedForDeletion].sort((x, y) => x - y) : [];
         historyCommitChain = historyCommitChain
-          .then(() => commitHistoryStep(Promise.resolve(bytesBeforeReload), marked, [pageIdx]))
+          .then(() => commitHistoryStep(Promise.resolve(bytesBeforeReload), marked, [pageIdx], { label: { key: 'histMarkup', pages: [pageIdx] } }))
           .catch(e => console.warn('history commit error', e));
         if (typeof documentDirty !== 'undefined') documentDirty = true;
         if (typeof updateInfo === 'function') updateInfo();
@@ -43906,7 +44639,7 @@ function editSelectedPage() {
         const marked = (typeof markedForDeletion !== 'undefined')
           ? [...markedForDeletion].sort((x, y) => x - y) : [];
         historyCommitChain = historyCommitChain
-          .then(() => commitHistoryStep(Promise.resolve(bytes), marked, [pageIdx]))
+          .then(() => commitHistoryStep(Promise.resolve(bytes), marked, [pageIdx], { label: { key: 'histMarkup', pages: [pageIdx] } }))
           .catch(e => console.warn('history commit error', e));
         if (typeof documentDirty !== 'undefined') documentDirty = true;
         if (typeof updateInfo === 'function') updateInfo();
@@ -43996,7 +44729,7 @@ function editSelectedPage() {
         const marked = (typeof markedForDeletion !== 'undefined')
           ? [...markedForDeletion].sort((x, y) => x - y) : [];
         historyCommitChain = historyCommitChain
-          .then(() => commitHistoryStep(Promise.resolve(bytesBeforeReload), marked, [pageIdx]))
+          .then(() => commitHistoryStep(Promise.resolve(bytesBeforeReload), marked, [pageIdx], { label: { key: 'histRedact', pages: [pageIdx] } }))
           .catch(e => console.warn('history commit error', e));
         if (typeof documentDirty !== 'undefined') documentDirty = true;
         if (typeof updateInfo === 'function') updateInfo();
@@ -44569,7 +45302,8 @@ function pePushPageEditHistoryBytes(pdfBytes, pageIdx, opts) {
     pages,
     pendingIdx,
     selected: sel.selected,
-    lastSel: sel.lastSel
+    lastSel: sel.lastSel,
+    label: { key: 'histPageEdit', pages: [pageIdx] }
   });
   trimDocHistory();
   docHistoryIndex = docHistory.length - 1;
@@ -65402,7 +66136,8 @@ async function pmWmApply(s, indices) {
   const marked = [...markedForDeletion].sort((x, y) => x - y);
   const historyBytes = bytes.slice();
   historyCommitChain = historyCommitChain
-    .then(() => commitHistoryStep(Promise.resolve(historyBytes), marked, indices, { lazyPages: true }))
+    .then(() => commitHistoryStep(Promise.resolve(historyBytes), marked, indices,
+      { lazyPages: true, label: { key: 'histWatermark', pages: indices } }))
     .catch(e => console.warn('history commit error', e));
   documentDirty = true;
   if (typeof updateInfo === 'function') updateInfo();
@@ -66456,7 +67191,7 @@ async function pmHfApply(s, indices, date) {
   const marked = [...markedForDeletion].sort((x, y) => x - y);
   const historyBytes = bytes.slice();
   historyCommitChain = historyCommitChain
-    .then(() => commitHistoryStep(Promise.resolve(historyBytes), marked, done, { lazyPages: true }))
+    .then(() => commitHistoryStep(Promise.resolve(historyBytes), marked, done, { lazyPages: true, label: { key: 'histHeaderFooter', pages: done } }))
     .catch(e => console.warn('history commit error', e));
   documentDirty = true;
   if (typeof updateInfo === 'function') updateInfo();
@@ -67873,7 +68608,7 @@ async function pmPfApply(plans) {
   const marked = [...markedForDeletion].sort((x, y) => x - y);
   const historyBytes = bytes.slice();
   historyCommitChain = historyCommitChain
-    .then(() => commitHistoryStep(Promise.resolve(historyBytes), marked, done, { lazyPages: true }))
+    .then(() => commitHistoryStep(Promise.resolve(historyBytes), marked, done, { lazyPages: true, label: { key: 'histPageFormat', pages: done } }))
     .catch(e => console.warn('history commit error', e));
   documentDirty = true;
   if (typeof updateInfo === 'function') updateInfo();
@@ -68492,7 +69227,7 @@ async function pmAcApply(plans) {
   const marked = [...markedForDeletion].sort((x, y) => x - y);
   const historyBytes = bytes.slice();
   historyCommitChain = historyCommitChain
-    .then(() => commitHistoryStep(Promise.resolve(historyBytes), marked, done, { lazyPages: true }))
+    .then(() => commitHistoryStep(Promise.resolve(historyBytes), marked, done, { lazyPages: true, label: { key: 'histAutoCrop', pages: done } }))
     .catch(e => console.warn('history commit error', e));
   documentDirty = true;
   if (typeof updateInfo === 'function') updateInfo();
