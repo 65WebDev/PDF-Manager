@@ -20422,6 +20422,45 @@
       lastPageTapY = e.clientY;
     }
 
+    // Phones: a touch on the text of a page at high zoom is left to the
+    // browser (a long press selects the text), but a short tap there is
+    // still a tap on the page - it shows / hides the menus, or does what a
+    // tap does on that page (multi-select ticks it, a page selected by a
+    // hold is let go). Only watched to its end; nothing is armed. A tap that
+    // only dismisses a text selection does nothing else.
+    let pmTextTap = null;
+    function pmWatchTextTap(hostPage, e) {
+      if (!isTouchDevice || !hostPage) return;
+      const sel = window.getSelection && window.getSelection();
+      pmTextTap = {
+        page: hostPage, id: e.pointerId, x: e.clientX, y: e.clientY, t: Date.now(),
+        sx: scrollContainer.scrollLeft, sy: scrollContainer.scrollTop,
+        hadSel: !!(sel && !sel.isCollapsed && (sel.toString() || '').trim())
+      };
+      document.addEventListener('pointerup', pmTextTapEnd, true);
+      document.addEventListener('pointercancel', pmTextTapEnd, true);
+    }
+    function pmTextTapEnd(e) {
+      const s = pmTextTap;
+      if (!s || e.pointerId !== s.id) return;
+      pmTextTap = null;
+      document.removeEventListener('pointerup', pmTextTapEnd, true);
+      document.removeEventListener('pointercancel', pmTextTapEnd, true);
+      if (e.type !== 'pointerup' || s.hadSel || !s.page.isConnected) return;
+      if (isLoading || pinchActive || rubberArmed || rubberActive || isDragActive) return;
+      if (Date.now() - s.t > LONG_PRESS_MS) return;
+      if (Math.hypot(e.clientX - s.x, e.clientY - s.y) > TAP_MOVE_MAX) return;
+      if (Math.abs(scrollContainer.scrollLeft - s.sx) > TAP_SCROLL_MAX ||
+          Math.abs(scrollContainer.scrollTop - s.sy) > TAP_SCROLL_MAX) return;
+      const idx = parseInt(s.page.dataset.index, 10);
+      if (Number.isNaN(idx)) return;
+      // The same choice as a tap on the page itself (onPagePointerUp).
+      const autoSelectedOnly = pmAutoSelectModeOn && pmAutoSelectedIdx === idx
+        && pmQuickActionsShownIdx !== idx;
+      if (multiSelectMode || (selectedPages.has(idx) && !autoSelectedOnly)) handlePageClick(idx, s.page, e);
+      else pmScheduleTapMenuToggle();
+    }
+
     function lockScrollForDrag() {
       scrollContainer.classList.add('drag-scroll-locked');
     }
@@ -20549,6 +20588,7 @@
         const hostPage = e.target.closest('.page');
         if (!pmLooksLikeFastDoubleTapOn(hostPage, e)) {
           pmRecordSoloTapOn(hostPage, e);
+          pmWatchTextTap(hostPage, e);
           return;
         }
         pmPendingDoubleTapPreventDefault = true;
@@ -27254,6 +27294,8 @@
             // would have nothing to match against and two taps on text could
             // never be recognized as a double-tap at all.
             if (typeof pmRecordSoloTapOn === 'function') pmRecordSoloTapOn(hostPage, e);
+            // ...and a short tap on the text is still a tap on the page.
+            if (e.pointerType === 'touch' && typeof pmWatchTextTap === 'function') pmWatchTextTap(hostPage, e);
           }
           e.stopPropagation();
         }, true);
