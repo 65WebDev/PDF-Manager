@@ -20438,6 +20438,34 @@
       lastPageTapIdx = hostIdx;
       lastPageTapX = e.clientX;
       lastPageTapY = e.clientY;
+      // Recorded as the finger comes down, before anyone knows it is a tap:
+      // if it turns out a swipe (moved, scrolled, taken over by the browser)
+      // or a hold, the record goes again. A flick begun on the text of a
+      // page, then a touch to drag on, was taken for a double tap - and the
+      // drag for the one-finger zoom.
+      pmSoloTapPending = {
+        id: e.pointerId, t: lastPageTapTime, x: e.clientX, y: e.clientY,
+        sx: scrollContainer.scrollLeft, sy: scrollContainer.scrollTop
+      };
+      document.addEventListener('pointerup', pmSoloTapEnd, true);
+      document.addEventListener('pointercancel', pmSoloTapEnd, true);
+    }
+    let pmSoloTapPending = null;
+    function pmSoloTapEnd(e) {
+      const s = pmSoloTapPending;
+      if (!s || e.pointerId !== s.id) return;
+      pmSoloTapPending = null;
+      document.removeEventListener('pointerup', pmSoloTapEnd, true);
+      document.removeEventListener('pointercancel', pmSoloTapEnd, true);
+      const tap = e.type === 'pointerup' &&
+        pmTapTime(e) - s.t <= LONG_PRESS_MS &&
+        Math.hypot(e.clientX - s.x, e.clientY - s.y) <= TAP_MOVE_MAX &&
+        Math.abs(scrollContainer.scrollLeft - s.sx) <= TAP_SCROLL_MAX &&
+        Math.abs(scrollContainer.scrollTop - s.sy) <= TAP_SCROLL_MAX;
+      if (!tap && lastPageTapTime === s.t) {
+        lastPageTapTime = 0;
+        lastPageTapIdx = null;
+      }
     }
 
     // Phones: a touch on the text of a page at high zoom is left to the
@@ -21402,6 +21430,9 @@
         if (Math.hypot(t.clientX - z.x, t.clientY - z.y) <= TAP_MOVE_MAX) return;
         z.active = true;
         pmCancelTapMenuToggle(z.t);   // the first tap's
+        // Whatever the browser may still be scrolling (a fling) stops under
+        // the zoom, as for a second finger (endPinch lets it go).
+        scrollContainer.classList.add('pm-pinch-scroll-stopped');
         pmBeginPinch(z.x, z.y);
       }
       if (!pinchActive) return;
