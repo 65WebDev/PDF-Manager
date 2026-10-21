@@ -14768,6 +14768,7 @@
       if (!bar) return;
       bar.hidden = noDocument;
       document.body.classList.toggle('pm-bottom-bar-on', !noDocument);
+      if (noDocument && typeof pmClearMenuSpacers === 'function') pmClearMenuSpacers();
       for (const id of ['pmBbSelect', 'pmBbTools', 'pmBbSearch', 'pmBbPrint', 'pmBbShare']) {
         const b = document.getElementById(id);
         if (b) b.disabled = baseDisabled;
@@ -20703,6 +20704,7 @@
           if (pmAutoSelectModeOn) pmQuickActionsRequestedIdx = null;
           pmUpdateAutoPageSelection();
           updateMobileQuickActions();
+          pmScheduleTrimMenuSpacers();
         });
       }, { passive: true });
 
@@ -22062,6 +22064,18 @@
         if (e.kind === 'doc') break;
       }
       pmNavTimelineReset();
+    }
+
+    /** The spot the timeline cursor stands on becomes the current view -
+     * for scrolling that kept the view where it was on screen (the menus
+     * folding away, pmHoldPagesWhileMenusMove). */
+    function pmNavTimelineRebaseSpot() {
+      const spot = pmNavTimelineSpot();
+      if (!spot) return;
+      for (let k = pmNavTimelineIndex; k >= 0; k--) {
+        if (pmNavTimeline[k].kind === 'pos') { pmNavTimeline[k].at = spot; return; }
+      }
+      pmNavTimelineBaseSpot = spot;
     }
 
     function pmNavTimelineRecordPos() {
@@ -23614,17 +23628,146 @@
       if (typeof readModeActive !== 'undefined' && readModeActive) return;
       const menu = document.getElementById('topMenu');
       if (!menu || !menu.classList.contains('collapsed')) return;
-      const top0 = pageEl ? pageEl.getBoundingClientRect().top : null;
+      // The pages are held where they are on screen while it slides in
+      // (pmHoldPagesWhileMenusMove, from toggleTopMenu).
       toggleTopMenu();
-      if (top0 == null) return;
-      const until = performance.now() + 450;
+    }
+
+    // ---- Phones: the pages stay put while the menus fold away / come back ----
+    // The top menu folding moves the work area's top edge up by its height
+    // (and the bottom bar's going lets the area grow downwards), which carried
+    // the pages up with it. While the menus animate, the scroll position
+    // follows that edge, so the pages stay where they were on screen. Where
+    // the document has no room left to scroll - its very top or its end - a
+    // blank spacer makes the room, the way Acrobat leaves the space its
+    // toolbar took. A spacer goes again once it is out of view (or when the
+    // menus come back and it is no longer needed).
+    // var, not const/let: pmSyncBottomBar can clear the spacers during
+    // script init (updateUIState), before this line has run.
+    var pmMenuSpacerEls = { top: null, bottom: null };
+    var pmMenuSpacerH = { top: 0, bottom: 0 };
+    var pmMenuHoldUntil = 0;
+    var pmMenuHoldAnchorY = null;
+    var pmMenuHoldObserver = null;
+    function pmSetMenuSpacer(which, h) {
+      h = Math.max(0, Math.round(h));
+      let el = pmMenuSpacerEls[which];
+      if (!el) {
+        if (!h || !scrollContainer || !pagesContainer) return;
+        el = document.createElement('div');
+        el.className = 'pm-menu-spacer';
+        el.setAttribute('aria-hidden', 'true');
+        if (which === 'top') scrollContainer.insertBefore(el, scrollContainer.firstChild);
+        else pagesContainer.after(el);
+        pmMenuSpacerEls[which] = el;
+      }
+      el.style.height = h + 'px';
+      pmMenuSpacerH[which] = h;
+    }
+    /** Scroll so that the pages' top edge is back at anchorY on screen,
+     * making room with a spacer where the scroll range ends. */
+    function pmHoldPagesAt(anchorY) {
+      const d = pagesContainer.getBoundingClientRect().top - anchorY;   // > 0: they slid down
+      if (Math.abs(d) < 0.5) return;
+      let target = scrollContainer.scrollTop + d;
+      if (target < 0) {
+        // Above the top of the document: the spacer pushes the pages down by
+        // what the scroll cannot, and the scroll goes to 0.
+        pmSetMenuSpacer('top', pmMenuSpacerH.top - target);
+        target = 0;
+      }
+      const max = scrollContainer.scrollHeight - scrollContainer.clientHeight;
+      if (target > max) pmSetMenuSpacer('bottom', pmMenuSpacerH.bottom + (target - max));
+      scrollContainer.scrollTop = target;
+    }
+    function pmHoldPagesWhileMenusMove(anchorY) {
+      // Start from no spacers: whatever room the new layout needs is made
+      // again right here, before anything is painted.
+      if (pmMenuSpacerH.top) {
+        const st = scrollContainer.scrollTop;
+        const top = pmMenuSpacerH.top;
+        pmSetMenuSpacer('top', 0);
+        scrollContainer.scrollTop = st - top;
+      }
+      // The smartphone undo/redo steps through the places the user scrolled
+      // to (pmNavTimeline): a scroll still settling is one of them, kept
+      // before this starts; the scrolling done here to hold the pages is not.
+      const timeline = typeof pmNavTimelineActive === 'function' && pmNavTimelineActive();
+      if (timeline) {
+        if (pmNavTimelineSaveTimer && !pmNavTimelineJumping) pmNavTimelineRecordPos();
+        pmNavTimelineJumping = true;
+        clearTimeout(pmNavTimelineJumpGuardTimer);
+        clearTimeout(pmNavTimelineSaveTimer);
+        pmNavTimelineSaveTimer = null;
+      }
+      pmSetMenuSpacer('bottom', 0);
+      pmHoldPagesAt(anchorY);
+      pmMenuHoldAnchorY = anchorY;
+      pmMenuHoldUntil = performance.now() + 480;   // the menu / bar animations take 220 ms
+      // The work area changes size on every frame of the animation; a
+      // ResizeObserver runs after that frame's layout and before its paint,
+      // so the correction is never a frame late (a requestAnimationFrame
+      // runs before the transition moves, and the pages visibly lagged).
+      if (!pmMenuHoldObserver && typeof ResizeObserver === 'function') {
+        pmMenuHoldObserver = new ResizeObserver(() => {
+          if (pmMenuHoldAnchorY == null) return;
+          if (performance.now() > pmMenuHoldUntil || pmMenuHoldFingerDown()) { pmMenuHoldAnchorY = null; return; }
+          pmHoldPagesAt(pmMenuHoldAnchorY);
+        });
+        pmMenuHoldObserver.observe(scrollContainer);
+      }
+      // ...and once a frame as well, in case the size settles early.
+      const done = () => {
+        pmMenuHoldAnchorY = null;
+        if (!timeline) return;
+        // The view did not move for the user: the place the timeline stands
+        // on is this one now, or the held scroll would read as a step back.
+        pmNavTimelineRebaseSpot();
+        clearTimeout(pmNavTimelineJumpGuardTimer);
+        pmNavTimelineJumpGuardTimer = setTimeout(() => { pmNavTimelineJumping = false; }, 100);
+      };
       const hold = () => {
-        if (!pageEl.isConnected) return;
-        const d = pageEl.getBoundingClientRect().top - top0;
-        if (Math.abs(d) >= 0.5) scrollContainer.scrollTop += d;
-        if (performance.now() < until) requestAnimationFrame(hold);
+        if (pmMenuHoldAnchorY == null) return;
+        if (pmMenuHoldFingerDown()) { done(); return; }
+        pmHoldPagesAt(pmMenuHoldAnchorY);
+        if (performance.now() < pmMenuHoldUntil) requestAnimationFrame(hold);
+        else done();
       };
       requestAnimationFrame(hold);
+    }
+    // A finger on the pages takes the scroll over.
+    function pmMenuHoldFingerDown() {
+      return typeof hqFingerHoldsRasters === 'function' && hqFingerHoldsRasters();
+    }
+    /** Drop what of the spacers is out of view - invisible, so it can go any
+     * time the view is at rest. */
+    function pmTrimMenuSpacers() {
+      if (!scrollContainer || performance.now() < pmMenuHoldUntil) return;
+      if (typeof hqFingerHoldsRasters === 'function' && hqFingerHoldsRasters()) return;
+      if (pmMenuSpacerH.top > 0) {
+        const st = scrollContainer.scrollTop;
+        const cut = Math.min(pmMenuSpacerH.top, st);
+        if (cut >= 1) {
+          pmSetMenuSpacer('top', pmMenuSpacerH.top - cut);
+          scrollContainer.scrollTop = st - cut;
+        }
+      }
+      if (pmMenuSpacerH.bottom > 0) {
+        const below = scrollContainer.scrollHeight - scrollContainer.clientHeight - scrollContainer.scrollTop;
+        const cut = Math.min(pmMenuSpacerH.bottom, below);
+        if (cut >= 1) pmSetMenuSpacer('bottom', pmMenuSpacerH.bottom - cut);
+      }
+    }
+    var pmTrimMenuSpacersTimer = null;
+    function pmScheduleTrimMenuSpacers() {
+      if (!pmMenuSpacerH.top && !pmMenuSpacerH.bottom) return;
+      clearTimeout(pmTrimMenuSpacersTimer);
+      pmTrimMenuSpacersTimer = setTimeout(pmTrimMenuSpacers, 250);
+    }
+    function pmClearMenuSpacers() {
+      if (!pmMenuSpacerEls) return;   // script init, see above
+      pmSetMenuSpacer('top', 0);
+      pmSetMenuSpacer('bottom', 0);
     }
 
     /** Ease the mobile menu between its two heights. The CSS collapse is a
@@ -23660,12 +23803,16 @@
       const menu = document.getElementById('topMenu');
       if (!menu) return;
       const heightBefore = isTouchDevice ? menu.getBoundingClientRect().height : 0;
+      // Where the pages are on screen, to keep them there (see pmHoldPagesAt).
+      const pagesAnchorY = isTouchDevice && pdfDoc && !readModeActive && !_readModeToggleGuard && pagesContainer
+        ? pagesContainer.getBoundingClientRect().top : null;
       const collapsed = menu.classList.toggle('collapsed');
       // The bottom bar folds away with it (#pmBottomBar).
       document.body.classList.toggle('pm-menu-collapsed', collapsed);
       if (isTouchDevice) {
         pmAnimateTopMenuHeight(menu, heightBefore, menu.getBoundingClientRect().height);
         pmCancelTapMenuToggle();
+        if (pagesAnchorY != null) pmHoldPagesWhileMenusMove(pagesAnchorY);
       }
       if (collapsed) {
         const area = document.getElementById('logoMenuArea');
