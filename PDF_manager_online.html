@@ -20343,6 +20343,14 @@
     const PAGE_DOUBLE_TAP_MOVE_MAX = 40;
     let lastPageTapTime = 0;
     let lastPageTapIdx = null;
+    // When the touch happened, not when its handler ran: in a zoomed-out
+    // grid the main thread is busy drawing previews, a handler can run well
+    // after its tap, and two quick taps then measured more than
+    // PAGE_DOUBLE_TAP_MS apart - the double tap there almost never counted.
+    // (performance.now()'s time base, like Event.timeStamp.)
+    function pmTapTime(e) {
+      return e && e.timeStamp > 0 ? e.timeStamp : performance.now();
+    }
     let lastPageTapX = 0, lastPageTapY = 0;
     // Set by onPagePointerDown when IT decides (using tap-tracking state as
     // of before this same event) that this touch is the second half of a
@@ -20373,6 +20381,10 @@
     // suppressing the native gesture doesn't cost the ability to scroll.
     let pmActiveTouchScrollFallback = false;
     let pmActiveTouchLastX = null, pmActiveTouchLastY = null;
+    let pmActiveTouchStartX = 0, pmActiveTouchStartY = 0, pmActiveTouchScrolling = false;
+    // One-finger zoom armed by a double tap's second touch (see
+    // pmArmOneFingerZoom): { x, y, active }.
+    let pmOneFingerZoom = null;
     // Selection state from just before the most recent single tap's
     // handlePageClick() - restored verbatim if that tap turns out to be the
     // first half of a fast double-tap, so the zoom leaves selection exactly
@@ -20401,7 +20413,7 @@
       const hostIdx = hostPage ? parseInt(hostPage.dataset.index, 10) : NaN;
       if (Number.isNaN(hostIdx)) return false;
       return lastPageTapIdx === hostIdx &&
-        (Date.now() - lastPageTapTime) < PAGE_DOUBLE_TAP_MS &&
+        (pmTapTime(e) - lastPageTapTime) < PAGE_DOUBLE_TAP_MS &&
         Math.hypot(e.clientX - lastPageTapX, e.clientY - lastPageTapY) < PAGE_DOUBLE_TAP_MOVE_MAX;
     }
 
@@ -20416,7 +20428,7 @@
       const hostIdx = hostPage ? parseInt(hostPage.dataset.index, 10) : NaN;
       if (Number.isNaN(hostIdx)) return;
       preTapSelectionSnapshot = { selected: new Set(selectedPages), last: lastSelectedIndex };
-      lastPageTapTime = Date.now();
+      lastPageTapTime = pmTapTime(e);
       lastPageTapIdx = hostIdx;
       lastPageTapX = e.clientX;
       lastPageTapY = e.clientY;
@@ -20458,7 +20470,7 @@
       const autoSelectedOnly = pmAutoSelectModeOn && pmAutoSelectedIdx === idx
         && pmQuickActionsShownIdx !== idx;
       if (multiSelectMode || (selectedPages.has(idx) && !autoSelectedOnly)) handlePageClick(idx, s.page, e);
-      else pmScheduleTapMenuToggle();
+      else pmScheduleTapMenuToggle(pmTapTime(e));
     }
 
     function lockScrollForDrag() {
@@ -20635,7 +20647,7 @@
       // right on top of it, looking like the page "zooms out by itself" or
       // jumps.
       if (lastPageTapIdx === pageIdx &&
-          (Date.now() - lastPageTapTime) < PAGE_DOUBLE_TAP_MS &&
+          (pmTapTime(e) - lastPageTapTime) < PAGE_DOUBLE_TAP_MS &&
           Math.hypot(e.clientX - lastPageTapX, e.clientY - lastPageTapY) < PAGE_DOUBLE_TAP_MOVE_MAX) {
         pmPendingDoubleTapPreventDefault = true;
         e.preventDefault();
@@ -20723,7 +20735,7 @@
               pendingDiv.classList.add('page-drag-charge-fill');
             }
           });
-          lastPageTapTime = Date.now();
+          lastPageTapTime = performance.now();
           lastPageTapIdx = pageIdx;
           lastPageTapX = touchLastX;
           lastPageTapY = touchLastY;
@@ -20840,12 +20852,12 @@
             !isPointInMobileQuickActions(e.clientX, e.clientY) &&
             !computeInsertAt(e.clientX, e.clientY)) {
           const tapIdx = parseInt(pageDiv.dataset.index, 10);
-          const now = Date.now();
+          const now = pmTapTime(e);
           const isFastDoubleTap = lastPageTapIdx === tapIdx && preTapSelectionSnapshot &&
             (now - lastPageTapTime) < PAGE_DOUBLE_TAP_MS &&
             Math.hypot(e.clientX - lastPageTapX, e.clientY - lastPageTapY) < PAGE_DOUBLE_TAP_MOVE_MAX;
           if (isFastDoubleTap) {
-            pmCancelTapMenuToggle();
+            pmCancelTapMenuToggle(now);
             // Consume it (don't chain into a triple-tap) and undo the first
             // tap's selection toggle - handlePageClick's multi-select
             // collapse isn't reversible by just calling it again, so the
@@ -20887,7 +20899,7 @@
             } else {
               // A tap selects nothing on a touch screen (pages are selected
               // by holding): it shows / hides the menus.
-              pmScheduleTapMenuToggle();
+              pmScheduleTapMenuToggle(now);
             }
             lastPageTapTime = now;
             lastPageTapIdx = tapIdx;
@@ -20946,8 +20958,19 @@
         // frame entirely once it takes over; scrolling while drawing one
         // makes no sense anyway (rubberTouchMove already preventDefaults
         // the native scroll for exactly this reason).
-        if (rubberArmed || rubberActive || isDragActive || pinchActive) return;
+        if (rubberArmed || rubberActive || isDragActive || pinchActive || pmOneFingerZoom) return;
         const t = e.touches[0];
+        // The browser's own slop: no scrolling before the finger has gone
+        // further than a tap may. Scrolling on the first pixels moved the
+        // view by a trembling finger's few pixels, and the double tap no
+        // longer counted as one (the view must not move during a tap).
+        if (!pmActiveTouchScrolling) {
+          if (Math.hypot(t.clientX - pmActiveTouchStartX, t.clientY - pmActiveTouchStartY) <= TAP_MOVE_MAX) return;
+          pmActiveTouchScrolling = true;
+          pmActiveTouchLastX = t.clientX;
+          pmActiveTouchLastY = t.clientY;
+          return;
+        }
         if (pmActiveTouchLastX != null) {
           if (!document.body.classList.contains('pm-vertical-scroll-lock')) {
             scrollContainer.scrollLeft += pmActiveTouchLastX - t.clientX;
@@ -20959,6 +20982,7 @@
       }, { passive: true });
       const pmEndActiveTouchScrollFallback = () => {
         pmActiveTouchScrollFallback = false;
+        pmActiveTouchScrolling = false;
         pmActiveTouchLastX = null;
         pmActiveTouchLastY = null;
       };
@@ -21195,52 +21219,59 @@
     scrollContainer.addEventListener('touchstart', (e) => {
       if (!isTouchDevice || isLoading || !pdfDoc) return;
       if (e.touches.length === 2) {
-        // Start of pinch - cancel possible drag/long press
-        cancelPageTouchDrag();
-        // A second finger joining mid-touch turns this into a pinch instead
-        // of whatever the first finger's touch was tracking - stop the
-        // manual-scroll takeover (see the div-level touchstart listener) so
-        // it doesn't resume with stale coordinates once the pinch ends.
-        pmActiveTouchScrollFallback = false;
-        pmActiveTouchLastX = null;
-        pmActiveTouchLastY = null;
-        // A manual pinch is a deliberate zoom action, same as dragging the
-        // (desktop) slider or wheel-zooming - both of those already exit
-        // fit-width mode via changeScale()/setScaleProgrammatic()'s own
-        // clearFitWidthToggle() call. Pinch was the one manual-zoom path
-        // that didn't: fitWidthToggleOn stayed true through applyPinchScale-
-        // Change(), so any later live re-track (pmReapplyFitWidthIfActive -
-        // e.g. the very next thumbnail to finish decoding) fought the pinch
-        // by silently re-snapping the scale back to fit-width's own target -
-        // anchored to whatever page fit-width was ORIGINALLY toggled on for,
-        // not the page just pinched, which is what looked like a scroll
-        // jump back to that first page.
-        if (typeof clearFitWidthToggle === 'function') clearFitWidthToggle();
-        pinchActive = true;
-        pinchStartScale = currentScale;
-        // What the user actually sees at gesture start (DOM), with math fallback.
-        try { void pagesContainer.offsetHeight; } catch (_) {}
-        const startDomCols = pmDomColsInFirstRow();
-        pinchStartCols = startDomCols > 0
-          ? startDomCols
-          : mobileColsThatFit(currentScale, getScrollAvailWidth());
-        mobileMinScale = computeMobilePinchMinScale();
-        document.body.classList.add('pinch-zooming');
-        pinchStartDist = touchDist(e.touches[0], e.touches[1]);
-
+        pmOneFingerZoom = null;   // a second finger: the pinch proper takes over
         const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
         const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
-        pinchStartMidX = midX;
-        pinchStartMidY = midY;
-        pinchLastMidX = midX;
-        pinchLastMidY = midY;
-
-        setPinchAnchorFromPage(findPinchAnchorPageAt(midX, midY), midX, midY);
-        setPinchTransformOrigin(midX, midY);
-        applyPinchVisualScale();
+        pmBeginPinch(midX, midY);
+        pinchStartDist = touchDist(e.touches[0], e.touches[1]);
         e.preventDefault();
       }
     }, { passive: false });
+
+    // The start of a zoom gesture about (midX, midY): two fingers, or one
+    // after a double tap (pmOneFingerZoom).
+    function pmBeginPinch(midX, midY) {
+      // Start of pinch - cancel possible drag/long press
+      cancelPageTouchDrag();
+      // A second finger joining mid-touch turns this into a pinch instead
+      // of whatever the first finger's touch was tracking - stop the
+      // manual-scroll takeover (see the div-level touchstart listener) so
+      // it doesn't resume with stale coordinates once the pinch ends.
+      pmActiveTouchScrollFallback = false;
+      pmActiveTouchLastX = null;
+      pmActiveTouchLastY = null;
+      // A manual pinch is a deliberate zoom action, same as dragging the
+      // (desktop) slider or wheel-zooming - both of those already exit
+      // fit-width mode via changeScale()/setScaleProgrammatic()'s own
+      // clearFitWidthToggle() call. Pinch was the one manual-zoom path
+      // that didn't: fitWidthToggleOn stayed true through applyPinchScale-
+      // Change(), so any later live re-track (pmReapplyFitWidthIfActive -
+      // e.g. the very next thumbnail to finish decoding) fought the pinch
+      // by silently re-snapping the scale back to fit-width's own target -
+      // anchored to whatever page fit-width was ORIGINALLY toggled on for,
+      // not the page just pinched, which is what looked like a scroll
+      // jump back to that first page.
+      if (typeof clearFitWidthToggle === 'function') clearFitWidthToggle();
+      pinchActive = true;
+      pinchStartScale = currentScale;
+      // What the user actually sees at gesture start (DOM), with math fallback.
+      try { void pagesContainer.offsetHeight; } catch (_) {}
+      const startDomCols = pmDomColsInFirstRow();
+      pinchStartCols = startDomCols > 0
+        ? startDomCols
+        : mobileColsThatFit(currentScale, getScrollAvailWidth());
+      mobileMinScale = computeMobilePinchMinScale();
+      document.body.classList.add('pinch-zooming');
+
+      pinchStartMidX = midX;
+      pinchStartMidY = midY;
+      pinchLastMidX = midX;
+      pinchLastMidY = midY;
+
+      setPinchAnchorFromPage(findPinchAnchorPageAt(midX, midY), midX, midY);
+      setPinchTransformOrigin(midX, midY);
+      applyPinchVisualScale();
+    }
 
     scrollContainer.addEventListener('touchmove', (e) => {
       if (!pinchActive || e.touches.length !== 2) return;
@@ -21330,6 +21361,46 @@
     }
     scrollContainer.addEventListener('touchend', endPinch);
     scrollContainer.addEventListener('touchcancel', endPinch);
+
+    // ── One-finger zoom (phones, one page a row) ──
+    // Double tap and keep the finger down, then slide it: below the line of
+    // the tap zooms in, above it zooms out, the further the more - as on
+    // mobile maps. Let go without sliding, it stays an ordinary double tap
+    // (fit width, onPagePointerUp). Runs on the pinch: the pages are scaled
+    // as a picture about the tapped point while the finger moves and laid
+    // out once on release (endPinch, which the touchend above runs).
+    const PM_ONE_FINGER_ZOOM_PX = 150;   // finger travel that doubles / halves the scale
+    function pmArmOneFingerZoom(x, y, t) {
+      pmOneFingerZoom = null;
+      if (!isTouchDevice || isLoading || !pdfDoc || pinchActive) return;
+      if (typeof readModeActive !== 'undefined' && readModeActive) return;
+      if (document.querySelector('.modal-overlay-active')) return;
+      if (typeof isPagesSingleColumnLayout !== 'function' || !isPagesSingleColumnLayout()) return;
+      pmOneFingerZoom = { x, y, t, active: false };
+    }
+    scrollContainer.addEventListener('touchmove', (e) => {
+      const z = pmOneFingerZoom;
+      if (!z || e.touches.length !== 1) return;
+      const t = e.touches[0];
+      if (!z.active) {
+        // A trembling finger is still a double tap.
+        if (Math.hypot(t.clientX - z.x, t.clientY - z.y) <= TAP_MOVE_MAX) return;
+        z.active = true;
+        pmCancelTapMenuToggle(z.t);   // the first tap's
+        pmBeginPinch(z.x, z.y);
+      }
+      if (!pinchActive) return;
+      // Distance from the tap's line, less the dead zone just crossed, so
+      // the scale starts moving from where it was.
+      const dy = t.clientY - z.y;
+      const travel = Math.sign(dy) * Math.max(0, Math.abs(dy) - TAP_MOVE_MAX);
+      const minS = mobileMinScale || computeMobilePinchMinScale();
+      applyPinchScaleChange(Math.max(minS, Math.min(700,
+        Math.round(pinchStartScale * Math.pow(2, travel / PM_ONE_FINGER_ZOOM_PX)))));
+    }, { passive: true });
+    const pmEndOneFingerZoom = () => { pmOneFingerZoom = null; };
+    scrollContainer.addEventListener('touchend', pmEndOneFingerZoom);
+    scrollContainer.addEventListener('touchcancel', pmEndOneFingerZoom);
 
     // ═══════════════════════════════════════════════════════════════════
     // Frame (rubber) selection of pages in selection mode
@@ -21432,7 +21503,7 @@
       const t = e.touches[0];
       if (!canStartRubberTouch(t.target || e.target)) { lastTapTime = 0; return; }
 
-      const now = Date.now();
+      const now = pmTapTime(e);   // the touch's own time, see pmTapTime
       const dt = now - lastTapTime;
       const dist = Math.hypot(t.clientX - lastTapX, t.clientY - lastTapY);
 
@@ -21442,11 +21513,18 @@
       if (pmAutoSelectModeOn) { lastTapTime = 0; return; }
 
       if (dt < DOUBLE_TAP_MS && dist < DOUBLE_TAP_DIST) {
+        // One page a row: double tap, hold and slide is the one-finger zoom
+        // there (pmOneFingerZoom) - the frame is the grid's.
+        if (pmOneFingerZoom ||
+            (typeof isPagesSingleColumnLayout === 'function' && isPagesSingleColumnLayout())) {
+          lastTapTime = 0;
+          return;
+        }
         // Double tap - arm the frame selection. Its first tap was taken for
         // a single one and is about to show / hide the menus: cancelled, or
         // they folded away under the finger drawing the frame (at the top of
         // the document leaving a blank spacer and shifting the frame's start).
-        pmCancelTapMenuToggle();
+        pmCancelTapMenuToggle(now);
         rubberArmed = true;
         rubberStartX = t.clientX;
         rubberStartY = t.clientY;
@@ -21475,6 +21553,11 @@
       if (e.touches.length !== 1) return;
       const t = e.touches[0];
       if (rubberArmed && !rubberActive) {
+        // Not before the finger has gone further than a tap may: a real
+        // finger trembles a few pixels, and the frame starting on the first
+        // of those moves took every double tap in the grid for a frame
+        // around one page instead of the zoom.
+        if (Math.hypot(t.clientX - rubberStartX, t.clientY - rubberStartY) <= TAP_MOVE_MAX) return;
         cancelPageTouchDrag();
         rubberActive = true;
         document.body.classList.add('rubber-selecting');
@@ -23841,26 +23924,56 @@
     // as they are. The tap waits out the double-tap window first, so the
     // second tap of a double-tap (fit width) cancels it.
     let pmTapMenuTimer = null;
-    function pmScheduleTapMenuToggle() {
+    // The tap whose toggle has run: { tap: its time } (see pmCancelTapMenuToggle).
+    let pmTapMenuFired = null;
+    /** tapTime: when the tap happened (pmTapTime of its event). */
+    function pmScheduleTapMenuToggle(tapTime) {
       if (!isTouchDevice || !pdfDoc) return;
+      if (tapTime == null) tapTime = performance.now();
       // A second tap inside the window: a double tap, which leaves the menus
-      // as they are.
-      if (pmTapMenuTimer) {
-        pmCancelTapMenuToggle();
+      // as they are - also when the first one's toggle has already run.
+      if (pmTapMenuTimer || (pmTapMenuFired && tapTime - pmTapMenuFired.tap < PAGE_DOUBLE_TAP_MS)) {
+        pmCancelTapMenuToggle(tapTime);
         return;
       }
-      pmTapMenuTimer = setTimeout(() => {
+      // A busy page (previews being drawn) runs this late, after a second
+      // tap has already come in but before its handlers have run - that tap
+      // goes first (it may be the double tap, which cancels this), and so,
+      // for a while, does a finger already back on the page.
+      const fingerDeadline = performance.now() + 2 * PAGE_DOUBLE_TAP_MS;
+      const fire = () => {
+        const sched = navigator.scheduling;
+        if (sched && typeof sched.isInputPending === 'function' && sched.isInputPending()) {
+          pmTapMenuTimer = setTimeout(fire, 0);
+          return;
+        }
+        if (pageTouchActive && performance.now() < fingerDeadline) {
+          pmTapMenuTimer = setTimeout(fire, 40);
+          return;
+        }
         pmTapMenuTimer = null;
         if (!pdfDoc || isLoading || pinchActive || isDragActive) return;
         if (rubberArmed || rubberActive) return;
         if (typeof readModeActive !== 'undefined' && readModeActive) return;
         if (document.querySelector('.modal-overlay-active')) return;
         toggleTopMenu();
-      }, PAGE_DOUBLE_TAP_MS);
+        pmTapMenuFired = { tap: tapTime };
+      };
+      pmTapMenuTimer = setTimeout(fire, PAGE_DOUBLE_TAP_MS);
     }
-    function pmCancelTapMenuToggle() {
+    /** tapTime: the second tap's time, when a second tap is what cancels. A
+     * page too busy to tell in time may have run the first tap's toggle
+     * before this tap's handlers - though the finger made the two a double
+     * tap. Then it is put back (before anything is painted: both happen in
+     * the same stretch of work). */
+    function pmCancelTapMenuToggle(tapTime) {
       clearTimeout(pmTapMenuTimer);
       pmTapMenuTimer = null;
+      const fired = pmTapMenuFired;
+      pmTapMenuFired = null;
+      if (fired && tapTime != null && tapTime >= fired.tap && tapTime - fired.tap < PAGE_DOUBLE_TAP_MS) {
+        toggleTopMenu();
+      }
     }
 
     // A page selected (its mini-tools up) while the menu is folded away:
@@ -25852,8 +25965,12 @@
           // touchend listeners near cancelPageTouchDrag) so a touch that
           // turns out to be a scroll-start, not a double-tap, still works.
           pmActiveTouchScrollFallback = true;
-          pmActiveTouchLastX = e.touches[0].clientX;
-          pmActiveTouchLastY = e.touches[0].clientY;
+          pmActiveTouchScrolling = false;
+          pmActiveTouchStartX = pmActiveTouchLastX = e.touches[0].clientX;
+          pmActiveTouchStartY = pmActiveTouchLastY = e.touches[0].clientY;
+          // One page a row: holding the finger down after the second tap and
+          // sliding it zooms (pmOneFingerZoom) - the pinch's job otherwise.
+          pmArmOneFingerZoom(e.touches[0].clientX, e.touches[0].clientY, pmTapTime(e));
         }
       }, { passive: false });
 
@@ -29048,7 +29165,7 @@
         // The empty area around the pages: show / hide the menus. A page
         // handles its own taps (onPagePointerUp), controls theirs.
         if (el && el.closest && el.closest('.page, #mobileScrollRail, #insertIndicator, button, a, input, label, select, textarea, [role="button"]')) return;
-        pmScheduleTapMenuToggle();
+        pmScheduleTapMenuToggle(pmTapTime(e));
       }, { passive: true, capture: true });
     })();
 
