@@ -1,4 +1,4 @@
-# PDF Document Manager in a <b>single HTML-file</b>
+# PDF Document Manager in a <b>single HTML file</b>
 
 <p align="right">
   <a href="#english">🇬🇧 English</a> · <a href="#русский">🇷🇺 Русский</a>
@@ -26,7 +26,7 @@
 </td>
 <td align="center" width="20%">
 <a href="docs/screenshots/05-merge-order.jpg"><img src="docs/screenshots/05-merge-order.jpg" width="150" alt="Merge dialog with a custom file order"></a><br>
-<sub>Merge with custom order</sub>
+<sub>Merging in a custom order</sub>
 </td>
 </tr>
 </table>
@@ -91,7 +91,7 @@ Android app: Android 7.0+, phones and tablets. Open the downloaded `.apk` on the
 
 ---
 
-<a id="русский"></a>**Редактор PDF в одном HTML-файле, который работает прямо в браузере.** Слияние и разбиение PDF, редактирование страниц, закладки, конвертация Word/Excel/почты — ничего устанавливать не нужно. Файлы не покидают ваш компьютер: вся обработка происходит локально, без загрузки на сервер.
+<a id="русский"></a>**Редактор PDF, который работает прямо в браузере.** Объединение и разделение PDF, редактирование страниц, закладки, конвертация файлов Word, Excel и писем — всё в одном HTML-файле, ничего устанавливать не нужно. Файлы не покидают ваш компьютер: вся обработка происходит локально, на сервер ничего не загружается.
 
 <table>
 <tr>
@@ -112,8 +112,8 @@ Android app: Android 7.0+, phones and tablets. Open the downloaded `.apk` on the
 <sub>Навигатор прокрутки</sub>
 </td>
 <td align="center" width="20%">
-<a href="docs/screenshots/05-merge-order.jpg"><img src="docs/screenshots/05-merge-order.jpg" width="150" alt="Слияние файлов с настройкой порядка"></a><br>
-<sub>Слияние с настройкой порядка</sub>
+<a href="docs/screenshots/05-merge-order.jpg"><img src="docs/screenshots/05-merge-order.jpg" width="150" alt="Окно объединения файлов с выбором порядка"></a><br>
+<sub>Объединение в нужном порядке</sub>
 </td>
 </tr>
 </table>
@@ -128,7 +128,7 @@ Android app: Android 7.0+, phones and tablets. Open the downloaded `.apk` on the
 <a href="https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_offline.html" title="Офлайн-версия, PDF_manager_offline.html: всё встроено в файл, работает без интернета"><img src="docs/download-icons/html-offline.svg" width="76" alt="Офлайн-версия (HTML)"></a>
 &emsp;
 <a href="https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.50/PDF.Manager_0.1.50_x64-setup.exe" title="Windows: установщик (x64)"><img src="docs/download-icons/windows-setup.svg" width="76" alt="Windows: установщик"></a>
-<a href="https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.50/pdf-manager.exe" title="Windows: portable .exe, запускается без установки"><img src="docs/download-icons/windows-portable.svg" width="76" alt="Windows: portable .exe"></a>
+<a href="https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.50/pdf-manager.exe" title="Windows: портативная версия (.exe), запускается без установки"><img src="docs/download-icons/windows-portable.svg" width="76" alt="Windows: портативная версия .exe"></a>
 &emsp;
 <a href="https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.50/PDF.Manager_0.1.50_amd64.deb" title="Linux: пакет .deb для Debian, Ubuntu и производных (x64)"><img src="docs/download-icons/linux-deb.svg" width="76" alt="Linux: .deb"></a>
 <a href="https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.50/PDF.Manager_0.1.50_amd64.AppImage" title="Linux: AppImage, запускается без установки на большинстве дистрибутивов (x64)"><img src="docs/download-icons/linux-appimage.svg" width="76" alt="Linux: AppImage"></a>
@@ -140,7 +140,7 @@ Android app: Android 7.0+, phones and tablets. Open the downloaded `.apk` on the
 
 Страницы релизов: [Windows](https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.50) · [Linux](https://github.com/65WebDev/PDF-Manager/releases/tag/linux-v0.1.50) · [Android](https://github.com/65WebDev/PDF-Manager/releases/tag/android-v0.1.50)
 
-После скачивания откройте HTML-файл в браузере. Онлайн-версия подгружает библиотеки из CDN; офлайн-версия содержит все зависимости внутри файла и работает без интернета.
+После скачивания откройте HTML-файл в браузере. Онлайн-версия подгружает библиотеки из CDN; офлайн-версия содержит все библиотеки внутри файла и работает без интернета.
 
 Поддерживаемые браузеры: Chrome/Edge 125+, Firefox ESR, Safari 18+ (в том числе iOS/iPadOS 18+).
 
@@ -148,12 +148,12 @@ Android app: Android 7.0+, phones and tablets. Open the downloaded `.apk` on the
 
 ### Возможности
 
-- **Управление страницами** — слияние, разбиение, перетаскивание, удаление и поворот страниц.
+- **Управление страницами** — объединение и разделение файлов, перестановка перетаскиванием, удаление и поворот страниц.
 - **Встроенный редактор страниц** — добавление и редактирование текста и изображений прямо на странице PDF.
-- **Закладки и оглавление** — иерархические закладки с множественным выделением, перетаскиванием и групповым удалением.
+- **Закладки и оглавление** — многоуровневые закладки: выделение нескольких сразу, перестановка перетаскиванием, удаление группой.
 - **Внутренние ссылки** — переходы по ссылкам и оглавлению прямо в просмотре.
-- **Умный зум** — чёткий рендер на любом приближении, магнит к ширине страницы (колесо/ползунок на десктопе, pinch-to-zoom на мобильном).
-- **Несколько документов сразу** *(только десктоп)* — несколько PDF во вкладках одного окна.
+- **Удобное масштабирование** — чёткое изображение при любом масштабе, привязка к ширине страницы (колесо мыши или ползунок на компьютере, жест двумя пальцами на смартфоне).
+- **Несколько документов сразу** *(только на компьютере)* — несколько PDF во вкладках одного окна.
 - **Импорт из Word, Excel и почты** — `.docx`, `.xlsx`, `.eml` и `.msg` конвертируются в PDF автоматически.
 - **Сжатие изображений** — уменьшение размера файла без потери читаемости.
 - **Пароль и шифрование** — установка пароля на PDF прямо в браузере, без сторонних сервисов.
@@ -162,16 +162,16 @@ Android app: Android 7.0+, phones and tablets. Open the downloaded `.apk` on the
 
 **Используемые библиотеки:**
 
-- **pdf-lib** v1.17.1 — сборка и редактирование PDF (страницы, поворот, слияние, сохранение)
-- **pdf.js** v6.3.289 — рендер страниц PDF (миниатюры, предпросмотр)
+- **pdf-lib** v1.17.1 — сборка и редактирование PDF (страницы, поворот, объединение, сохранение)
+- **pdf.js** v6.3.289 — отрисовка страниц PDF (миниатюры, просмотр)
 - **mammoth** v1.12.3 — конвертация файлов Word (`.docx`) в HTML при импорте
 - **SheetJS (xlsx)** v0.20.3 — чтение таблиц Excel (`.xls`/`.xlsx`) при импорте
 - **html2canvas** v1.4.1 — растеризация HTML-разметки в изображение для сборки PDF
 - **JSZip** v3.10.2 — распаковка `.docx`-архивов для docx-preview
-- **docx-preview** v0.4.1 — постраничный рендер документов Word
+- **docx-preview** v0.4.1 — постраничная отрисовка документов Word
 - **ExcelJS** v4.4.0 — чтение таблиц Excel со стилями и настройками печати
 - **postal-mime** v3.0.1 — разбор писем (`.eml`)
 - **@kenjiuno/msgreader-web-ng** v0.2.0-alpha1 — разбор писем Outlook (`.msg`)
-- **@kenjiuno/decompressrtf** v0.1.4 — распаковка RTF-тела в файлах `.msg`
+- **@kenjiuno/decompressrtf** v0.1.4 — распаковка текста писем в формате RTF внутри `.msg`
 - **@cantoo/pdf-lib** v2.11.1 — открытие PDF-файлов, защищённых паролем
 - **@pdf-lib/fontkit** v1.1.1 — встраивание Unicode-шрифта для нелатинского текста в заполняемых полях форм
