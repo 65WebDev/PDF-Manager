@@ -6,7 +6,9 @@
 //! - Save / Export go through the system file picker (Storage Access
 //!   Framework), Share through the system share sheet, Print through the
 //!   system print dialog;
-//! - reading mode hides the status and navigation bars.
+//! - reading mode hides the status and navigation bars;
+//! - the About box's update downloads the newer APK from the project's
+//!   releases and hands it to the system installer.
 //!
 //! The Android WebView cannot pass a request body to the app, so a file from
 //! the editor arrives as base64 text, in chunks (`android_stage_chunk`), and
@@ -274,6 +276,45 @@ pub fn open_url_detached(app: AppHandle, url: String) {
       log::warn!("openUrl: {e}");
     }
   });
+}
+
+/// The only place an update APK is downloaded from: the project's releases
+/// (the Kotlin side checks the same before it downloads anything).
+const RELEASES_DOWNLOAD: &str = "https://github.com/65WebDev/PDF-Manager/releases/download/";
+
+fn is_release_apk_url(url: &str) -> bool {
+  url.starts_with(RELEASES_DOWNLOAD)
+    && url.ends_with(".apk")
+    && !url.contains("..")
+    && !url.contains('?')
+    && !url.contains('#')
+}
+
+/// In-app update: downloads the APK at `url` (a release of the project) and
+/// opens the system installer for it, where the user confirms. The first
+/// time Android's "Install unknown apps" switch for the app comes up before
+/// that. Fails with a message starting "install_permission", "cancelled",
+/// "not_apk", "not_newer" or "other_key" (see PdfBridgePlugin.installUpdate).
+#[tauri::command]
+pub async fn android_install_update(app: AppHandle, url: String) -> Result<(), String> {
+  if !is_release_apk_url(&url) {
+    return Err("Обновление скачивается только со страницы релизов проекта".into());
+  }
+  let _: Empty = call(&app, "installUpdate", json!({ "url": url })).await?;
+  Ok(())
+}
+
+/// How far the update download is: { done, total } in bytes (total -1 while unknown).
+#[tauri::command]
+pub async fn android_update_progress(app: AppHandle) -> Result<Value, String> {
+  call(&app, "updateProgress", json!({})).await
+}
+
+/// Stops the update download.
+#[tauri::command]
+pub async fn android_cancel_update(app: AppHandle) -> Result<(), String> {
+  let _: Empty = call(&app, "cancelUpdate", json!({})).await?;
+  Ok(())
 }
 
 /// Reading mode: the status and navigation bars are hidden (a swipe from the
