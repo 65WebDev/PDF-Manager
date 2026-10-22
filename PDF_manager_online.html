@@ -39937,14 +39937,21 @@ function pmBookmarksReferenceBottom() {
   return typeof stickyBarTop === 'function' ? stickyBarTop() : 0;
 }
 
-// How much of the screen's bottom the on-screen keyboard covers. A browser
-// lays it over the page without resizing it - only the visual viewport
-// shrinks - so the page's own sizes do not show it. (The Android app's view
-// is resized instead, and this stays 0 there.)
+// The height a position:fixed `bottom` counts from (the layout viewport).
+// Not innerHeight: on a phone's Chrome that follows the visual viewport and
+// shrinks with the on-screen keyboard, while fixed boxes stay where they were.
+function pmBookmarksLayoutHeight() {
+  return document.documentElement.clientHeight || window.innerHeight;
+}
+
+// How much of the layout viewport's bottom the on-screen keyboard covers. A
+// browser lays it over the page without resizing it - only the visual
+// viewport shrinks - so the page's own sizes do not show it. (The Android
+// app's view is resized instead, and this stays 0 there.)
 function pmBookmarksKeyboardInset() {
   const vv = window.visualViewport;
   if (!vv) return 0;
-  return Math.max(0, Math.round(window.innerHeight - (vv.offsetTop + vv.height)));
+  return Math.max(0, Math.round(pmBookmarksLayoutHeight() - (vv.offsetTop + vv.height)));
 }
 
 function pmBookmarksPositionPanel() {
@@ -39956,7 +39963,7 @@ function pmBookmarksPositionPanel() {
     // screen with 8px either side (the right edge is in the CSS) - or just
     // above the on-screen keyboard while it is up.
     const work = scrollContainer.getBoundingClientRect();
-    const below = Math.max(0, window.innerHeight - (work.top + scrollContainer.clientHeight),
+    const below = Math.max(0, pmBookmarksLayoutHeight() - (work.top + scrollContainer.clientHeight),
       pmBookmarksKeyboardInset());
     panel.style.top = 'auto';
     panel.style.bottom = Math.round(below + 8) + 'px';
@@ -40008,7 +40015,7 @@ function pmBookmarksUpdateListMaxHeight() {
     // below the work area's top (or the top of what is on screen, should the
     // browser have panned the view up to the field being typed in).
     const vv = window.visualViewport;
-    const sheetBottom = window.innerHeight - (parseFloat(panel && panel.style.bottom) || 0);
+    const sheetBottom = pmBookmarksLayoutHeight() - (parseFloat(panel && panel.style.bottom) || 0);
     const roomTop = Math.max(scrollContainer.getBoundingClientRect().top, vv ? vv.offsetTop : 0) + 8;
     cap = Math.min(cap, sheetBottom - roomTop);
     list.style.maxHeight = Math.max(60, Math.floor(cap - (lr.top - pr.top) - (pr.bottom - lr.bottom) - padV)) + 'px';
