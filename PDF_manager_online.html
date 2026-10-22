@@ -579,6 +579,16 @@
       flex: 1 1 auto; min-width: 0; overflow: hidden;
       text-overflow: ellipsis; white-space: nowrap; text-align: left;
     }
+    /*Rename in place: the label turns into this field. The negative margin
+       keeps the text where the label's was (padding 3px + border 1px).*/
+    .pm-tab-rename-input {
+      flex: 1 1 auto; min-width: 0; width: 0; box-sizing: border-box; height: 21px;
+      margin: 0 -4px; padding: 0 3px;
+      font: inherit; color: #1f2d3a; background: #fff;
+      border: 1px solid #3498db; border-radius: 4px; outline: none;
+      user-select: text; cursor: text;
+    }
+    html[data-theme="dark"] .pm-tab-rename-input { color: #e8ecef; background: #1c2128; border-color: #4aa3df; }
     .pm-tab-star { flex: 0 0 auto; color: #e74c3c; font-weight: 700; font-size: 15px; line-height: 0; }
     .pm-tab-star[hidden] { display: none; }
     .pm-tab-close {
@@ -6444,7 +6454,15 @@
         box-sizing: border-box;
       }
       .main-row .compact-btn .btn-ico { font-size: 21px; }
-      .main-row #replaceBtn .btn-ico svg { width: 21px; height: 21px; }
+      /*Phone icon sizes and nudges, picked on a phone with the icon tuner page.
+         Same selectors as the desktop sizes above the media queries - later, so
+         they win here and leave the desktop menu as it is.*/
+      #topMenu #selectFileBtn .btn-ico { font-size: 22.5px; position: relative; left: 0.5px; }
+      #topMenu #saveBtn .btn-ico { font-size: 20px; }
+      #topMenu #replaceBtn .btn-ico svg { width: 21.5px; height: 21.5px; }
+      #topMenu #exportBtn .btn-ico svg { width: 21.5px; height: 21.5px; }
+      #topMenu #mobileReadModeBtn .btn-ico svg { width: 26px; height: 26px; position: relative; top: 0.5px; }
+      #topMenu #multiSelectIcon { font-size: 25px; position: relative; top: 0.5px; }
 
       /*We reduce the gaps and indentation under the logo so that 5 icons fit into a row*/
       .main-row { gap: 8px 8px; padding-right: 56px; }
@@ -6475,7 +6493,7 @@
       }
       .top-menu .main-row button#rotateLeftBtn .rotate-glyph,
       .top-menu .main-row button#rotateRightBtn .rotate-glyph {
-        font-size: 35px;
+        font-size: 34.5px;
         line-height: 1;
         display: block;
         transform: translateY(3px) scaleX(-1) scaleY(-1);
@@ -31583,70 +31601,6 @@
       updateUIState();
     }
 
-    // Modal one-line text input. Resolves to the text, or null if cancelled
-    // (Esc, Cancel, a click outside). The value starts fully selected, so
-    // typing replaces it; moving the caret drops the selection as in any
-    // text field.
-    function showTextInputDialog(title, value, opts) {
-      opts = opts || {};
-      return new Promise((resolve) => {
-        const overlay = document.createElement('div');
-        overlay.className = 'modal-overlay-active';
-        overlay.style.cssText = `
-          position: fixed; inset: 0; background: rgba(0,0,0,0.6);
-          display: flex; align-items: center; justify-content: center; z-index: 100001;`;
-        const box = document.createElement('div');
-        box.className = 'pm-modal-box';
-        box.style.cssText = `
-          background: #fff; border-radius: 12px; padding: 22px 26px; max-width: 92vw;
-          box-shadow: 0 10px 30px rgba(0,0,0,0.3); min-width: 360px;`;
-        box.innerHTML = `
-          <div style="font-size:17px; color:#2c3e50; margin-bottom:14px; font-weight:600;">${escapeHtml(title)}</div>
-          <input id="pmTextInput" type="text" spellcheck="false" autocomplete="off"
-            style="box-sizing:border-box; width:100%; padding:9px 11px; font-size:15px;
-              border:1px solid #bbb; border-radius:6px; outline:none; margin-bottom:18px;">
-          <div style="display:flex; gap:12px; justify-content:flex-end;">
-            <button id="pmTextOk" type="button" style="padding:9px 22px; border:none; border-radius:6px;
-              background:#3498db; color:#fff; font-weight:bold; cursor:pointer; font-size:15px;">${escapeHtml(opts.okText || 'OK')}</button>
-            <button id="pmTextCancel" type="button" style="padding:9px 22px; border:1px solid #ccc; border-radius:6px;
-              background:#fff; color:#333; cursor:pointer; font-size:15px;">${escapeHtml(opts.cancelText || t('confirmNo'))}</button>
-          </div>`;
-        overlay.appendChild(box);
-        document.body.appendChild(overlay);
-        const input = box.querySelector('#pmTextInput');
-        input.value = value || '';
-
-        let settled = false;
-        const close = (result) => {
-          if (settled) return;
-          settled = true;
-          document.removeEventListener('keydown', onKey, true);
-          if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
-          resolve(result);
-        };
-        box.querySelector('#pmTextOk').addEventListener('click', (e) => {
-          e.preventDefault(); e.stopPropagation(); close(input.value);
-        });
-        box.querySelector('#pmTextCancel').addEventListener('click', (e) => {
-          e.preventDefault(); e.stopPropagation(); close(null);
-        });
-        overlay.addEventListener('click', (e) => {
-          if (e.target === overlay) { e.preventDefault(); e.stopPropagation(); close(null); }
-        });
-        // Capture phase, and stopped here: the editor's own shortcuts
-        // (Delete, arrows, Ctrl+A, ...) must not act on the document while
-        // a name is being typed.
-        const onKey = (e) => {
-          if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); close(input.value); return; }
-          if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(null); return; }
-          if (e.target === input) e.stopPropagation();
-        };
-        document.addEventListener('keydown', onKey, true);
-        input.focus();
-        input.select();
-      });
-    }
-
     // Universal modal confirmation window "Yes/No"
     function showConfirmDialog(message, opts) {
       opts = opts || {};
@@ -38299,30 +38253,110 @@ function pmOpenTabMenu(clientX, clientY, tabId) {
 // document was opened from: Save then offers the new name instead of quietly
 // writing back over the old file under the old one.
 const PM_BAD_FILENAME_CHARS = /[\\/:*?"<>|\u0000-\u001f]/g;
-async function pmRenameTab(tabId) {
+function pmTabBaseName(tab) {
+  return (((tab.id === pmActiveId) ? currentFileName : tab.fileName) || '').replace(/\.pdf$/i, '');
+}
+function pmApplyTabName(tabId, typed) {
   const tab = pmTabs.find(x => x.id === tabId);
   if (!tab) return;
-  const isActive = tabId === pmActiveId;
-  const current = (isActive ? currentFileName : tab.fileName) || '';
-  const base = current.replace(/\.pdf$/i, '');
-  const typed = await showTextInputDialog(t('tabRenameTitle'), base, {
-    okText: t('tabRename'), cancelText: t('confirmCloseTabNo')
-  });
-  if (typed == null) return;
   const cleaned = typed.replace(PM_BAD_FILENAME_CHARS, '').replace(/\.pdf$/i, '').trim();
-  if (!cleaned || cleaned === base) return;
+  if (!cleaned || cleaned === pmTabBaseName(tab)) return;
   const name = cleaned + '.pdf';
   tab.fileName = name;
   tab.sourceHandle = null;
   tab.sourceNativePath = null;
-  if (isActive) {
+  if (tabId === pmActiveId) {
     currentFileName = name;
     sourceFileHandle = null;
     sourceNativePath = null;
     updateInfo();
   }
-  pmRenderBar();
 }
+
+// Renamed right in the tab (a double click on it, or Rename in its menu):
+// the label turns into a text field. Enter or a click anywhere else keeps
+// the new name, Escape the old one.
+let pmTabRename = null;   // { tabId, input, value, selStart, selEnd } while a name is edited
+function pmStartTabRename(tabId) {
+  if (!pmTabsEnabled()) return;
+  if (pmTabRename) pmFinishTabRename(true);
+  const tab = pmTabs.find(x => x.id === tabId);
+  if (!tab) return;
+  const value = pmTabBaseName(tab);
+  pmTabRename = { tabId, input: null, value, selStart: 0, selEnd: value.length };
+  pmMountTabRename();
+}
+
+// Puts the field into its tab - again after each redraw of the tab bar (the
+// switch to the tab a double click starts with ends in one), with the text
+// and selection it had.
+function pmMountTabRename() {
+  const r = pmTabRename;
+  const el = r && tabBarEl && tabBarEl.querySelector('.pm-tab[data-tab-id="' + r.tabId + '"]');
+  const label = el && el.querySelector('.pm-tab-label');
+  if (!label) { pmTabRename = null; return; }
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'pm-tab-rename-input';
+  input.spellcheck = false;
+  input.autocomplete = 'off';
+  input.value = r.value;
+  input.setAttribute('aria-label', t('tabRenameTitle'));
+  // The tab's own mouse handling (switch, drag, middle-click close, its
+  // menu) is not for the field: the caret and the selection are placed
+  // with the mouse here, and the right button gives the usual text menu.
+  for (const type of ['mousedown', 'click', 'dblclick', 'auxclick', 'contextmenu']) {
+    input.addEventListener(type, (e) => e.stopPropagation());
+  }
+  input.addEventListener('blur', () => {
+    // Another window took the focus: the field gets it back on the return.
+    if (pmTabRename && pmTabRename.input === input && document.hasFocus()) pmFinishTabRename(true);
+  });
+  label.replaceWith(input);
+  r.input = input;
+  input.focus({ preventScroll: true });
+  input.setSelectionRange(r.selStart, r.selEnd);
+}
+
+function pmFinishTabRename(commit) {
+  const r = pmTabRename;
+  if (!r) return;
+  pmTabRename = null;
+  const input = r.input;
+  if (!input) return;
+  if (commit) pmApplyTabName(r.tabId, input.value);
+  // The label back in place, no redraw: the click that ended the edit still
+  // lands on the tab it was meant for.
+  const tab = pmTabs.find(x => x.id === r.tabId);
+  const el = input.closest('.pm-tab');
+  if (el && tab) el.title = tab.fileName || '';
+  const label = document.createElement('span');
+  label.className = 'pm-tab-label';
+  label.textContent = (tab && tab.fileName) || t('tabNoName');
+  input.replaceWith(label);
+}
+
+(function initPmTabRename() {
+  // Window, capture: ahead of every shortcut handler of the editor (some
+  // listen in the capture phase), so Delete, Ctrl+A, Ctrl+Z, letters...
+  // only edit the name.
+  const onKey = (e) => {
+    const r = pmTabRename;
+    if (!r || !r.input || e.target !== r.input) return;
+    e.stopPropagation();
+    if (e.type !== 'keydown' || e.isComposing) return;
+    if (e.key === 'Enter') { e.preventDefault(); pmFinishTabRename(true); }
+    else if (e.key === 'Escape') { e.preventDefault(); pmFinishTabRename(false); }
+  };
+  window.addEventListener('keydown', onKey, true);
+  window.addEventListener('keyup', onKey, true);
+  // A click anywhere else ends the edit first - also where the press keeps
+  // the focus in the field (a tab being dragged, the page area).
+  window.addEventListener('mousedown', (e) => {
+    const r = pmTabRename;
+    if (r && r.input && e.target !== r.input) pmFinishTabRename(true);
+  }, true);
+})();
 
 async function pmCloseTabsExcept(keepId) {
   const keep = new Set(Array.isArray(keepId) ? keepId : [keepId]);
@@ -38362,7 +38396,7 @@ async function pmCloseTabsToRight(fromTabId) {
     if (action === 'close') await pmCloseTabIds(pmGetSelectedTabIds());
     else if (action === 'close-others') await pmCloseTabsExceptSelected();
     else if (action === 'close-right') await pmCloseTabsToRight(tabId);
-    else if (action === 'rename') await pmRenameTab(tabId);
+    else if (action === 'rename') pmStartTabRename(tabId);
   });
   document.addEventListener('mousedown', (e) => {
     if (menu.style.display !== 'block' || menu.contains(e.target)) return;
@@ -38819,8 +38853,16 @@ function pmTabDragEnd() {
 function pmRenderBar() {
   if (!tabBarEl) return;
   pmCloseTabMenu();
+  // A name being edited goes on in the new tab (pmMountTabRename below)
+  if (pmTabRename && pmTabRename.input) {
+    const input = pmTabRename.input;
+    pmTabRename.value = input.value;
+    pmTabRename.selStart = input.selectionStart;
+    pmTabRename.selEnd = input.selectionEnd;
+    pmTabRename.input = null;   // its blur on removal is not the end of the edit
+  }
   tabBarEl.innerHTML = '';
-  if (!pmTabs.length) return;
+  if (!pmTabs.length) { pmTabRename = null; return; }
   pmAlignBarLeft();
   const w = pmComputeWidth(pmTabs.length, pmAvailWidth());
   const tabNoNameLabel = t('tabNoName');
@@ -38883,8 +38925,15 @@ function pmRenderBar() {
       pmCloseTabMenu();
       pmOpenTabMenu(e.clientX, e.clientY, tab.id);
     });
+    // A double click on the name: rename it right there
+    el.addEventListener('dblclick', (e) => {
+      if (e.target.closest('.pm-tab-close')) return;
+      if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+      pmStartTabRename(tab.id);
+    });
     tabBarEl.appendChild(el);
   });
+  if (pmTabRename) pmMountTabRename();
   const plus = document.createElement('button');
   plus.type = 'button';
   plus.className = 'pm-tab-new';
