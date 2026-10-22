@@ -11,7 +11,7 @@ window.__PDF_MANAGER_VERSION_FEED__ = {
   "windowsDownloadUrl": "https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.48",
   "linuxVersion": "0.1.48",
   "linuxDownloadUrl": "https://github.com/65WebDev/PDF-Manager/releases/tag/linux-v0.1.48",
-  "androidVersion": "",
-  "androidDownloadUrl": "",
-  "updatedAt": "2026-10-22T07:53:18.514Z"
+  "androidVersion": "0.1.48",
+  "androidDownloadUrl": "https://github.com/65WebDev/PDF-Manager/releases/tag/android-v0.1.48",
+  "updatedAt": "2026-10-22T07:59:35.923Z"
 };
