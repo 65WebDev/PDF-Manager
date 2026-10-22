@@ -405,6 +405,23 @@
       transition: opacity 0.15s, transform 0.15s, background 0.15s;
     }
     #aboutBtn:hover { background: #3498db; }
+    /*A newer version is out (pmSetUpdateAvailable): an orange dot in the
+      corner of the app logo and of the About button under it - an element
+      of its own (the button's ::after is its hover caption, .pm-pop-cap).*/
+    .pm-update-dot {
+      display: none;
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #f39c12;
+      box-shadow: 0 0 0 2px #2c3e50;
+      pointer-events: none;
+      z-index: 1;
+    }
+    body.pm-update-available .pm-update-dot { display: block; }
     #aboutBtn.show {
       opacity: 1;
       transform: translateY(0);
@@ -7906,6 +7923,11 @@
     }
     html[data-theme="dark"] .pm-modal-box * { color: #e2e6ea !important; }
     #aboutUpdateLine a.pm-about-update-dl { color: #b45309; text-decoration: underline; white-space: nowrap; }
+    /*Android app: download and install the newer version from About.*/
+    #aboutUpdateLine .pm-about-update-install {
+      margin-top: 8px; padding: 6px 20px; border: none; border-radius: 6px;
+      background: #e67e22; color: #fff; font-size: 13px; font-weight: 600; cursor: pointer;
+    }
     /* About update banner: light inline backgrounds + global light text = unreadable.
        Override both for dark theme (warn = outdated, fail = feed unreachable). */
     html[data-theme="dark"] .pm-modal-box #aboutUpdateLine.pm-about-update-warn {
@@ -7930,9 +7952,11 @@
     html[data-theme="dark"] .pm-modal-box #encPwdCancel,
     html[data-theme="dark"] .pm-modal-box #cancelBtn,
     html[data-theme="dark"] .pm-modal-box #peSigRenameCancel,
-    html[data-theme="dark"] .pm-modal-box #pmTextCancel {
+    html[data-theme="dark"] .pm-modal-box #pmTextCancel,
+    html[data-theme="dark"] .pm-modal-box #pmUpdateBtn {
       background: #333a44 !important; border-color: #4a5058 !important;
     }
+    html[data-theme="dark"] .pm-modal-box #pmUpdateBar { background: #3a414b !important; }
     /* Text-input dialog (tab rename): hover feedback on both buttons (light + dark). */
     #pmTextCancel:hover { background: #f0f0f0 !important; }
     #pmTextOk:hover { background: #2d86c3 !important; }
@@ -9967,6 +9991,18 @@
         aboutUpdateDownload: 'Скачать', aboutUpToDate: 'Установлена последняя версия',
         aboutUpdateApp: 'Вышла обновлённая версия приложения {ver}',
         aboutUpdateWeb: 'Вышла обновлённая версия {build}',
+        updateAvailableTip: 'Доступна новая версия',
+        updateInstall: 'Обновить', updateCancel: 'Отмена',
+        updateConfirm: 'Скачать и установить версию {ver}?',
+        updateConfirmNote: 'Android попросит подтвердить установку, приложение закроется и обновится.',
+        updateConfirmUnsaved: 'Есть несохранённые изменения — они пропадут. Сначала сохраните документ.',
+        updatePreparing: 'Подготовка обновления…',
+        updateDownloading: 'Загрузка обновления… {progress}',
+        updateInstallerOpened: 'Подтвердите установку в окне Android.',
+        updateNeedPermission: 'Установка из этого приложения не разрешена. Разрешите её в открывшихся настройках Android и нажмите «Обновить» ещё раз.',
+        updateOtherKey: 'Новая версия подписана другим ключом, чем установленное приложение, и поверх него не установится. Удалите приложение и установите новую версию вручную.',
+        updateNotNewer: 'Скачанная версия не новее установленной.',
+        updateFailed: 'Не удалось обновить: {msg}',
         pagePrevDesktop: 'Предыдущая страница (ПКМ - автопрокрутка)',
         pagePrevTouch: 'Предыдущая страница. Удерживание - автопрокрутка',
         pageNextDesktop: 'Следующая страница (ПКМ - автопрокрутка)',
@@ -10459,6 +10495,18 @@
         aboutUpdateDownload: 'Download', aboutUpToDate: 'You have the latest version',
         aboutUpdateApp: 'An updated application version {ver} is available',
         aboutUpdateWeb: 'An updated version {build} is available',
+        updateAvailableTip: 'A new version is available',
+        updateInstall: 'Update', updateCancel: 'Cancel',
+        updateConfirm: 'Download and install version {ver}?',
+        updateConfirmNote: 'Android will ask you to confirm the installation; the app will close and update.',
+        updateConfirmUnsaved: 'There are unsaved changes — they will be lost. Save the document first.',
+        updatePreparing: 'Preparing the update…',
+        updateDownloading: 'Downloading the update… {progress}',
+        updateInstallerOpened: 'Confirm the installation in the Android window.',
+        updateNeedPermission: 'Installing from this app is not allowed. Allow it in the Android settings that opened and tap “Update” again.',
+        updateOtherKey: 'The new version is signed with a different key than the installed app and cannot be installed over it. Uninstall the app and install the new version manually.',
+        updateNotNewer: 'The downloaded version is not newer than the installed one.',
+        updateFailed: 'Could not update: {msg}',
         pagePrevDesktop: 'Previous page (RMB — auto-scroll)',
         pagePrevTouch: 'Previous page. Hold — auto-scroll',
         pageNextDesktop: 'Next page (RMB — auto-scroll)',
@@ -10951,6 +10999,18 @@
         aboutUpdateDownload: 'Descargar', aboutUpToDate: 'Tienes la última versión',
         aboutUpdateApp: 'Hay una nueva versión de la aplicación disponible: {ver}',
         aboutUpdateWeb: 'Hay una nueva versión disponible: {build}',
+        updateAvailableTip: 'Hay una nueva versión disponible',
+        updateInstall: 'Actualizar', updateCancel: 'Cancelar',
+        updateConfirm: '¿Descargar e instalar la versión {ver}?',
+        updateConfirmNote: 'Android pedirá confirmar la instalación; la aplicación se cerrará y se actualizará.',
+        updateConfirmUnsaved: 'Hay cambios sin guardar y se perderán. Guarde primero el documento.',
+        updatePreparing: 'Preparando la actualización…',
+        updateDownloading: 'Descargando la actualización… {progress}',
+        updateInstallerOpened: 'Confirme la instalación en la ventana de Android.',
+        updateNeedPermission: 'No está permitido instalar desde esta aplicación. Permítalo en los ajustes de Android que se abrieron y pulse «Actualizar» de nuevo.',
+        updateOtherKey: 'La nueva versión está firmada con una clave distinta de la aplicación instalada y no se puede instalar encima. Desinstale la aplicación e instale la nueva versión manualmente.',
+        updateNotNewer: 'La versión descargada no es más reciente que la instalada.',
+        updateFailed: 'No se pudo actualizar: {msg}',
         pagePrevDesktop: 'Página anterior (clic derecho - desplazamiento automático)',
         pagePrevTouch: 'Página anterior. Mantener pulsado - desplazamiento automático',
         pageNextDesktop: 'Página siguiente (clic derecho - desplazamiento automático)',
@@ -11474,6 +11534,18 @@
         aboutUpdateDownload: '下载', aboutUpToDate: '已是最新版本',
         aboutUpdateApp: '有可用的应用程序更新版本 {ver}',
         aboutUpdateWeb: '有可用的更新版本 {build}',
+        updateAvailableTip: '有新版本可用',
+        updateInstall: '更新', updateCancel: '取消',
+        updateConfirm: '下载并安装版本 {ver}？',
+        updateConfirmNote: 'Android 会请您确认安装，应用将关闭并完成更新。',
+        updateConfirmUnsaved: '有未保存的更改，将会丢失。请先保存文档。',
+        updatePreparing: '正在准备更新…',
+        updateDownloading: '正在下载更新… {progress}',
+        updateInstallerOpened: '请在 Android 窗口中确认安装。',
+        updateNeedPermission: '未允许从此应用安装。请在打开的 Android 设置中允许，然后再次点按“更新”。',
+        updateOtherKey: '新版本的签名密钥与已安装的应用不同，无法覆盖安装。请卸载应用后手动安装新版本。',
+        updateNotNewer: '下载的版本并不比已安装的版本新。',
+        updateFailed: '无法更新：{msg}',
         pagePrevDesktop: '上一页（右键 — 自动滚动）',
         pagePrevTouch: '上一页。长按 — 自动滚动',
         pageNextDesktop: '下一页（右键 — 自动滚动）',
@@ -31867,12 +31939,20 @@
       return null;
     }
 
+    // The Android app's in-app update downloads only from the project's
+    // releases (the app itself checks the same, see PdfBridgePlugin.kt).
+    function pdfManagerReleaseApkUrl(url) {
+      const s = String(url || '').trim();
+      return /^https:\/\/github\.com\/65WebDev\/PDF-Manager\/releases\/download\/[^/?#]+\/[^/?#]+\.apk$/.test(s) && s.indexOf('..') < 0 ? s : '';
+    }
+
     /**
      * Compare the desktop app version (Windows or Linux, each with its own
      * release) or the stamped web build with the published feed.
-     * Returns { outdated, upToDate, messages[], downloadUrl, feed }, or null
-     * when the feed is unreachable. upToDate is set only when a comparison
-     * could actually be made (an unstamped page cannot tell).
+     * Returns { outdated, upToDate, messages[], downloadUrl, newVersion,
+     * apkUrl, feed }, or null when the feed is unreachable. upToDate is set
+     * only when a comparison could actually be made (an unstamped page
+     * cannot tell). apkUrl: the Android app's newer APK itself.
      */
     async function pdfManagerCheckForUpdates() {
       // Offline HTML builds never phone home for updates (the desktop shell still may).
@@ -31882,6 +31962,8 @@
       const messages = [];
       let compared = false;
       let downloadUrl = '';
+      let newVersion = '';
+      let apkUrl = '';
       if (pdfManagerIsDesktopShell()) {
         // The editor inside the app only changes with a new app release, so
         // only the app version counts here - a newer editor build on main
@@ -31894,6 +31976,13 @@
           if (pdfManagerCompareSemver(remoteVer, localVer) > 0) {
             messages.push(t('aboutUpdateApp', { ver: remoteVer }));
             downloadUrl = String(feed[platform + 'DownloadUrl'] || '').trim();
+            newVersion = remoteVer;
+            // Android: "Download" fetches the APK itself in the browser, and
+            // the app can install it on its own (pmAndroidInstallUpdate).
+            if (platform === 'android') {
+              apkUrl = pdfManagerReleaseApkUrl(feed.androidApkUrl);
+              if (apkUrl) downloadUrl = apkUrl;
+            }
           }
         }
       } else {
@@ -31910,7 +31999,11 @@
         }
       }
       if (!/^https:\/\//i.test(downloadUrl)) downloadUrl = '';
-      return { outdated: messages.length > 0, upToDate: compared && !messages.length, messages, downloadUrl, feed };
+      const result = { outdated: messages.length > 0, upToDate: compared && !messages.length, messages, downloadUrl, newVersion, apkUrl, feed };
+      // The dot on the app logo / About button follows every check that
+      // could tell (pmSetUpdateAvailable).
+      if (compared) pmSetUpdateAvailable(result.outdated);
+      return result;
     }
 
     function pdfManagerFormatAboutVersionHtml(opts) {
@@ -32068,6 +32161,20 @@
               el.appendChild(document.createTextNode(' '));
               el.appendChild(a);
             }
+            // Android app: download and install it from here, after a "yes".
+            if (result.apkUrl && pmAndroidCanInstallUpdate()) {
+              const btn = document.createElement('button');
+              btn.type = 'button';
+              btn.id = 'aboutUpdateInstallBtn';
+              btn.className = 'pm-about-update-install';
+              btn.textContent = t('updateInstall');
+              btn.addEventListener('click', () => {
+                close();
+                pmAndroidInstallUpdate(result);
+              });
+              el.appendChild(document.createElement('br'));
+              el.appendChild(btn);
+            }
             return;
           }
           if (result && result.upToDate) {
@@ -32093,6 +32200,146 @@
             el.textContent = t('aboutUpdateFail');
           }
         }).catch(() => { /* ignore */ });
+      }
+    }
+
+    // ─── Update dot ───
+    // A newer version is out (found by the About box or by the background
+    // check below): an orange dot in the corner of the app logo and of the
+    // About button. Wherever About checks for updates - the online page and
+    // the Windows / Linux / Android apps; offline HTML builds never check.
+    function pmSetUpdateAvailable(on) {
+      const about = document.getElementById('aboutBtn');
+      [document.querySelector('.app-logo'), about].forEach((el) => {
+        if (!el || el.querySelector(':scope > .pm-update-dot')) return;
+        const dot = document.createElement('span');
+        dot.className = 'pm-update-dot';
+        dot.setAttribute('aria-hidden', 'true');
+        el.appendChild(dot);
+      });
+      document.body.classList.toggle('pm-update-available', !!on);
+      if (!about) return;
+      if (on) {
+        about.setAttribute('data-i18n-title', 'updateAvailableTip');
+        about.title = t('updateAvailableTip');
+      } else {
+        about.removeAttribute('data-i18n-title');
+        about.removeAttribute('title');
+      }
+    }
+
+    const PM_UPDATE_FIRST_CHECK_MS = 5000;
+    const PM_UPDATE_RECHECK_MS = 6 * 60 * 60 * 1000;
+    (function pmInitUpdateWatch() {
+      if (PDF_MANAGER_OFFLINE_BUILD && !pdfManagerIsDesktopShell()) return;
+      // An unstamped page (a source checkout) has no build to compare.
+      if (!pdfManagerIsDesktopShell() && PDF_MANAGER_BUILD_VERSION.startsWith('__')) return;
+      const check = () => { pdfManagerCheckForUpdates().catch(() => { /* offline: no dot */ }); };
+      setTimeout(check, PM_UPDATE_FIRST_CHECK_MS);
+      setInterval(check, PM_UPDATE_RECHECK_MS);
+    })();
+
+    // ─── Android app: in-app update ───
+    function pmAndroidUpdateInvoke() {
+      const core = window.__TAURI__ && window.__TAURI__.core;
+      return (core && typeof core.invoke === 'function') ? core.invoke.bind(core) : null;
+    }
+    function pmAndroidCanInstallUpdate() {
+      return pmIsAndroidApp() && !!pmAndroidUpdateInvoke();
+    }
+
+    // Asks first (the app closes for the install, unsaved work goes with it),
+    // then downloads the newer APK in a box with progress and Cancel, and
+    // hands it to the system installer, which asks once more. The first time
+    // Android's "Install unknown apps" page for the app comes up in between.
+    async function pmAndroidInstallUpdate(info) {
+      const invoke = pmAndroidUpdateInvoke();
+      if (!invoke || !info || !info.apkUrl) return;
+      let msg = escapeHtml(t('updateConfirm', { ver: info.newVersion || '' })) +
+        `<div style="margin-top:8px; font-size:13.5px; font-weight:400; color:#555;">${escapeHtml(t('updateConfirmNote'))}</div>`;
+      if (hasAnyUnsavedDocument()) {
+        msg += `<div style="margin-top:8px; font-size:13.5px; color:#c0392b;">${escapeHtml(t('updateConfirmUnsaved'))}</div>`;
+      }
+      const ok = await showConfirmDialog(msg, { html: true, yesText: t('updateInstall'), noText: t('updateCancel'), yesBg: '#e67e22' });
+      if (!ok) return;
+
+      const overlay = document.createElement('div');
+      overlay.className = 'modal-overlay-active';
+      overlay.style.cssText = `
+        position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+        display: flex; align-items: center; justify-content: center; z-index: 100001;`;
+      const box = document.createElement('div');
+      box.className = 'pm-modal-box';
+      box.style.cssText = `
+        background: #fff; border-radius: 12px; padding: 20px 24px; width: min(340px, 92vw);
+        box-sizing: border-box; text-align: center; box-shadow: 0 10px 30px rgba(0,0,0,0.3);`;
+      box.innerHTML = `
+        <div id="pmUpdateText" style="font-size:15px; color:#2c3e50; font-weight:600; line-height:1.4;"></div>
+        <div id="pmUpdateBar" style="height:8px; margin:14px 0 4px; border-radius:4px; background:#e8edf1; overflow:hidden;">
+          <div style="height:100%; width:0; background:#e67e22; transition:width .2s;"></div></div>
+        <button id="pmUpdateBtn" type="button" style="margin-top:12px; padding:8px 22px; border:1px solid #ccc;
+          border-radius:6px; background:#fff; color:#333; font-size:14px; cursor:pointer;"></button>`;
+      overlay.appendChild(box);
+      document.body.appendChild(overlay);
+      const text = box.querySelector('#pmUpdateText');
+      const bar = box.querySelector('#pmUpdateBar');
+      const btn = box.querySelector('#pmUpdateBtn');
+      let downloading = true;
+      let timer = 0;
+      const close = () => {
+        clearInterval(timer);
+        document.removeEventListener('keydown', onKey, true);
+        overlay.remove();
+      };
+      // Cancel stops the download (installUpdate then fails with "cancelled",
+      // which closes the box); once it is over the button just closes it.
+      const cancelOrClose = () => {
+        if (downloading) invoke('android_cancel_update').catch(() => {});
+        else close();
+      };
+      // Esc - and so the Android Back key - does what the button does.
+      const onKey = (e) => {
+        if (e.key !== 'Escape') return;
+        e.preventDefault();
+        e.stopPropagation();
+        cancelOrClose();
+      };
+      document.addEventListener('keydown', onKey, true);
+      btn.addEventListener('click', cancelOrClose);
+      text.textContent = t('updatePreparing');
+      btn.textContent = t('updateCancel');
+      timer = setInterval(async () => {
+        if (!downloading) return;
+        try {
+          const p = await invoke('android_update_progress');
+          const done = Number(p && p.done) || 0;
+          const total = Number(p && p.total) || -1;
+          if (!downloading || (done <= 0 && total <= 0)) return;
+          const pct = total > 0 ? Math.min(100, Math.round(done * 100 / total)) : 0;
+          bar.firstElementChild.style.width = pct + '%';
+          text.textContent = t('updateDownloading', {
+            progress: total > 0 ? pct + ' %' : (done / 1048576).toFixed(1) + ' MB'
+          });
+        } catch (_) { /* the next tick tries again */ }
+      }, 300);
+      const finish = (key, params, isError) => {
+        downloading = false;
+        clearInterval(timer);
+        bar.style.display = 'none';
+        text.textContent = t(key, params);
+        text.style.color = isError ? '#c0392b' : '#2c3e50';
+        btn.textContent = t('aboutClose');
+      };
+      try {
+        await invoke('android_install_update', { url: info.apkUrl });
+        finish('updateInstallerOpened');
+      } catch (err) {
+        const s = String((err && err.message) || err || '');
+        if (/\bcancelled\b/.test(s)) { downloading = false; close(); return; }
+        if (/\binstall_permission\b/.test(s)) finish('updateNeedPermission', null, true);
+        else if (/\bother_key\b/.test(s)) finish('updateOtherKey', null, true);
+        else if (/\bnot_newer\b/.test(s)) finish('updateNotNewer', null, true);
+        else finish('updateFailed', { msg: s.replace(/^\s*(not_apk:\s*)?/, '') }, true);
       }
     }
 

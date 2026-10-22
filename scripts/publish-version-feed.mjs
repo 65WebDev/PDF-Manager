@@ -9,7 +9,7 @@
  *   COMMIT / SHORT_COMMIT / DOWNLOAD_URL / OFFLINE_DOWNLOAD_URL (optional)
  *   WINDOWS_VERSION / WINDOWS_DOWNLOAD_URL (optional; merged into existing feed)
  *   LINUX_VERSION / LINUX_DOWNLOAD_URL (optional; merged into existing feed)
- *   ANDROID_VERSION / ANDROID_DOWNLOAD_URL (optional; merged into existing feed)
+ *   ANDROID_VERSION / ANDROID_DOWNLOAD_URL / ANDROID_APK_URL (optional; merged into existing feed)
  *   SKIP_GH=1      write files only, do not upload/commit
  *   SKIP_COMMIT=1  upload release asset but do not commit to main
  *
@@ -57,94 +57,59 @@ function readExistingFeed() {
   }
 }
 
-function latestWindowsFromGh() {
-  const r = runGh([
-    'release',
-    'list',
-    '--limit',
-    '30',
-    '--json',
-    'tagName,url',
-  ]);
-  if (r.status !== 0) return null;
+// The newest non-draft, non-pre-release tags, newest first. `gh release
+// list --json` knows tagName / isDraft / isPrerelease but no url: asking for
+// one made gh fail, every lookup below came back empty, and a feed only ever
+// got the versions an uploader passed in by env - the Android one never.
+let releaseTagsCache = null;
+function releaseTagsFromGh() {
+  if (releaseTagsCache) return releaseTagsCache;
+  const r = runGh(['release', 'list', '--limit', '50', '--json', 'tagName,isDraft,isPrerelease']);
+  releaseTagsCache = [];
+  if (r.status !== 0) return releaseTagsCache;
   try {
-    const list = JSON.parse(r.stdout || '[]');
-    for (const item of list) {
-      const tag = String(item.tagName || '');
-      const m = /^windows-v(.+)$/i.exec(tag);
-      if (m) {
-        return {
-          windowsVersion: m[1],
-          windowsDownloadUrl:
-            item.url ||
-            `https://github.com/65WebDev/PDF-Manager/releases/tag/${tag}`,
-        };
-      }
-    }
+    releaseTagsCache = JSON.parse(r.stdout || '[]')
+      .filter((item) => item && !item.isDraft && !item.isPrerelease)
+      .map((item) => String(item.tagName || ''));
   } catch {
     /* ignore */
   }
+  return releaseTagsCache;
+}
+
+/** Newest `{prefix}-v{version}` release: { tag, version, url } or null. */
+function latestReleaseFromGh(prefix) {
+  const re = new RegExp(`^${prefix}-v(.+)$`, 'i');
+  for (const tag of releaseTagsFromGh()) {
+    const m = re.exec(tag);
+    if (m) {
+      return { tag, version: m[1], url: `https://github.com/65WebDev/PDF-Manager/releases/tag/${tag}` };
+    }
+  }
   return null;
+}
+
+function latestWindowsFromGh() {
+  const r = latestReleaseFromGh('windows');
+  return r ? { windowsVersion: r.version, windowsDownloadUrl: r.url } : null;
 }
 
 function latestLinuxFromGh() {
-  const r = runGh([
-    'release',
-    'list',
-    '--limit',
-    '30',
-    '--json',
-    'tagName,url',
-  ]);
-  if (r.status !== 0) return null;
-  try {
-    const list = JSON.parse(r.stdout || '[]');
-    for (const item of list) {
-      const tag = String(item.tagName || '');
-      const m = /^linux-v(.+)$/i.exec(tag);
-      if (m) {
-        return {
-          linuxVersion: m[1],
-          linuxDownloadUrl:
-            item.url ||
-            `https://github.com/65WebDev/PDF-Manager/releases/tag/${tag}`,
-        };
-      }
-    }
-  } catch {
-    /* ignore */
-  }
-  return null;
+  const r = latestReleaseFromGh('linux');
+  return r ? { linuxVersion: r.version, linuxDownloadUrl: r.url } : null;
+}
+
+// The APK itself - what the Android app's in-app update downloads - under
+// the name scripts/upload-android-apk.mjs gives it.
+function androidApkUrlFor(version) {
+  return `https://github.com/65WebDev/PDF-Manager/releases/download/android-v${version}/PDF-Manager_${version}.apk`;
 }
 
 function latestAndroidFromGh() {
-  const r = runGh([
-    'release',
-    'list',
-    '--limit',
-    '30',
-    '--json',
-    'tagName,url',
-  ]);
-  if (r.status !== 0) return null;
-  try {
-    const list = JSON.parse(r.stdout || '[]');
-    for (const item of list) {
-      const tag = String(item.tagName || '');
-      const m = /^android-v(.+)$/i.exec(tag);
-      if (m) {
-        return {
-          androidVersion: m[1],
-          androidDownloadUrl:
-            item.url ||
-            `https://github.com/65WebDev/PDF-Manager/releases/tag/${tag}`,
-        };
-      }
-    }
-  } catch {
-    /* ignore */
-  }
-  return null;
+  const r = latestReleaseFromGh('android');
+  return r
+    ? { androidVersion: r.version, androidDownloadUrl: r.url, androidApkUrl: androidApkUrlFor(r.version) }
+    : null;
 }
 
 function buildFeed() {
@@ -196,6 +161,13 @@ function buildFeed() {
     'ANDROID_DOWNLOAD_URL',
     androidGh.androidDownloadUrl || prev.androidDownloadUrl || '',
   );
+  // A version passed in without its APK link gets the one its release has.
+  const androidApkUrl = env(
+    'ANDROID_APK_URL',
+    (androidGh.androidVersion === androidVersion && androidGh.androidApkUrl) ||
+      (prev.androidVersion === androidVersion && prev.androidApkUrl) ||
+      (androidVersion ? androidApkUrlFor(androidVersion) : ''),
+  );
 
   const feed = {
     build: build || prev.build || '',
@@ -211,6 +183,7 @@ function buildFeed() {
     linuxDownloadUrl,
     androidVersion,
     androidDownloadUrl,
+    androidApkUrl,
     updatedAt: new Date().toISOString(),
   };
   return feed;

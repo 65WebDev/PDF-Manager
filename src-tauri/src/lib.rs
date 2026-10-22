@@ -339,7 +339,13 @@ pub fn run() {
       #[cfg(target_os = "android")]
       android::android_share_file,
       #[cfg(target_os = "android")]
-      android::android_print_file
+      android::android_print_file,
+      #[cfg(target_os = "android")]
+      android::android_install_update,
+      #[cfg(target_os = "android")]
+      android::android_update_progress,
+      #[cfg(target_os = "android")]
+      android::android_cancel_update
     ])
     .setup(move |app| {
       // Always start maximized (Windows "развернуть"), not just when opened
