@@ -39963,11 +39963,23 @@ function pmBookmarksPositionPanel() {
     // screen with 8px either side (the right edge is in the CSS) - or just
     // above the on-screen keyboard while it is up.
     const work = scrollContainer.getBoundingClientRect();
+    panel.style.left = '8px';
+    if (pmBookmarksState.editingId != null) {
+      // A bookmark's name being typed: the keyboard comes up from the bottom,
+      // and a phone's browser does not always tell the page how far (Chrome
+      // lays it over the page) - the sheet goes up to the top of the work
+      // area, out of its way, before it comes, and back down once the name
+      // is in (pmBookmarksRerender).
+      const vv = window.visualViewport;
+      panel.style.bottom = 'auto';
+      panel.style.top = Math.round(Math.max(work.top, vv ? vv.offsetTop : 0) + 8) + 'px';
+      pmBookmarksUpdateListMaxHeight();
+      return;
+    }
     const below = Math.max(0, pmBookmarksLayoutHeight() - (work.top + scrollContainer.clientHeight),
       pmBookmarksKeyboardInset());
     panel.style.top = 'auto';
     panel.style.bottom = Math.round(below + 8) + 'px';
-    panel.style.left = '8px';
     pmBookmarksUpdateListMaxHeight();
     return;
   }
@@ -40011,13 +40023,21 @@ function pmBookmarksUpdateListMaxHeight() {
     const padV = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0) +
       (parseFloat(cs.borderTopWidth) || 0) + (parseFloat(cs.borderBottomWidth) || 0);
     let cap = scrollContainer.clientHeight / 3;
-    // Above the keyboard there can be less room than that: the sheet stays
-    // below the work area's top (or the top of what is on screen, should the
-    // browser have panned the view up to the field being typed in).
+    // Above the keyboard there can be less room than that. At the bottom,
+    // above a keyboard that shows: the sheet stays below the work area's top
+    // (or the top of what is on screen, should the browser have panned the
+    // view up to the field being typed in). At the top (a name being typed):
+    // it ends above the keyboard, as far as the browser tells where that is.
     const vv = window.visualViewport;
-    const sheetBottom = pmBookmarksLayoutHeight() - (parseFloat(panel && panel.style.bottom) || 0);
-    const roomTop = Math.max(scrollContainer.getBoundingClientRect().top, vv ? vv.offsetTop : 0) + 8;
-    cap = Math.min(cap, sheetBottom - roomTop);
+    const atTop = !!(panel && panel.style.top && panel.style.top !== 'auto');
+    if (atTop) {
+      const shownBottom = vv ? vv.offsetTop + vv.height : pmBookmarksLayoutHeight();
+      cap = Math.min(cap, shownBottom - parseFloat(panel.style.top) - 8);
+    } else {
+      const sheetBottom = pmBookmarksLayoutHeight() - (parseFloat(panel && panel.style.bottom) || 0);
+      const roomTop = Math.max(scrollContainer.getBoundingClientRect().top, vv ? vv.offsetTop : 0) + 8;
+      cap = Math.min(cap, sheetBottom - roomTop);
+    }
     list.style.maxHeight = Math.max(60, Math.floor(cap - (lr.top - pr.top) - (pr.bottom - lr.bottom) - padV)) + 'px';
     pmBookmarksUpdateThumb();
     return;
@@ -41231,7 +41251,21 @@ function pmBookmarksRerender() {
   const list = document.getElementById('pmBookmarksList');
   const scrollTop = list ? list.scrollTop : 0;
   pmBookmarksRenderList(pmBookmarksFlatten(pmBookmarksState.tree));
+  // Phones: a name starting or done being typed moves the sheet to the top
+  // or back down (pmBookmarksPositionPanel).
+  if (isTouchDevice && pmBookmarksState.open) pmBookmarksPositionPanel();
   if (list) list.scrollTop = scrollTop;
+  if (isTouchDevice) pmBookmarksKeepEditingInView();
+}
+
+// Phones: the name being typed stays in sight inside the list.
+function pmBookmarksKeepEditingInView() {
+  const list = document.getElementById('pmBookmarksList');
+  const input = list && list.querySelector('.pm-bookmarks-rename-input');
+  if (!input) return;
+  const lr = list.getBoundingClientRect(), ir = input.getBoundingClientRect();
+  if (ir.top < lr.top) list.scrollTop -= lr.top - ir.top + 4;
+  else if (ir.bottom > lr.bottom) list.scrollTop += ir.bottom - lr.bottom + 4;
 }
 
 function pmBookmarksExpandAll() {
@@ -41718,13 +41752,7 @@ function pmBookmarksCheckLanded() {
   const onViewportChange = () => {
     if (!pmBookmarksState.open) return;
     pmBookmarksPositionPanel();
-    const input = document.activeElement;
-    const listEl = document.getElementById('pmBookmarksList');
-    if (!isTouchDevice || !listEl || !input || !input.classList ||
-        !input.classList.contains('pm-bookmarks-rename-input')) return;
-    const lr = listEl.getBoundingClientRect(), ir = input.getBoundingClientRect();
-    if (ir.top < lr.top) listEl.scrollTop -= lr.top - ir.top + 4;
-    else if (ir.bottom > lr.bottom) listEl.scrollTop += ir.bottom - lr.bottom + 4;
+    if (isTouchDevice) pmBookmarksKeepEditingInView();
   };
   window.addEventListener('resize', onViewportChange);
   if (window.visualViewport) {
