@@ -8,7 +8,8 @@
  * Skip: ANDROID_SKIP_UPLOAD=1
  *
  * After a successful upload also:
- *   - refreshes the About version-feed (androidVersion) and commits it to the branch
+ *   - refreshes the About version-feed (androidVersion, androidApkUrl - the
+ *     in-app update downloads that APK) and commits it to the branch
  *   - writes the Android download links into README.md and index.html
  *   - commits/pushes those meta files (unless SKIP_META_COMMIT=1)
  *   - keeps GitHub "Latest" on the newest HTML build-* release, same as the
@@ -303,7 +304,13 @@ function main() {
   const feed = spawnSync(process.platform === 'win32' ? 'node.exe' : 'node', [join(root, 'scripts', 'publish-version-feed.mjs')], {
     cwd: root,
     windowsHide: true,
-    env: { ...process.env, ANDROID_VERSION: version, ANDROID_DOWNLOAD_URL: releaseUrl, SKIP_COMMIT: '1' },
+    env: {
+      ...process.env,
+      ANDROID_VERSION: version,
+      ANDROID_DOWNLOAD_URL: releaseUrl,
+      ANDROID_APK_URL: `https://github.com/${REPO_SLUG}/releases/download/${tag}/${apkName}`,
+      SKIP_COMMIT: '1',
+    },
     stdio: 'inherit',
   });
   if (feed.status !== 0) console.warn('version-feed обновить не удалось (APK уже загружен).');
