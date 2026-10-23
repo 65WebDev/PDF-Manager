@@ -45443,9 +45443,18 @@ function editSelectedPage() {
 
   // Mobile preview: after a text selection settles, show the format/copy menu
   // (desktop uses RMB). Hide while the selection is still being adjusted.
+  // Not while the finger is still on the screen either - a long press dragged
+  // on to extend the selection, a handle held: the menu would cover the text
+  // being selected. It comes once the finger is up. When the page does not
+  // see the finger at all (the browser moves its selection handles itself,
+  // often telling the page nothing), it waits for a longer pause instead.
   if (isTouchDevice && textCopyMenu) {
+    const MOBILE_TEXT_MENU_AFTER_LIFT_MS = 150;
+    const MOBILE_TEXT_MENU_UNTRACKED_MS = 800;
     let mobilePreviewTextSelTimer = null;
     let mobilePreviewTextSelSig = '';
+    let mobilePreviewTextSelAfterLift = false;   // a change made with the finger down
+    let mobilePreviewTextLiftAt = 0;
     function mobilePreviewTextSelSignature() {
       try {
         const sel = window.getSelection();
@@ -45456,10 +45465,11 @@ function editSelectedPage() {
           (r.endContainer && r.endContainer.nodeValue ? r.endOffset : '');
       } catch (_) { return ''; }
     }
-    function scheduleMobilePreviewTextSelMenu() {
+    function scheduleMobilePreviewTextSelMenu(delay) {
       clearTimeout(mobilePreviewTextSelTimer);
       mobilePreviewTextSelTimer = setTimeout(() => {
         mobilePreviewTextSelTimer = null;
+        if (previewTextSelPointerDown) { mobilePreviewTextSelAfterLift = true; return; }
         if (typeof isZoomTextSelect !== 'function' || !isZoomTextSelect()) {
           hideTextCopyMenu();
           return;
@@ -45498,15 +45508,31 @@ function editSelectedPage() {
         let captured = null;
         try { captured = range.cloneRange(); } catch (_) {}
         showTextCopyMenu({ clientX: x, clientY: y }, text, captured, parseInt(pageDiv.dataset.index, 10));
-      }, 420);
+      }, delay);
     }
     document.addEventListener('selectionchange', () => {
       if (typeof isZoomTextSelect !== 'function' || !isZoomTextSelect()) return;
       const peModal = document.getElementById('pageEditModal');
       if (peModal && peModal.classList.contains('visible')) return;
       if (textCopyMenu.classList.contains('visible')) hideTextCopyMenu();
-      scheduleMobilePreviewTextSelMenu();
+      if (previewTextSelPointerDown) {
+        clearTimeout(mobilePreviewTextSelTimer);
+        mobilePreviewTextSelAfterLift = true;
+        return;
+      }
+      // (a change right after the finger came up is part of that gesture)
+      const justLifted = performance.now() - mobilePreviewTextLiftAt < 500;
+      scheduleMobilePreviewTextSelMenu(justLifted ? MOBILE_TEXT_MENU_AFTER_LIFT_MS : MOBILE_TEXT_MENU_UNTRACKED_MS);
     });
+    const onLift = (e) => {
+      if (e.touches && e.touches.length) return;   // another finger still down
+      mobilePreviewTextLiftAt = performance.now();
+      if (!mobilePreviewTextSelAfterLift) return;
+      mobilePreviewTextSelAfterLift = false;
+      scheduleMobilePreviewTextSelMenu(MOBILE_TEXT_MENU_AFTER_LIFT_MS);
+    };
+    document.addEventListener('touchend', onLift, { capture: true, passive: true });
+    document.addEventListener('touchcancel', onLift, { capture: true, passive: true });
   }
 
   document.addEventListener('contextmenu', async (e) => {
@@ -55396,8 +55422,16 @@ function peUpsertTextMarkupsOnPage(pageIdx, action, fracs, opts) {
 function peShowTextSelCtxMenu(clientX, clientY, info) {
   const menu = document.getElementById('peTextSelCtxMenu');
   if (!menu || !info) return;
-  // Never show the markup/copy menu while a selection handle is being dragged.
+  // Never show the markup/copy menu while a selection handle is being dragged
+  // - nor, on a touch screen, while the finger that is selecting the page's
+  // text is still down (a long press opens this menu through contextmenu):
+  // it shows once the finger is up (onPtrUp -> peEndTextSelHandleDrag).
   if (peTextSelHandleDragging) {
+    peTextSelMenuResume = { clientX, clientY, info };
+    return;
+  }
+  if (typeof isTouchDevice !== 'undefined' && isTouchDevice && peTextSelPointerDown && info.kind === 'page') {
+    peTextSelHandleDragging = true;
     peTextSelMenuResume = { clientX, clientY, info };
     return;
   }
