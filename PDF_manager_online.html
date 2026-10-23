@@ -635,6 +635,7 @@
     }
     /*The tab bar is hidden in reading mode*/
     body.read-mode-active .tab-bar { display: none !important; }
+    #tabBarScroll { display: none; }
     /*Touch: the bar comes with a second document (pmSyncLayout) and folds
       away with the menu. It scrolls sideways - pmComputeWidth keeps the tabs
       wide enough to read - and only the active tab has a close cross: a
@@ -659,6 +660,9 @@
       .pm-tab.active .pm-tab-close svg { width: 10px; height: 10px; }
       /*Held: its menu is open*/
       .pm-tab.pm-bb-open { box-shadow: inset 0 0 0 2px #6f93b6; }
+      /*Tabs that don't all fit: a thin bar under them (pmUpdateTabBarScrollHint)*/
+      #tabBarScroll { position: absolute; height: 3px; z-index: 3; pointer-events: none; }
+      #tabBarScroll > div { position: absolute; top: 0; bottom: 0; border-radius: 2px; background: rgba(150, 170, 188, .8); }
       #tabBar .pm-tab-new { width: 32px; height: 32px; min-width: 32px; min-height: 32px; margin-bottom: 1px; }
       #tabBar .pm-tab-new:hover { background: transparent; color: #c9d3dc; }
     }
@@ -8269,6 +8273,7 @@
     </div>
     <!--Tab bar (desktop)-->
     <div id="tabBar" class="tab-bar" aria-hidden="true"></div>
+    <div id="tabBarScroll" aria-hidden="true"><div></div></div>
     <!--Highlighting the empty space to the right of tabs when moving pages there-->
     <div id="pmNewTabDropZone" aria-hidden="true"></div>
   </div>
@@ -9619,6 +9624,7 @@
     let pmTabMenuTabId = null;
     let pmTabMenuOpenedAt = 0;
     let pmTabBarScrollLeft = 0;   // touch: where the bar was scrolled to (pmTabBarShowActive)
+    let pmTabBarPressed = false, pmTabBarRenderDue = false;   // touch: a finger on the bar (pmRenderBar waits)
     let pmMeasureCanvas = null;
     let pmDrag = null;
     let pmDragSuppressClick = false;
@@ -15267,7 +15273,8 @@
           cancel();
           timer = setTimeout(() => {
             timer = null;
-            held = open(btn) !== false;
+            // (redrawn away under the finger: nothing to anchor a menu to)
+            held = btn.isConnected && open(btn) !== false;
           }, PM_TOUCH_TIP_MS);
         });
         btn.addEventListener('pointermove', (e) => {
@@ -20618,6 +20625,7 @@
     let longPressTimer = null;
     let longPressActive = false;
     let pagePointerId = null;
+    let pmPagePressTarget = null;   // what the finger came down on (pmKeepTouchDragTarget)
     let touchLastX = 0, touchLastY = 0;
     let suppressPageTap = false;   // true → do not select the page (there was a scroll/offset)
     let pageTouchActive = false;
@@ -20809,6 +20817,7 @@
 
     function cancelPageTouchDrag() {
       suppressPageTap = true;
+      pmDropTouchDragTarget();
       clearTimeout(longPressTimer);
       longPressTimer = null;
       clearTimeout(pageSelectStageTimer);
@@ -20932,6 +20941,7 @@
 
       dragSourceDiv = e.currentTarget;
       pagePointerId = e.pointerId;
+      pmPagePressTarget = e.target;
       dragStartX = e.clientX;
       dragStartY = e.clientY;
       touchLastX = e.clientX;
@@ -26806,6 +26816,7 @@
         invalidateDragGeometry();
         endScrollLock();
         unlockScrollForDrag();
+        pmDropTouchDragTarget();
       };
 
       finishDrag();
@@ -30275,6 +30286,7 @@
     }
 
     function clearPageDragTabVisuals() {
+      if (isTouchDevice) pmTouchDragDwell(null);
       pageDragOverTabId = null;
       pageDragSourceTabId = null;
       pageCrossTabTargetTabId = null;
@@ -30442,8 +30454,11 @@
 
       const tid = findPageDropTargetTab(clientX, clientY);
       const sourceId = getPageDragSourceTabId();
+      // (touch: switch after a moment held over a tab - pmTouchDragDwell)
+      const switchTo = (id) => { if (isTouchDevice) pmTouchDragDwell(id); else pmSwitchTabForPageDrag(id); };
 
       if (tid == null) {
+        if (isTouchDevice) pmTouchDragDwell(null);
         pageDragOverTabId = null;
         // The empty space to the right of the last tab is an invitation to create a new document.
         if (isOverNewTabDropZone(clientX, clientY)) {
@@ -30467,17 +30482,61 @@
         pageDragOverTabId = null;
         pageCrossTabTargetTabId = sourceId;
         pmUpdatePageDragTabVisuals();
-        if (pmActiveId !== sourceId) pmSwitchTabForPageDrag(sourceId);
+        if (pmActiveId !== sourceId) switchTo(sourceId);
         return;
       }
 
       pageDragOverTabId = tid;
       pageCrossTabTargetTabId = tid;
       pmUpdatePageDragTabVisuals();
-      // Touch: lit up only - the switch waits for the release (onDragMouseUp).
-      // Switching under the finger takes away the page it came down on, and
-      // a finger's events go nowhere else: the drag would freeze.
-      if (!isTouchDevice) pmSwitchTabForPageDrag(tid);
+      switchTo(tid);
+    }
+
+    // Touch: a page held a moment over a tab switches to that document, to
+    // be placed among its pages; passing over the tab bar on the way to the
+    // top of the document does not. Let go on the tab itself before that and
+    // the page goes to the document's end (onDragMouseUp).
+    const PM_TOUCH_TAB_DWELL_MS = 400;
+    let pmTouchDwellTabId = null, pmTouchDwellTimer = null;
+    function pmTouchDragDwell(tid) {
+      if (tid === pmTouchDwellTabId) return;
+      clearTimeout(pmTouchDwellTimer);
+      pmTouchDwellTimer = null;
+      pmTouchDwellTabId = tid;
+      if (tid == null) return;
+      pmTouchDwellTimer = setTimeout(() => {
+        pmTouchDwellTimer = null;
+        if (isDragActive && pmTouchDwellTabId === tid) pmSwitchTabForPageDrag(tid);
+      }, PM_TOUCH_TAB_DWELL_MS);
+    }
+
+    // Touch: a finger's events go to the element it came down on - and only
+    // while that element is in the document. Switching documents under a
+    // dragged page takes it out, and the drag froze: nothing heard the finger
+    // any more, not even its lifting. Before a switch it is moved into a
+    // hidden keeper until the finger is up; the old document's pages are
+    // being thrown away, so it is stripped of what made it one of them.
+    let pmTouchDragKeeper = null;
+    function pmKeepTouchDragTarget() {
+      const el = pmPagePressTarget;
+      if (!isTouchDevice || !el || !pagesContainer.contains(el)) return;
+      if (!pmTouchDragKeeper) {
+        pmTouchDragKeeper = document.createElement('div');
+        pmTouchDragKeeper.setAttribute('aria-hidden', 'true');
+        pmTouchDragKeeper.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;overflow:hidden;opacity:0;pointer-events:none;';
+        // (no longer under the page area's own touchmove blocker)
+        pmTouchDragKeeper.addEventListener('touchmove', (e) => { if (isDragActive) e.preventDefault(); }, { passive: false });
+        document.body.appendChild(pmTouchDragKeeper);
+      }
+      el.removeAttribute('class');
+      el.removeAttribute('id');
+      el.removeAttribute('data-index');
+      if (el.children.length) el.textContent = '';
+      pmTouchDragKeeper.appendChild(el);
+    }
+    function pmDropTouchDragTarget() {
+      pmPagePressTarget = null;
+      if (pmTouchDragKeeper) pmTouchDragKeeper.textContent = '';
     }
 
     function pmSwitchTabForPageDrag(targetTabId) {
@@ -30508,8 +30567,11 @@
           pageCrossTabTargetTabId = tid;
 
           pmPageTabDropInProgress = true;
+          if (isTouchDevice) pmKeepTouchDragTarget();
           try {
             await pmActivate(tid, true);
+            // The insert marker measures the pages of the document now shown
+            if (isDragActive) captureDragGeometry();
             pageDragOverTabId = null;
             pmUpdatePageDragTabVisuals();
           } catch (err) {
@@ -37478,6 +37540,28 @@ async function pmActivate(id, skipCapture, keepSelection) {
   requestAnimationFrame(() => { scrollContainer.scrollTop = top; });
 }
 
+// A tab tapped / clicked. Not while a document is loading (the load would
+// land in whatever tab is active by then), and one switch at a time - a
+// switch rebuilds the pages over several awaits, and a second one started
+// meanwhile (quick taps on two tabs) mixed the two documents up. The tab
+// tapped last is the one shown.
+let pmTappedSwitching = false, pmTappedNextId = null;
+async function pmActivateTapped(id) {
+  if (isLoading) return;
+  pmTappedNextId = id;
+  if (pmTappedSwitching) return;
+  pmTappedSwitching = true;
+  try {
+    while (pmTappedNextId != null) {
+      const next = pmTappedNextId;
+      pmTappedNextId = null;
+      if (next !== pmActiveId && pmTabs.some(x => x.id === next) && !isLoading) await pmActivate(next);
+    }
+  } finally {
+    pmTappedSwitching = false;
+  }
+}
+
 function pmResetGlobalsEmpty() {
   // A tab opening on a fresh document starts from a plain view - it must not
   // inherit the fit-width ladder of whatever was on screen a moment ago.
@@ -38563,13 +38647,14 @@ function pmComputeWidth(n, avail) {
 // Room kept at the end of the bar for the + (new document) button: its
 // width, its margin and the gap before it.
 const PM_NEW_TAB_BTN_ROOM = 28;
+const PM_TOUCH_NEW_TAB_BTN_ROOM = 36;   // (touch: a 32px button)
 function pmAvailWidth() {
   if (tabBarEl && tabBarEl.clientWidth) {
     // The content box - the tabs start after the padding that lines them up
     // with the "Select files" button (pmAlignBarLeft).
     const cs = getComputedStyle(tabBarEl);
     const inner = tabBarEl.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
-    return Math.max(0, inner - PM_NEW_TAB_BTN_ROOM);
+    return Math.max(0, inner - (isTouchDevice ? PM_TOUCH_NEW_TAB_BTN_ROOM : PM_NEW_TAB_BTN_ROOM));
   }
   if (topMenuEl && topMenuEl.clientWidth) return Math.max(0, topMenuEl.clientWidth - 20);
   return 800;
@@ -38992,6 +39077,8 @@ function pmTabDragEnd() {
 
 function pmRenderBar() {
   if (!tabBarEl) return;
+  if (pmTabBarPressed) { pmTabBarRenderDue = true; return; }   // (touch: pmTabBarPressed)
+  pmTabBarRenderDue = false;
   pmCloseTabMenu();
   // A name being edited goes on in the new tab (pmMountTabRename below)
   if (pmTabRename && pmTabRename.input) {
@@ -39042,7 +39129,7 @@ function pmRenderBar() {
       }
       pmClearTabSelection();
       pmTabSelectAnchor = tab.id;
-      if (tab.id !== pmActiveId) pmActivate(tab.id);
+      if (tab.id !== pmActiveId) pmActivateTapped(tab.id);
       else pmUpdateTabSelectionVisual();
     });
     el.addEventListener('mousedown', (e) => {
@@ -39090,7 +39177,7 @@ function pmRenderBar() {
   plus.addEventListener('mousedown', (e) => e.stopPropagation());
   plus.addEventListener('click', (e) => { e.stopPropagation(); pmCreateNewDocTab(); });
   tabBarEl.appendChild(plus);
-  if (isTouchDevice) pmTabBarShowActive(keepScrollLeft);
+  if (isTouchDevice) { pmTabBarShowActive(keepScrollLeft); pmUpdateTabBarScrollHint(); }
   if (typeof pmUpdatePageDragTabVisuals === 'function' && isDragActive) {
     pmUpdatePageDragTabVisuals();
   }
@@ -39107,19 +39194,56 @@ function pmTabBarShowActive(scrollLeft) {
   if (r.left < bar.left + pad) tabBarEl.scrollLeft -= bar.left + pad - r.left;
   else if (r.right > bar.right - pad) tabBarEl.scrollLeft += r.right - (bar.right - pad);
 }
-// Hidden (the menu folded, reading mode) the bar loses its scroll position:
-// it is kept here and put back when the bar shows again.
-(function initPmTouchTabBarScroll() {
-  if (!isTouchDevice || !tabBarEl || typeof ResizeObserver !== 'function') return;
+// Touch: tabs that do not all fit get a thin bar under them - no handle to
+// drag, only a sign that they scroll and where the view is among them.
+function pmUpdateTabBarScrollHint() {
+  const hint = document.getElementById('tabBarScroll');
+  if (!hint) return;
+  const w = tabBarEl.clientWidth, sw = tabBarEl.scrollWidth;
+  const over = isTouchDevice && tabBarEl.clientHeight > 0 && sw > w + 1;
+  hint.style.display = over ? 'block' : 'none';
+  if (!over) return;
+  const inset = 8, track = w - 2 * inset;
+  hint.style.left = (tabBarEl.offsetLeft + inset) + 'px';
+  hint.style.top = (tabBarEl.offsetTop + tabBarEl.offsetHeight - 4) + 'px';
+  hint.style.width = track + 'px';
+  const thumb = Math.max(24, track * w / sw);
+  hint.firstElementChild.style.width = thumb + 'px';
+  hint.firstElementChild.style.left = ((track - thumb) * tabBarEl.scrollLeft / (sw - w)) + 'px';
+}
+
+(function initPmTouchTabBar() {
+  if (!isTouchDevice || !tabBarEl) return;
+  // Hidden (the menu folded, reading mode) the bar loses its scroll
+  // position: it is kept here and put back when the bar shows again.
   tabBarEl.addEventListener('scroll', () => {
     if (tabBarEl.clientHeight) pmTabBarScrollLeft = tabBarEl.scrollLeft;
+    pmUpdateTabBarScrollHint();
   }, { passive: true });
-  let shown = false;
-  new ResizeObserver(() => {
-    const now = tabBarEl.clientHeight > 0;
-    if (now && !shown) pmTabBarShowActive(pmTabBarScrollLeft);
-    shown = now;
-  }).observe(tabBarEl);
+  if (typeof ResizeObserver === 'function') {
+    let shown = false;
+    new ResizeObserver(() => {
+      const now = tabBarEl.clientHeight > 0;
+      if (now && !shown) pmTabBarShowActive(pmTabBarScrollLeft);
+      shown = now;
+      pmUpdateTabBarScrollHint();
+    }).observe(tabBarEl);
+  }
+  // No redraw of the bar under a finger (pmRenderBar waits): the window
+  // resizing as the browser's address bar folds away, a file finishing
+  // loading... swapped the tab being pressed for a new one - its release
+  // went nowhere, the tap switched nothing, and the hold timer left running
+  // opened the tab's menu with nothing to anchor it, in the top left corner.
+  // The redraw comes once the tap has done its work.
+  tabBarEl.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'touch') pmTabBarPressed = true;
+  }, true);
+  const release = (e) => {
+    if (!pmTabBarPressed || (e.type === 'pointerdown' && tabBarEl.contains(e.target))) return;
+    pmTabBarPressed = false;
+    setTimeout(() => { if (pmTabBarRenderDue && !pmTabBarPressed) pmRenderBar(); }, 350);
+  };
+  for (const type of ['pointerup', 'pointercancel', 'pointerdown']) document.addEventListener(type, release, true);
 })();
 
 // Panel visibility + integration with collapsed menu/reading mode.
