@@ -8649,8 +8649,8 @@
       <div class="pe-mkb-keys" id="peMobileKbKeys" aria-label="Клавиатура" data-i18n-aria="peMobileKbKeysAria"></div>
     </div>
     <input type="file" id="peImgInput" accept="image/png,image/jpeg" style="display:none">
-    <input type="file" id="peSignatureInput" accept="image/png,image/jpeg" style="display:none">
-    <input type="file" id="peSignatureLibraryInput" accept="image/png,image/jpeg" style="display:none">
+    <input type="file" id="peSignatureInput" accept="image/png,image/jpeg,application/pdf,.pdf" style="display:none">
+    <input type="file" id="peSignatureLibraryInput" accept="image/png,image/jpeg,application/pdf,.pdf" style="display:none">
     <!-- Mobile Undo/Redo in page editor — same look/placement as preview chrome -->
     <div id="peMobileUndoRedoBar" aria-hidden="true">
       <button id="peMobileUndoBtn" type="button" data-tip="Вернуть на шаг назад" data-i18n-title="undoMobile" aria-label="Вернуть на шаг назад" data-i18n-aria="undoMobile">←</button>
@@ -10183,7 +10183,7 @@
         wmNoText: 'Введите текст водяного знака', wmBadRange: 'Неверный диапазон страниц',
         wmApplyError: 'Не удалось нанести водяной знак',
         peInsertTextHint: 'Вставить текст\nF2 или Enter — редактировать текст выбранного блока',
-        peInsertText: 'Вставить текст', peInsertImage: 'Вставить изображение', peInsertSignature: 'Вставить подпись', peSignatureAddNew: 'Добавить новую подпись', peSignatureDefaultName: 'Подпись {n}', peSignatureRenameTitle: 'Переименовать подпись', peAddShapes: 'Добавить фигуры',
+        peInsertText: 'Вставить текст', peInsertImage: 'Вставить изображение', peInsertSignature: 'Вставить подпись', peSignatureAddNew: 'Добавить новую подпись: изображение или PDF-скан', peSignatureReadFailed: 'Не удалось прочитать подпись из этого файла', peSignatureDefaultName: 'Подпись {n}', peSignatureRenameTitle: 'Переименовать подпись', peAddShapes: 'Добавить фигуры',
         peShapeRect: 'Прямоугольник', peShapeEllipse: 'Круг / овал', peShapeArrow: 'Стрелка',
         peShapeLine: 'Линия', peShapePlus: 'Плюс', peShapeFreehand: 'Свободная форма', peShapeStar: 'Звезда',
         peObjLabelText: 'Текст', peObjLabelImage: 'Изображение',
@@ -10689,7 +10689,7 @@
         wmNoText: 'Enter the watermark text', wmBadRange: 'Invalid page range',
         wmApplyError: 'Could not apply the watermark',
         peInsertTextHint: 'Insert text\nF2 or Enter — edit the text of the selected block',
-        peInsertText: 'Insert text', peInsertImage: 'Insert image', peInsertSignature: 'Insert signature', peSignatureAddNew: 'Add new signature', peSignatureDefaultName: 'Signature {n}', peSignatureRenameTitle: 'Rename signature', peAddShapes: 'Add shapes',
+        peInsertText: 'Insert text', peInsertImage: 'Insert image', peInsertSignature: 'Insert signature', peSignatureAddNew: 'Add new signature: an image or a PDF scan', peSignatureReadFailed: 'Could not read a signature from this file', peSignatureDefaultName: 'Signature {n}', peSignatureRenameTitle: 'Rename signature', peAddShapes: 'Add shapes',
         peShapeRect: 'Rectangle', peShapeEllipse: 'Circle / oval', peShapeArrow: 'Arrow',
         peShapeLine: 'Line', peShapePlus: 'Plus', peShapeFreehand: 'Freeform', peShapeStar: 'Star',
         peObjLabelText: 'Text', peObjLabelImage: 'Image',
@@ -11195,7 +11195,7 @@
         wmNoText: 'Introduzca el texto de la marca de agua', wmBadRange: 'Rango de páginas no válido',
         wmApplyError: 'No se pudo aplicar la marca de agua',
         peInsertTextHint: 'Insertar texto\nF2 o Intro: editar el texto del bloque seleccionado',
-        peInsertText: 'Insertar texto', peInsertImage: 'Insertar imagen', peInsertSignature: 'Insertar firma', peSignatureAddNew: 'Añadir nueva firma', peSignatureDefaultName: 'Firma {n}', peSignatureRenameTitle: 'Renombrar firma', peAddShapes: 'Añadir formas',
+        peInsertText: 'Insertar texto', peInsertImage: 'Insertar imagen', peInsertSignature: 'Insertar firma', peSignatureAddNew: 'Añadir nueva firma: una imagen o un PDF escaneado', peSignatureReadFailed: 'No se pudo leer una firma de este archivo', peSignatureDefaultName: 'Firma {n}', peSignatureRenameTitle: 'Renombrar firma', peAddShapes: 'Añadir formas',
         peShapeRect: 'Rectángulo', peShapeEllipse: 'Círculo / óvalo', peShapeArrow: 'Flecha',
         peShapeLine: 'Línea', peShapePlus: 'Cruz', peShapeFreehand: 'Forma libre', peShapeStar: 'Estrella',
         peObjLabelText: 'Texto', peObjLabelImage: 'Imagen',
@@ -11755,7 +11755,8 @@
         peInsertText: '插入文字',
         peInsertImage: '插入图片',
         peInsertSignature: '插入签名',
-        peSignatureAddNew: '添加新签名',
+        peSignatureAddNew: '添加新签名：图片或 PDF 扫描件',
+        peSignatureReadFailed: '无法从此文件读取签名',
         peSignatureDefaultName: '签名 {n}',
         peSignatureRenameTitle: '重命名签名',
         peAddShapes: '添加形状',
@@ -53682,19 +53683,58 @@ function peLoadImageFromDataUrl(dataUrl) {
   });
 }
 
-// Loads a picked signature photo, strips its background (see
+// A signature can also come as a PDF - what a scanner usually makes of a
+// signed sheet. Its first page is drawn large enough for the ink to keep
+// clean edges once it is cut out of the sheet (peRemoveSignatureBackground
+// crops to the ink).
+const PE_SIGNATURE_PDF_MAX_DIM = 3000;
+function peIsPdfFile(file) {
+  return !!file && (file.type === 'application/pdf' || /\.pdf$/i.test(file.name || ''));
+}
+function peIsSignatureFile(file) {
+  return !!file && (peIsPdfFile(file) || (!!file.type && file.type.startsWith('image/')));
+}
+async function peRenderSignaturePdf(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const doc = await pdfjsLib.getDocument({ data: bytes }).promise;
+  try {
+    const page = await doc.getPage(1);
+    const vp1 = page.getViewport({ scale: 1 });
+    const viewport = page.getViewport({ scale: PE_SIGNATURE_PDF_MAX_DIM / Math.max(vp1.width, vp1.height) });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(viewport.width);
+    canvas.height = Math.round(viewport.height);
+    const ctx = canvas.getContext('2d');
+    // White paper under a page that has none (a signature drawn as
+    // vectors): the ink is told from the paper by its brightness.
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    return canvas;
+  } finally {
+    pmDestroyPdfjsDoc(doc);
+  }
+}
+// The picked file as something to cut the signature out of: the image
+// itself, or the PDF's first page. null (with a message) if it cannot be read.
+async function peLoadSignatureSource(file) {
+  try {
+    if (peIsPdfFile(file)) return await peRenderSignaturePdf(file);
+    return (await peLoadImageFile(file)).im;
+  } catch (_) {
+    if (typeof pmShowToast === 'function') pmShowToast(t('peSignatureReadFailed'));
+    return null;
+  }
+}
+
+// Loads a picked signature photo (or PDF scan), strips its background (see
 // peRemoveSignatureBackground) and inserts the result exactly like a normal
 // pasted image.
 async function peInsertSignatureFile(file, xFrac, yFrac) {
-  if (!peState || !file || !file.type || !file.type.startsWith('image/')) return;
-  let loaded;
-  try {
-    loaded = await peLoadImageFile(file);
-  } catch (_) {
-    return;
-  }
-  if (!peState) return;
-  const pngUrl = peRemoveSignatureBackground(loaded.im);
+  if (!peState || !peIsSignatureFile(file)) return;
+  const source = await peLoadSignatureSource(file);
+  if (!source || !peState) return;
+  const pngUrl = peRemoveSignatureBackground(source);
   if (!pngUrl) return;
   let processed;
   try {
@@ -53863,15 +53903,10 @@ async function peRenderSignatureMenu() {
 // Adds a signature to the saved library WITHOUT inserting it onto the page -
 // insertion happens only by picking a saved slot from the menu.
 async function peAddSignatureToLibrary(file) {
-  if (!peState || !file || !file.type || !file.type.startsWith('image/')) return;
-  let loaded;
-  try {
-    loaded = await peLoadImageFile(file);
-  } catch (_) {
-    return;
-  }
-  if (!peState) return;
-  const pngUrl = peRemoveSignatureBackground(loaded.im);
+  if (!peState || !peIsSignatureFile(file)) return;
+  const source = await peLoadSignatureSource(file);
+  if (!source || !peState) return;
+  const pngUrl = peRemoveSignatureBackground(source);
   if (!pngUrl) return;
   let processed;
   try {
