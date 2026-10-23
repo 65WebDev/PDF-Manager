@@ -27479,6 +27479,41 @@
       });
     }
 
+    // ── Touch: selection handles off the text ─────────────────────────
+    // A finger dragging a selection handle a pixel off the glyphs - into a
+    // gap between lines, past a line's end - made the browser put that end
+    // in the page image or the layer container: the start of the page (or
+    // of the document), so the whole page up to the other end got selected.
+    // The clamp below cannot help there - it follows the mouse, while the
+    // browser moves the handles itself and the page only sees the resulting
+    // selection. So that end goes back to where it last was on text, and
+    // follows the finger again once the finger is back over text.
+    function pmTextSelEndOnText(node) {
+      const el = node && (node.nodeType === 3 ? node.parentElement : node);
+      const layer = el && el.closest ? el.closest('.textLayer') : null;
+      return !!layer && el !== layer && !el.closest('.endOfContent');
+    }
+    if (isTouchDevice) {
+      let last = null;   // the selection as it last was with both ends on text
+      const same = (p, q) => p.node === q.node && p.offset === q.offset;
+      document.addEventListener('selectionchange', () => {
+        const sel = document.getSelection();
+        if (!sel || !sel.rangeCount || sel.isCollapsed) { last = null; return; }
+        const a = { node: sel.anchorNode, offset: sel.anchorOffset };
+        const f = { node: sel.focusNode, offset: sel.focusOffset };
+        if (pmTextSelEndOnText(a.node) && pmTextSelEndOnText(f.node)) { last = { a, f }; return; }
+        // Only the same selection, one of its ends dragged off the text (the
+        // browser may swap which end is the anchor); anything else is a new
+        // selection of something else, left alone.
+        if (!last || !(same(a, last.a) || same(a, last.f) || same(f, last.a) || same(f, last.f))) {
+          last = null;
+          return;
+        }
+        if (!last.a.node.isConnected || !last.f.node.isConnected) { last = null; return; }
+        try { sel.setBaseAndExtent(last.a.node, last.a.offset, last.f.node, last.f.offset); } catch (_) { last = null; }
+      });
+    }
+
     // ── Deterministic clamp ──────────────────────────────────────────
     // The endOfContent guard depends on browser hit-testing heuristics that
     // have proven unreliable; this does not. During a drag that started on a
