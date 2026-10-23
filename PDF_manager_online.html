@@ -635,6 +635,33 @@
     }
     /*The tab bar is hidden in reading mode*/
     body.read-mode-active .tab-bar { display: none !important; }
+    /*Touch: the bar comes with a second document (pmSyncLayout) and folds
+      away with the menu. It scrolls sideways - pmComputeWidth keeps the tabs
+      wide enough to read - and only the active tab has a close cross: a
+      finger landing a little off must not close the tab next to it.*/
+    @media (pointer: coarse) {
+      .top-menu.collapsed .tab-bar { display: none !important; }
+      .tab-bar {
+        height: 36px; max-height: none;
+        /*edge to edge over the menu's 20px sides, so tabs scroll out at the
+          screen's edge (pmAlignBarLeft still lines the first one up)*/
+        margin: 0 -20px; padding-right: 12px;
+        overflow-x: auto; overflow-y: hidden;
+        scrollbar-width: none; overscroll-behavior-x: contain;
+      }
+      .tab-bar::-webkit-scrollbar { display: none; }
+      .pm-tab { height: 34px; font-size: 13px; padding: 0 4px 0 10px; }
+      /*(no hover on a touch screen - it would stay on the tab last tapped)*/
+      .pm-tab:not(.active):hover { background: #3a4a5a; color: #c9d3dc; }
+      .pm-tab:not(.active) .pm-tab-close,
+      .pm-tab:has(.pm-tab-rename-input) .pm-tab-close { display: none; }
+      .pm-tab.active .pm-tab-close { width: 28px; height: 28px; opacity: .7; }
+      .pm-tab.active .pm-tab-close svg { width: 10px; height: 10px; }
+      /*Held: its menu is open*/
+      .pm-tab.pm-bb-open { box-shadow: inset 0 0 0 2px #6f93b6; }
+      #tabBar .pm-tab-new { width: 32px; height: 32px; min-width: 32px; min-height: 32px; margin-bottom: 1px; }
+      #tabBar .pm-tab-new:hover { background: transparent; color: #c9d3dc; }
+    }
     /*Tooltip "files will open in new tabs" when dragging from File Explorer*/
     #tabDropHint {
       position: fixed; z-index: 99999; display: none; pointer-events: none;
@@ -9460,6 +9487,49 @@
         total -= docHistoryEntryBytes(docHistory[0]);
         docHistory.shift();
       }
+      pmTrimTouchTabsHistory();
+    }
+
+    // Touch: the undo histories of all open documents share one budget - a
+    // phone has nowhere near the memory for 500 MB per tab. Over it, steps
+    // go from the other tabs first (redo steps, then the oldest undo ones),
+    // then the active tab's oldest. Every history keeps its first step - the
+    // document as opened, which tells whether it has unsaved changes
+    // (syncDirtyFromHistory) - and the step it is at: switching to a tab
+    // rebuilds it from that one. Past those the budget is not enforced.
+    const PM_TOUCH_HISTORY_MAX_BYTES = 256 * 1024 * 1024;
+    function pmHistoryBytes(lists) {
+      const seen = new Set();   // steps that only changed the selection share their bytes
+      let total = 0;
+      for (const list of lists) {
+        for (const snap of list) {
+          const b = snap && snap.pdfBytes;
+          if (b && !seen.has(b)) { seen.add(b); total += docHistoryEntryBytes(snap); }
+        }
+      }
+      return total;
+    }
+    function pmTrimTouchTabsHistory() {
+      if (!isTouchDevice) return;
+      const others = pmTabs.filter(x => x.id !== pmActiveId && Array.isArray(x.docHistory));
+      const lists = () => [docHistory, ...others.map(x => x.docHistory)];
+      // steps a tab can give up: all but its first one and the one it is at
+      const spare = (x) => x.docHistory.length - (x.docHistoryIndex > 0 ? 2 : 1);
+      while (pmHistoryBytes(lists()) > PM_TOUCH_HISTORY_MAX_BYTES) {
+        let tab = null;   // the other tab with the most steps to spare
+        for (const x of others) {
+          if (spare(x) > 0 && (!tab || spare(x) > spare(tab))) tab = x;
+        }
+        if (tab) {
+          const h = tab.docHistory;
+          if (h.length - 1 > tab.docHistoryIndex) h.pop();
+          else { h.splice(1, 1); tab.docHistoryIndex--; }
+        } else if (docHistory.length > 2) {
+          docHistory.splice(1, 1);   // (the active tab is at its newest step)
+        } else {
+          break;
+        }
+      }
     }
     let historyPushTimer = null;
     let selectionHistoryTimer = null;
@@ -9548,6 +9618,7 @@
     let pmTabInsertIndex = null;
     let pmTabMenuTabId = null;
     let pmTabMenuOpenedAt = 0;
+    let pmTabBarScrollLeft = 0;   // touch: where the bar was scrolled to (pmTabBarShowActive)
     let pmMeasureCanvas = null;
     let pmDrag = null;
     let pmDragSuppressClick = false;
@@ -9559,7 +9630,13 @@
     const TAB_MAX_W = 220;
     const TAB_MIN_W = 58;
     const TAB_MIN_FIT = 4;
-    function pmTabsEnabled() { return !isTouchDevice; }
+    //Tabs on every device. A phone or tablet shows the tab bar only once a
+    //second document is open (pmSyncLayout) and scrolls it sideways instead
+    //of narrowing the tabs; it keeps fewer documents open, as each of them
+    //holds its own undo history in memory (pmTrimTouchTabsHistory).
+    const PM_TOUCH_TABS_MAX = 6;
+    const PM_TOUCH_TAB_MIN_W = 104;
+    function pmTabsEnabled() { return true; }
     const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'bmp', 'gif', 'webp', 'tif', 'tiff'];
     function isImageExt(ext) { return IMAGE_EXTS.includes((ext || '').toLowerCase()); }
 
@@ -10292,7 +10369,7 @@
         confirmNo: 'Нет',
         confirmDeletePage: 'Удалить выбранную страницу?',
         confirmDeletePages: 'Удалить выбранные страницы?',
-        confirmOpenReplace: 'Документ не сохранён.<br>При открытии новый документ будет заменён на текущий.',
+        confirmOpenReplace: 'Документ не сохранён.<br>Новый документ откроется вместо текущего.',
         confirmOpenReplaceYes: 'Подтвердить',
         confirmOpenReplaceNo: 'Отменить',
         confirmCloseTab: 'Документ «{name}» не сохранён.<br>Закрыть вкладку?',
@@ -10336,6 +10413,8 @@
         loadingRenderingNewPagesCountOf: 'Рендер новых страниц... {i} из {srcCount}',
         alertReplacePagesError: 'Ошибка при замене страниц',
         alertNoRoomForTab: 'Недостаточно места для новой вкладки.\nЗакройте лишние вкладки и повторите.',
+        alertTabLimit: 'Можно открыть не больше {n} документов.\nЗакройте лишние вкладки и повторите.',
+        openManyAsk: 'Выбрано файлов: {n}. Как их открыть?', openManyTabs: 'Во вкладках', openManyMerge: 'Объединить в один',
         loadingMovingPagesToTab: 'Перенос страниц...',
         alertCreateDocError: 'Ошибка создания документа',
         alertShortcutDropped: 'Похоже, это ярлык, а не сам файл ({name}). Браузер не может прочитать файл через ярлык — перетащите оригинальный файл или откройте его через кнопку «Открыть».',
@@ -10840,6 +10919,8 @@
         loadingRenderingNewPagesCountOf: 'Rendering new pages... {i} of {srcCount}',
         alertReplacePagesError: 'Error replacing pages',
         alertNoRoomForTab: 'Not enough room for a new tab.\nClose some tabs and try again.',
+        alertTabLimit: 'Up to {n} documents can be open at once.\nClose some tabs and try again.',
+        openManyAsk: 'Files selected: {n}. How to open them?', openManyTabs: 'In tabs', openManyMerge: 'Merge into one',
         loadingMovingPagesToTab: 'Moving pages...',
         alertCreateDocError: 'Error creating the document',
         alertShortcutDropped: 'This looks like a shortcut, not the file itself ({name}). Browsers can\'t read a file through a shortcut - please drag the original file, or use the Open button instead.',
@@ -11344,6 +11425,8 @@
         loadingRenderingNewPagesCountOf: 'Renderizando páginas nuevas... {i} de {srcCount}',
         alertReplacePagesError: 'Error al reemplazar páginas',
         alertNoRoomForTab: 'No hay espacio suficiente para una nueva pestaña.\nCierre algunas pestañas e inténtelo de nuevo.',
+        alertTabLimit: 'Se pueden tener abiertos hasta {n} documentos.\nCierre algunas pestañas e inténtelo de nuevo.',
+        openManyAsk: 'Archivos seleccionados: {n}. ¿Cómo abrirlos?', openManyTabs: 'En pestañas', openManyMerge: 'Combinar en uno',
         loadingMovingPagesToTab: 'Moviendo páginas...',
         alertCreateDocError: 'Error al crear el documento',
         alertShortcutDropped: 'Esto parece un acceso directo, no el archivo en sí ({name}). El navegador no puede leer un archivo a través de un acceso directo: arrastre el archivo original o utilice el botón «Abrir».',
@@ -11921,6 +12004,8 @@
         loadingRenderingNewPagesCountOf: '正在渲染新页面... {i} / {srcCount}',
         alertReplacePagesError: '替换页面时出错',
         alertNoRoomForTab: '没有足够的空间打开新标签页。\n请关闭部分标签页后重试。',
+        alertTabLimit: '最多可同时打开 {n} 个文档。\n请关闭部分标签页后重试。',
+        openManyAsk: '已选择 {n} 个文件。如何打开？', openManyTabs: '在标签页中打开', openManyMerge: '合并为一个',
         loadingMovingPagesToTab: '正在移动页面...',
         alertCreateDocError: '创建文档时出错',
         alertShortcutDropped: '这似乎是一个快捷方式，而不是文件本身（{name}）。浏览器无法通过快捷方式读取文件 — 请拖拽原始文件，或使用"打开"按钮。',
@@ -20782,6 +20867,7 @@
       try { dragSourceDiv.setPointerCapture(pagePointerId); } catch (_) {}
       if (navigator.vibrate) navigator.vibrate(15);
       isDragActive = true;
+      pageDragSourceTabId = pmActiveId;   // (dropped on another tab: moved from this one)
       pagesContainer.classList.add('dragging-active');
       draggedIndex = parseInt(dragSourceDiv.dataset.index);
       dragGhostEl = createDragGhost(dragSourceDiv, touchLastX, touchLastY);
@@ -21005,9 +21091,9 @@
       if (longPressActive || isDragActive) {
         e.preventDefault();
         enforceScrollLock();
-        moveDragGhostTo(e.clientX, e.clientY);
-        updateInsertIndicatorsAt(e.clientX, e.clientY);
-        checkAndStartAutoScroll(e.clientY);
+        // The mouse's pass: ghost, insert marker, auto-scroll - and a tab
+        // under the finger switches to that document to drop the pages there.
+        runDragMoveFrame(e.clientX, e.clientY);
         return;
       }
 
@@ -21060,7 +21146,7 @@
       }
 
       if (longPressActive) {
-        onDragMouseUp({ clientX: e.clientX, clientY: e.clientY });
+        onDragMouseUp({ clientX: e.clientX, clientY: e.clientY, preventDefault() {}, stopPropagation() {} });
       } else {
         let textSelBlocksTap = false;
         if (typeof isZoomTextSelect === 'function' && isZoomTextSelect()) {
@@ -23898,9 +23984,10 @@
       fileInput.addEventListener('change', e => e.target.files[0] && loadPDF(e.target.files[0]));
     }
 
-    // Desktop: “Select files” - open one or more files. If it's already underway
-    // working with a document, the new set REPLACES the current one (with a warning if
-    // there are unsaved changes). On mobile the behavior is the same (one file).
+    // “Select files” - one or more files, each in a new tab (a touch screen
+    // asks whether several go into tabs or into one merged document -
+    // pmOpenFilesTabsOrMerge). Without tabs the new set REPLACES the current
+    // document, with a warning if it has unsaved changes.
     async function loadNewPDF() {
       // If a document with unsaved changes is opened, we warn you about replacement
       if (!pmTabsEnabled() && pdfDoc && documentDirty) {
@@ -23983,7 +24070,7 @@
       // Open: one file - normal download;
       // several - select an order, then collect a single document.
       if (pmTabsEnabled()) {
-        await pmOpenFilesAsTabs(files, fileHandles);
+        await pmOpenFilesTabsOrMerge(files, fileHandles);
       } else if (files.length === 1) {
         loadPDF(files[0]);
       } else {
@@ -26669,6 +26756,14 @@
           // We update the drop target using the release coordinates (the last mousemove could be different).
           if (pmTabsEnabled() && isDragActive) {
             updatePageDragTabTarget(e.clientX, e.clientY);
+          }
+          // Touch: let go over another document's tab - the pages go to its
+          // end (no marker there), and that document is shown.
+          if (isTouchDevice && isDragActive && pageDragOverTabId != null) {
+            pmSwitchTabForPageDrag(pageDragOverTabId);
+            if (pageTabSwitchPromise) {
+              try { await pageTabSwitchPromise; } catch (err) { console.error(err); }
+            }
           }
           const dropToNewTab = pageDragOverNewTabZone;
 
@@ -30379,7 +30474,10 @@
       pageDragOverTabId = tid;
       pageCrossTabTargetTabId = tid;
       pmUpdatePageDragTabVisuals();
-      pmSwitchTabForPageDrag(tid);
+      // Touch: lit up only - the switch waits for the release (onDragMouseUp).
+      // Switching under the finger takes away the page it came down on, and
+      // a finger's events go nowhere else: the drag would freeze.
+      if (!isTouchDevice) pmSwitchTabForPageDrag(tid);
     }
 
     function pmSwitchTabForPageDrag(targetTabId) {
@@ -30449,7 +30547,7 @@
       if (!indices.length) return;
 
       if (!pmCanAddTab()) {
-        alert(t('alertNoRoomForTab'));
+        pmAlertNoRoomForTab();
         return;
       }
 
@@ -31654,16 +31752,19 @@
         // opts.dismissOnBackdrop === false: a click outside the box does
         // nothing - for choices a stray click must not make on the user's
         // behalf (the crash-recovery prompt, where "No" deletes the work).
+        // opts.dismissValue: what a click outside / Escape resolves to, when
+        // both buttons are choices and neither one means "no" (null: neither).
+        const dismissValue = ('dismissValue' in opts) ? opts.dismissValue : false;
         overlay.addEventListener('click', (e) => {
           if (e.target === overlay) {
             e.preventDefault();
             e.stopPropagation();
-            if (opts.dismissOnBackdrop !== false) close(false);
+            if (opts.dismissOnBackdrop !== false) close(dismissValue);
           }
         });
         const onKey = (e) => {
           if (e.key === 'Enter')  { e.preventDefault(); e.stopPropagation(); close(true); }
-          if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(false); }
+          if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(dismissValue); }
         };
         document.addEventListener('keydown', onKey, true);
       });
@@ -33802,7 +33903,7 @@
         let newSession = null;
         if (creatingNewTab) {
           if (!pmCanAddTab()) {
-            alert(t('alertNoRoomForTab'));
+            pmAlertNoRoomForTab();
             return;
           }
           if (pmActiveId != null) pmCaptureActive();
@@ -37410,7 +37511,7 @@ function pmActiveIsEmptyNewDoc() {
 async function pmCreateNewDocTab() {
   if (isLoading || !pmTabsEnabled()) return;
   if (!pmCanAddTab()) {
-    alert(t('alertNoRoomForTab'));
+    pmAlertNoRoomForTab();
     return;
   }
   if (pmActiveId != null) pmCaptureActive();
@@ -37428,7 +37529,7 @@ window.pmCreateNewDocTab = pmCreateNewDocTab;
 // Opens one file in a NEW tab (insertAt - position on the panel, default to the end).
 async function pmOpenOneFileAsTab(file, handle, insertAt) {
   if (!pmCanAddTab()) {
-    alert(t('alertNoRoomForTab'));
+    pmAlertNoRoomForTab();
     return false;
   }
   if (pmActiveId != null) pmCaptureActive();
@@ -37472,6 +37573,23 @@ async function pmOpenFilesAsTabs(files, handles, insertAt) {
     at++;
   }
 }
+
+// Several files opened at once on a touch screen: each in a tab of its own,
+// or all merged into one new document - the phone has no Merge button, so
+// opening files together is how they get merged there.
+async function pmOpenFilesTabsOrMerge(files, handles) {
+  if (!files || !files.length) return;
+  if (isTouchDevice && files.length > 1) {
+    const inTabs = await showConfirmDialog(t('openManyAsk', { n: files.length }), {
+      yesText: t('openManyTabs'), noText: t('openManyMerge'), yesBg: '#3498db', dismissValue: null
+    });
+    if (inTabs == null) return;
+    if (!inTabs) { await mergeFilesFlow(files, { forceNewTab: true }); return; }
+  }
+  await pmOpenFilesAsTabs(files, handles);
+}
+// (the Android app's "Open with" / "Share", prepare-tauri-ui.mjs)
+window.pmOpenFilesTabsOrMerge = pmOpenFilesTabsOrMerge;
 
 // Sorting files by name (natural) - “alphabetically”.
 function pmSortFilesByName(files) {
@@ -38304,8 +38422,9 @@ function pmMountTabRename() {
   input.setAttribute('aria-label', t('tabRenameTitle'));
   // The tab's own mouse handling (switch, drag, middle-click close, its
   // menu) is not for the field: the caret and the selection are placed
-  // with the mouse here, and the right button gives the usual text menu.
-  for (const type of ['mousedown', 'click', 'dblclick', 'auxclick', 'contextmenu']) {
+  // with the mouse here, and the right button gives the usual text menu
+  // (touch: a hold selects text instead of opening the tab's menu).
+  for (const type of ['pointerdown', 'mousedown', 'click', 'dblclick', 'auxclick', 'contextmenu']) {
     input.addEventListener(type, (e) => e.stopPropagation());
   }
   input.addEventListener('blur', () => {
@@ -38384,6 +38503,19 @@ async function pmCloseTabsToRight(fromTabId) {
   await pmCloseTabIds(pmTabs.slice(idx + 1).map(t => t.id));
 }
 
+// Touch: a tab held - what a right click on it gives on a desktop, in the
+// phone's own menu.
+function pmShowTabHoldMenu(el, tabId) {
+  const idx = pmTabs.findIndex(x => x.id === tabId);
+  if (idx < 0 || isLoading) return false;
+  pmShowPopMenu(el, [
+    { label: t('tabRename'), onClick: () => pmStartTabRename(tabId) },
+    { label: t('tabClose'), onClick: () => pmCloseTab(tabId) },
+    { label: t('tabCloseOthers'), disabled: pmTabs.length < 2, onClick: () => pmCloseTabsExcept(tabId) },
+    { label: t('tabCloseRight'), disabled: idx >= pmTabs.length - 1, onClick: () => pmCloseTabsToRight(tabId) },
+  ], { title: pmTabs[idx].fileName || t('tabNoName'), place: 'below' });
+}
+
 (function initPmTabMenu() {
   const menu = document.getElementById('pmTabMenu');
   if (!menu) return;
@@ -38419,9 +38551,12 @@ async function pmCloseTabsToRight(fromTabId) {
 // fit without scrolling. Lower bound (4 letters) guaranteed by locking
 // opening new tabs (pmCanAddTab), rather than horizontal scrolling.
 // 3px: .tab-bar's gap between tabs.
+// Touch: no narrower than PM_TOUCH_TAB_MIN_W - the bar scrolls sideways
+// instead, a name squeezed to a few letters being of no use under a finger.
 function pmComputeWidth(n, avail) {
   if (n <= 0) return 0;
-  return Math.max(1, Math.min(TAB_MAX_W, Math.floor((avail - 3 * (n - 1)) / n)));
+  const w = Math.max(1, Math.min(TAB_MAX_W, Math.floor((avail - 3 * (n - 1)) / n)));
+  return isTouchDevice ? Math.max(PM_TOUCH_TAB_MIN_W, w) : w;
 }
 
 // Available width of the tab bar (if there are no tabs yet, we estimate it using the menu).
@@ -38453,11 +38588,16 @@ function pmMinTabWidth() {
   } catch (e) { return TAB_MIN_W; }
 }
 
-// Will another tab fit at least the minimum width (4 letters)?
+// Will another tab fit at least the minimum width (4 letters)? On a touch
+// screen the bar scrolls - there it is the number of documents that counts.
 function pmCanAddTab() {
+  if (isTouchDevice) return pmTabs.length < PM_TOUCH_TABS_MAX;
   const n = pmTabs.length + 1;
   const w = pmComputeWidth(n, pmAvailWidth());
   return w >= pmMinTabWidth();
+}
+function pmAlertNoRoomForTab() {
+  alert(isTouchDevice ? t('alertTabLimit', { n: PM_TOUCH_TABS_MAX }) : t('alertNoRoomForTab'));
 }
 
 // Align the left edge of the first tab with the left edge of the “Select files” button.
@@ -38861,17 +39001,20 @@ function pmRenderBar() {
     pmTabRename.selEnd = input.selectionEnd;
     pmTabRename.input = null;   // its blur on removal is not the end of the edit
   }
+  const keepScrollLeft = tabBarEl.clientHeight ? tabBarEl.scrollLeft : pmTabBarScrollLeft;
   tabBarEl.innerHTML = '';
   if (!pmTabs.length) { pmTabRename = null; return; }
   pmAlignBarLeft();
   const w = pmComputeWidth(pmTabs.length, pmAvailWidth());
   const tabNoNameLabel = t('tabNoName');
-  const tabCloseLabel = t('tabCloseTitle');
+  // (touch: no tooltip - holding the cross would show it along with the tab's menu)
+  const tabCloseTitle = isTouchDevice ? '' : ' title="' + escapeHtml(t('tabCloseTitle')) + '"';
   pmTabs.forEach(tab => {
     const el = document.createElement('div');
     const sel = pmSelectedTabIds.has(tab.id);
     el.className = 'pm-tab' + (tab.id === pmActiveId ? ' active' : '') + (sel ? ' pm-tab-selected' : '');
-    el.style.width = w + 'px';
+    // (touch: the active tab is a little wider - its close cross takes room)
+    el.style.width = (isTouchDevice && tab.id === pmActiveId ? Math.max(w, PM_TOUCH_TAB_MIN_W + 32) : w) + 'px';
     el.title = tab.fileName || '';
     el.dataset.tabId = tab.id;
     const dirty = (tab.id === pmActiveId) ? documentDirty : tab.dirty;
@@ -38880,7 +39023,7 @@ function pmRenderBar() {
     el.innerHTML =
       '<span class="pm-tab-star"' + (dirty ? '' : ' hidden') + '>*</span>' +
       '<span class="pm-tab-label">' + escapeHtml(tab.fileName || tabNoNameLabel) + '</span>' +
-      '<span class="pm-tab-close" title="' + escapeHtml(tabCloseLabel) + '">' + pmTabCloseIcon() + '</span>';
+      '<span class="pm-tab-close"' + tabCloseTitle + '>' + pmTabCloseIcon() + '</span>';
     el.addEventListener('click', (e) => {
       pmTabSyncModifiers(e);
       if (pmDragSuppressClick) { pmDragSuppressClick = false; e.stopPropagation(); return; }
@@ -38909,12 +39052,15 @@ function pmRenderBar() {
         e.stopPropagation();
         return;
       }
-      if (e.button === 0) pmTabDragStart(e, tab.id);
+      // (touch: the mouse events a tap ends with - the finger scrolls the
+      // bar rather than dragging tabs along it)
+      if (e.button === 0 && !isTouchDevice) pmTabDragStart(e, tab.id);
     });
     el.addEventListener('contextmenu', (e) => {
       if (!pmTabsEnabled()) return;
       e.preventDefault();
       e.stopPropagation();
+      if (isTouchDevice) return;   // held: pmShowTabHoldMenu
       if (pmDrag) {
         document.removeEventListener('mousemove', pmTabDragMove);
         document.removeEventListener('mouseup', pmTabDragEnd);
@@ -38931,6 +39077,7 @@ function pmRenderBar() {
       if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
       pmStartTabRename(tab.id);
     });
+    pmHoldMenu(el, () => pmShowTabHoldMenu(el, tab.id));
     tabBarEl.appendChild(el);
   });
   if (pmTabRename) pmMountTabRename();
@@ -38943,15 +39090,43 @@ function pmRenderBar() {
   plus.addEventListener('mousedown', (e) => e.stopPropagation());
   plus.addEventListener('click', (e) => { e.stopPropagation(); pmCreateNewDocTab(); });
   tabBarEl.appendChild(plus);
+  if (isTouchDevice) pmTabBarShowActive(keepScrollLeft);
   if (typeof pmUpdatePageDragTabVisuals === 'function' && isDragActive) {
     pmUpdatePageDragTabVisuals();
   }
 }
 
+// Touch: the bar scrolls sideways. Back where the finger left it, with the
+// active tab brought into view.
+function pmTabBarShowActive(scrollLeft) {
+  tabBarEl.scrollLeft = scrollLeft;
+  const act = tabBarEl.querySelector('.pm-tab.active');
+  if (!act || !tabBarEl.clientHeight) return;
+  const bar = tabBarEl.getBoundingClientRect(), r = act.getBoundingClientRect();
+  const pad = 12;
+  if (r.left < bar.left + pad) tabBarEl.scrollLeft -= bar.left + pad - r.left;
+  else if (r.right > bar.right - pad) tabBarEl.scrollLeft += r.right - (bar.right - pad);
+}
+// Hidden (the menu folded, reading mode) the bar loses its scroll position:
+// it is kept here and put back when the bar shows again.
+(function initPmTouchTabBarScroll() {
+  if (!isTouchDevice || !tabBarEl || typeof ResizeObserver !== 'function') return;
+  tabBarEl.addEventListener('scroll', () => {
+    if (tabBarEl.clientHeight) pmTabBarScrollLeft = tabBarEl.scrollLeft;
+  }, { passive: true });
+  let shown = false;
+  new ResizeObserver(() => {
+    const now = tabBarEl.clientHeight > 0;
+    if (now && !shown) pmTabBarShowActive(pmTabBarScrollLeft);
+    shown = now;
+  }).observe(tabBarEl);
+})();
+
 // Panel visibility + integration with collapsed menu/reading mode.
 function pmSyncLayout() {
   if (!tabBarEl || !topMenuEl) return;
-  const show = pmTabsEnabled() && pmTabs.length > 0 && !readModeActive;
+  // Touch: a lone document needs no bar taking up a phone's height
+  const show = pmTabsEnabled() && pmTabs.length > (isTouchDevice ? 1 : 0) && !readModeActive;
   tabBarEl.style.display = show ? '' : 'none';
   topMenuEl.classList.toggle('tabbar-visible', show);
   if (show) pmRenderBar();   // panel visible - render with correct alignment
