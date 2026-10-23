@@ -17806,6 +17806,24 @@
       return promise;
     }
 
+    // Touch: a finger selecting text - a long press dragged on, a selection
+    // handle nudged - that comes up over a link must not follow it: the
+    // link's confirmation (or the jump to its page) ended the selection
+    // half-way. A link takes a tap only when no text got selected since the
+    // finger came down. (Clearing a selection does not count: a tap on a
+    // link next to selected text still opens it.)
+    let pmTextSelectedSinceDown = false;
+    if (isTouchDevice) {
+      document.addEventListener('pointerdown', () => { pmTextSelectedSinceDown = false; }, true);
+      document.addEventListener('selectionchange', () => {
+        const sel = document.getSelection();
+        if (sel && sel.rangeCount && !sel.isCollapsed) pmTextSelectedSinceDown = true;
+      });
+    }
+    function pmLinkTapWasSelecting() {
+      return isTouchDevice && pmTextSelectedSinceDown;
+    }
+
     // Builds (or removes, if the page has no links) the .pm-link-layer for
     // one page card. Visibility/interactivity itself is CSS-only
     // (body.nav-mode-active hides internal links) so this can run unconditionally
@@ -17849,6 +17867,7 @@
         zone.style.height = (link.height * 100) + '%';
         zone.addEventListener('click', (e) => {
           e.stopPropagation();
+          if (pmLinkTapWasSelecting()) return;
           if (typeof isPagesSingleColumnLayout === 'function' && !isPagesSingleColumnLayout()) return;
           if (typeof pmBookmarksGoTo === 'function') pmBookmarksGoTo(link.pageIndex);
         });
@@ -17872,7 +17891,11 @@
       a.style.height = (link.height * 100) + '%';
       let down = null;
       a.addEventListener('mouseenter', () => { a.title = t('linkFollow') + '\n' + link.url; });
-      a.addEventListener('mousedown', (e) => { down = { x: e.clientX, y: e.clientY }; });
+      a.addEventListener('mousedown', (e) => {
+        down = { x: e.clientX, y: e.clientY };
+        // (the press of that tap would also clear the selection being made)
+        if (pmLinkTapWasSelecting()) e.preventDefault();
+      });
       a.addEventListener('dragstart', (e) => e.preventDefault());
       a.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -17880,7 +17903,7 @@
         e.preventDefault();
         const moved = down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4;
         down = null;
-        if (moved || e.button !== 0) return;
+        if (moved || e.button !== 0 || pmLinkTapWasSelecting()) return;
         pmConfirmOpenLink(link.url);
       });
       // A middle click would open a new tab past the confirmation.
