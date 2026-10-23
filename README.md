@@ -66,7 +66,7 @@ Android app: Android 7.0+, phones and tablets. Open the downloaded `.apk` on the
 - **Bookmarks & table of contents** — hierarchical bookmarks with multi-select, drag reordering, and bulk delete.
 - **Clickable internal links** — follow links and table-of-contents entries in the viewer.
 - **Smart zoom** — crisp rendering at any zoom level, snaps to page width (wheel/slider on desktop, pinch-to-zoom on mobile).
-- **Multiple documents at once** *(desktop only)* — several PDFs in tabs, one window.
+- **Multiple documents at once** — several PDFs in tabs, one window (up to 6 on a phone).
 - **Import from Word, Excel & email** — `.docx`, `.xlsx`, `.eml` and `.msg` converted to PDF automatically.
 - **Image compression** — reduce the PDF file size without losing readability.
 - **Password & encryption** — set a password on a PDF right in the browser, no third-party service involved.
@@ -153,7 +153,7 @@ Android app: Android 7.0+, phones and tablets. Open the downloaded `.apk` on the
 - **Закладки и оглавление** — многоуровневые закладки: выделение нескольких сразу, перестановка перетаскиванием, удаление группой.
 - **Внутренние ссылки** — переходы по ссылкам и оглавлению прямо в просмотре.
 - **Удобное масштабирование** — чёткое изображение при любом масштабе, привязка к ширине страницы (колесо мыши или ползунок на компьютере, жест двумя пальцами на смартфоне).
-- **Несколько документов сразу** *(только на компьютере)* — несколько PDF во вкладках одного окна.
+- **Несколько документов сразу** — несколько PDF во вкладках одного окна (на смартфоне — до 6).
 - **Импорт из Word, Excel и почты** — `.docx`, `.xlsx`, `.eml` и `.msg` конвертируются в PDF автоматически.
 - **Сжатие изображений** — уменьшение размера файла без потери читаемости.
 - **Пароль и шифрование** — установка пароля на PDF прямо в браузере, без сторонних сервисов.
