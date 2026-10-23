@@ -636,10 +636,10 @@
     /*The tab bar is hidden in reading mode*/
     body.read-mode-active .tab-bar { display: none !important; }
     #tabBarScroll { display: none; }
-    /*Touch: the bar comes with a second document (pmSyncLayout) and folds
-      away with the menu. It scrolls sideways - pmComputeWidth keeps the tabs
-      wide enough to read - and only the active tab has a close cross: a
-      finger landing a little off must not close the tab next to it.*/
+    /*Touch: the bar folds away with the menu. It scrolls sideways -
+      pmComputeWidth keeps the tabs wide enough to read - and only the active
+      tab has a close cross: a finger landing a little off must not close the
+      tab next to it.*/
     @media (pointer: coarse) {
       .top-menu.collapsed .tab-bar { display: none !important; }
       .tab-bar {
@@ -9636,10 +9636,9 @@
     const TAB_MAX_W = 220;
     const TAB_MIN_W = 58;
     const TAB_MIN_FIT = 4;
-    //Tabs on every device. A phone or tablet shows the tab bar only once a
-    //second document is open (pmSyncLayout) and scrolls it sideways instead
-    //of narrowing the tabs; it keeps fewer documents open, as each of them
-    //holds its own undo history in memory (pmTrimTouchTabsHistory).
+    //Tabs on every device. A phone or tablet scrolls the tab bar sideways
+    //instead of narrowing the tabs, and keeps fewer documents open, as each
+    //of them holds its own undo history in memory (pmTrimTouchTabsHistory).
     const PM_TOUCH_TABS_MAX = 6;
     const PM_TOUCH_TAB_MIN_W = 104;
     function pmTabsEnabled() { return true; }
@@ -24535,10 +24534,12 @@
     // jumping by its height.
     function pmFoldMenuSpacer(which) {
       const el = pmMenuSpacerEls[which];
+      const h = pmMenuSpacerH[which];
       pmSetMenuSpacer(which, 0);
       // Set along with the new height: the change from the height last drawn
       // is animated (pmSetMenuSpacer drops it again for the next change).
-      if (el) el.style.transition = 'height 0.22s ease';
+      // A taller one (the tab bar above the menu) takes longer, at the same pace.
+      if (el) el.style.transition = 'height ' + Math.max(0.22, h / 320).toFixed(2) + 's ease';
     }
     var pmTrimMenuSpacersTimer = null;
     function pmScheduleTrimMenuSpacers() {
@@ -24592,6 +24593,10 @@
       // The bottom bar folds away with it (#pmBottomBar).
       document.body.classList.toggle('pm-menu-collapsed', collapsed);
       if (isTouchDevice) {
+        // The file name's own margin changes with the menu: now, not in
+        // relayoutTopUI's frame, which runs after the pages are held still
+        // and moved them by it.
+        updateHeaderLayout();
         pmAnimateTopMenuHeight(menu, heightBefore, menu.getBoundingClientRect().height);
         pmCancelTapMenuToggle();
         if (pagesAnchorY != null) pmHoldPagesWhileMenusMove(pagesAnchorY);
@@ -39307,8 +39312,7 @@ function pmUpdateTabBarScrollHint() {
 // Panel visibility + integration with collapsed menu/reading mode.
 function pmSyncLayout() {
   if (!tabBarEl || !topMenuEl) return;
-  // Touch: a lone document needs no bar taking up a phone's height
-  const show = pmTabsEnabled() && pmTabs.length > (isTouchDevice ? 1 : 0) && !readModeActive;
+  const show = pmTabsEnabled() && pmTabs.length > 0 && !readModeActive;
   tabBarEl.style.display = show ? '' : 'none';
   topMenuEl.classList.toggle('tabbar-visible', show);
   if (show) pmRenderBar();   // panel visible - render with correct alignment
@@ -42361,6 +42365,7 @@ function pmBookmarksSyncPhoneSheet(open) {
 // var: pmBookmarksClose (and so pmBookmarksSyncPhoneSheet) can run during
 // script init (updateUIState), before this line.
 var pmBookmarksLanded = null;   // { pageEl, top, left }
+var pmBookmarksLandedTimer = null;
 function pmBookmarksMarkLanded(pageIndex) {
   const pageEl = pagesContainer.querySelector('.page[data-index="' + pageIndex + '"]');
   if (!pageEl) { pmBookmarksLanded = null; return; }
@@ -42370,6 +42375,14 @@ function pmBookmarksMarkLanded(pageIndex) {
 function pmBookmarksCheckLanded() {
   const l = pmBookmarksLanded;
   if (!l) return;
+  // The menus folding away / coming back hold the pages still, but a scroll
+  // event can come between a frame of the menu's animation and the hold's
+  // correction for it: checked again once the menus have stopped.
+  if (typeof pmMenuHoldAnchorY !== 'undefined' && pmMenuHoldAnchorY != null) {
+    clearTimeout(pmBookmarksLandedTimer);
+    pmBookmarksLandedTimer = setTimeout(pmBookmarksCheckLanded, Math.max(0, pmMenuHoldUntil - performance.now()) + 50);
+    return;
+  }
   const r = l.pageEl.isConnected ? l.pageEl.getBoundingClientRect() : null;
   if (r && Math.abs(r.top - l.top) <= 6 && Math.abs(r.left - l.left) <= 6) return;
   pmBookmarksLanded = null;
