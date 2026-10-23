@@ -635,6 +635,37 @@
     }
     /*The tab bar is hidden in reading mode*/
     body.read-mode-active .tab-bar { display: none !important; }
+    #tabBarScroll { display: none; }
+    /*Touch: the bar comes with a second document (pmSyncLayout) and folds
+      away with the menu. It scrolls sideways - pmComputeWidth keeps the tabs
+      wide enough to read - and only the active tab has a close cross: a
+      finger landing a little off must not close the tab next to it.*/
+    @media (pointer: coarse) {
+      .top-menu.collapsed .tab-bar { display: none !important; }
+      .tab-bar {
+        height: 36px; max-height: none;
+        /*edge to edge over the menu's 20px sides, so tabs scroll out at the
+          screen's edge (pmAlignBarLeft still lines the first one up)*/
+        margin: 0 -20px; padding-right: 12px;
+        overflow-x: auto; overflow-y: hidden;
+        scrollbar-width: none; overscroll-behavior-x: contain;
+      }
+      .tab-bar::-webkit-scrollbar { display: none; }
+      .pm-tab { height: 34px; font-size: 13px; padding: 0 4px 0 10px; }
+      /*(no hover on a touch screen - it would stay on the tab last tapped)*/
+      .pm-tab:not(.active):hover { background: #3a4a5a; color: #c9d3dc; }
+      .pm-tab:not(.active) .pm-tab-close,
+      .pm-tab:has(.pm-tab-rename-input) .pm-tab-close { display: none; }
+      .pm-tab.active .pm-tab-close { width: 28px; height: 28px; opacity: .7; }
+      .pm-tab.active .pm-tab-close svg { width: 10px; height: 10px; }
+      /*Held: its menu is open*/
+      .pm-tab.pm-bb-open { box-shadow: inset 0 0 0 2px #6f93b6; }
+      /*Tabs that don't all fit: a thin bar under them (pmUpdateTabBarScrollHint)*/
+      #tabBarScroll { position: absolute; height: 3px; z-index: 3; pointer-events: none; }
+      #tabBarScroll > div { position: absolute; top: 0; bottom: 0; border-radius: 2px; background: rgba(150, 170, 188, .8); }
+      #tabBar .pm-tab-new { width: 32px; height: 32px; min-width: 32px; min-height: 32px; margin-bottom: 1px; }
+      #tabBar .pm-tab-new:hover { background: transparent; color: #c9d3dc; }
+    }
     /*Tooltip "files will open in new tabs" when dragging from File Explorer*/
     #tabDropHint {
       position: fixed; z-index: 99999; display: none; pointer-events: none;
@@ -8242,6 +8273,7 @@
     </div>
     <!--Tab bar (desktop)-->
     <div id="tabBar" class="tab-bar" aria-hidden="true"></div>
+    <div id="tabBarScroll" aria-hidden="true"><div></div></div>
     <!--Highlighting the empty space to the right of tabs when moving pages there-->
     <div id="pmNewTabDropZone" aria-hidden="true"></div>
   </div>
@@ -9460,6 +9492,49 @@
         total -= docHistoryEntryBytes(docHistory[0]);
         docHistory.shift();
       }
+      pmTrimTouchTabsHistory();
+    }
+
+    // Touch: the undo histories of all open documents share one budget - a
+    // phone has nowhere near the memory for 500 MB per tab. Over it, steps
+    // go from the other tabs first (redo steps, then the oldest undo ones),
+    // then the active tab's oldest. Every history keeps its first step - the
+    // document as opened, which tells whether it has unsaved changes
+    // (syncDirtyFromHistory) - and the step it is at: switching to a tab
+    // rebuilds it from that one. Past those the budget is not enforced.
+    const PM_TOUCH_HISTORY_MAX_BYTES = 256 * 1024 * 1024;
+    function pmHistoryBytes(lists) {
+      const seen = new Set();   // steps that only changed the selection share their bytes
+      let total = 0;
+      for (const list of lists) {
+        for (const snap of list) {
+          const b = snap && snap.pdfBytes;
+          if (b && !seen.has(b)) { seen.add(b); total += docHistoryEntryBytes(snap); }
+        }
+      }
+      return total;
+    }
+    function pmTrimTouchTabsHistory() {
+      if (!isTouchDevice) return;
+      const others = pmTabs.filter(x => x.id !== pmActiveId && Array.isArray(x.docHistory));
+      const lists = () => [docHistory, ...others.map(x => x.docHistory)];
+      // steps a tab can give up: all but its first one and the one it is at
+      const spare = (x) => x.docHistory.length - (x.docHistoryIndex > 0 ? 2 : 1);
+      while (pmHistoryBytes(lists()) > PM_TOUCH_HISTORY_MAX_BYTES) {
+        let tab = null;   // the other tab with the most steps to spare
+        for (const x of others) {
+          if (spare(x) > 0 && (!tab || spare(x) > spare(tab))) tab = x;
+        }
+        if (tab) {
+          const h = tab.docHistory;
+          if (h.length - 1 > tab.docHistoryIndex) h.pop();
+          else { h.splice(1, 1); tab.docHistoryIndex--; }
+        } else if (docHistory.length > 2) {
+          docHistory.splice(1, 1);   // (the active tab is at its newest step)
+        } else {
+          break;
+        }
+      }
     }
     let historyPushTimer = null;
     let selectionHistoryTimer = null;
@@ -9548,6 +9623,8 @@
     let pmTabInsertIndex = null;
     let pmTabMenuTabId = null;
     let pmTabMenuOpenedAt = 0;
+    let pmTabBarScrollLeft = 0;   // touch: where the bar was scrolled to (pmTabBarShowActive)
+    let pmTabBarPressed = false, pmTabBarRenderDue = false;   // touch: a finger on the bar (pmRenderBar waits)
     let pmMeasureCanvas = null;
     let pmDrag = null;
     let pmDragSuppressClick = false;
@@ -9559,7 +9636,13 @@
     const TAB_MAX_W = 220;
     const TAB_MIN_W = 58;
     const TAB_MIN_FIT = 4;
-    function pmTabsEnabled() { return !isTouchDevice; }
+    //Tabs on every device. A phone or tablet shows the tab bar only once a
+    //second document is open (pmSyncLayout) and scrolls it sideways instead
+    //of narrowing the tabs; it keeps fewer documents open, as each of them
+    //holds its own undo history in memory (pmTrimTouchTabsHistory).
+    const PM_TOUCH_TABS_MAX = 6;
+    const PM_TOUCH_TAB_MIN_W = 104;
+    function pmTabsEnabled() { return true; }
     const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'bmp', 'gif', 'webp', 'tif', 'tiff'];
     function isImageExt(ext) { return IMAGE_EXTS.includes((ext || '').toLowerCase()); }
 
@@ -10292,7 +10375,7 @@
         confirmNo: 'Нет',
         confirmDeletePage: 'Удалить выбранную страницу?',
         confirmDeletePages: 'Удалить выбранные страницы?',
-        confirmOpenReplace: 'Документ не сохранён.<br>При открытии новый документ будет заменён на текущий.',
+        confirmOpenReplace: 'Документ не сохранён.<br>Новый документ откроется вместо текущего.',
         confirmOpenReplaceYes: 'Подтвердить',
         confirmOpenReplaceNo: 'Отменить',
         confirmCloseTab: 'Документ «{name}» не сохранён.<br>Закрыть вкладку?',
@@ -10336,6 +10419,8 @@
         loadingRenderingNewPagesCountOf: 'Рендер новых страниц... {i} из {srcCount}',
         alertReplacePagesError: 'Ошибка при замене страниц',
         alertNoRoomForTab: 'Недостаточно места для новой вкладки.\nЗакройте лишние вкладки и повторите.',
+        alertTabLimit: 'Можно открыть не больше {n} документов.\nЗакройте лишние вкладки и повторите.',
+        openManyAsk: 'Выбрано файлов: {n}. Как их открыть?', openManyTabs: 'Во вкладках', openManyMerge: 'Объединить в один',
         loadingMovingPagesToTab: 'Перенос страниц...',
         alertCreateDocError: 'Ошибка создания документа',
         alertShortcutDropped: 'Похоже, это ярлык, а не сам файл ({name}). Браузер не может прочитать файл через ярлык — перетащите оригинальный файл или откройте его через кнопку «Открыть».',
@@ -10840,6 +10925,8 @@
         loadingRenderingNewPagesCountOf: 'Rendering new pages... {i} of {srcCount}',
         alertReplacePagesError: 'Error replacing pages',
         alertNoRoomForTab: 'Not enough room for a new tab.\nClose some tabs and try again.',
+        alertTabLimit: 'Up to {n} documents can be open at once.\nClose some tabs and try again.',
+        openManyAsk: 'Files selected: {n}. How to open them?', openManyTabs: 'In tabs', openManyMerge: 'Merge into one',
         loadingMovingPagesToTab: 'Moving pages...',
         alertCreateDocError: 'Error creating the document',
         alertShortcutDropped: 'This looks like a shortcut, not the file itself ({name}). Browsers can\'t read a file through a shortcut - please drag the original file, or use the Open button instead.',
@@ -11344,6 +11431,8 @@
         loadingRenderingNewPagesCountOf: 'Renderizando páginas nuevas... {i} de {srcCount}',
         alertReplacePagesError: 'Error al reemplazar páginas',
         alertNoRoomForTab: 'No hay espacio suficiente para una nueva pestaña.\nCierre algunas pestañas e inténtelo de nuevo.',
+        alertTabLimit: 'Se pueden tener abiertos hasta {n} documentos.\nCierre algunas pestañas e inténtelo de nuevo.',
+        openManyAsk: 'Archivos seleccionados: {n}. ¿Cómo abrirlos?', openManyTabs: 'En pestañas', openManyMerge: 'Combinar en uno',
         loadingMovingPagesToTab: 'Moviendo páginas...',
         alertCreateDocError: 'Error al crear el documento',
         alertShortcutDropped: 'Esto parece un acceso directo, no el archivo en sí ({name}). El navegador no puede leer un archivo a través de un acceso directo: arrastre el archivo original o utilice el botón «Abrir».',
@@ -11921,6 +12010,8 @@
         loadingRenderingNewPagesCountOf: '正在渲染新页面... {i} / {srcCount}',
         alertReplacePagesError: '替换页面时出错',
         alertNoRoomForTab: '没有足够的空间打开新标签页。\n请关闭部分标签页后重试。',
+        alertTabLimit: '最多可同时打开 {n} 个文档。\n请关闭部分标签页后重试。',
+        openManyAsk: '已选择 {n} 个文件。如何打开？', openManyTabs: '在标签页中打开', openManyMerge: '合并为一个',
         loadingMovingPagesToTab: '正在移动页面...',
         alertCreateDocError: '创建文档时出错',
         alertShortcutDropped: '这似乎是一个快捷方式，而不是文件本身（{name}）。浏览器无法通过快捷方式读取文件 — 请拖拽原始文件，或使用"打开"按钮。',
@@ -15182,7 +15273,8 @@
           cancel();
           timer = setTimeout(() => {
             timer = null;
-            held = open(btn) !== false;
+            // (redrawn away under the finger: nothing to anchor a menu to)
+            held = btn.isConnected && open(btn) !== false;
           }, PM_TOUCH_TIP_MS);
         });
         btn.addEventListener('pointermove', (e) => {
@@ -17714,6 +17806,24 @@
       return promise;
     }
 
+    // Touch: a finger selecting text - a long press dragged on, a selection
+    // handle nudged - that comes up over a link must not follow it: the
+    // link's confirmation (or the jump to its page) ended the selection
+    // half-way. A link takes a tap only when no text got selected since the
+    // finger came down. (Clearing a selection does not count: a tap on a
+    // link next to selected text still opens it.)
+    let pmTextSelectedSinceDown = false;
+    if (isTouchDevice) {
+      document.addEventListener('pointerdown', () => { pmTextSelectedSinceDown = false; }, true);
+      document.addEventListener('selectionchange', () => {
+        const sel = document.getSelection();
+        if (sel && sel.rangeCount && !sel.isCollapsed) pmTextSelectedSinceDown = true;
+      });
+    }
+    function pmLinkTapWasSelecting() {
+      return isTouchDevice && pmTextSelectedSinceDown;
+    }
+
     // Builds (or removes, if the page has no links) the .pm-link-layer for
     // one page card. Visibility/interactivity itself is CSS-only
     // (body.nav-mode-active hides internal links) so this can run unconditionally
@@ -17757,6 +17867,7 @@
         zone.style.height = (link.height * 100) + '%';
         zone.addEventListener('click', (e) => {
           e.stopPropagation();
+          if (pmLinkTapWasSelecting()) return;
           if (typeof isPagesSingleColumnLayout === 'function' && !isPagesSingleColumnLayout()) return;
           if (typeof pmBookmarksGoTo === 'function') pmBookmarksGoTo(link.pageIndex);
         });
@@ -17780,7 +17891,11 @@
       a.style.height = (link.height * 100) + '%';
       let down = null;
       a.addEventListener('mouseenter', () => { a.title = t('linkFollow') + '\n' + link.url; });
-      a.addEventListener('mousedown', (e) => { down = { x: e.clientX, y: e.clientY }; });
+      a.addEventListener('mousedown', (e) => {
+        down = { x: e.clientX, y: e.clientY };
+        // (the press of that tap would also clear the selection being made)
+        if (pmLinkTapWasSelecting()) e.preventDefault();
+      });
       a.addEventListener('dragstart', (e) => e.preventDefault());
       a.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -17788,7 +17903,7 @@
         e.preventDefault();
         const moved = down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 4;
         down = null;
-        if (moved || e.button !== 0) return;
+        if (moved || e.button !== 0 || pmLinkTapWasSelecting()) return;
         pmConfirmOpenLink(link.url);
       });
       // A middle click would open a new tab past the confirmation.
@@ -20533,6 +20648,7 @@
     let longPressTimer = null;
     let longPressActive = false;
     let pagePointerId = null;
+    let pmPagePressTarget = null;   // what the finger came down on (pmKeepTouchDragTarget)
     let touchLastX = 0, touchLastY = 0;
     let suppressPageTap = false;   // true → do not select the page (there was a scroll/offset)
     let pageTouchActive = false;
@@ -20724,6 +20840,7 @@
 
     function cancelPageTouchDrag() {
       suppressPageTap = true;
+      pmDropTouchDragTarget();
       clearTimeout(longPressTimer);
       longPressTimer = null;
       clearTimeout(pageSelectStageTimer);
@@ -20782,6 +20899,7 @@
       try { dragSourceDiv.setPointerCapture(pagePointerId); } catch (_) {}
       if (navigator.vibrate) navigator.vibrate(15);
       isDragActive = true;
+      pageDragSourceTabId = pmActiveId;   // (dropped on another tab: moved from this one)
       pagesContainer.classList.add('dragging-active');
       draggedIndex = parseInt(dragSourceDiv.dataset.index);
       dragGhostEl = createDragGhost(dragSourceDiv, touchLastX, touchLastY);
@@ -20846,6 +20964,7 @@
 
       dragSourceDiv = e.currentTarget;
       pagePointerId = e.pointerId;
+      pmPagePressTarget = e.target;
       dragStartX = e.clientX;
       dragStartY = e.clientY;
       touchLastX = e.clientX;
@@ -21005,9 +21124,9 @@
       if (longPressActive || isDragActive) {
         e.preventDefault();
         enforceScrollLock();
-        moveDragGhostTo(e.clientX, e.clientY);
-        updateInsertIndicatorsAt(e.clientX, e.clientY);
-        checkAndStartAutoScroll(e.clientY);
+        // The mouse's pass: ghost, insert marker, auto-scroll - and a tab
+        // under the finger switches to that document to drop the pages there.
+        runDragMoveFrame(e.clientX, e.clientY);
         return;
       }
 
@@ -21060,7 +21179,7 @@
       }
 
       if (longPressActive) {
-        onDragMouseUp({ clientX: e.clientX, clientY: e.clientY });
+        onDragMouseUp({ clientX: e.clientX, clientY: e.clientY, preventDefault() {}, stopPropagation() {} });
       } else {
         let textSelBlocksTap = false;
         if (typeof isZoomTextSelect === 'function' && isZoomTextSelect()) {
@@ -23898,9 +24017,10 @@
       fileInput.addEventListener('change', e => e.target.files[0] && loadPDF(e.target.files[0]));
     }
 
-    // Desktop: “Select files” - open one or more files. If it's already underway
-    // working with a document, the new set REPLACES the current one (with a warning if
-    // there are unsaved changes). On mobile the behavior is the same (one file).
+    // “Select files” - one or more files, each in a new tab (a touch screen
+    // asks whether several go into tabs or into one merged document -
+    // pmOpenFilesTabsOrMerge). Without tabs the new set REPLACES the current
+    // document, with a warning if it has unsaved changes.
     async function loadNewPDF() {
       // If a document with unsaved changes is opened, we warn you about replacement
       if (!pmTabsEnabled() && pdfDoc && documentDirty) {
@@ -23983,7 +24103,7 @@
       // Open: one file - normal download;
       // several - select an order, then collect a single document.
       if (pmTabsEnabled()) {
-        await pmOpenFilesAsTabs(files, fileHandles);
+        await pmOpenFilesTabsOrMerge(files, fileHandles);
       } else if (files.length === 1) {
         loadPDF(files[0]);
       } else {
@@ -26670,6 +26790,14 @@
           if (pmTabsEnabled() && isDragActive) {
             updatePageDragTabTarget(e.clientX, e.clientY);
           }
+          // Touch: let go over another document's tab - the pages go to its
+          // end (no marker there), and that document is shown.
+          if (isTouchDevice && isDragActive && pageDragOverTabId != null) {
+            pmSwitchTabForPageDrag(pageDragOverTabId);
+            if (pageTabSwitchPromise) {
+              try { await pageTabSwitchPromise; } catch (err) { console.error(err); }
+            }
+          }
           const dropToNewTab = pageDragOverNewTabZone;
 
           const crossTabDrop = pageCrossTabDrag && pageCrossTabDrag.sourceTabId !== pmActiveId;
@@ -26711,6 +26839,7 @@
         invalidateDragGeometry();
         endScrollLock();
         unlockScrollForDrag();
+        pmDropTouchDragTarget();
       };
 
       finishDrag();
@@ -27370,6 +27499,41 @@
         // Deterministic clamp — also runs at paint time from
         // renderTextLayerHighlights (see clampTextLayerDragSelection).
         clampTextLayerDragSelection(selection);
+      });
+    }
+
+    // ── Touch: selection handles off the text ─────────────────────────
+    // A finger dragging a selection handle a pixel off the glyphs - into a
+    // gap between lines, past a line's end - made the browser put that end
+    // in the page image or the layer container: the start of the page (or
+    // of the document), so the whole page up to the other end got selected.
+    // The clamp below cannot help there - it follows the mouse, while the
+    // browser moves the handles itself and the page only sees the resulting
+    // selection. So that end goes back to where it last was on text, and
+    // follows the finger again once the finger is back over text.
+    function pmTextSelEndOnText(node) {
+      const el = node && (node.nodeType === 3 ? node.parentElement : node);
+      const layer = el && el.closest ? el.closest('.textLayer') : null;
+      return !!layer && el !== layer && !el.closest('.endOfContent');
+    }
+    if (isTouchDevice) {
+      let last = null;   // the selection as it last was with both ends on text
+      const same = (p, q) => p.node === q.node && p.offset === q.offset;
+      document.addEventListener('selectionchange', () => {
+        const sel = document.getSelection();
+        if (!sel || !sel.rangeCount || sel.isCollapsed) { last = null; return; }
+        const a = { node: sel.anchorNode, offset: sel.anchorOffset };
+        const f = { node: sel.focusNode, offset: sel.focusOffset };
+        if (pmTextSelEndOnText(a.node) && pmTextSelEndOnText(f.node)) { last = { a, f }; return; }
+        // Only the same selection, one of its ends dragged off the text (the
+        // browser may swap which end is the anchor); anything else is a new
+        // selection of something else, left alone.
+        if (!last || !(same(a, last.a) || same(a, last.f) || same(f, last.a) || same(f, last.f))) {
+          last = null;
+          return;
+        }
+        if (!last.a.node.isConnected || !last.f.node.isConnected) { last = null; return; }
+        try { sel.setBaseAndExtent(last.a.node, last.a.offset, last.f.node, last.f.offset); } catch (_) { last = null; }
       });
     }
 
@@ -30180,6 +30344,7 @@
     }
 
     function clearPageDragTabVisuals() {
+      if (isTouchDevice) pmTouchDragDwell(null);
       pageDragOverTabId = null;
       pageDragSourceTabId = null;
       pageCrossTabTargetTabId = null;
@@ -30347,8 +30512,11 @@
 
       const tid = findPageDropTargetTab(clientX, clientY);
       const sourceId = getPageDragSourceTabId();
+      // (touch: switch after a moment held over a tab - pmTouchDragDwell)
+      const switchTo = (id) => { if (isTouchDevice) pmTouchDragDwell(id); else pmSwitchTabForPageDrag(id); };
 
       if (tid == null) {
+        if (isTouchDevice) pmTouchDragDwell(null);
         pageDragOverTabId = null;
         // The empty space to the right of the last tab is an invitation to create a new document.
         if (isOverNewTabDropZone(clientX, clientY)) {
@@ -30372,14 +30540,61 @@
         pageDragOverTabId = null;
         pageCrossTabTargetTabId = sourceId;
         pmUpdatePageDragTabVisuals();
-        if (pmActiveId !== sourceId) pmSwitchTabForPageDrag(sourceId);
+        if (pmActiveId !== sourceId) switchTo(sourceId);
         return;
       }
 
       pageDragOverTabId = tid;
       pageCrossTabTargetTabId = tid;
       pmUpdatePageDragTabVisuals();
-      pmSwitchTabForPageDrag(tid);
+      switchTo(tid);
+    }
+
+    // Touch: a page held a moment over a tab switches to that document, to
+    // be placed among its pages; passing over the tab bar on the way to the
+    // top of the document does not. Let go on the tab itself before that and
+    // the page goes to the document's end (onDragMouseUp).
+    const PM_TOUCH_TAB_DWELL_MS = 400;
+    let pmTouchDwellTabId = null, pmTouchDwellTimer = null;
+    function pmTouchDragDwell(tid) {
+      if (tid === pmTouchDwellTabId) return;
+      clearTimeout(pmTouchDwellTimer);
+      pmTouchDwellTimer = null;
+      pmTouchDwellTabId = tid;
+      if (tid == null) return;
+      pmTouchDwellTimer = setTimeout(() => {
+        pmTouchDwellTimer = null;
+        if (isDragActive && pmTouchDwellTabId === tid) pmSwitchTabForPageDrag(tid);
+      }, PM_TOUCH_TAB_DWELL_MS);
+    }
+
+    // Touch: a finger's events go to the element it came down on - and only
+    // while that element is in the document. Switching documents under a
+    // dragged page takes it out, and the drag froze: nothing heard the finger
+    // any more, not even its lifting. Before a switch it is moved into a
+    // hidden keeper until the finger is up; the old document's pages are
+    // being thrown away, so it is stripped of what made it one of them.
+    let pmTouchDragKeeper = null;
+    function pmKeepTouchDragTarget() {
+      const el = pmPagePressTarget;
+      if (!isTouchDevice || !el || !pagesContainer.contains(el)) return;
+      if (!pmTouchDragKeeper) {
+        pmTouchDragKeeper = document.createElement('div');
+        pmTouchDragKeeper.setAttribute('aria-hidden', 'true');
+        pmTouchDragKeeper.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;overflow:hidden;opacity:0;pointer-events:none;';
+        // (no longer under the page area's own touchmove blocker)
+        pmTouchDragKeeper.addEventListener('touchmove', (e) => { if (isDragActive) e.preventDefault(); }, { passive: false });
+        document.body.appendChild(pmTouchDragKeeper);
+      }
+      el.removeAttribute('class');
+      el.removeAttribute('id');
+      el.removeAttribute('data-index');
+      if (el.children.length) el.textContent = '';
+      pmTouchDragKeeper.appendChild(el);
+    }
+    function pmDropTouchDragTarget() {
+      pmPagePressTarget = null;
+      if (pmTouchDragKeeper) pmTouchDragKeeper.textContent = '';
     }
 
     function pmSwitchTabForPageDrag(targetTabId) {
@@ -30410,8 +30625,11 @@
           pageCrossTabTargetTabId = tid;
 
           pmPageTabDropInProgress = true;
+          if (isTouchDevice) pmKeepTouchDragTarget();
           try {
             await pmActivate(tid, true);
+            // The insert marker measures the pages of the document now shown
+            if (isDragActive) captureDragGeometry();
             pageDragOverTabId = null;
             pmUpdatePageDragTabVisuals();
           } catch (err) {
@@ -30449,7 +30667,7 @@
       if (!indices.length) return;
 
       if (!pmCanAddTab()) {
-        alert(t('alertNoRoomForTab'));
+        pmAlertNoRoomForTab();
         return;
       }
 
@@ -31654,16 +31872,19 @@
         // opts.dismissOnBackdrop === false: a click outside the box does
         // nothing - for choices a stray click must not make on the user's
         // behalf (the crash-recovery prompt, where "No" deletes the work).
+        // opts.dismissValue: what a click outside / Escape resolves to, when
+        // both buttons are choices and neither one means "no" (null: neither).
+        const dismissValue = ('dismissValue' in opts) ? opts.dismissValue : false;
         overlay.addEventListener('click', (e) => {
           if (e.target === overlay) {
             e.preventDefault();
             e.stopPropagation();
-            if (opts.dismissOnBackdrop !== false) close(false);
+            if (opts.dismissOnBackdrop !== false) close(dismissValue);
           }
         });
         const onKey = (e) => {
           if (e.key === 'Enter')  { e.preventDefault(); e.stopPropagation(); close(true); }
-          if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(false); }
+          if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(dismissValue); }
         };
         document.addEventListener('keydown', onKey, true);
       });
@@ -33802,7 +34023,7 @@
         let newSession = null;
         if (creatingNewTab) {
           if (!pmCanAddTab()) {
-            alert(t('alertNoRoomForTab'));
+            pmAlertNoRoomForTab();
             return;
           }
           if (pmActiveId != null) pmCaptureActive();
@@ -37377,6 +37598,28 @@ async function pmActivate(id, skipCapture, keepSelection) {
   requestAnimationFrame(() => { scrollContainer.scrollTop = top; });
 }
 
+// A tab tapped / clicked. Not while a document is loading (the load would
+// land in whatever tab is active by then), and one switch at a time - a
+// switch rebuilds the pages over several awaits, and a second one started
+// meanwhile (quick taps on two tabs) mixed the two documents up. The tab
+// tapped last is the one shown.
+let pmTappedSwitching = false, pmTappedNextId = null;
+async function pmActivateTapped(id) {
+  if (isLoading) return;
+  pmTappedNextId = id;
+  if (pmTappedSwitching) return;
+  pmTappedSwitching = true;
+  try {
+    while (pmTappedNextId != null) {
+      const next = pmTappedNextId;
+      pmTappedNextId = null;
+      if (next !== pmActiveId && pmTabs.some(x => x.id === next) && !isLoading) await pmActivate(next);
+    }
+  } finally {
+    pmTappedSwitching = false;
+  }
+}
+
 function pmResetGlobalsEmpty() {
   // A tab opening on a fresh document starts from a plain view - it must not
   // inherit the fit-width ladder of whatever was on screen a moment ago.
@@ -37410,7 +37653,7 @@ function pmActiveIsEmptyNewDoc() {
 async function pmCreateNewDocTab() {
   if (isLoading || !pmTabsEnabled()) return;
   if (!pmCanAddTab()) {
-    alert(t('alertNoRoomForTab'));
+    pmAlertNoRoomForTab();
     return;
   }
   if (pmActiveId != null) pmCaptureActive();
@@ -37428,7 +37671,7 @@ window.pmCreateNewDocTab = pmCreateNewDocTab;
 // Opens one file in a NEW tab (insertAt - position on the panel, default to the end).
 async function pmOpenOneFileAsTab(file, handle, insertAt) {
   if (!pmCanAddTab()) {
-    alert(t('alertNoRoomForTab'));
+    pmAlertNoRoomForTab();
     return false;
   }
   if (pmActiveId != null) pmCaptureActive();
@@ -37472,6 +37715,23 @@ async function pmOpenFilesAsTabs(files, handles, insertAt) {
     at++;
   }
 }
+
+// Several files opened at once on a touch screen: each in a tab of its own,
+// or all merged into one new document - the phone has no Merge button, so
+// opening files together is how they get merged there.
+async function pmOpenFilesTabsOrMerge(files, handles) {
+  if (!files || !files.length) return;
+  if (isTouchDevice && files.length > 1) {
+    const inTabs = await showConfirmDialog(t('openManyAsk', { n: files.length }), {
+      yesText: t('openManyTabs'), noText: t('openManyMerge'), yesBg: '#3498db', dismissValue: null
+    });
+    if (inTabs == null) return;
+    if (!inTabs) { await mergeFilesFlow(files, { forceNewTab: true }); return; }
+  }
+  await pmOpenFilesAsTabs(files, handles);
+}
+// (the Android app's "Open with" / "Share", prepare-tauri-ui.mjs)
+window.pmOpenFilesTabsOrMerge = pmOpenFilesTabsOrMerge;
 
 // Sorting files by name (natural) - “alphabetically”.
 function pmSortFilesByName(files) {
@@ -38304,8 +38564,9 @@ function pmMountTabRename() {
   input.setAttribute('aria-label', t('tabRenameTitle'));
   // The tab's own mouse handling (switch, drag, middle-click close, its
   // menu) is not for the field: the caret and the selection are placed
-  // with the mouse here, and the right button gives the usual text menu.
-  for (const type of ['mousedown', 'click', 'dblclick', 'auxclick', 'contextmenu']) {
+  // with the mouse here, and the right button gives the usual text menu
+  // (touch: a hold selects text instead of opening the tab's menu).
+  for (const type of ['pointerdown', 'mousedown', 'click', 'dblclick', 'auxclick', 'contextmenu']) {
     input.addEventListener(type, (e) => e.stopPropagation());
   }
   input.addEventListener('blur', () => {
@@ -38384,6 +38645,19 @@ async function pmCloseTabsToRight(fromTabId) {
   await pmCloseTabIds(pmTabs.slice(idx + 1).map(t => t.id));
 }
 
+// Touch: a tab held - what a right click on it gives on a desktop, in the
+// phone's own menu.
+function pmShowTabHoldMenu(el, tabId) {
+  const idx = pmTabs.findIndex(x => x.id === tabId);
+  if (idx < 0 || isLoading) return false;
+  pmShowPopMenu(el, [
+    { label: t('tabRename'), onClick: () => pmStartTabRename(tabId) },
+    { label: t('tabClose'), onClick: () => pmCloseTab(tabId) },
+    { label: t('tabCloseOthers'), disabled: pmTabs.length < 2, onClick: () => pmCloseTabsExcept(tabId) },
+    { label: t('tabCloseRight'), disabled: idx >= pmTabs.length - 1, onClick: () => pmCloseTabsToRight(tabId) },
+  ], { title: pmTabs[idx].fileName || t('tabNoName'), place: 'below' });
+}
+
 (function initPmTabMenu() {
   const menu = document.getElementById('pmTabMenu');
   if (!menu) return;
@@ -38419,22 +38693,26 @@ async function pmCloseTabsToRight(fromTabId) {
 // fit without scrolling. Lower bound (4 letters) guaranteed by locking
 // opening new tabs (pmCanAddTab), rather than horizontal scrolling.
 // 3px: .tab-bar's gap between tabs.
+// Touch: no narrower than PM_TOUCH_TAB_MIN_W - the bar scrolls sideways
+// instead, a name squeezed to a few letters being of no use under a finger.
 function pmComputeWidth(n, avail) {
   if (n <= 0) return 0;
-  return Math.max(1, Math.min(TAB_MAX_W, Math.floor((avail - 3 * (n - 1)) / n)));
+  const w = Math.max(1, Math.min(TAB_MAX_W, Math.floor((avail - 3 * (n - 1)) / n)));
+  return isTouchDevice ? Math.max(PM_TOUCH_TAB_MIN_W, w) : w;
 }
 
 // Available width of the tab bar (if there are no tabs yet, we estimate it using the menu).
 // Room kept at the end of the bar for the + (new document) button: its
 // width, its margin and the gap before it.
 const PM_NEW_TAB_BTN_ROOM = 28;
+const PM_TOUCH_NEW_TAB_BTN_ROOM = 36;   // (touch: a 32px button)
 function pmAvailWidth() {
   if (tabBarEl && tabBarEl.clientWidth) {
     // The content box - the tabs start after the padding that lines them up
     // with the "Select files" button (pmAlignBarLeft).
     const cs = getComputedStyle(tabBarEl);
     const inner = tabBarEl.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
-    return Math.max(0, inner - PM_NEW_TAB_BTN_ROOM);
+    return Math.max(0, inner - (isTouchDevice ? PM_TOUCH_NEW_TAB_BTN_ROOM : PM_NEW_TAB_BTN_ROOM));
   }
   if (topMenuEl && topMenuEl.clientWidth) return Math.max(0, topMenuEl.clientWidth - 20);
   return 800;
@@ -38453,11 +38731,16 @@ function pmMinTabWidth() {
   } catch (e) { return TAB_MIN_W; }
 }
 
-// Will another tab fit at least the minimum width (4 letters)?
+// Will another tab fit at least the minimum width (4 letters)? On a touch
+// screen the bar scrolls - there it is the number of documents that counts.
 function pmCanAddTab() {
+  if (isTouchDevice) return pmTabs.length < PM_TOUCH_TABS_MAX;
   const n = pmTabs.length + 1;
   const w = pmComputeWidth(n, pmAvailWidth());
   return w >= pmMinTabWidth();
+}
+function pmAlertNoRoomForTab() {
+  alert(isTouchDevice ? t('alertTabLimit', { n: PM_TOUCH_TABS_MAX }) : t('alertNoRoomForTab'));
 }
 
 // Align the left edge of the first tab with the left edge of the “Select files” button.
@@ -38852,6 +39135,8 @@ function pmTabDragEnd() {
 
 function pmRenderBar() {
   if (!tabBarEl) return;
+  if (pmTabBarPressed) { pmTabBarRenderDue = true; return; }   // (touch: pmTabBarPressed)
+  pmTabBarRenderDue = false;
   pmCloseTabMenu();
   // A name being edited goes on in the new tab (pmMountTabRename below)
   if (pmTabRename && pmTabRename.input) {
@@ -38861,17 +39146,20 @@ function pmRenderBar() {
     pmTabRename.selEnd = input.selectionEnd;
     pmTabRename.input = null;   // its blur on removal is not the end of the edit
   }
+  const keepScrollLeft = tabBarEl.clientHeight ? tabBarEl.scrollLeft : pmTabBarScrollLeft;
   tabBarEl.innerHTML = '';
   if (!pmTabs.length) { pmTabRename = null; return; }
   pmAlignBarLeft();
   const w = pmComputeWidth(pmTabs.length, pmAvailWidth());
   const tabNoNameLabel = t('tabNoName');
-  const tabCloseLabel = t('tabCloseTitle');
+  // (touch: no tooltip - holding the cross would show it along with the tab's menu)
+  const tabCloseTitle = isTouchDevice ? '' : ' title="' + escapeHtml(t('tabCloseTitle')) + '"';
   pmTabs.forEach(tab => {
     const el = document.createElement('div');
     const sel = pmSelectedTabIds.has(tab.id);
     el.className = 'pm-tab' + (tab.id === pmActiveId ? ' active' : '') + (sel ? ' pm-tab-selected' : '');
-    el.style.width = w + 'px';
+    // (touch: the active tab is a little wider - its close cross takes room)
+    el.style.width = (isTouchDevice && tab.id === pmActiveId ? Math.max(w, PM_TOUCH_TAB_MIN_W + 32) : w) + 'px';
     el.title = tab.fileName || '';
     el.dataset.tabId = tab.id;
     const dirty = (tab.id === pmActiveId) ? documentDirty : tab.dirty;
@@ -38880,7 +39168,7 @@ function pmRenderBar() {
     el.innerHTML =
       '<span class="pm-tab-star"' + (dirty ? '' : ' hidden') + '>*</span>' +
       '<span class="pm-tab-label">' + escapeHtml(tab.fileName || tabNoNameLabel) + '</span>' +
-      '<span class="pm-tab-close" title="' + escapeHtml(tabCloseLabel) + '">' + pmTabCloseIcon() + '</span>';
+      '<span class="pm-tab-close"' + tabCloseTitle + '>' + pmTabCloseIcon() + '</span>';
     el.addEventListener('click', (e) => {
       pmTabSyncModifiers(e);
       if (pmDragSuppressClick) { pmDragSuppressClick = false; e.stopPropagation(); return; }
@@ -38899,7 +39187,7 @@ function pmRenderBar() {
       }
       pmClearTabSelection();
       pmTabSelectAnchor = tab.id;
-      if (tab.id !== pmActiveId) pmActivate(tab.id);
+      if (tab.id !== pmActiveId) pmActivateTapped(tab.id);
       else pmUpdateTabSelectionVisual();
     });
     el.addEventListener('mousedown', (e) => {
@@ -38909,12 +39197,15 @@ function pmRenderBar() {
         e.stopPropagation();
         return;
       }
-      if (e.button === 0) pmTabDragStart(e, tab.id);
+      // (touch: the mouse events a tap ends with - the finger scrolls the
+      // bar rather than dragging tabs along it)
+      if (e.button === 0 && !isTouchDevice) pmTabDragStart(e, tab.id);
     });
     el.addEventListener('contextmenu', (e) => {
       if (!pmTabsEnabled()) return;
       e.preventDefault();
       e.stopPropagation();
+      if (isTouchDevice) return;   // held: pmShowTabHoldMenu
       if (pmDrag) {
         document.removeEventListener('mousemove', pmTabDragMove);
         document.removeEventListener('mouseup', pmTabDragEnd);
@@ -38931,6 +39222,7 @@ function pmRenderBar() {
       if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
       pmStartTabRename(tab.id);
     });
+    pmHoldMenu(el, () => pmShowTabHoldMenu(el, tab.id));
     tabBarEl.appendChild(el);
   });
   if (pmTabRename) pmMountTabRename();
@@ -38943,15 +39235,80 @@ function pmRenderBar() {
   plus.addEventListener('mousedown', (e) => e.stopPropagation());
   plus.addEventListener('click', (e) => { e.stopPropagation(); pmCreateNewDocTab(); });
   tabBarEl.appendChild(plus);
+  if (isTouchDevice) { pmTabBarShowActive(keepScrollLeft); pmUpdateTabBarScrollHint(); }
   if (typeof pmUpdatePageDragTabVisuals === 'function' && isDragActive) {
     pmUpdatePageDragTabVisuals();
   }
 }
 
+// Touch: the bar scrolls sideways. Back where the finger left it, with the
+// active tab brought into view.
+function pmTabBarShowActive(scrollLeft) {
+  tabBarEl.scrollLeft = scrollLeft;
+  const act = tabBarEl.querySelector('.pm-tab.active');
+  if (!act || !tabBarEl.clientHeight) return;
+  const bar = tabBarEl.getBoundingClientRect(), r = act.getBoundingClientRect();
+  const pad = 12;
+  if (r.left < bar.left + pad) tabBarEl.scrollLeft -= bar.left + pad - r.left;
+  else if (r.right > bar.right - pad) tabBarEl.scrollLeft += r.right - (bar.right - pad);
+}
+// Touch: tabs that do not all fit get a thin bar under them - no handle to
+// drag, only a sign that they scroll and where the view is among them.
+function pmUpdateTabBarScrollHint() {
+  const hint = document.getElementById('tabBarScroll');
+  if (!hint) return;
+  const w = tabBarEl.clientWidth, sw = tabBarEl.scrollWidth;
+  const over = isTouchDevice && tabBarEl.clientHeight > 0 && sw > w + 1;
+  hint.style.display = over ? 'block' : 'none';
+  if (!over) return;
+  const inset = 8, track = w - 2 * inset;
+  hint.style.left = (tabBarEl.offsetLeft + inset) + 'px';
+  hint.style.top = (tabBarEl.offsetTop + tabBarEl.offsetHeight - 4) + 'px';
+  hint.style.width = track + 'px';
+  const thumb = Math.max(24, track * w / sw);
+  hint.firstElementChild.style.width = thumb + 'px';
+  hint.firstElementChild.style.left = ((track - thumb) * tabBarEl.scrollLeft / (sw - w)) + 'px';
+}
+
+(function initPmTouchTabBar() {
+  if (!isTouchDevice || !tabBarEl) return;
+  // Hidden (the menu folded, reading mode) the bar loses its scroll
+  // position: it is kept here and put back when the bar shows again.
+  tabBarEl.addEventListener('scroll', () => {
+    if (tabBarEl.clientHeight) pmTabBarScrollLeft = tabBarEl.scrollLeft;
+    pmUpdateTabBarScrollHint();
+  }, { passive: true });
+  if (typeof ResizeObserver === 'function') {
+    let shown = false;
+    new ResizeObserver(() => {
+      const now = tabBarEl.clientHeight > 0;
+      if (now && !shown) pmTabBarShowActive(pmTabBarScrollLeft);
+      shown = now;
+      pmUpdateTabBarScrollHint();
+    }).observe(tabBarEl);
+  }
+  // No redraw of the bar under a finger (pmRenderBar waits): the window
+  // resizing as the browser's address bar folds away, a file finishing
+  // loading... swapped the tab being pressed for a new one - its release
+  // went nowhere, the tap switched nothing, and the hold timer left running
+  // opened the tab's menu with nothing to anchor it, in the top left corner.
+  // The redraw comes once the tap has done its work.
+  tabBarEl.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'touch') pmTabBarPressed = true;
+  }, true);
+  const release = (e) => {
+    if (!pmTabBarPressed || (e.type === 'pointerdown' && tabBarEl.contains(e.target))) return;
+    pmTabBarPressed = false;
+    setTimeout(() => { if (pmTabBarRenderDue && !pmTabBarPressed) pmRenderBar(); }, 350);
+  };
+  for (const type of ['pointerup', 'pointercancel', 'pointerdown']) document.addEventListener(type, release, true);
+})();
+
 // Panel visibility + integration with collapsed menu/reading mode.
 function pmSyncLayout() {
   if (!tabBarEl || !topMenuEl) return;
-  const show = pmTabsEnabled() && pmTabs.length > 0 && !readModeActive;
+  // Touch: a lone document needs no bar taking up a phone's height
+  const show = pmTabsEnabled() && pmTabs.length > (isTouchDevice ? 1 : 0) && !readModeActive;
   tabBarEl.style.display = show ? '' : 'none';
   topMenuEl.classList.toggle('tabbar-visible', show);
   if (show) pmRenderBar();   // panel visible - render with correct alignment
@@ -45109,9 +45466,18 @@ function editSelectedPage() {
 
   // Mobile preview: after a text selection settles, show the format/copy menu
   // (desktop uses RMB). Hide while the selection is still being adjusted.
+  // Not while the finger is still on the screen either - a long press dragged
+  // on to extend the selection, a handle held: the menu would cover the text
+  // being selected. It comes once the finger is up. When the page does not
+  // see the finger at all (the browser moves its selection handles itself,
+  // often telling the page nothing), it waits for a longer pause instead.
   if (isTouchDevice && textCopyMenu) {
+    const MOBILE_TEXT_MENU_AFTER_LIFT_MS = 150;
+    const MOBILE_TEXT_MENU_UNTRACKED_MS = 800;
     let mobilePreviewTextSelTimer = null;
     let mobilePreviewTextSelSig = '';
+    let mobilePreviewTextSelAfterLift = false;   // a change made with the finger down
+    let mobilePreviewTextLiftAt = 0;
     function mobilePreviewTextSelSignature() {
       try {
         const sel = window.getSelection();
@@ -45122,10 +45488,11 @@ function editSelectedPage() {
           (r.endContainer && r.endContainer.nodeValue ? r.endOffset : '');
       } catch (_) { return ''; }
     }
-    function scheduleMobilePreviewTextSelMenu() {
+    function scheduleMobilePreviewTextSelMenu(delay) {
       clearTimeout(mobilePreviewTextSelTimer);
       mobilePreviewTextSelTimer = setTimeout(() => {
         mobilePreviewTextSelTimer = null;
+        if (previewTextSelPointerDown) { mobilePreviewTextSelAfterLift = true; return; }
         if (typeof isZoomTextSelect !== 'function' || !isZoomTextSelect()) {
           hideTextCopyMenu();
           return;
@@ -45164,15 +45531,31 @@ function editSelectedPage() {
         let captured = null;
         try { captured = range.cloneRange(); } catch (_) {}
         showTextCopyMenu({ clientX: x, clientY: y }, text, captured, parseInt(pageDiv.dataset.index, 10));
-      }, 420);
+      }, delay);
     }
     document.addEventListener('selectionchange', () => {
       if (typeof isZoomTextSelect !== 'function' || !isZoomTextSelect()) return;
       const peModal = document.getElementById('pageEditModal');
       if (peModal && peModal.classList.contains('visible')) return;
       if (textCopyMenu.classList.contains('visible')) hideTextCopyMenu();
-      scheduleMobilePreviewTextSelMenu();
+      if (previewTextSelPointerDown) {
+        clearTimeout(mobilePreviewTextSelTimer);
+        mobilePreviewTextSelAfterLift = true;
+        return;
+      }
+      // (a change right after the finger came up is part of that gesture)
+      const justLifted = performance.now() - mobilePreviewTextLiftAt < 500;
+      scheduleMobilePreviewTextSelMenu(justLifted ? MOBILE_TEXT_MENU_AFTER_LIFT_MS : MOBILE_TEXT_MENU_UNTRACKED_MS);
     });
+    const onLift = (e) => {
+      if (e.touches && e.touches.length) return;   // another finger still down
+      mobilePreviewTextLiftAt = performance.now();
+      if (!mobilePreviewTextSelAfterLift) return;
+      mobilePreviewTextSelAfterLift = false;
+      scheduleMobilePreviewTextSelMenu(MOBILE_TEXT_MENU_AFTER_LIFT_MS);
+    };
+    document.addEventListener('touchend', onLift, { capture: true, passive: true });
+    document.addEventListener('touchcancel', onLift, { capture: true, passive: true });
   }
 
   document.addEventListener('contextmenu', async (e) => {
@@ -55062,8 +55445,16 @@ function peUpsertTextMarkupsOnPage(pageIdx, action, fracs, opts) {
 function peShowTextSelCtxMenu(clientX, clientY, info) {
   const menu = document.getElementById('peTextSelCtxMenu');
   if (!menu || !info) return;
-  // Never show the markup/copy menu while a selection handle is being dragged.
+  // Never show the markup/copy menu while a selection handle is being dragged
+  // - nor, on a touch screen, while the finger that is selecting the page's
+  // text is still down (a long press opens this menu through contextmenu):
+  // it shows once the finger is up (onPtrUp -> peEndTextSelHandleDrag).
   if (peTextSelHandleDragging) {
+    peTextSelMenuResume = { clientX, clientY, info };
+    return;
+  }
+  if (typeof isTouchDevice !== 'undefined' && isTouchDevice && peTextSelPointerDown && info.kind === 'page') {
+    peTextSelHandleDragging = true;
     peTextSelMenuResume = { clientX, clientY, info };
     return;
   }

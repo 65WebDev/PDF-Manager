@@ -438,7 +438,8 @@ const TAURI_OPEN_BRIDGE = `
     } catch (_) {}
     var loader = getLoader();
     var tabsEnabled = getGlobalFn('pmTabsEnabled');
-    var openTabs = getGlobalFn('pmOpenFilesAsTabs');
+    // (a phone asks whether several files go into tabs or into one document)
+    var openTabs = getGlobalFn('pmOpenFilesTabsOrMerge') || getGlobalFn('pmOpenFilesAsTabs');
     var openMulti = getGlobalFn('openMultipleAsNewDocument');
     try {
       if (tabsEnabled && tabsEnabled() && openTabs) {
@@ -622,8 +623,9 @@ const TAURI_OPEN_BRIDGE = `
     }
   }
 
-  // A document with unsaved changes is about to be replaced (a phone has no
-  // tabs) - the same question as "Select file" asks.
+  // A document with unsaved changes is about to be replaced (only without
+  // tabs - with them a file sent to the app opens in a new one) - the same
+  // question as "Select file" asks.
   async function confirmReplaceUnsaved() {
     try {
       var tabsOn = getGlobalFn('pmTabsEnabled');
