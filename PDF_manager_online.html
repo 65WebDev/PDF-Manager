@@ -47917,7 +47917,7 @@ function peRedrawObjects() {
   // So does a line of the page's text - unless it is out of the page being edited.
   if (peState.objects.some(o => o.pageText)) {
     peState.objects = peState.objects.filter(o => !o.pageText || o === peState.sel ||
-      (peState.multiSel || []).includes(o) || o.pageText.live || o.pageText.lifting || pePageTextMoved(o));
+      (peState.multiSel || []).includes(o) || o.pageText.live || o.pageText.lifting || pePageTextChanged(o));
   }
   peState.objects.forEach(o => {
     if (o.type === 'comment') return;
@@ -47949,7 +47949,7 @@ function peRedrawObjects() {
       // A line of the page's text: the page shows it until it is edited or moved.
       if (o.pageText) {
         el.classList.add('pe-pagetext');
-        if (!o.pageText.live && !pePageTextMoved(o)) inner.classList.add('pe-pagetext-ghost');
+        if (!o.pageText.live && !pePageTextChanged(o)) inner.classList.add('pe-pagetext-ghost');
       }
       // Text background - only via hiliteColor (span in o.html), not on the container.
       inner.style.backgroundColor = 'transparent';
@@ -52776,6 +52776,17 @@ function peApplyTextLayoutStyles(inner, o, W) {
   inner.style.textAlign = align;
   inner.style.maxWidth = 'none';
   inner.style.width = '';
+  // A paragraph of the page's own text (pePageTextSelect): its width, first
+  // line's indent, line spacing and - while not changed - its alignment.
+  const t = o.pageText;
+  inner.style.textIndent = '';
+  inner.style.lineHeight = '';
+  if (t && t.wrapW && peState) {
+    inner.style.width = (t.wrapW * peState.scale) + 'px';
+    inner.style.textIndent = ((t.indent || 0) * peState.scale) + 'px';
+    if (align === t.style0.textAlign) inner.style.textAlign = t.align;
+  }
+  if (t && t.lh) inner.style.lineHeight = String(t.lh);
 }
 
 function peApplyTextAlign(align) {
@@ -52977,6 +52988,9 @@ function peSyncFontSelect(o) {
   if (!sel) return;
   if (sel.dataset.filled !== '1') void peFillFontSelect();
   const v = (o && o.fontFamily) || '';
+  // The page's own text keeps its own fonts (bold and italic come from the
+  // font's other faces): no list for it.
+  sel.disabled = !!(o && o.pageText);
   if (v && !Array.from(sel.options).some(op => op.value === v)) {
     const opt = document.createElement('option');
     opt.value = v;
@@ -53580,10 +53594,10 @@ function pePageImgMoved(o) {
 function pePageImgTapSelect(clientX, clientY) {
   if (!peState || !peState.objSelectMode || peState.tool !== 'select') return false;
   if ((peState.sel && !peState.sel.pageImg && !peState.sel.pageText) || (peState.multiSel && peState.multiSel.length)) return false;
-  // A line of the page's text first: it is mostly drawn over the pictures.
-  const line = pePageTextAt(clientX, clientY);
-  if (line) {
-    pePageTextSelect(line);
+  // The page's text first: it is mostly drawn over the pictures.
+  const unit = pePageTextAt(clientX, clientY);
+  if (unit) {
+    pePageTextSelect(unit);
     return true;
   }
   const pl = pePageImgAt(clientX, clientY);
@@ -53925,29 +53939,32 @@ function pePickReplacementImage(o) {
 }
 
 // ============================================================================
-// The page's own text, edited a line at a time in place (pePageText*).
-// pdf.js decodes the text: its operator list gives every character code a
-// text operator shows, with its Unicode and width, and every font's
-// ToUnicode, widths and which codes have a glyph (fontExtraProperties).
-// pePageTextScan walks the page's own content streams beside it, operator by
-// operator, for where each text operator is and the text state, colour and
-// matrices it is drawn with - the two must agree code for code, or the
-// page's text is left alone. A line (text operators one after another along
-// one baseline) is selected like an image of the page: a stand-in text
-// object over it, see-through until it is edited or moved. Editing lifts the
-// line out of the page, so the editor's text shows alone, and writes it back
-// where it was once the editing ends: in its own fonts, the characters that
-// did not change exactly where they were, new ones in the font of the
-// character before them - or the bundled Roboto for a character that font
-// has no glyph for. Only the page's own content streams, only horizontal
+// The page's own text, edited in place (pePageText*). pdf.js decodes the
+// text: its operator list gives every character code a text operator shows,
+// with its Unicode and width, and every font's ToUnicode, widths and which
+// codes have a glyph (fontExtraProperties). pePageTextScan walks the page's
+// own content streams beside it, operator by operator, for where each text
+// operator is and the text state, colour and matrices it is drawn with - the
+// two must agree code for code, or the page's text is left alone. Lines
+// (text operators one after another along one baseline) make up units: a
+// paragraph (lines the text wraps from one to the next), or a line on its
+// own. A unit is selected like an image of the page: a stand-in text object
+// over it, see-through until it is edited, moved or restyled. Editing lifts
+// the unit out of the page, so the editor's text shows alone, and writes it
+// back where it was once the editing ends: in its own fonts, the characters
+// before the first change exactly where they were, new ones in the font of
+// the character before them (another subset of the font, or another face of
+// it for bold or italic, or the bundled Roboto for a glyph the page has
+// none of), a paragraph wrapped anew within its width from its first
+// changed line on. Only the page's own content streams, only horizontal
 // visible text (not a scan's invisible OCR layer), and only fonts whose
 // codes can be written (simple fonts, and composite ones with Identity-H).
 // ============================================================================
 
 const PE_PAGETEXT_MARK = 'PMTextEdit';
 let pePageTextCache = null;
-const pePageTextDeleted = [];   // { key } lines to take off the page
-const pePageTextLive = [];      // stand-ins whose line is lifted out of the page, waiting to go back
+const pePageTextDeleted = [];   // { ref } units to take off the page
+const pePageTextLive = [];      // stand-ins whose unit is lifted out of the page, waiting to go back
 let pePageTextChain = Promise.resolve();
 let pePageTextTimer = null, pePageTextPending = null;
 let pePageTextTapTimer = null;   // a tap on page text, selecting its line once it is no double tap
@@ -54348,7 +54365,137 @@ function pePageTextLines(scan, view) {
   return lines.filter(l => l.text.trim());
 }
 
-/** The page's text lines - scanned once per state of the page. */
+/** The width of a space in the font a line's character is drawn with (visual points). */
+function pePageTextSpaceW(ch) {
+  const op = ch.op;
+  const enc = pePageTextEncoder(op.font);
+  const code = enc.code(' ');
+  const w = code != null ? enc.width(code) : 250;
+  const su = ch.c && ch.c.adv ? ch.w / ch.c.adv : 1;
+  return ((w || 250) * op.fm0 * op.ts.size + op.ts.Tc + (code === 32 && op.bpc === 1 ? op.ts.Tw : 0)) * (op.ts.Tz / 100) * su;
+}
+
+/** The width of a line's first word (visual points). */
+function pePageTextFirstWordW(line) {
+  let w = 0;
+  for (const ch of line.chars) {
+    if (ch.syn || /\s/.test(ch.ch)) { if (w) break; continue; }
+    w += ch.w;
+  }
+  return w;
+}
+
+/**
+ * Lines that are one paragraph: one after another down the page, one size,
+ * even line spacing, one left edge (the first line may be indented), or one
+ * centre, or one right edge - and every line but the last full, the next
+ * line's first word not fitting after it, so the breaks are the wrapping
+ * and not the writer's own (a list, an address, a table's rows stay lines).
+ * How much room a line had is measured up to its column's edge: the widest
+ * line on the page starting where it does (ending where it does, for right
+ * alignment; centred where it is, for centring).
+ * A unit is what is selected and edited: a paragraph, or a line on its own.
+ * Its chars: the lines' characters with a soft break ({ syn, soft }) between
+ * lines, a hyphen at a break left out of its text ({ hyph }).
+ */
+function pePageTextUnits(lines) {
+  const units = [];
+  let cur = null;
+  const near = (a, b, tol) => Math.abs(a - b) <= tol;
+  const centre = l => (l.x0 + l.x1) / 2;
+  const sameCtm = (a, b) => a.every((v, j) => Math.abs(v - b[j]) <= 1e-6 * Math.max(1, Math.abs(v)));
+  const column = (l, key) => lines.filter(m => near(key(m), key(l), 2) && near(m.size, l.size, 0.1 * l.size));
+  const continues = (u, l) => {
+    const prev = u.lines[u.lines.length - 1];
+    if (!sameCtm(prev.ops[0].ctm, l.ops[0].ctm)) return false;
+    if (!near(l.size, prev.size, 0.03 * prev.size)) return false;
+    const lead = l.y - prev.y;
+    if (lead < 1.0 * prev.size || lead > 2.0 * prev.size) return false;
+    if (u.lead && !near(lead, u.lead, 0.05 * u.lead)) return false;
+    let align = null;
+    if (u.align === 'left') align = near(l.x0, u.left, 1.5) ? 'left' : null;
+    else if (u.align === 'center') align = near(centre(l), centre(prev), 1.5) ? 'center' : null;
+    else if (u.align === 'right') align = near(l.x1, prev.x1, 1.5) ? 'right' : null;
+    // The second line: the same left edge (or the first one indented), centre, or right edge.
+    else if (near(l.x0, prev.x0, 1.5) || (l.x0 < prev.x0 && prev.x0 - l.x0 <= 6 * prev.size)) align = 'left';
+    else if (near(centre(l), centre(prev), 1.5)) align = 'center';
+    else if (near(l.x1, prev.x1, 1.5)) align = 'right';
+    if (!align) return false;
+    // The line before is full: the next one's first word would not have
+    // fitted after it, up to the column's edge.
+    // (An edge only that line reaches proves nothing: it is not grouped.)
+    const others = (key) => u.lines.concat([l], column(l, key)).filter(m => m !== prev);
+    let room;
+    if (align === 'left') {
+      const o = others(m => m.x0);
+      room = o.length ? Math.max(...o.map(x => x.x1)) - prev.x1 : -1;
+      if (!o.some(x => x.x1 >= prev.x1 - 1)) return false;
+    } else if (align === 'right') {
+      const o = others(m => m.x1);
+      if (!o.some(x => x.x0 <= prev.x0 + 1)) return false;
+      room = prev.x0 - Math.min(...o.map(x => x.x0));
+    } else {
+      const o = others(centre);
+      if (!o.some(x => x.x1 - x.x0 >= prev.x1 - prev.x0 - 1)) return false;
+      room = Math.max(...o.map(x => x.x1 - x.x0)) - (prev.x1 - prev.x0);
+    }
+    const need = pePageTextSpaceW(prev.chars[prev.chars.length - 1]) + pePageTextFirstWordW(l);
+    if (room >= need - 0.5) return false;
+    u.align = align;
+    u.lead = u.lead || lead;
+    if (align === 'left' && u.left == null) u.left = Math.min(l.x0, prev.x0);
+    return true;
+  };
+  lines.forEach(l => {
+    if (cur && continues(cur, l)) { cur.lines.push(l); return; }
+    cur = { lines: [l], align: null, lead: 0, left: null };
+    units.push(cur);
+  });
+  return units.map(u => {
+    const ls = u.lines;
+    const chars = [];
+    ls.forEach((l, i) => {
+      if (i) {
+        const prev = chars[chars.length - 1];
+        const first = l.chars[0];
+        if (prev && /^[-­]$/.test(prev.ch) && first && /^\p{Ll}/u.test(first.ch)) {
+          prev.hyph = true;   // a word broken at the line's end
+        } else {
+          chars.push({ syn: true, soft: true, ch: ' ', x: ls[i - 1].x1, y: ls[i - 1].y, w: 0, size: l.size, op: (prev || first).op, line: i - 1 });
+        }
+      }
+      l.chars.forEach(ch => chars.push({ ...ch, line: i }));
+    });
+    const unit = {
+      lines: ls, chars, ops: [].concat(...ls.map(l => l.ops)),
+      text: chars.map(c => (c.hyph ? '' : c.ch)).join(''),
+      x0: Math.min(...ls.map(l => l.x0)), x1: Math.max(...ls.map(l => l.x1)),
+      y: ls[0].y, top: ls[0].top, bottom: ls[ls.length - 1].bottom, size: ls[0].size, para: null
+    };
+    if (ls.length > 1) {
+      let align = u.align;
+      // A left paragraph's right edge: its column's (the widest line on the page from its left edge).
+      const right = align === 'left'
+        ? Math.max(...ls.map(l => l.x1), ...column(ls[ls.length - 1], m => m.x0).map(m => m.x1))
+        : Math.max(...ls.map(l => l.x1));
+      // Left lines all ending at that edge (all but the last): justified.
+      if (align === 'left' && ls.slice(0, -1).every(l => Math.abs(l.x1 - right) <= 1) &&
+          ls[ls.length - 1].x1 < right - 1 && ls.slice(0, -1).some(l => l.chars.some(c => c.syn || c.ch === ' '))) align = 'justify';
+      const x0 = align === 'left' || align === 'justify' ? Math.min(...ls.slice(1).map(l => l.x0)) : unit.x0;
+      const x1 = align === 'center' ? Math.max(...ls.map(l => l.x1)) : right;
+      unit.para = {
+        align, lead: u.lead,
+        x0: align === 'center' ? Math.min(...ls.map(l => l.x0)) : x0, x1,
+        indent: align === 'left' || align === 'justify' ? Math.max(0, ls[0].x0 - x0) : 0
+      };
+      unit.x0 = unit.para.x0;
+      unit.x1 = Math.max(unit.x1, x1);
+    }
+    return unit;
+  });
+}
+
+/** The page's text: its lines and units (paragraphs, lines on their own) - scanned once per state of the page. */
 function pePageTextData() {
   if (!peState || !pdfDoc || !peState.page) return Promise.resolve(null);
   const rot = peFinalRotation();
@@ -54363,9 +54510,10 @@ function pePageTextData() {
       const scan = pePageTextScan(pdfDoc, pdfDoc.getPage(idx), pj);
       if (!scan) {
         console.warn('Page text not editable: the page content and pdf.js disagree');
-        return { view, scan: null, lines: [] };
+        return { view, scan: null, lines: [], units: [] };
       }
-      return { view, scan, lines: pePageTextLines(scan, view) };
+      const lines = pePageTextLines(scan, view);
+      return { view, scan, lines, units: pePageTextUnits(lines) };
     } catch (err) {
       console.warn('pePageTextData', err);
       return null;
@@ -54377,22 +54525,25 @@ function pePageTextData() {
   return promise;
 }
 
-/** The topmost line of the page's text under a screen point - from what is scanned already. */
+/** The unit whose line has a visual point on it (topmost: painted last). */
+function pePageTextUnitAt(units, x, y) {
+  for (let k = (units || []).length - 1; k >= 0; k--) {
+    const u = units[k];
+    if (u.lines.some(l => x >= l.x0 - 1 && x <= l.x1 + 1 && y >= l.top - 1 && y <= l.bottom + 1)) return u;
+  }
+  return null;
+}
+
+/** The unit of the page's text under a screen point - from what is scanned already. */
 function pePageTextAt(clientX, clientY) {
   if (!peState || !peState.page) return null;
   void pePageTextData();
   const data = pePageTextCache && pePageTextCache.data;
-  if (!data || !data.lines.length) return null;
+  if (!data || !data.units.length) return null;
   const stage = document.getElementById('peStage');
   const r = stage && stage.getBoundingClientRect();
   if (!r || !(r.width > 0)) return null;
-  const x = (clientX - r.left) / r.width * data.view.W;
-  const y = (clientY - r.top) / r.height * data.view.H;
-  for (let k = data.lines.length - 1; k >= 0; k--) {
-    const l = data.lines[k];
-    if (x >= l.x0 - 1 && x <= l.x1 + 1 && y >= l.top - 1 && y <= l.bottom + 1) return l;
-  }
-  return null;
+  return pePageTextUnitAt(data.units, (clientX - r.left) / r.width * data.view.W, (clientY - r.top) / r.height * data.view.H);
 }
 
 /** A CSS font stack that looks like a PDF font, by its name. */
@@ -54424,15 +54575,17 @@ function pePageTextFontLooks(font) {
 }
 
 const pePageTextShareCache = new Map();
-/** Where CSS puts the baseline in a line box of line-height 1.25 for a font stack, as a share of the size. */
-function pePageTextBaselineShare(css, bold, italic) {
-  const key = css + '|' + bold + '|' + italic;
+/** Where CSS puts the first baseline in a line box of line-height lh for a font stack, as a share of the size. */
+function pePageTextBaselineShare(css, bold, italic, lh) {
+  lh = lh || 1.25;
+  const key = css + '|' + bold + '|' + italic + '|' + lh;
   if (pePageTextShareCache.has(key)) return pePageTextShareCache.get(key);
-  let share = 0.97;
+  let share = 0.97 + (lh - 1.25) / 2;
   try {
     const host = document.createElement('div');
     host.style.cssText = 'position:fixed;left:-99999px;top:0;visibility:hidden;pointer-events:none;' +
-      'font-size:200px;line-height:1.25;white-space:pre;';
+      'font-size:200px;white-space:pre;';
+    host.style.lineHeight = String(lh);
     host.style.fontFamily = css;
     host.style.fontWeight = bold ? 'bold' : 'normal';
     host.style.fontStyle = italic ? 'italic' : 'normal';
@@ -54442,33 +54595,39 @@ function pePageTextBaselineShare(css, bold, italic) {
     document.body.appendChild(host);
     const v = (mark.getBoundingClientRect().top - host.getBoundingClientRect().top) / 200;
     host.remove();
-    if (v > 0.5 && v < 1.25) share = v;
+    if (v > 0.3 && v < 3) share = v;
   } catch (_) {}
   pePageTextShareCache.set(key, share);
   return share;
 }
 
-/** Same line again after the page was read anew: same text, near the same place. */
-function pePageTextFind(lines, ref) {
-  if (!lines || !ref) return null;
+/** Same unit again after the page was read anew: same text, near the same place. */
+function pePageTextFind(units, ref) {
+  if (!units || !ref) return null;
   let best = null, bestD = Infinity;
-  lines.forEach(l => {
-    if (l.text !== ref.text) return;
-    const d = Math.hypot(l.x0 - ref.x0, l.y - ref.y);
-    if (d < bestD) { bestD = d; best = l; }
+  units.forEach(u => {
+    if (u.text !== ref.text) return;
+    const d = Math.hypot(u.x0 - ref.x0, u.y - ref.y);
+    if (d < bestD) { bestD = d; best = u; }
   });
   return bestD < 3 ? best : null;
 }
 
-/** The stand-in's style and position for a line: font look, size, colour, mixed runs as spans. */
-function pePageTextObjectFields(line, view) {
-  const first = line.cells[0];
+/**
+ * The stand-in's look and place for a unit: the first character's font look,
+ * size and colour, runs that differ as spans; a paragraph's width, line
+ * spacing, first-line indent and alignment.
+ */
+function pePageTextObjectFields(unit, view) {
+  const first = unit.chars.find(c => !c.syn);
   const font = first.op.font;
   const looks = pePageTextFontLooks(font);
   const css = pePageTextCss(font);
   const fontPt = first.size;
   const sc = Math.max(1e-6, peState.scale || 1);
-  const share = pePageTextBaselineShare(css, looks.bold, looks.italic);
+  const para = unit.para;
+  const lh = para ? Math.max(0.8, Math.min(3, para.lead / fontPt)) : 1.25;
+  const share = pePageTextBaselineShare(css, looks.bold, looks.italic, lh);
   let html = '';
   let run = null;
   const flush = () => {
@@ -54483,7 +54642,12 @@ function pePageTextObjectFields(line, view) {
     html += styles.length ? '<span style="' + styles.join(';') + '">' + text + '</span>' : text;
     run = null;
   };
-  line.chars.forEach(ch => {
+  unit.chars.forEach(ch => {
+    if (ch.hyph) return;
+    if (ch.soft) {
+      if (run) run.text += ' ';
+      return;
+    }
     const op = ch.op;
     const key = op.loaded + '|' + op.css + '|' + ch.size.toFixed(2);
     if (!run || run.key !== key) {
@@ -54493,48 +54657,38 @@ function pePageTextObjectFields(line, view) {
     run.text += ch.ch;
   });
   flush();
+  const align = para ? para.align : 'left';
   return {
-    text: line.text, html, fontPt, color: first.op.css || '#000000', bold: looks.bold, italic: looks.italic,
-    textAlign: 'left', rot: 0,
-    // Its first baseline where the line's is: CSS padding 1px 2px, then the
-    // baseline's place in the line box.
-    x: (line.x0 - 2 / sc) / view.W,
-    y: (line.y - 1 / sc - share * fontPt) / view.H,
-    css
+    text: unit.text, html, fontPt, color: first.op.css || '#000000', bold: looks.bold, italic: looks.italic,
+    // A block's own alignment knows no "justify" (peNormalizeTextAlign): the
+    // paragraph's is kept apart, and shown while the block's is not changed.
+    textAlign: align === 'justify' ? 'left' : align, align,
+    // Its first baseline where the unit's is: CSS padding 1px 2px, then the
+    // baseline's place in the first line box.
+    x: ((para ? para.x0 : unit.x0) - 2 / sc) / view.W,
+    y: (unit.y - 1 / sc - share * fontPt) / view.H,
+    css, wrapW: para ? para.x1 - para.x0 : 0, lh: para ? lh : 0, indent: para ? para.indent : 0
   };
 }
 
-/**
- * A click (or tap) on the page's text layer in Object-select: the line under
- * it is selected - unless the click made a selection of text (that is for
- * marking up) or is the second of a double click (a word, as before). A
- * double click on the selected line edits it (the stand-in's dblclick); on
- * a phone, "Edit text" in its long-press menu.
- */
-function pePageTextLayerTap(e) {
-  if (!peState || !peState.objSelectMode || peState.tool !== 'select' || e.button !== 0 || e.detail > 1) return;
-  // The click a tap ends with: the tap itself is handled (once it is no double tap).
-  if (!e.touch && (e.pointerType === 'touch' || e.pointerType === 'pen' ||
-      (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents))) return;
-  if (peState.inlineEditId) return;
-  const sel = window.getSelection();
-  if (sel && !sel.isCollapsed) return;
-  const line = pePageTextAt(e.clientX, e.clientY);
-  if (line) pePageTextSelect(line);
+/** The stand-in's own fields from a unit (a new one, or one read again after a change). */
+function pePageTextApply(o, unit, view) {
+  const f = pePageTextObjectFields(unit, view);
+  Object.assign(o, { text: f.text, html: f.html, fontPt: f.fontPt, color: f.color, bold: f.bold, italic: f.italic,
+    underline: false, textAlign: f.textAlign, x: f.x, y: f.y, rot: 0 });
+  o.pageText = {
+    ref: { text: unit.text, x0: unit.x0, y: unit.y }, css: f.css, x0: f.x, y0: f.y,
+    wrapW: f.wrapW, lh: f.lh, indent: f.indent, align: f.align, live: false, unit: null,
+    style0: { fontPt: f.fontPt, bold: f.bold, italic: f.italic, underline: false, color: f.color, textAlign: f.textAlign, html: f.html }
+  };
+  return o;
 }
 
-/** Select a line of the page's text: a see-through stand-in text object over it. */
-function pePageTextSelect(line) {
+/** Select a unit of the page's text: a see-through stand-in text object over it. */
+function pePageTextSelect(unit) {
   const data = pePageTextCache && pePageTextCache.data;
-  if (!peState || !line || !data) return null;
-  const f = pePageTextObjectFields(line, data.view);
-  const o = {
-    id: -(++pePageImgIdSeq),
-    type: 'text',
-    text: f.text, html: f.html, fontPt: f.fontPt, color: f.color, bold: f.bold, italic: f.italic,
-    textAlign: 'left', x: f.x, y: f.y, rot: 0,
-    pageText: { ref: { text: line.text, x0: line.x0, y: line.y }, css: f.css, x0: f.x, y0: f.y, live: false, line: null }
-  };
+  if (!peState || !unit || !data) return null;
+  const o = pePageTextApply({ id: -(++pePageImgIdSeq), type: 'text' }, unit, data.view);
   peState.objects.push(o);
   peSelect(o);
   peRedrawObjects();
@@ -54548,6 +54702,42 @@ function pePageTextMoved(o) {
   if (!t) return false;
   return Math.abs((Number(o.x) || 0) - t.x0) > 1e-5 || Math.abs((Number(o.y) || 0) - t.y0) > 1e-5 ||
     Math.abs(Number(o.rot) || 0) > 0.01;
+}
+
+/** The stand-in's look changed (size, bold, italic, underline, colour, alignment, or a part of its text). */
+function pePageTextRestyled(o) {
+  const s0 = o && o.pageText && o.pageText.style0;
+  if (!s0) return false;
+  return Math.abs((Number(o.fontPt) || 0) - s0.fontPt) > 0.01 || !!o.bold !== s0.bold || !!o.italic !== s0.italic ||
+    !!o.underline !== s0.underline || (o.textAlign || 'left') !== s0.textAlign ||
+    !pePageTextSameColor(o.color, s0.color) || String(o.html || '') !== s0.html;
+}
+
+function pePageTextChanged(o) {
+  return pePageTextMoved(o) || pePageTextRestyled(o);
+}
+
+function pePageTextSameColor(a, b) {
+  return peVecColor(a).rgb === peVecColor(b).rgb;
+}
+
+/**
+ * A click (or tap) on the page's text layer in Object-select: the paragraph
+ * or line under it is selected - unless the click made a selection of text
+ * (that is for marking up) or is the second of a double click (a word, as
+ * before). A double click on the selected text edits it (the stand-in's
+ * dblclick); on a phone, "Edit text" in its long-press menu.
+ */
+function pePageTextLayerTap(e) {
+  if (!peState || !peState.objSelectMode || peState.tool !== 'select' || e.button !== 0 || e.detail > 1) return;
+  // The click a tap ends with: the tap itself is handled (once it is no double tap).
+  if (!e.touch && (e.pointerType === 'touch' || e.pointerType === 'pen' ||
+      (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents))) return;
+  if (peState.inlineEditId) return;
+  const sel = window.getSelection();
+  if (sel && !sel.isCollapsed) return;
+  const unit = pePageTextAt(e.clientX, e.clientY);
+  if (unit) pePageTextSelect(unit);
 }
 
 /** Codes a font of the page can write a character with (one with a glyph), and their widths. */
@@ -54613,115 +54803,308 @@ function pePageTextSiblings(scan) {
   return byName;
 }
 
+/** A PDF font's family, for its other faces on the page: no subset tag, no style ("Arial-BoldMT" -> "arial"). */
+function pePageTextFamily(font) {
+  return pePageTextFontName(font).split(/[-,]/)[0].replace(/MT$/, '').replace(/PS$/, '').toLowerCase();
+}
+
 /**
- * The line's characters after the editing: the ones that did not change
- * where they were (those after the change moved along by it), the new ones
- * after them in the font of the character before them (or the bundled
- * Roboto, for one that font lacks), a new line of text below the last one.
- * Each glyph as { op (whose state it is drawn with), code(s), hex, w (its
- * width, 1000-units), fm0, x, y (visual), sx (visual per text-space unit),
- * face (Roboto, for a fallback glyph) }.
+ * The stand-in's text as it is now, and each character's style (UTF-16
+ * positions; null at a line break): from its editor DOM, or its HTML.
  */
-async function pePageTextLayout(line, newText, view, siblings) {
-  const chars = line.chars;
-  const old = chars.map(c => c.ch);
-  newText = String(newText || '').replace(/\r\n?/g, '\n').replace(/[​﻿]/g, '');
-  let p = 0, pos = 0;
-  while (p < old.length && newText.startsWith(old[p], pos) && old[p] !== '\n') { pos += old[p].length; p++; }
-  let s = 0, end = newText.length;
-  while (s < old.length - p && end - old[old.length - 1 - s].length >= pos &&
-         newText.slice(end - old[old.length - 1 - s].length, end) === old[old.length - 1 - s]) {
-    end -= old[old.length - 1 - s].length;
-    s++;
-  }
-  const mid = newText.slice(pos, end);
-  // New text takes the style of the character before it (the first one, at the start).
-  let anchor = null;
-  for (let j = Math.max(0, p - 1); j >= 0 && !anchor; j--) if (!chars[j].syn) anchor = chars[j];
-  if (!anchor) anchor = chars.find(c => !c.syn);
-  const out = [];
-  chars.slice(0, p).forEach(c => out.push({ ...c }));
-  // Where the new text starts: right after the unchanged start, or where the line began.
-  let x = p > 0 ? chars[p - 1].x + chars[p - 1].w : (chars.length ? chars[0].x : line.x0);
-  let y = p > 0 ? chars[p - 1].y : line.y;
+function pePageTextStyledText(o) {
+  let text = '';
+  const styles = [];
+  // The runs' colours are read from the DOM, where a see-through stand-in has none.
+  const el = peGetInlineTextEl(o);
+  const ghost = !!(el && el.classList.contains('pe-pagetext-ghost'));
+  if (ghost) el.classList.remove('pe-pagetext-ghost');
+  let paras;
+  try { paras = peTextParagraphsForBake(o) || []; } finally { if (ghost) el.classList.add('pe-pagetext-ghost'); }
+  paras.forEach((runs, i) => {
+    if (i) { text += '\n'; styles.push(null); }
+    (runs || []).forEach(r => {
+      const t = String(r.text || '').replace(/[​﻿\r]/g, '');
+      const st = { bold: !!r.bold, italic: !!r.italic, underline: !!r.underline, color: r.color || o.color, fontPt: r.fontPt || o.fontPt };
+      for (let k = 0; k < t.length; k++) { text += t[k]; styles.push(st); }
+    });
+  });
+  while (text.endsWith('\n')) { text = text.slice(0, -1); styles.pop(); }
+  return { text, styles };
+}
+
+/** A character's look as the page draws it. */
+function pePageTextCharStyle(c) {
+  const lk = pePageTextFontLooks(c.op.font);
+  return { bold: lk.bold, italic: lk.italic, underline: false, color: c.op.css, fontPt: c.size };
+}
+
+function pePageTextSameStyle(a, b) {
+  if (!a || !b) return true;
+  return a.bold === b.bold && a.italic === b.italic && a.underline === b.underline &&
+    Math.abs(a.fontPt - b.fontPt) < 0.05 && pePageTextSameColor(a.color, b.color);
+}
+
+/**
+ * The page's fonts that can draw text in a style next to the anchor
+ * character: its own when its look is the one asked, then the others of its
+ * family with that look (its other subsets, its bold or italic face).
+ */
+function pePageTextCandidates(style, anchor, siblings) {
   const aop = anchor.op;
-  const aEnc = pePageTextEncoder(aop.font);
-  const { M } = pePageTextViewOf(aop, view);
-  const G = pmAffMul(anchor.c ? anchor.c.tm : aop.cells[0].tm, M);
+  const looks0 = pePageTextFontLooks(aop.font);
+  const want = style ? { bold: !!style.bold, italic: !!style.italic } : looks0;
+  const fam = pePageTextFamily(aop.font);
+  const cands = [];
+  if (looks0.bold === want.bold && looks0.italic === want.italic) cands.push({ res: aop.ts.font, font: aop.font, bpc: aop.bpc, fm0: aop.fm0 });
+  (siblings ? [...siblings.values()] : []).forEach(list => list.forEach(f => {
+    if (cands.some(c => c.res === f.res) || pePageTextFamily(f.font) !== fam) return;
+    const lk = pePageTextFontLooks(f.font);
+    if (lk.bold === want.bold && lk.italic === want.italic) cands.push(f);
+  }));
+  return cands;
+}
+
+/** The first of those fonts that has every character of a word - a word is never a mix of fonts. */
+function pePageTextPickFont(word, style, anchor, siblings) {
+  return pePageTextCandidates(style, anchor, siblings).find(f => {
+    const enc = pePageTextEncoder(f.font);
+    for (const ch of word) if (enc.code(ch) == null) return false;
+    return true;
+  }) || null;
+}
+
+/**
+ * A glyph for a new (or newly styled) character, in the style asked: in the
+ * font picked for its word (pePageTextPickFont) - or, with none of the
+ * page's fonts having the whole word, the bundled Roboto in that look. Its
+ * size and colour as asked: a copy of the anchor's operator state with
+ * them. A space no font has a glyph for: just its room ({ syn }).
+ */
+async function pePageTextMakeGlyph(ch, style, anchor, siblings, view, picked) {
+  const aop = anchor.op;
+  const looks0 = pePageTextFontLooks(aop.font);
+  const want = style ? { bold: !!style.bold, italic: !!style.italic } : looks0;
+  const scaleV = anchor.size / aop.ts.size;   // visual points per unit of font size
+  const sizeV = style && style.fontPt ? style.fontPt : anchor.size;
+  const tsize = sizeV / scaleV;
+  let fill = aop.fill;
+  if (style && style.color && !pePageTextSameColor(style.color, aop.css)) fill = peVecColor(style.color).rgb + ' rg';
+  const op = (Math.abs(tsize - aop.ts.size) > 1e-6 || fill !== aop.fill) ? { ...aop, ts: { ...aop.ts, size: tsize }, fill, css: style.color } : aop;
+  const G = pmAffMul(anchor.c ? anchor.c.tm : aop.cells[0].tm, pePageTextViewOf(aop, view).M);
   const su = Math.hypot(G[0], G[1]);
   const Th = aop.ts.Tz / 100;
-  const leading = (aop.ts.TL > 0 ? aop.ts.TL * Math.hypot(G[2], G[3]) : 0) || anchor.size * 1.2;
-  const looks = pePageTextFontLooks(aop.font);
-  for (const ch of mid) {
-    if (ch === '\n') {
-      x = line.x0;
-      y += leading;
-      continue;
-    }
-    const code = aEnc.code(ch);
-    if (code != null && aEnc.has(code)) {
-      const w = aEnc.width(code);
-      const adv = (w * aop.fm0 * aop.ts.size + aop.ts.Tc + (code === 32 && aop.bpc === 1 ? aop.ts.Tw : 0)) * Th * su;
-      out.push({ syn: false, ch, x, y, w: adv, size: anchor.size, op: aop, glyph: { code, len: aop.bpc, w } });
-      x += adv;
-      continue;
-    }
-    // Another subset of the same font that has it.
-    const sib = ((siblings && siblings.get(pePageTextFontName(aop.font))) || []).find(f => {
-      if (f.res === aop.ts.font) return false;
-      const c = pePageTextEncoder(f.font).code(ch);
-      return c != null;
-    });
-    if (sib) {
-      const enc = pePageTextEncoder(sib.font);
-      const code2 = enc.code(ch);
-      const w = enc.width(code2);
-      const adv = (w * sib.fm0 * aop.ts.size + aop.ts.Tc) * Th * su;
-      out.push({ syn: false, ch, x, y, w: adv, size: anchor.size, op: aop, glyph: { code: code2, len: sib.bpc, w, res: sib.res, fm0: sib.fm0 } });
-      x += adv;
-      continue;
-    }
-    if (/\s/.test(ch)) {
-      // A space the font has no glyph for: just the room of one.
-      const sp = aEnc.code(' ');
-      const w = sp != null ? aEnc.width(sp) : 250;
-      const adv = ((w || 250) * aop.fm0 * aop.ts.size + aop.ts.Tc) * Th * su;
-      out.push({ syn: true, ch, x, y, w: adv, size: anchor.size, op: aop });
-      x += adv;
-      continue;
-    }
-    const face = await peVecFont(pdfDoc, looks.bold, looks.italic);
-    const hex = face.font.encodeText(ch).asString();
-    let units = 0;
-    face.fk.layout(ch, face.font.embedder.fontFeatures).positions.forEach(q => { units += q.xAdvance; });
-    const w = units * 1000 / face.fk.unitsPerEm;
-    const adv = (w * 0.001 * aop.ts.size + aop.ts.Tc) * Th * su;
-    out.push({ syn: false, ch, x, y, w: adv, size: anchor.size, op: aop, glyph: { hex, w, face } });
-    x += adv;
+  const adv = (w, fm0, wordSpace) => (w * fm0 * tsize + aop.ts.Tc + (wordSpace ? aop.ts.Tw : 0)) * Th * su;
+  const under = !!(style && style.underline);
+  const cands = picked === undefined ? pePageTextCandidates(style, anchor, siblings) : picked ? [picked] : [];
+  for (const f of cands) {
+    const enc = pePageTextEncoder(f.font);
+    const code = enc.code(ch);
+    if (code == null) continue;
+    const w = enc.width(code);
+    return { syn: false, ch, w: adv(w, f.fm0, code === 32 && f.bpc === 1), size: sizeV, op, under, glyph: { code, len: f.bpc, w, res: f.res, fm0: f.fm0 } };
   }
-  // The rest of the line, moved along by the change - up to a gap the page
-  // left between words or columns (no space character in it): that gap
-  // takes the change, down to a narrow one, and what is after it stays put.
-  const rest = chars.slice(chars.length - s);
-  if (rest.length) {
-    let dx = x - rest[0].x;
-    const dy = y - rest[0].y;
-    rest.forEach(c => {
-      if (c.syn && !dy && dx) {
-        const minGap = 0.2 * c.size;
-        const w = Math.max(minGap, c.w - dx);
-        out.push({ ...c, x: c.x + dx, w });
-        dx = c.x + dx + w - (c.x + c.w);
-        return;
+  const room = () => {
+    const enc = pePageTextEncoder(aop.font);
+    const sp = enc.code(' ');
+    return { syn: true, ch, w: adv((sp != null ? enc.width(sp) : 0) || 250, aop.fm0, false), size: sizeV, op, under };
+  };
+  if (/\s/.test(ch)) return room();
+  // Not in Roboto either: a space's room, drawn by nothing (asked before a face goes into the document).
+  if (!peVecHasChar(await peVecProbeFont(), ch)) return room();
+  const face = await peVecFont(pdfDoc, want.bold, want.italic);
+  const hex = face.font.encodeText(ch).asString();
+  let units = 0;
+  face.fk.layout(ch, face.font.embedder.fontFeatures).positions.forEach(q => { units += q.xAdvance; });
+  const w = units * 1000 / face.fk.unitsPerEm;
+  return { syn: false, ch, w: adv(w, 0.001, false), size: sizeV, op, under, glyph: { hex, w, face } };
+}
+
+/** The natural width of a space where an item is (visual points): no word spacing, no justifying. */
+function pePageTextGapW(it, view) {
+  const op = it.op;
+  const enc = pePageTextEncoder(op.font);
+  const sp = enc.code(' ');
+  const w = (sp != null ? enc.width(sp) : 0) || 250;
+  const G = pmAffMul(it.c ? it.c.tm : op.cells[0].tm, pePageTextViewOf(op, view).M);
+  return (w * op.fm0 * op.ts.size + op.ts.Tc) * (op.ts.Tz / 100) * Math.hypot(G[0], G[1]);
+}
+
+/**
+ * A unit's characters after the editing (the stand-in's text and styles),
+ * as glyphs placed in visual points - see pePageTextEmit. The characters
+ * before the first change stay exactly where they were.
+ *  A line on its own: the new ones follow, then the rest of the line,
+ *  moved along by the change up to a gap the page left between words or
+ *  columns (no space in it), which takes the change, down to a narrow one.
+ *  A paragraph: from its line with the first change on, its words are
+ *  wrapped anew within its width, at its line spacing and alignment
+ *  (justified lines spread to the width, the last one not); once a line
+ *  starts where it did before with nothing changed after it, the lines from
+ *  there on stay as they were.
+ * opts.gone: the stand-in was deleted (nothing is drawn).
+ */
+async function pePageTextRelayout(unit, o, view, siblings, opts) {
+  if (opts && opts.gone) return [];
+  const { text: newText, styles } = pePageTextStyledText(o);
+  const chars = unit.chars;
+  const n = chars.length;
+  const old = chars.map(c => (c.hyph ? '' : c.ch));
+  const keepAt = (i, pos) => chars[i].syn || !old[i] || pePageTextSameStyle(pePageTextCharStyle(chars[i]), styles[pos]);
+  let p = 0, pos = 0;
+  while (p < n && newText.startsWith(old[p], pos) && old[p] !== '\n' && keepAt(p, pos)) { pos += old[p].length; p++; }
+  let s = 0, end = newText.length;
+  while (s < n - p) {
+    const t = old[n - 1 - s];
+    if (end - t.length < pos || newText.slice(end - t.length, end) !== t || !keepAt(n - 1 - s, end - t.length)) break;
+    end -= t.length;
+    s++;
+  }
+  // New text takes the look of the character before it (the first one, at the start).
+  const anchorOf = i => {
+    for (let j = Math.min(i, n) - 1; j >= 0; j--) if (!chars[j].syn) return chars[j];
+    return chars.find(c => !c.syn);
+  };
+  const made = [];
+  for (let k = pos; k < end;) {
+    const ch = newText[k];
+    if (ch === '\n') { made.push({ brk: true }); k++; continue; }
+    if (/\s/.test(ch)) { made.push(await pePageTextMakeGlyph(ch, styles[k], anchorOf(p), siblings, view)); k++; continue; }
+    // A word (of one style): one font for all of it.
+    let j = k;
+    while (j < end && !/\s/.test(newText[j]) && pePageTextSameStyle(styles[j], styles[k])) j++;
+    const word = newText.slice(k, j);
+    const picked = pePageTextPickFont(word, styles[k], anchorOf(p), siblings);
+    for (const c of word) made.push(await pePageTextMakeGlyph(c, styles[k], anchorOf(p), siblings, view, picked));
+    k = j;
+  }
+  const kept = i => ({ ...chars[i], idx: i });
+  const P = unit.para;
+  const out = [];
+  if (!P) {
+    for (let i = 0; i < p; i++) out.push(kept(i));
+    const a = p > 0 ? chars[p - 1] : null;
+    let x = a ? a.x + a.w : (n ? chars[0].x : unit.x0);
+    let y = a ? a.y : unit.y;
+    const lead = (unit.size || 12) * 1.2;
+    made.forEach(m => {
+      if (m.brk) { x = unit.x0; y += lead; return; }
+      out.push({ ...m, x, y });
+      x += m.w;
+    });
+    const rest = [];
+    for (let i = n - s; i < n; i++) rest.push(kept(i));
+    if (rest.length) {
+      let dx = x - rest[0].x;
+      const dy = y - rest[0].y;
+      rest.forEach(c => {
+        if (c.syn && !dy && dx) {
+          const w = Math.max(0.2 * c.size, c.w - dx);
+          out.push({ ...c, x: c.x + dx, w });
+          dx = c.x + dx + w - (c.x + c.w);
+          return;
+        }
+        out.push({ ...c, x: c.x + dx, y: c.y + dy });
+      });
+    }
+    return out;
+  }
+  // A paragraph.
+  const s0 = o.pageText.style0;
+  const align = (o.textAlign || 'left') !== s0.textAlign ? (o.textAlign || 'left') : P.align;
+  const relayAll = align !== P.align;
+  const ratio = Math.abs((Number(o.fontPt) || s0.fontPt) - s0.fontPt) > 0.01 ? (Number(o.fontPt) || s0.fontPt) / s0.fontPt : 1;
+  const lead = P.lead * ratio;
+  const lines = unit.lines;
+  // The first line with a change (a soft break belongs to the line before it).
+  const L = relayAll ? 0 : (p < n ? chars[p].line : chars[n - 1].line);
+  for (let i = 0; i < n; i++) if (chars[i].line < L && !chars[i].soft) out.push(kept(i));
+  // The words from line L on: kept characters, the new ones, the rest.
+  const seq = [];
+  const firstOfLine = lines.map((l, k) => chars.findIndex(c => c.line === k && !c.syn));
+  const fromIdx = chars.findIndex(c => c.line >= L);
+  for (let i = Math.max(0, fromIdx); i < p; i++) seq.push(kept(i));
+  made.forEach(m => seq.push(m));
+  for (let i = n - s; i < n; i++) seq.push(kept(i));
+  const lineY = k => (k < lines.length && ratio === 1 ? lines[k].y : (k < lines.length ? lines[0].y + (lines[k].y - lines[0].y) * ratio : lines[lines.length - 1].y + (k - lines.length + 1) * lead));
+  const W = P.x1 - P.x0;
+  const lineLeft = k => P.x0 + (k === 0 ? P.indent : 0);
+  const lineWidth = k => W - (k === 0 ? P.indent : 0);
+  // Words and the gaps before them.
+  const words = [];
+  let word = null, gap = null, hard = false;
+  seq.forEach(it => {
+    if (it.brk) { word = null; gap = null; hard = true; return; }
+    if (it.hyph) return;   // no hyphen where the word is no longer broken
+    const isSpace = it.syn || /^\s$/.test(it.ch);
+    if (isSpace) {
+      if (word) { gap = it; word = null; }
+      return;
+    }
+    if (!word) {
+      word = { items: [], w: 0, gap, hard };
+      words.push(word);
+      gap = null;
+      hard = false;
+    }
+    word.items.push(it);
+    word.w += it.w;
+  });
+  let k = L;
+  let lineWords = [];
+  let used = 0;
+  let stopAt = -1;
+  const finish = (last) => {
+    const y = lineY(k);
+    const width = lineWidth(k);
+    const gaps = lineWords.slice(1).map(w => (w.gap ? pePageTextGapW(w.gap, view) : 0));
+    const total = lineWords.reduce((acc, w) => acc + w.w, 0) + gaps.reduce((a, b) => a + b, 0);
+    let x = lineLeft(k);
+    if (align === 'center') x = P.x0 + (W - total) / 2;
+    else if (align === 'right') x = P.x1 - total;
+    const extra = align === 'justify' && !last && gaps.length ? (width - total) / gaps.length : 0;
+    lineWords.forEach((w, i) => {
+      if (i) {
+        const g = w.gap;
+        const gw = gaps[i - 1] + extra;
+        if (g && !g.syn) out.push({ ...g, x, y, w: gw });
+        x += gw;
       }
-      out.push({ ...c, x: c.x + dx, y: c.y + dy });
+      w.items.forEach(it => {
+        out.push({ ...it, x, y });
+        x += it.w;
+      });
     });
+    lineWords = [];
+    used = 0;
+    k++;
+  };
+  for (let wi = 0; wi < words.length; wi++) {
+    const w = words[wi];
+    if (w.hard && lineWords.length) finish(true);
+    // Nothing changed from here on and this word starts a line where it did:
+    // the lines from here on stay as they were.
+    if (!relayAll && !lineWords.length && k > L && ratio === 1 && w.items[0].idx != null && w.items[0].idx >= n - s &&
+        k < lines.length && w.items[0].idx === firstOfLine[k]) {
+      stopAt = k;
+      break;
+    }
+    const g = lineWords.length && w.gap ? pePageTextGapW(w.gap, view) : 0;
+    if (lineWords.length && used + g + w.w > lineWidth(k) + 0.5) {
+      finish(false);
+      wi--;
+      continue;
+    }
+    lineWords.push(w);
+    used += (lineWords.length > 1 ? g : 0) + w.w;
   }
+  if (lineWords.length) finish(true);
+  if (stopAt >= 0) for (let i = 0; i < n; i++) if (chars[i].line >= stopAt && !chars[i].soft) out.push(kept(i));
   return out;
 }
 
 /**
- * Content-stream source for laid-out characters (pePageTextLayout): runs of
+ * Content-stream source for laid-out characters (pePageTextRelayout): runs of
  * one font, size and colour, each from its own text matrix - the original
  * glyph's, moved to its new place - and every glyph placed by TJ steps, with
  * character and word spacing 0 (they are in the places already). The fonts
@@ -54776,14 +55159,45 @@ function pePageTextEmit(items, view, fallbackName) {
   return body.join('\n');
 }
 
-/** The source that goes where a line was: its new text, in a text object and q/Q of its own. */
-function pePageTextInsertion(line, body, X) {
-  const op = line.ops[0];
+/**
+ * Content-stream source underlining the glyphs asked to be (pePageTextMakeGlyph:
+ * under): a tenth of the size thick, half that below the baseline - as the
+ * editor's CSS draws it - in their colour; a filled path in the current user
+ * space, outside the text object.
+ */
+function pePageTextUnderlines(items, view) {
+  const out = [];
+  let seg = null;
+  const flush = () => {
+    if (!seg) return;
+    const { Minv } = pePageTextViewOf(seg.op, view);
+    const t = seg.y + seg.size * 0.05, b = t + seg.size * 0.1;
+    const pts = [[seg.x0, t], [seg.x1, t], [seg.x1, b], [seg.x0, b]].map(q => pmAffApply(Minv, q[0], q[1]));
+    out.push('q ' + seg.op.fill + ' ' + pts.map((q, i) => q.map(peVecNum).join(' ') + (i ? ' l' : ' m')).join(' ') + ' h f Q');
+    seg = null;
+  };
+  items.forEach(it => {
+    if (!it.under || it.brk) { flush(); return; }
+    if (seg && Math.abs(seg.y - it.y) < 0.01 && seg.op.fill === it.op.fill && Math.abs(it.x - seg.x1) < 0.5) {
+      seg.x1 = it.x + it.w;
+      return;
+    }
+    flush();
+    seg = { op: it.op, x0: it.x, x1: it.x + it.w, y: it.y, size: it.size };
+  });
+  flush();
+  return out.join('\n');
+}
+
+/** The source that goes where a unit was: its new text, in a text object and q/Q of its own. */
+function pePageTextInsertion(unit, body, X, under) {
+  const op = unit.ops[0];
   const parts = [];
   if (op.inText) parts.push('ET');
   parts.push('q');
   if (X) parts.push(X.map(pePageImgNum).join(' ') + ' cm');
   if (body) parts.push('BT', '0 Tc 0 Tw', body, 'ET');
+  if (under) parts.push(under);
   parts.push('Q');
   // Back in the text object it was in, with the line matrix the operators after it build on.
   if (op.inText) parts.push('BT', op.tlm.map(pePageImgNum).join(' ') + ' Tm');
@@ -54797,19 +55211,19 @@ function pePageTextBytes(text) {
 }
 
 /**
- * Take a line's operators out of the page; what goes in place of the first
+ * Take a unit's operators out of the page; what goes in place of the first
  * one: insertion (content-stream source) - or a marker comment the edited
- * text replaces later (pePageTextFill). The line must still be on the page
- * as it was read (lines from pePageTextData of the current page).
+ * text replaces later (pePageTextFill). The unit must still be on the page
+ * as it was read (units from pePageTextData of the current page).
  */
-async function pePageTextCut(doc, page, line, insertion) {
+async function pePageTextCut(doc, page, unit, insertion) {
   const streams = pePageContentStreamsOnly(doc, page);
   const byStream = new Map();
-  line.ops.forEach(op => {
+  unit.ops.forEach(op => {
     if (!byStream.has(op.streamIdx)) byStream.set(op.streamIdx, []);
     byStream.get(op.streamIdx).push(op);
   });
-  const first = line.ops.reduce((a, b) => (b.streamIdx < a.streamIdx || (b.streamIdx === a.streamIdx && b.start < a.start) ? b : a));
+  const first = unit.ops.reduce((a, b) => (b.streamIdx < a.streamIdx || (b.streamIdx === a.streamIdx && b.start < a.start) ? b : a));
   for (const [si, ops] of byStream) {
     const stream = streams[si];
     const src = stream && peDecodePdfStreamBytes(stream);
@@ -54832,7 +55246,7 @@ async function pePageTextCut(doc, page, line, insertion) {
   return true;
 }
 
-/** Replace the marker a lifted line left (pePageTextCut) with source; false when it is not there. */
+/** Replace the marker a lifted unit left (pePageTextCut) with source; false when it is not there. */
 async function pePageTextFill(doc, page, token, text) {
   const mark = pePageTextBytes('%' + PE_PAGETEXT_MARK + ' ' + token);
   for (const stream of pePageContentStreamsOnly(doc, page)) {
@@ -54859,8 +55273,8 @@ async function pePageTextFill(doc, page, token, text) {
   return false;
 }
 
-/** The visual move/turn of a stand-in, as a map of the current user space at its line (q ... cm). */
-function pePageTextDelta(o, line, view) {
+/** The visual move/turn of a stand-in, as a map of the current user space at its unit (q ... cm). */
+function pePageTextDelta(o, unit, view) {
   if (!pePageTextMoved(o)) return null;
   const el = peGetTextOuterEl(o);
   const sc = Math.max(1e-6, peState.scale || 1);
@@ -54869,7 +55283,7 @@ function pePageTextDelta(o, line, view) {
   const b0 = { x: t.x0, y: t.y0, w: w / view.W, h: h / view.H, rot: 0 };
   const b1 = { x: o.x, y: o.y, w: w / view.W, h: h / view.H, rot: Number(o.rot) || 0 };
   const D = pePageImgUserDelta(b0, b1, view);   // in default user space
-  const C = line.ops[0].ctm;
+  const C = unit.ops[0].ctm;
   const Cinv = pmAffInv(C);
   return Cinv ? pmAffMul(pmAffMul(C, D), Cinv) : null;
 }
@@ -54901,9 +55315,9 @@ async function pePageTextUndoPoint() {
 }
 
 /**
- * Editing a stand-in begins: its line comes out of the page (a marker in
- * its place) and the stand-in's text shows instead, until pePageTextSync
- * writes it back.
+ * Editing a stand-in begins: its unit comes out of the page (a marker in its
+ * place) and the stand-in's text shows instead, until pePageTextSync writes
+ * it back.
  */
 function pePageTextLift(o) {
   if (!o || !o.pageText || o.pageText.live || o.pageText.lifting) return;
@@ -54913,16 +55327,16 @@ function pePageTextLift(o) {
     try {
       if (!peState || !peState.objects.includes(o)) return;
       const data = await pePageTextData();
-      const line = data && pePageTextFind(data.lines, o.pageText.ref);
-      if (!line) return;
+      const unit = data && pePageTextFind(data.units, o.pageText.ref);
+      if (!unit) return;
       ownsWriter = await peClaimLivePdfDocWriter();
       await pePageTextUndoPoint();
       const token = Math.random().toString(36).slice(2, 10);
-      const ok = await pePageTextCut(pdfDoc, pdfDoc.getPage(peState.idx), line, '%' + PE_PAGETEXT_MARK + ' ' + token);
+      const ok = await pePageTextCut(pdfDoc, pdfDoc.getPage(peState.idx), unit, '%' + PE_PAGETEXT_MARK + ' ' + token);
       if (!ok) return;
       o.pageText.live = true;
       o.pageText.token = token;
-      o.pageText.line = line;
+      o.pageText.unit = unit;
       o.pageText.view = data.view;
       o.pageText.siblings = pePageTextSiblings(data.scan);
       if (!pePageTextLive.includes(o)) pePageTextLive.push(o);
@@ -54939,15 +55353,20 @@ function pePageTextLift(o) {
   });
 }
 
-/** Whether something is waiting for the page: lifted lines no longer being edited, moved or deleted lines. */
+/** Stand-ins changed while not lifted out: moved, turned or restyled. */
+function pePageTextChangedObjects() {
+  return peState.objects.filter(o => o.pageText && !o.pageText.live && !o.pageText.lifting && pePageTextChanged(o));
+}
+
+/** Whether something is waiting for the page: lifted units no longer being edited, changed or deleted units. */
 function pePageTextWaiting() {
   if (!peState) return false;
   if (pePageTextDeleted.length) return true;
   if (pePageTextLive.some(o => peState.inlineEditId !== o.id)) return true;
-  return peState.objects.some(o => o.pageText && !o.pageText.live && pePageTextMoved(o));
+  return pePageTextChangedObjects().length > 0;
 }
 
-/** Called on every editor history commit: an edit or a move of the page's text may be over. */
+/** Called on every editor history commit: an edit, a move or a restyle of the page's text may be over. */
 function pePageTextMaybeSchedule() {
   if (!pePageTextWaiting()) return;
   clearTimeout(pePageTextTimer);
@@ -54982,10 +55401,10 @@ async function pePageTextSync() {
   if (!peState || !pdfDoc) return;
   const done = pePageTextLive.filter(o => peState.inlineEditId !== o.id);
   const deleted = pePageTextDeleted.splice(0);
-  const moved = peState.objects.filter(o => o.pageText && !o.pageText.live && pePageTextMoved(o));
-  if (!done.length && !deleted.length && !moved.length) return;
+  const changedObjs = pePageTextChangedObjects();
+  if (!done.length && !deleted.length && !changedObjs.length) return;
   let ownsWriter = false;
-  // Stand-ins to keep selected: where their line starts now (visual points).
+  // Stand-ins to keep selected: where their text starts now (visual points).
   const reselect = [];
   const keepAt = (o, first, view) => {
     if (!first || Math.abs(Number(o.rot) || 0) > 0.01) {
@@ -54994,6 +55413,11 @@ async function pePageTextSync() {
     }
     const t = o.pageText;
     reselect.push({ o, x: first.x + (o.x - t.x0) * view.W, y: first.y + (o.y - t.y0) * view.H });
+  };
+  const write = (unit, items, X, view, fallbackName) => {
+    const body = pePageTextEmit(items, view, fallbackName);
+    const under = pePageTextUnderlines(items, view);
+    return body || under || X ? pePageTextInsertion(unit, body, X, under) : '';
   };
   try {
     ownsWriter = await peClaimLivePdfDocWriter();
@@ -55005,45 +55429,42 @@ async function pePageTextSync() {
       pePageTextLive.splice(pePageTextLive.indexOf(o), 1);
       const t = o.pageText;
       const gone = !peState.objects.includes(o);
-      const line = t.line, view = t.view;
-      const items = await pePageTextLayout(line, gone ? '' : String(o.text || ''), view, t.siblings);
-      const X = gone ? null : pePageTextDelta(o, line, view);
-      const body = pePageTextEmit(items, view, fallbackName);
-      if (await pePageTextFill(pdfDoc, page, t.token, body ? pePageTextInsertion(line, body, X) : '')) changed++;
+      const items = await pePageTextRelayout(t.unit, o, t.view, t.siblings, { gone });
+      const X = gone ? null : pePageTextDelta(o, t.unit, t.view);
+      if (await pePageTextFill(pdfDoc, page, t.token, items.length ? write(t.unit, items, X, t.view, fallbackName) : '')) changed++;
       t.live = false;
-      if (!gone) keepAt(o, items.find(i => !i.syn), view);
+      if (!gone) keepAt(o, items.find(i => !i.syn && !i.brk), t.view);
     }
-    if (moved.length || deleted.length) {
+    if (changedObjs.length || deleted.length) {
       const data = await pePageTextData();
-      for (const o of moved) {
-        const line = data && pePageTextFind(data.lines, o.pageText.ref);
-        if (!line) continue;
-        const X = pePageTextDelta(o, line, data.view);
-        const body = pePageTextEmit(line.chars.map(c => ({ ...c })), data.view, fallbackName);
-        if (await pePageTextCut(pdfDoc, page, line, pePageTextInsertion(line, body, X))) changed++;
-        keepAt(o, line.chars.find(c => !c.syn), data.view);
+      const siblings = pePageTextSiblings(data && data.scan);
+      for (const o of changedObjs) {
+        const unit = data && pePageTextFind(data.units, o.pageText.ref);
+        if (!unit) continue;
+        const items = await pePageTextRelayout(unit, o, data.view, siblings);
+        const X = pePageTextDelta(o, unit, data.view);
+        if (await pePageTextCut(pdfDoc, page, unit, write(unit, items, X, data.view, fallbackName))) changed++;
+        keepAt(o, items.find(i => !i.syn && !i.brk), data.view);
       }
       for (const d of deleted) {
-        const line = data && pePageTextFind(data.lines, d.ref);
-        if (line && await pePageTextCut(pdfDoc, page, line, '')) changed++;
+        const unit = data && pePageTextFind(data.units, d.ref);
+        if (unit && await pePageTextCut(pdfDoc, page, unit, '')) changed++;
       }
     }
     if (!changed) return;
     await pePageTextAfterChange();
-    // The line stays selected, read from the page as it is now.
+    // The text stays selected, read from the page as it is now.
     if (reselect.length) {
       const data = await pePageTextData();
       reselect.forEach(({ o, x, y }) => {
         if (!peState || !peState.objects.includes(o)) return;
-        const line = data && data.lines.find(l => Math.abs(l.y - y) < 0.3 * l.size && x >= l.x0 - 1 && x <= l.x1 + 1);
-        if (!line) {
+        const unit = data && pePageTextUnitAt(data.units, x + 0.5, y);
+        if (!unit) {
           peState.objects = peState.objects.filter(z => z !== o);
           if (peState.sel === o) peState.sel = null;
           return;
         }
-        const f = pePageTextObjectFields(line, data.view);
-        Object.assign(o, { text: f.text, html: f.html, fontPt: f.fontPt, color: f.color, bold: f.bold, italic: f.italic, x: f.x, y: f.y, rot: 0 });
-        o.pageText = { ref: { text: line.text, x0: line.x0, y: line.y }, css: f.css, x0: f.x, y0: f.y, live: false, line: null };
+        pePageTextApply(o, unit, data.view);
       });
     }
     if (peState.sel && !peState.objects.includes(peState.sel)) peState.sel = null;
@@ -60390,9 +60811,9 @@ function peObjMouseDown(e, o) {
     }
   });
 
-  // Desktop, Object-select: a dashed frame around a line of the page's text
-  // or an image of the page under the mouse - a click selects it
-  // (pePageImgTapSelect), a double click edits the line.
+  // Desktop, Object-select: a dashed frame around a paragraph or line of the
+  // page's text or an image of the page under the mouse - a click selects it
+  // (pePageImgTapSelect), a double click edits the text.
   {
     let hoverEl = null, raf = 0, lastX = 0, lastY = 0;
     const hide = () => { if (hoverEl) hoverEl.style.display = 'none'; };
@@ -60402,19 +60823,19 @@ function peObjMouseDown(e, o) {
           document.getElementById('pageEditModal')?.classList.contains('pe-hand-mode')) { hide(); return; }
       const under = document.elementFromPoint(lastX, lastY);
       if (!under || !stage.contains(under) || (under.closest && under.closest('.pe-obj'))) { hide(); return; }
-      const line = pePageTextAt(lastX, lastY);
-      const textView = line && pePageTextCache && pePageTextCache.data && pePageTextCache.data.view;
-      const pl = line ? null : pePageImgAt(lastX, lastY);
+      const unit = pePageTextAt(lastX, lastY);
+      const textView = unit && pePageTextCache && pePageTextCache.data && pePageTextCache.data.view;
+      const pl = unit ? null : pePageImgAt(lastX, lastY);
       const view = textView || (pePageImgCache && pePageImgCache.view);
-      if ((!pl && !line) || !view) { hide(); return; }
+      if ((!pl && !unit) || !view) { hide(); return; }
       if (!hoverEl) {
         hoverEl = document.createElement('div');
         hoverEl.className = 'pe-pageimg-hover';
       }
       if (hoverEl.parentNode !== stage) stage.appendChild(hoverEl);
       const { w: W, h: H } = peStageSize();
-      const b = line
-        ? { x: line.x0 / view.W, y: line.top / view.H, w: (line.x1 - line.x0) / view.W, h: (line.bottom - line.top) / view.H, rot: 0 }
+      const b = unit
+        ? { x: unit.x0 / view.W, y: unit.top / view.H, w: (unit.x1 - unit.x0) / view.W, h: (unit.bottom - unit.top) / view.H, rot: 0 }
         : pl.box;
       hoverEl.style.left = (b.x * W) + 'px';
       hoverEl.style.top = (b.y * H) + 'px';
@@ -69163,6 +69584,7 @@ async function peVecFont(doc, bold, italic) {
     fonts[key] = (async () => {
       doc.registerFontkit(await pmFormLoadFontkit());
       const font = await doc.embedFont(pmRobotoTtfBytes(key), { subset: true });
+      peVecFontReembeddable(doc, font);
       return { key, font, fk: font.embedder.font };
     })();
   }
@@ -69172,6 +69594,44 @@ async function peVecFont(doc, bold, italic) {
     delete fonts[key];
     throw err;
   }
+}
+
+/**
+ * pdf-lib writes a subset font anew on every save after new characters were
+ * encoded with it, and two things go wrong then: the parts of the font it
+ * wrote before stay in the file, unreferenced (it never collects them); and
+ * once a save put the pieces of composed glyphs (accented letters) into the
+ * subset, glyphs encoded after it leave gaps in its glyph list that its
+ * widths code reads past. Old parts are dropped, gaps skipped.
+ */
+function peVecFontReembeddable(doc, font) {
+  const emb = font.embedder;
+  if (emb && emb.glyphCache && Array.isArray(emb.glyphs)) emb.glyphCache.populate = () => emb.glyphs.filter(Boolean);
+  const embed0 = font.embed.bind(font);
+  font.embed = async () => {
+    const old = font.modified ? peVecFontParts(doc, font.ref) : [];
+    await embed0();
+    old.forEach(ref => { try { doc.context.delete(ref); } catch (_) {} });
+  };
+}
+
+/** The objects a written Type0 font is made of besides its own dictionary: CID font, descriptor, font file, ToUnicode. */
+function peVecFontParts(doc, ref) {
+  const ctx = doc.context;
+  const N = PDFLib.PDFName;
+  const dict = ref ? ctx.lookup(ref) : null;
+  if (!(dict instanceof PDFLib.PDFDict)) return [];
+  const parts = [];
+  const take = v => {
+    if (v instanceof PDFLib.PDFRef) parts.push(v);
+    return v ? ctx.lookup(v) : null;
+  };
+  take(dict.get(N.of('ToUnicode')));
+  const desc = dict.lookup(N.of('DescendantFonts'));
+  const cid = desc instanceof PDFLib.PDFArray ? take(desc.get(0)) : null;
+  const fd = cid instanceof PDFLib.PDFDict ? take(cid.get(N.of('FontDescriptor'))) : null;
+  if (fd instanceof PDFLib.PDFDict) take(fd.get(N.of('FontFile2')) || fd.get(N.of('FontFile3')));
+  return parts;
 }
 
 let peVecProbeFontPromise = null;
