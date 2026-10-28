@@ -3734,6 +3734,13 @@
       picture only follows a move, until the page has it there.*/
     .pe-obj-img.pe-pageimg img { opacity: 0; }
     .pe-obj-img.pe-pageimg.pe-pageimg-moved img { opacity: .9; }
+    /*A line of the page's own text (pePageTextSelect): the page shows it -
+      the stand-in's text only once the line is out of the page for editing,
+      or moved.*/
+    .pe-obj-text.pe-pagetext-ghost, .pe-obj-text.pe-pagetext-ghost * {
+      color: transparent !important; background-color: transparent !important;
+      text-decoration-color: transparent !important;
+    }
     /*Desktop, Object-select: an image of the page under the pointer.*/
     .pe-pageimg-hover {
       position: absolute; pointer-events: none; z-index: 4;
@@ -10502,6 +10509,7 @@
         alertApplyCropError: 'Не удалось применить кадрирование',
         alertRedactAreaError: 'Не удалось затереть область',
         alertPageImgError: 'Не удалось изменить изображение на странице',
+        alertPageTextError: 'Не удалось изменить текст на странице',
         alertRedactTextError: 'Не удалось затереть текст',
         alertOpenEditorError: 'Не удалось открыть редактор страницы',
         alertRevertPageEditsError: 'Не удалось отменить изменения страницы',
@@ -11010,6 +11018,7 @@
         alertApplyCropError: 'Could not apply the crop',
         alertRedactAreaError: 'Could not redact the area',
         alertPageImgError: 'Could not change the image on the page',
+        alertPageTextError: 'Could not change the text on the page',
         alertRedactTextError: 'Could not redact the text',
         alertOpenEditorError: 'Could not open the page editor',
         alertRevertPageEditsError: 'Could not revert the page changes',
@@ -11518,6 +11527,7 @@
         alertApplyCropError: 'No se pudo aplicar el recorte',
         alertRedactAreaError: 'No se pudo tachar el área',
         alertPageImgError: 'No se pudo cambiar la imagen de la página',
+        alertPageTextError: 'No se pudo cambiar el texto de la página',
         alertRedactTextError: 'No se pudo tachar el texto',
         alertOpenEditorError: 'No se pudo abrir el editor de páginas',
         alertRevertPageEditsError: 'No se pudieron revertir los cambios de la página',
@@ -12106,6 +12116,7 @@
         alertApplyCropError: '无法应用裁剪',
         alertRedactAreaError: '无法遮盖该区域',
         alertPageImgError: '无法修改页面上的图片',
+        alertPageTextError: '无法修改页面上的文字',
         alertRedactTextError: '无法遮盖该文字',
         alertOpenEditorError: '无法打开页面编辑器',
         alertRevertPageEditsError: '无法撤销页面更改',
@@ -27894,6 +27905,9 @@
           e.stopPropagation();
         }, true);
         layer.addEventListener('click', (e) => {
+          // Page editor, Object-select: a click on a line of the page's own
+          // text selects it (a double click then edits it).
+          if (layer.id === 'peTextLayer' && typeof pePageTextLayerTap === 'function') pePageTextLayerTap(e);
           e.stopPropagation();
         }, true);
       }
@@ -44412,7 +44426,8 @@ async function peLoadEditorPageFromLiveDoc() {
   if (!peState || !pdfDoc) return;
   pePageImgGen++;
   const one = await peSinglePageDoc(pdfDoc, peState.idx);
-  const doc = await pdfjsLib.getDocument({ data: await one.save() }).promise;
+  // fontExtraProperties: the fonts' ToUnicode, widths and glyphs, for editing the page's text.
+  const doc = await pdfjsLib.getDocument({ data: await one.save(), fontExtraProperties: true }).promise;
   const newPage = await doc.getPage(1);
   try { pmDestroyPdfjsDoc(peState.doc); } catch (_) {}
   peState.doc = doc;
@@ -46820,7 +46835,7 @@ async function openPageEditor(idx, restoreSelection) {
     let bytes = (docHistoryIndex >= 0 && docHistory[docHistoryIndex])
       ? docHistory[docHistoryIndex].pdfBytes : null;
     if (!bytes) bytes = new Uint8Array(await pdfDoc.save());
-    const doc = await pdfjsLib.getDocument({ data: bytes.slice() }).promise;
+    const doc = await pdfjsLib.getDocument({ data: bytes.slice(), fontExtraProperties: true }).promise;
     const page = await doc.getPage(idx + 1);
     peState = {
       idx, doc, page,
@@ -46927,9 +46942,9 @@ function peCaptureEditorSnapshot() {
       pageCropBox = { x: cb.x, y: cb.y, w: cb.width, h: cb.height };
     }
   } catch (_) {}
-  // A selected image of the page is no object of the editor: the page's own
-  // bytes (snap.pdfBytes) carry it.
-  const isPageImg = o => !!(o && o.pageImg);
+  // A selected image or line of the page is no object of the editor: the
+  // page's own bytes (snap.pdfBytes) carry it.
+  const isPageImg = o => !!(o && (o.pageImg || o.pageText));
   const objects = peState.objects.filter(o => !isPageImg(o)).map(o => {
     const copy = { ...o };
     delete copy.imgEl;
@@ -47363,6 +47378,8 @@ function peCommitEditorHistory(force) {
   if (!peState || peState.__historyLock) return;
   // A gesture on an image of the page is over: it goes into the page itself.
   pePageImgMaybeSchedule();
+  // So does an edit or a move of the page's text.
+  pePageTextMaybeSchedule();
   const snap = peCaptureEditorSnapshot();
   if (!snap) return;
   const undo = peState.undoStack || [];
@@ -47897,6 +47914,11 @@ function peRedrawObjects() {
       (peState.multiSel || []).includes(o) || pePageImgMoved(o) ||
       pePageImgReplaced.some(r => r.o === o));
   }
+  // So does a line of the page's text - unless it is out of the page being edited.
+  if (peState.objects.some(o => o.pageText)) {
+    peState.objects = peState.objects.filter(o => !o.pageText || o === peState.sel ||
+      (peState.multiSel || []).includes(o) || o.pageText.live || o.pageText.lifting || pePageTextMoved(o));
+  }
   peState.objects.forEach(o => {
     if (o.type === 'comment') return;
     const el = document.createElement('div');
@@ -47923,7 +47945,12 @@ function peRedrawObjects() {
       inner.style.color = o.color;
       inner.style.fontWeight = o.bold ? 'bold' : 'normal';
       inner.style.fontStyle = o.italic ? 'italic' : 'normal';
-      if (o.fontFamily) inner.style.fontFamily = peTextFontStack(o);
+      if (o.fontFamily || o.pageText) inner.style.fontFamily = peTextFontStack(o);
+      // A line of the page's text: the page shows it until it is edited or moved.
+      if (o.pageText) {
+        el.classList.add('pe-pagetext');
+        if (!o.pageText.live && !pePageTextMoved(o)) inner.classList.add('pe-pagetext-ghost');
+      }
       // Text background - only via hiliteColor (span in o.html), not on the container.
       inner.style.backgroundColor = 'transparent';
       peNormalizeTextAlign(o);
@@ -51158,6 +51185,8 @@ function peBeginInlineEdit(o, opts) {
   document.getElementById('pageEditModal')?.classList.remove('pe-text-geom-dragging');
   peState.inlineEditId = o.id;
   peState.inlineEditFocusPending = true;
+  // A line of the page's text: out of the page while it is edited.
+  if (o.pageText) pePageTextLift(o);
   const skipSelectionHistory = !!(opts && opts.isNewDraft) || peState.draftTextId === o.id;
   peSelect(o, { skipSelectionHistory });
   // Focus FIRST while still inside the user gesture (critical for mobile OSK).
@@ -52913,6 +52942,7 @@ const PE_TEXT_FONT_DEFAULT = '"Segoe UI", Arial, sans-serif';
 // the file as real text (peVecTextOps).
 const PE_TEXT_FONT_NEW = 'PM Watermark Roboto';
 function peTextFontStack(o) {
+  if (o && o.pageText && o.pageText.css) return o.pageText.css;   // a line of the page's own text
   return (o && o.fontFamily) ? pmWmFontCss(o.fontFamily) + ', ' + PE_TEXT_FONT_DEFAULT : PE_TEXT_FONT_DEFAULT;
 }
 
@@ -53358,6 +53388,7 @@ function peSerializeObject(o, mode) {
   delete copy.imgEl;
   // A copied image of the page pastes as an ordinary placed image.
   delete copy.pageImg;
+  delete copy.pageText;
   if (mode === 'copy' && copy.type === 'highlight' && copy.hlComment) delete copy.hlComment;
   return JSON.parse(JSON.stringify(copy));
 }
@@ -53406,6 +53437,8 @@ function peDeleteObjects(objects, opts) {
     if (o && o.pageImg && peState.objects.includes(o)) {
       pePageImgDeleted.push({ kind: o.pageImg.kind, name: o.pageImg.name, box0: { ...o.pageImg.box0 } });
     }
+    // A line of the page's text too (one out of the page for editing just stays out).
+    if (o && o.pageText && !o.pageText.live && peState.objects.includes(o)) pePageTextDeleted.push({ ref: o.pageText.ref });
   });
   peState.objects = peState.objects.filter(o => !ids.has(o.id));
   if (peState.sel && ids.has(peState.sel.id)) peState.sel = null;
@@ -53546,7 +53579,13 @@ function pePageImgMoved(o) {
  */
 function pePageImgTapSelect(clientX, clientY) {
   if (!peState || !peState.objSelectMode || peState.tool !== 'select') return false;
-  if ((peState.sel && !peState.sel.pageImg) || (peState.multiSel && peState.multiSel.length)) return false;
+  if ((peState.sel && !peState.sel.pageImg && !peState.sel.pageText) || (peState.multiSel && peState.multiSel.length)) return false;
+  // A line of the page's text first: it is mostly drawn over the pictures.
+  const line = pePageTextAt(clientX, clientY);
+  if (line) {
+    pePageTextSelect(line);
+    return true;
+  }
   const pl = pePageImgAt(clientX, clientY);
   if (!pl) return false;
   pePageImgSelect(pl);
@@ -53768,6 +53807,7 @@ function pePageImgMaybeSchedule() {
 
 /** Whatever is waiting for the page, written now (before Save, undo, redo). */
 async function pePageImgFlush() {
+  await pePageTextFlush();
   for (let guard = 0; guard < 4; guard++) {
     if (pePageImgTimer) {
       clearTimeout(pePageImgTimer);
@@ -53882,6 +53922,1139 @@ function pePickReplacementImage(o) {
     }).catch(() => {});
   };
   input.click();
+}
+
+// ============================================================================
+// The page's own text, edited a line at a time in place (pePageText*).
+// pdf.js decodes the text: its operator list gives every character code a
+// text operator shows, with its Unicode and width, and every font's
+// ToUnicode, widths and which codes have a glyph (fontExtraProperties).
+// pePageTextScan walks the page's own content streams beside it, operator by
+// operator, for where each text operator is and the text state, colour and
+// matrices it is drawn with - the two must agree code for code, or the
+// page's text is left alone. A line (text operators one after another along
+// one baseline) is selected like an image of the page: a stand-in text
+// object over it, see-through until it is edited or moved. Editing lifts the
+// line out of the page, so the editor's text shows alone, and writes it back
+// where it was once the editing ends: in its own fonts, the characters that
+// did not change exactly where they were, new ones in the font of the
+// character before them - or the bundled Roboto for a character that font
+// has no glyph for. Only the page's own content streams, only horizontal
+// visible text (not a scan's invisible OCR layer), and only fonts whose
+// codes can be written (simple fonts, and composite ones with Identity-H).
+// ============================================================================
+
+const PE_PAGETEXT_MARK = 'PMTextEdit';
+let pePageTextCache = null;
+const pePageTextDeleted = [];   // { key } lines to take off the page
+const pePageTextLive = [];      // stand-ins whose line is lifted out of the page, waiting to go back
+let pePageTextChain = Promise.resolve();
+let pePageTextTimer = null, pePageTextPending = null;
+let pePageTextTapTimer = null;   // a tap on page text, selecting its line once it is no double tap
+
+function pmLatin1(src, start, end) {
+  let s = '';
+  for (let k = start; k < end; k++) s += String.fromCharCode(src[k]);
+  return s;
+}
+
+/**
+ * A content-stream lexer. next() gives the next token - { t, v, s, e } with
+ * t 'num', 'name' (decoded), 'str' (bytes), 'arr' (tokens), 'dict', 'kw'
+ * (true/false/null) or 'op' and s/e its byte range - or null at the end.
+ * skipInlineImage() steps over an inline image's data after its BI.
+ */
+function pePdfContentLexer(src) {
+  const len = src.length;
+  let i = 0;
+  const isWS = c => c === 0x20 || c === 0x09 || c === 0x0d || c === 0x0a || c === 0x0c || c === 0;
+  const isDelim = c => c === 0x28 || c === 0x29 || c === 0x3c || c === 0x3e || c === 0x5b ||
+    c === 0x5d || c === 0x7b || c === 0x7d || c === 0x2f || c === 0x25;
+  const skipWS = () => {
+    while (i < len) {
+      const c = src[i];
+      if (isWS(c)) { i++; continue; }
+      if (c === 0x25) { while (i < len && src[i] !== 0x0a && src[i] !== 0x0d) i++; continue; }
+      break;
+    }
+  };
+  const literal = () => {
+    const out = [];
+    i++;
+    let depth = 1;
+    while (i < len) {
+      let c = src[i++];
+      if (c === 0x5c) {
+        if (i >= len) break;
+        c = src[i++];
+        if (c === 0x6e) out.push(0x0a);
+        else if (c === 0x72) out.push(0x0d);
+        else if (c === 0x74) out.push(0x09);
+        else if (c === 0x62) out.push(0x08);
+        else if (c === 0x66) out.push(0x0c);
+        else if (c >= 0x30 && c <= 0x37) {
+          let v = c - 0x30;
+          for (let n = 0; n < 2 && i < len && src[i] >= 0x30 && src[i] <= 0x37; n++) v = v * 8 + (src[i++] - 0x30);
+          out.push(v & 0xff);
+        } else if (c === 0x0d) {
+          if (src[i] === 0x0a) i++;   // a line continued
+        } else if (c !== 0x0a) {
+          out.push(c);
+        }
+        continue;
+      }
+      if (c === 0x28) depth++;
+      else if (c === 0x29 && --depth === 0) break;
+      if (c === 0x0d) {
+        if (src[i] === 0x0a) i++;
+        c = 0x0a;
+      }
+      out.push(c);
+    }
+    return out;
+  };
+  const hex = () => {
+    i++;
+    const out = [];
+    let hi = -1;
+    while (i < len && src[i] !== 0x3e) {
+      const c = src[i++];
+      const v = c >= 0x30 && c <= 0x39 ? c - 0x30 : c >= 0x41 && c <= 0x46 ? c - 55 : c >= 0x61 && c <= 0x66 ? c - 87 : -1;
+      if (v < 0) continue;
+      if (hi < 0) hi = v;
+      else { out.push(hi * 16 + v); hi = -1; }
+    }
+    if (hi >= 0) out.push(hi * 16);
+    i++;
+    return out;
+  };
+  const skipDict = () => {
+    i += 2;
+    let d = 1;
+    while (i < len && d > 0) {
+      skipWS();
+      if (i >= len) break;
+      const c = src[i];
+      if (c === 0x3c && src[i + 1] === 0x3c) { d++; i += 2; continue; }
+      if (c === 0x3e && src[i + 1] === 0x3e) { d--; i += 2; continue; }
+      if (c === 0x28) { literal(); continue; }
+      if (c === 0x3c) { hex(); continue; }
+      i++;
+    }
+  };
+  const word = () => {
+    const s = i;
+    while (i < len && !isWS(src[i]) && !isDelim(src[i])) i++;
+    return pmLatin1(src, s, i);
+  };
+  const value = () => {
+    const s = i, c = src[i];
+    if (c === 0x28) { const v = literal(); return { t: 'str', v, s, e: i }; }
+    if (c === 0x3c && src[i + 1] === 0x3c) { skipDict(); return { t: 'dict', s, e: i }; }
+    if (c === 0x3c) { const v = hex(); return { t: 'str', v, s, e: i }; }
+    if (c === 0x5b) {
+      i++;
+      const items = [];
+      while (i < len) {
+        skipWS();
+        if (i >= len) break;
+        if (src[i] === 0x5d) { i++; break; }
+        items.push(value());
+      }
+      return { t: 'arr', v: items, s, e: i };
+    }
+    if (c === 0x2f) {
+      i++;
+      return { t: 'name', v: peDecodePdfNameToken(word()), s, e: i };
+    }
+    if (isDelim(c)) { i++; return { t: 'junk', s, e: i }; }
+    const w = word();
+    if (/^[+-]?(\d+\.?\d*|\.\d+)$/.test(w)) return { t: 'num', v: parseFloat(w), s, e: i };
+    if (w === 'true' || w === 'false' || w === 'null') return { t: 'kw', v: w, s, e: i };
+    return { t: 'op', v: w, s, e: i };
+  };
+  return {
+    next() {
+      skipWS();
+      return i < len ? value() : null;
+    },
+    skipInlineImage() {
+      while (i < len) {
+        skipWS();
+        if (i >= len) return;
+        if (src[i] === 0x49 && src[i + 1] === 0x44 && (i + 2 >= len || isWS(src[i + 2]) || isDelim(src[i + 2]))) {
+          i += 2;
+          if (i < len && isWS(src[i])) i++;
+          break;
+        }
+        value();
+      }
+      while (i < len) {
+        if (src[i] === 0x45 && src[i + 1] === 0x49 && (i === 0 || isWS(src[i - 1])) &&
+            (i + 2 >= len || isWS(src[i + 2]) || isDelim(src[i + 2]))) {
+          i += 2;
+          return;
+        }
+        i++;
+      }
+    }
+  };
+}
+
+/**
+ * A composite font's CMap is Identity-H: two-byte codes that are the CIDs.
+ * pdf.js hands its CMap over without the name - it shows by its one 0000-FFFF
+ * code range and empty map.
+ */
+function pePageTextIdentityH(cm) {
+  if (!cm || cm.vertical || cm.useCMap) return false;
+  if (cm.name === 'Identity-H') return true;
+  const r = Array.isArray(cm.codespaceRanges) ? cm.codespaceRanges : [];
+  return cm.numCodespaceRanges === 1 && Array.isArray(r[1]) && r[1][0] === 0 && r[1][1] === 0xffff &&
+    !(Array.isArray(cm._map) ? cm._map.length : cm._map && Object.keys(cm._map).length);
+}
+
+/** The text operators pdf.js decoded on the page (not inside forms), in order, and their fonts. */
+async function pePageTextPdfjsOps(pjPage) {
+  const OPS = pdfjsLib.OPS;
+  const list = await pjPage.getOperatorList({ annotationMode: pdfjsLib.AnnotationMode.DISABLE });
+  const ops = [];
+  let depth = 0, font = null, size = 0, fill = '#000000';
+  const stack = [];
+  for (let i = 0; i < list.fnArray.length; i++) {
+    const fn = list.fnArray[i], args = list.argsArray[i] || [];
+    if (fn === OPS.paintFormXObjectBegin) depth++;
+    else if (fn === OPS.paintFormXObjectEnd) depth--;
+    else if (fn === OPS.save) stack.push({ font, size, fill });
+    else if (fn === OPS.restore) {
+      const st = stack.pop();
+      if (st) { font = st.font; size = st.size; fill = st.fill; }
+    } else if (fn === OPS.setFont) { font = args[0]; size = args[1]; }
+    else if (fn === OPS.setFillRGBColor) {
+      if (typeof args[0] === 'string') fill = args[0];
+      else if (args.length >= 3) fill = '#' + [0, 1, 2].map(j => (args[j] | 0).toString(16).padStart(2, '0')).join('');
+    } else if (fn === OPS.showText && depth === 0) ops.push({ font, size, items: args[0] || [], fill });
+  }
+  const fonts = new Map();
+  ops.forEach(r => {
+    if (!r.font || fonts.has(r.font)) return;
+    try { if (pjPage.commonObjs.has(r.font)) fonts.set(r.font, pjPage.commonObjs.get(r.font)); } catch (_) {}
+  });
+  return { ops, fonts };
+}
+
+/**
+ * The page's own text operators (pj: pePageTextPdfjsOps) with where each one
+ * is (content stream, byte range) and how it is drawn: CTM, text and line
+ * matrices, text state, fill and stroke colour as the operators that set them
+ * (written back as they are), and per character its code, Unicode, width and
+ * text matrix. null when the two readings of the page disagree.
+ */
+function pePageTextScan(doc, page, pj) {
+  const recs = pj.ops;
+  const ops = [];
+  let k = 0, bad = false;
+  let ctm = [1, 0, 0, 1, 0, 0], Tm = [1, 0, 0, 1, 0, 0], Tlm = [1, 0, 0, 1, 0, 0], inText = false;
+  let ts = { font: null, size: 0, Tc: 0, Tw: 0, Tz: 100, TL: 0, Ts: 0, Tr: 0 };
+  let fill = '0 g', stroke = '0 G', fillCs = '', strokeCs = '';
+  const stack = [];
+  const streams = pePageContentStreamsOnly(doc, page);
+  for (let si = 0; si < streams.length && !bad; si++) {
+    const src = peDecodePdfStreamBytes(streams[si]);
+    if (!src) continue;
+    const lex = pePdfContentLexer(src);
+    const args = [];
+    const show = (op, start, end) => {
+      let elems = [];
+      if (op === 'TJ') {
+        const arr = args.find(a => a.t === 'arr');
+        elems = arr ? arr.v : [];
+      } else {
+        const str = args.filter(a => a.t === 'str').pop();
+        elems = str ? [str] : [];
+      }
+      let quote = null;
+      if (op === "'" || op === '"') {
+        if (op === '"') {
+          const nn = args.filter(a => a.t === 'num').map(a => a.v);
+          if (nn.length >= 2) { ts.Tw = nn[0]; ts.Tc = nn[1]; quote = nn.slice(0, 2); }
+        }
+        Tlm = pmAffMul([1, 0, 0, 1, 0, -ts.TL], Tlm);
+        Tm = Tlm.slice();
+      }
+      if (!ts.font) return;   // pdf.js skips text with no font set, too
+      const rec = recs[k++];
+      if (!rec) { bad = true; return; }
+      const font = rec.font ? pj.fonts.get(rec.font) : null;
+      const fm0 = font && font.fontMatrix && font.fontMatrix[0] ? Math.abs(font.fontMatrix[0]) : 0.001;
+      const Th = ts.Tz / 100;
+      const composite = !!(font && font.composite);
+      const bpc = !font ? 0 : !composite ? 1 : pePageTextIdentityH(font.cMap) ? 2 : 0;
+      const codes = [];
+      if (bpc) {
+        elems.forEach(el => {
+          if (el.t !== 'str') return;
+          for (let b = 0; b + bpc <= el.v.length; b += bpc) codes.push(bpc === 2 ? el.v[b] * 256 + el.v[b + 1] : el.v[b]);
+        });
+      }
+      const rop = {
+        streamIdx: si, start, end, op, quote, inText, ctm: ctm.slice(), tlm: Tlm.slice(),
+        ts: { ...ts }, fill: (fillCs ? fillCs + ' ' : '') + fill, stroke: (strokeCs ? strokeCs + ' ' : '') + stroke,
+        loaded: rec.font, css: rec.fill, font, fm0, bpc, cells: [], editable: false
+      };
+      let ci = 0;
+      for (const it of rec.items) {
+        if (typeof it === 'number') {
+          Tm = pmAffMul([1, 0, 0, 1, -it / 1000 * ts.size * Th, 0], Tm);
+          continue;
+        }
+        if (!it) continue;
+        if (bpc && codes[ci++] !== it.originalCharCode) { bad = true; return; }
+        const w = Number(it.width) || 0;
+        const adv = (w * fm0 * ts.size + ts.Tc + (it.isSpace ? ts.Tw : 0)) * Th;
+        rop.cells.push({ ch: String(it.unicode || ''), code: it.originalCharCode, w, isSpace: !!it.isSpace, tm: Tm.slice(), adv });
+        Tm = pmAffMul([1, 0, 0, 1, adv, 0], Tm);
+      }
+      if (bpc && ci !== codes.length) { bad = true; return; }
+      rop.tmEnd = Tm.slice();
+      rop.editable = !!(font && bpc && !font.isType3Font && !font.vertical && font.toUnicode && font.toFontChar &&
+        ts.Tr >= 0 && ts.Tr <= 2 && Th > 0 && ts.size > 0);
+      ops.push(rop);
+    };
+    for (let tok = lex.next(); tok && !bad; tok = lex.next()) {
+      if (tok.t !== 'op') { args.push(tok); continue; }
+      const op = tok.v;
+      const start = args.length ? args[0].s : tok.s, end = tok.e;
+      const N = args.filter(a => a.t === 'num').map(a => a.v);
+      const last = N.length ? N[N.length - 1] : NaN;
+      const raw = () => pmLatin1(src, start, end);
+      switch (op) {
+        case 'q': stack.push({ ctm, ts: { ...ts }, fill, stroke, fillCs, strokeCs }); break;
+        case 'Q': {
+          const st = stack.pop();
+          if (st) { ctm = st.ctm; ts = st.ts; fill = st.fill; stroke = st.stroke; fillCs = st.fillCs; strokeCs = st.strokeCs; }
+          break;
+        }
+        case 'cm': if (N.length >= 6) { const m = N.slice(-6); ctm = peMatMul(ctm, m[0], m[1], m[2], m[3], m[4], m[5]); } break;
+        case 'BT': inText = true; Tm = [1, 0, 0, 1, 0, 0]; Tlm = Tm.slice(); break;
+        case 'ET': inText = false; break;
+        case 'Tf': {
+          const nm = args.filter(a => a.t === 'name').pop();
+          if (nm) ts.font = nm.v;
+          if (Number.isFinite(last)) ts.size = last;
+          break;
+        }
+        case 'Tc': if (Number.isFinite(last)) ts.Tc = last; break;
+        case 'Tw': if (Number.isFinite(last)) ts.Tw = last; break;
+        case 'Tz': if (Number.isFinite(last)) ts.Tz = last; break;
+        case 'TL': if (Number.isFinite(last)) ts.TL = last; break;
+        case 'Ts': if (Number.isFinite(last)) ts.Ts = last; break;
+        case 'Tr': if (Number.isFinite(last)) ts.Tr = last; break;
+        case 'Td': case 'TD':
+          if (N.length >= 2) {
+            const tx = N[N.length - 2], ty = N[N.length - 1];
+            if (op === 'TD') ts.TL = -ty;
+            Tlm = pmAffMul([1, 0, 0, 1, tx, ty], Tlm);
+            Tm = Tlm.slice();
+          }
+          break;
+        case 'Tm': if (N.length >= 6) { Tlm = N.slice(-6); Tm = Tlm.slice(); } break;
+        case 'T*': Tlm = pmAffMul([1, 0, 0, 1, 0, -ts.TL], Tlm); Tm = Tlm.slice(); break;
+        case 'Tj': case 'TJ': case "'": case '"': show(op, start, end); break;
+        case 'g': case 'rg': case 'k': fill = raw(); fillCs = ''; break;
+        case 'G': case 'RG': case 'K': stroke = raw(); strokeCs = ''; break;
+        case 'cs': fillCs = raw(); fill = ''; break;
+        case 'sc': case 'scn': fill = raw(); break;
+        case 'CS': strokeCs = raw(); stroke = ''; break;
+        case 'SC': case 'SCN': stroke = raw(); break;
+        case 'BI': lex.skipInlineImage(); break;
+        default: break;
+      }
+      args.length = 0;
+    }
+  }
+  if (bad || k !== recs.length) return null;
+  return { ops, fonts: pj.fonts };
+}
+
+/** User space at a text operator -> the editor's visual points, and back. */
+function pePageTextViewOf(op, view) {
+  const M = pmAffMul(op.ctm, view.V);
+  return { M, Minv: pmAffInv(M) };
+}
+
+/**
+ * The page's text as lines: text operators one after another along one
+ * horizontal baseline, left to right, gaps no wider than about a character.
+ * Per line its characters in the editor's visual points (x, baseline y,
+ * advance w, size) - with a space put in for a gap the page leaves between
+ * words without one - its text, and its box.
+ */
+function pePageTextLines(scan, view) {
+  const lines = [];
+  let cur = null;
+  const sameCtm = (a, b) => a.every((v, j) => Math.abs(v - b[j]) <= 1e-6 * Math.max(1, Math.abs(v)));
+  scan.ops.forEach(op => {
+    if (!op.editable) { cur = null; return; }
+    if (!op.cells.length) { if (cur) cur.ops.push(op); return; }
+    const { M } = pePageTextViewOf(op, view);
+    const G = pmAffMul(op.cells[0].tm, M);
+    const ux = G[0], uy = G[1], vx = G[2], vy = G[3];
+    const su = Math.hypot(ux, uy), sv = Math.hypot(vx, vy);
+    if (!(ux > 0) || Math.abs(uy) > 0.01 * su || !(vy < 0) || Math.abs(vx) > 0.01 * sv) { cur = null; return; }
+    const size = sv * op.ts.size;
+    const cells = op.cells.map(c => {
+      const p = pmAffApply(pmAffMul(c.tm, M), 0, 0);
+      return { op, c, x: p[0], y: p[1], w: c.adv * su, size };
+    });
+    const a = cells[0], z = cells[cells.length - 1];
+    if (cur && sameCtm(cur.ops[0].ctm, op.ctm) && Math.abs(a.y - cur.y) < 0.2 * Math.min(size, cur.size) &&
+        a.x > cur.x1 - 0.3 * size && a.x - cur.x1 < 1.5 * Math.max(size, cur.size)) {
+      cur.ops.push(op);
+      cur.cells.push(...cells);
+      cur.x1 = Math.max(cur.x1, z.x + z.w);
+      cur.size = Math.max(cur.size, size);
+      return;
+    }
+    cur = { ops: [op], cells, y: a.y, x0: a.x, x1: z.x + z.w, size };
+    lines.push(cur);
+  });
+  lines.forEach(l => {
+    const chars = [];
+    let prev = null;
+    l.cells.forEach(cell => {
+      if (prev) {
+        const gap = cell.x - (prev.x + prev.w);
+        if (gap > 0.15 * cell.size && !/\s$/.test(prev.c.ch) && !/^\s/.test(cell.c.ch)) {
+          chars.push({ syn: true, ch: ' ', x: prev.x + prev.w, y: prev.y, w: gap, size: cell.size, op: prev.op });
+        }
+      }
+      chars.push({ syn: false, ch: cell.c.ch, x: cell.x, y: cell.y, w: cell.w, size: cell.size, op: cell.op, c: cell.c });
+      prev = cell;
+    });
+    l.chars = chars;
+    l.text = chars.map(ch => ch.ch).join('');
+    let top = Infinity, bottom = -Infinity;
+    l.cells.forEach(cell => {
+      const f = cell.op.font;
+      const asc = f && f.ascent > 0.4 && f.ascent < 1.6 ? f.ascent : 0.9;
+      const desc = f && f.descent < 0 && f.descent > -0.8 ? -f.descent : 0.25;
+      top = Math.min(top, cell.y - asc * cell.size);
+      bottom = Math.max(bottom, cell.y + desc * cell.size);
+    });
+    l.top = top;
+    l.bottom = bottom;
+  });
+  return lines.filter(l => l.text.trim());
+}
+
+/** The page's text lines - scanned once per state of the page. */
+function pePageTextData() {
+  if (!peState || !pdfDoc || !peState.page) return Promise.resolve(null);
+  const rot = peFinalRotation();
+  const c = pePageTextCache;
+  if (c && c.doc === pdfDoc && c.gen === pePageImgGen && c.idx === peState.idx && c.rot === rot) return c.promise;
+  const page = peState.page, idx = peState.idx;
+  const promise = (async () => {
+    try {
+      const view = pePageImgView();
+      const pj = await pePageTextPdfjsOps(page);
+      if (!peState || peState.page !== page) return null;
+      const scan = pePageTextScan(pdfDoc, pdfDoc.getPage(idx), pj);
+      if (!scan) {
+        console.warn('Page text not editable: the page content and pdf.js disagree');
+        return { view, scan: null, lines: [] };
+      }
+      return { view, scan, lines: pePageTextLines(scan, view) };
+    } catch (err) {
+      console.warn('pePageTextData', err);
+      return null;
+    }
+  })();
+  const entry = { doc: pdfDoc, gen: pePageImgGen, idx, rot, promise, data: null };
+  pePageTextCache = entry;
+  promise.then(d => { entry.data = d; });
+  return promise;
+}
+
+/** The topmost line of the page's text under a screen point - from what is scanned already. */
+function pePageTextAt(clientX, clientY) {
+  if (!peState || !peState.page) return null;
+  void pePageTextData();
+  const data = pePageTextCache && pePageTextCache.data;
+  if (!data || !data.lines.length) return null;
+  const stage = document.getElementById('peStage');
+  const r = stage && stage.getBoundingClientRect();
+  if (!r || !(r.width > 0)) return null;
+  const x = (clientX - r.left) / r.width * data.view.W;
+  const y = (clientY - r.top) / r.height * data.view.H;
+  for (let k = data.lines.length - 1; k >= 0; k--) {
+    const l = data.lines[k];
+    if (x >= l.x0 - 1 && x <= l.x1 + 1 && y >= l.top - 1 && y <= l.bottom + 1) return l;
+  }
+  return null;
+}
+
+/** A CSS font stack that looks like a PDF font, by its name. */
+function pePageTextCss(font) {
+  const name = String((font && font.name) || '').replace(/^[A-Z]{6}\+/, '');
+  const base = name.split(/[-,+_]/)[0].replace(/(PSMT|PS|MT|Std|Pro|LT)$/, '') || 'sans-serif';
+  const pretty = base.replace(/([a-z])([A-Z])/g, '$1 $2');
+  const generic = font && font.isMonospace ? 'monospace' : font && font.isSerifFont ? 'serif' : 'sans-serif';
+  const known = {
+    'Times New Roman': '"Times New Roman", Tinos, "Liberation Serif", Times, serif',
+    'Times': 'Times, "Times New Roman", Tinos, "Liberation Serif", serif',
+    'Arial': 'Arial, Arimo, "Liberation Sans", Helvetica, sans-serif',
+    'Helvetica': 'Helvetica, Arial, Arimo, "Liberation Sans", sans-serif',
+    'Courier New': '"Courier New", Cousine, "Liberation Mono", Courier, monospace',
+    'Courier': 'Courier, "Courier New", Cousine, "Liberation Mono", monospace',
+    'Calibri': 'Calibri, Carlito, sans-serif',
+    'Cambria': 'Cambria, Caladea, serif',
+    'Roboto': pmWmFontCss(PM_WM_ROBOTO_FAMILY) + ', Roboto, sans-serif'
+  };
+  return known[pretty] || ('"' + base + '", "' + pretty + '", ' + generic);
+}
+
+function pePageTextFontLooks(font) {
+  const name = String((font && font.name) || '');
+  return {
+    bold: !!(font && (font.bold || font.black)) || /bold|black|heavy|semibold|demi/i.test(name),
+    italic: !!(font && font.italic) || /italic|oblique/i.test(name)
+  };
+}
+
+const pePageTextShareCache = new Map();
+/** Where CSS puts the baseline in a line box of line-height 1.25 for a font stack, as a share of the size. */
+function pePageTextBaselineShare(css, bold, italic) {
+  const key = css + '|' + bold + '|' + italic;
+  if (pePageTextShareCache.has(key)) return pePageTextShareCache.get(key);
+  let share = 0.97;
+  try {
+    const host = document.createElement('div');
+    host.style.cssText = 'position:fixed;left:-99999px;top:0;visibility:hidden;pointer-events:none;' +
+      'font-size:200px;line-height:1.25;white-space:pre;';
+    host.style.fontFamily = css;
+    host.style.fontWeight = bold ? 'bold' : 'normal';
+    host.style.fontStyle = italic ? 'italic' : 'normal';
+    const mark = document.createElement('span');
+    mark.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline;';
+    host.append('H', mark);
+    document.body.appendChild(host);
+    const v = (mark.getBoundingClientRect().top - host.getBoundingClientRect().top) / 200;
+    host.remove();
+    if (v > 0.5 && v < 1.25) share = v;
+  } catch (_) {}
+  pePageTextShareCache.set(key, share);
+  return share;
+}
+
+/** Same line again after the page was read anew: same text, near the same place. */
+function pePageTextFind(lines, ref) {
+  if (!lines || !ref) return null;
+  let best = null, bestD = Infinity;
+  lines.forEach(l => {
+    if (l.text !== ref.text) return;
+    const d = Math.hypot(l.x0 - ref.x0, l.y - ref.y);
+    if (d < bestD) { bestD = d; best = l; }
+  });
+  return bestD < 3 ? best : null;
+}
+
+/** The stand-in's style and position for a line: font look, size, colour, mixed runs as spans. */
+function pePageTextObjectFields(line, view) {
+  const first = line.cells[0];
+  const font = first.op.font;
+  const looks = pePageTextFontLooks(font);
+  const css = pePageTextCss(font);
+  const fontPt = first.size;
+  const sc = Math.max(1e-6, peState.scale || 1);
+  const share = pePageTextBaselineShare(css, looks.bold, looks.italic);
+  let html = '';
+  let run = null;
+  const flush = () => {
+    if (!run) return;
+    const text = peEscapeHtml(run.text);
+    const styles = [];
+    if (run.css !== css) styles.push('font-family:' + run.css.replace(/"/g, "'"));
+    if (run.looks.bold !== looks.bold) styles.push('font-weight:' + (run.looks.bold ? 'bold' : 'normal'));
+    if (run.looks.italic !== looks.italic) styles.push('font-style:' + (run.looks.italic ? 'italic' : 'normal'));
+    if (run.color !== first.op.css) styles.push('color:' + run.color);
+    if (Math.abs(run.size - fontPt) > 0.05) styles.push('font-size:' + (run.size / fontPt).toFixed(3) + 'em');
+    html += styles.length ? '<span style="' + styles.join(';') + '">' + text + '</span>' : text;
+    run = null;
+  };
+  line.chars.forEach(ch => {
+    const op = ch.op;
+    const key = op.loaded + '|' + op.css + '|' + ch.size.toFixed(2);
+    if (!run || run.key !== key) {
+      flush();
+      run = { key, text: '', css: pePageTextCss(op.font), looks: pePageTextFontLooks(op.font), color: op.css, size: ch.size };
+    }
+    run.text += ch.ch;
+  });
+  flush();
+  return {
+    text: line.text, html, fontPt, color: first.op.css || '#000000', bold: looks.bold, italic: looks.italic,
+    textAlign: 'left', rot: 0,
+    // Its first baseline where the line's is: CSS padding 1px 2px, then the
+    // baseline's place in the line box.
+    x: (line.x0 - 2 / sc) / view.W,
+    y: (line.y - 1 / sc - share * fontPt) / view.H,
+    css
+  };
+}
+
+/**
+ * A click (or tap) on the page's text layer in Object-select: the line under
+ * it is selected - unless the click made a selection of text (that is for
+ * marking up) or is the second of a double click (a word, as before). A
+ * double click on the selected line edits it (the stand-in's dblclick); on
+ * a phone, "Edit text" in its long-press menu.
+ */
+function pePageTextLayerTap(e) {
+  if (!peState || !peState.objSelectMode || peState.tool !== 'select' || e.button !== 0 || e.detail > 1) return;
+  // The click a tap ends with: the tap itself is handled (once it is no double tap).
+  if (!e.touch && (e.pointerType === 'touch' || e.pointerType === 'pen' ||
+      (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents))) return;
+  if (peState.inlineEditId) return;
+  const sel = window.getSelection();
+  if (sel && !sel.isCollapsed) return;
+  const line = pePageTextAt(e.clientX, e.clientY);
+  if (line) pePageTextSelect(line);
+}
+
+/** Select a line of the page's text: a see-through stand-in text object over it. */
+function pePageTextSelect(line) {
+  const data = pePageTextCache && pePageTextCache.data;
+  if (!peState || !line || !data) return null;
+  const f = pePageTextObjectFields(line, data.view);
+  const o = {
+    id: -(++pePageImgIdSeq),
+    type: 'text',
+    text: f.text, html: f.html, fontPt: f.fontPt, color: f.color, bold: f.bold, italic: f.italic,
+    textAlign: 'left', x: f.x, y: f.y, rot: 0,
+    pageText: { ref: { text: line.text, x0: line.x0, y: line.y }, css: f.css, x0: f.x, y0: f.y, live: false, line: null }
+  };
+  peState.objects.push(o);
+  peSelect(o);
+  peRedrawObjects();
+  peUpdateProps();
+  peUpdatePanUi();
+  return o;
+}
+
+function pePageTextMoved(o) {
+  const t = o && o.pageText;
+  if (!t) return false;
+  return Math.abs((Number(o.x) || 0) - t.x0) > 1e-5 || Math.abs((Number(o.y) || 0) - t.y0) > 1e-5 ||
+    Math.abs(Number(o.rot) || 0) > 0.01;
+}
+
+/** Codes a font of the page can write a character with (one with a glyph), and their widths. */
+const pePageTextEncoders = new WeakMap();
+function pePageTextEncoder(font) {
+  let enc = pePageTextEncoders.get(font);
+  if (enc) return enc;
+  const rev = new Map();
+  const tu = font.toUnicode || {};
+  const add = (code, s) => {
+    if (typeof s === 'number') s = String.fromCodePoint(s);
+    if (typeof s !== 'string' || !s) return;
+    if (!rev.has(s)) rev.set(s, []);
+    rev.get(s).push(code);
+  };
+  if (tu._map) {
+    const m = tu._map;
+    if (Array.isArray(m)) m.forEach((s, code) => add(code, s));
+    else Object.keys(m).forEach(code => add(Number(code), m[code]));
+  } else if (Number.isFinite(tu.firstChar) && Number.isFinite(tu.lastChar)) {
+    for (let code = tu.firstChar; code <= tu.lastChar && code < 0x10000; code++) add(code, code);
+  }
+  const toFontChar = font.toFontChar || {};
+  const widths = font.widths || {};
+  enc = {
+    has: code => toFontChar[code] !== undefined,
+    width: code => (typeof widths[code] === 'number' ? widths[code] : (Number(font.defaultWidth) || 0)),
+    code(ch) {
+      const list = rev.get(ch);
+      if (!list) return null;
+      const ok = list.find(c => toFontChar[c] !== undefined);
+      return ok === undefined ? null : ok;
+    }
+  };
+  pePageTextEncoders.set(font, enc);
+  return enc;
+}
+
+function pePageTextHex(code, len) {
+  return code.toString(16).toUpperCase().padStart(len * 2, '0');
+}
+
+/** A PDF font's name without its subset tag ("ABCDEF+"). */
+function pePageTextFontName(font) {
+  return String((font && font.name) || '').replace(/^[A-Z]{6}\+/, '');
+}
+
+/**
+ * The fonts on the page by name: several subsets of one font (one per
+ * resource, each with the glyphs some of the text needed) can stand in for
+ * each other - a character one lacks may be in another.
+ */
+function pePageTextSiblings(scan) {
+  const byName = new Map();
+  const seen = new Set();
+  (scan ? scan.ops : []).forEach(op => {
+    if (!op.editable || seen.has(op.ts.font)) return;
+    seen.add(op.ts.font);
+    const name = pePageTextFontName(op.font);
+    if (!byName.has(name)) byName.set(name, []);
+    byName.get(name).push({ res: op.ts.font, font: op.font, bpc: op.bpc, fm0: op.fm0 });
+  });
+  return byName;
+}
+
+/**
+ * The line's characters after the editing: the ones that did not change
+ * where they were (those after the change moved along by it), the new ones
+ * after them in the font of the character before them (or the bundled
+ * Roboto, for one that font lacks), a new line of text below the last one.
+ * Each glyph as { op (whose state it is drawn with), code(s), hex, w (its
+ * width, 1000-units), fm0, x, y (visual), sx (visual per text-space unit),
+ * face (Roboto, for a fallback glyph) }.
+ */
+async function pePageTextLayout(line, newText, view, siblings) {
+  const chars = line.chars;
+  const old = chars.map(c => c.ch);
+  newText = String(newText || '').replace(/\r\n?/g, '\n').replace(/[​﻿]/g, '');
+  let p = 0, pos = 0;
+  while (p < old.length && newText.startsWith(old[p], pos) && old[p] !== '\n') { pos += old[p].length; p++; }
+  let s = 0, end = newText.length;
+  while (s < old.length - p && end - old[old.length - 1 - s].length >= pos &&
+         newText.slice(end - old[old.length - 1 - s].length, end) === old[old.length - 1 - s]) {
+    end -= old[old.length - 1 - s].length;
+    s++;
+  }
+  const mid = newText.slice(pos, end);
+  // New text takes the style of the character before it (the first one, at the start).
+  let anchor = null;
+  for (let j = Math.max(0, p - 1); j >= 0 && !anchor; j--) if (!chars[j].syn) anchor = chars[j];
+  if (!anchor) anchor = chars.find(c => !c.syn);
+  const out = [];
+  chars.slice(0, p).forEach(c => out.push({ ...c }));
+  // Where the new text starts: right after the unchanged start, or where the line began.
+  let x = p > 0 ? chars[p - 1].x + chars[p - 1].w : (chars.length ? chars[0].x : line.x0);
+  let y = p > 0 ? chars[p - 1].y : line.y;
+  const aop = anchor.op;
+  const aEnc = pePageTextEncoder(aop.font);
+  const { M } = pePageTextViewOf(aop, view);
+  const G = pmAffMul(anchor.c ? anchor.c.tm : aop.cells[0].tm, M);
+  const su = Math.hypot(G[0], G[1]);
+  const Th = aop.ts.Tz / 100;
+  const leading = (aop.ts.TL > 0 ? aop.ts.TL * Math.hypot(G[2], G[3]) : 0) || anchor.size * 1.2;
+  const looks = pePageTextFontLooks(aop.font);
+  for (const ch of mid) {
+    if (ch === '\n') {
+      x = line.x0;
+      y += leading;
+      continue;
+    }
+    const code = aEnc.code(ch);
+    if (code != null && aEnc.has(code)) {
+      const w = aEnc.width(code);
+      const adv = (w * aop.fm0 * aop.ts.size + aop.ts.Tc + (code === 32 && aop.bpc === 1 ? aop.ts.Tw : 0)) * Th * su;
+      out.push({ syn: false, ch, x, y, w: adv, size: anchor.size, op: aop, glyph: { code, len: aop.bpc, w } });
+      x += adv;
+      continue;
+    }
+    // Another subset of the same font that has it.
+    const sib = ((siblings && siblings.get(pePageTextFontName(aop.font))) || []).find(f => {
+      if (f.res === aop.ts.font) return false;
+      const c = pePageTextEncoder(f.font).code(ch);
+      return c != null;
+    });
+    if (sib) {
+      const enc = pePageTextEncoder(sib.font);
+      const code2 = enc.code(ch);
+      const w = enc.width(code2);
+      const adv = (w * sib.fm0 * aop.ts.size + aop.ts.Tc) * Th * su;
+      out.push({ syn: false, ch, x, y, w: adv, size: anchor.size, op: aop, glyph: { code: code2, len: sib.bpc, w, res: sib.res, fm0: sib.fm0 } });
+      x += adv;
+      continue;
+    }
+    if (/\s/.test(ch)) {
+      // A space the font has no glyph for: just the room of one.
+      const sp = aEnc.code(' ');
+      const w = sp != null ? aEnc.width(sp) : 250;
+      const adv = ((w || 250) * aop.fm0 * aop.ts.size + aop.ts.Tc) * Th * su;
+      out.push({ syn: true, ch, x, y, w: adv, size: anchor.size, op: aop });
+      x += adv;
+      continue;
+    }
+    const face = await peVecFont(pdfDoc, looks.bold, looks.italic);
+    const hex = face.font.encodeText(ch).asString();
+    let units = 0;
+    face.fk.layout(ch, face.font.embedder.fontFeatures).positions.forEach(q => { units += q.xAdvance; });
+    const w = units * 1000 / face.fk.unitsPerEm;
+    const adv = (w * 0.001 * aop.ts.size + aop.ts.Tc) * Th * su;
+    out.push({ syn: false, ch, x, y, w: adv, size: anchor.size, op: aop, glyph: { hex, w, face } });
+    x += adv;
+  }
+  // The rest of the line, moved along by the change - up to a gap the page
+  // left between words or columns (no space character in it): that gap
+  // takes the change, down to a narrow one, and what is after it stays put.
+  const rest = chars.slice(chars.length - s);
+  if (rest.length) {
+    let dx = x - rest[0].x;
+    const dy = y - rest[0].y;
+    rest.forEach(c => {
+      if (c.syn && !dy && dx) {
+        const minGap = 0.2 * c.size;
+        const w = Math.max(minGap, c.w - dx);
+        out.push({ ...c, x: c.x + dx, w });
+        dx = c.x + dx + w - (c.x + c.w);
+        return;
+      }
+      out.push({ ...c, x: c.x + dx, y: c.y + dy });
+    });
+  }
+  return out;
+}
+
+/**
+ * Content-stream source for laid-out characters (pePageTextLayout): runs of
+ * one font, size and colour, each from its own text matrix - the original
+ * glyph's, moved to its new place - and every glyph placed by TJ steps, with
+ * character and word spacing 0 (they are in the places already). The fonts
+ * are the page's own by their resource names, Roboto by fallbackName(face).
+ */
+function pePageTextEmit(items, view, fallbackName) {
+  const body = [];
+  let run = null;
+  const flush = () => {
+    if (!run) return;
+    body.push(run.head + '\n[' + run.tj + '] TJ');
+    run = null;
+  };
+  items.forEach(it => {
+    if (it.syn) return;
+    const op = it.op;
+    const { Minv } = pePageTextViewOf(op, view);
+    const g = it.glyph || { code: it.c.code, len: op.bpc, w: it.c.w };
+    const fontRes = g.face ? fallbackName(g.face) : PDFLib.PDFName.of(g.res || op.ts.font).asString();
+    const size = op.ts.size, Th = op.ts.Tz / 100;
+    const fm0 = g.face ? 0.001 : (g.fm0 || op.fm0);
+    // The glyph's text matrix: the one it had (or its run's), moved to (x, y).
+    const base = (it.c ? it.c.tm : op.cells[0].tm);
+    const at = pmAffApply(Minv, it.x, it.y);
+    const tm = [base[0], base[1], base[2], base[3], at[0], at[1]];
+    const key = fontRes + '|' + size + '|' + Th + '|' + op.ts.Ts + '|' + op.ts.Tr + '|' + op.fill + '|' + op.stroke +
+      '|' + base.slice(0, 4).map(peVecNum).join(',');
+    let d = null;
+    if (run && run.key === key) {
+      // Where this glyph is along the run, in the run's text space.
+      const inv = pmAffInv([run.tm[0], run.tm[1], run.tm[2], run.tm[3], 0, 0]);
+      d = inv ? pmAffApply(inv, tm[4] - run.tm[4], tm[5] - run.tm[5]) : null;
+      if (d && Math.abs(d[1]) > 0.01) d = null;   // a line below: a run of its own
+    }
+    if (!d) {
+      flush();
+      run = {
+        key, tm, pen: 0, size, Th, fm0,
+        head: [fontRes + ' ' + peVecNum(size) + ' Tf', peVecNum(Th * 100) + ' Tz', peVecNum(op.ts.Ts) + ' Ts',
+          op.ts.Tr + ' Tr', op.fill, op.stroke, tm.map(peVecNum).join(' ') + ' Tm'].filter(Boolean).join('\n'),
+        tj: ''
+      };
+    } else {
+      const step = (d[0] - run.pen) * 1000 / (run.size * run.Th);
+      if (Math.abs(step) > 0.01) run.tj += peVecNum(-step);
+      run.pen = d[0];
+    }
+    run.tj += '<' + (g.hex || pePageTextHex(g.code, g.len)) + '>';
+    run.pen += g.w * fm0 * run.size * run.Th;
+  });
+  flush();
+  return body.join('\n');
+}
+
+/** The source that goes where a line was: its new text, in a text object and q/Q of its own. */
+function pePageTextInsertion(line, body, X) {
+  const op = line.ops[0];
+  const parts = [];
+  if (op.inText) parts.push('ET');
+  parts.push('q');
+  if (X) parts.push(X.map(pePageImgNum).join(' ') + ' cm');
+  if (body) parts.push('BT', '0 Tc 0 Tw', body, 'ET');
+  parts.push('Q');
+  // Back in the text object it was in, with the line matrix the operators after it build on.
+  if (op.inText) parts.push('BT', op.tlm.map(pePageImgNum).join(' ') + ' Tm');
+  return parts.join('\n');
+}
+
+function pePageTextBytes(text) {
+  const b = new Uint8Array(text.length);
+  for (let k = 0; k < text.length; k++) b[k] = text.charCodeAt(k) & 0xff;
+  return b;
+}
+
+/**
+ * Take a line's operators out of the page; what goes in place of the first
+ * one: insertion (content-stream source) - or a marker comment the edited
+ * text replaces later (pePageTextFill). The line must still be on the page
+ * as it was read (lines from pePageTextData of the current page).
+ */
+async function pePageTextCut(doc, page, line, insertion) {
+  const streams = pePageContentStreamsOnly(doc, page);
+  const byStream = new Map();
+  line.ops.forEach(op => {
+    if (!byStream.has(op.streamIdx)) byStream.set(op.streamIdx, []);
+    byStream.get(op.streamIdx).push(op);
+  });
+  const first = line.ops.reduce((a, b) => (b.streamIdx < a.streamIdx || (b.streamIdx === a.streamIdx && b.start < a.start) ? b : a));
+  for (const [si, ops] of byStream) {
+    const stream = streams[si];
+    const src = stream && peDecodePdfStreamBytes(stream);
+    if (!src) return false;
+    ops.sort((a, b) => b.start - a.start);
+    let cur = src;
+    for (const op of ops) {
+      // ' and " move to the next line first: that stays.
+      let rep = op.op === "'" ? 'T*' : op.op === '"' ? (op.quote || [0, 0]).map(pePageImgNum).join(' Tw ') + ' Tc T*' : '';
+      if (op === first) rep += '\n' + insertion;
+      const ins = pePageTextBytes('\n' + rep + '\n');
+      const next = new Uint8Array(cur.length - (op.end - op.start) + ins.length);
+      next.set(cur.subarray(0, op.start), 0);
+      next.set(ins, op.start);
+      next.set(cur.subarray(op.end), op.start + ins.length);
+      cur = next;
+    }
+    await peRewriteStreamBytes(doc, stream, cur);
+  }
+  return true;
+}
+
+/** Replace the marker a lifted line left (pePageTextCut) with source; false when it is not there. */
+async function pePageTextFill(doc, page, token, text) {
+  const mark = pePageTextBytes('%' + PE_PAGETEXT_MARK + ' ' + token);
+  for (const stream of pePageContentStreamsOnly(doc, page)) {
+    const src = peDecodePdfStreamBytes(stream);
+    if (!src) continue;
+    let at = -1;
+    for (let k = 0; k + mark.length <= src.length && at < 0; k++) {
+      if (src[k] !== 0x25) continue;
+      let j = 0;
+      while (j < mark.length && src[k + j] === mark[j]) j++;
+      if (j === mark.length) at = k;
+    }
+    if (at < 0) continue;
+    let end = at + mark.length;
+    while (end < src.length && src[end] !== 0x0a && src[end] !== 0x0d) end++;
+    const ins = pePageTextBytes(text);
+    const next = new Uint8Array(src.length - (end - at) + ins.length);
+    next.set(src.subarray(0, at), 0);
+    next.set(ins, at);
+    next.set(src.subarray(end), at + ins.length);
+    await peRewriteStreamBytes(doc, stream, next);
+    return true;
+  }
+  return false;
+}
+
+/** The visual move/turn of a stand-in, as a map of the current user space at its line (q ... cm). */
+function pePageTextDelta(o, line, view) {
+  if (!pePageTextMoved(o)) return null;
+  const el = peGetTextOuterEl(o);
+  const sc = Math.max(1e-6, peState.scale || 1);
+  const w = el ? el.offsetWidth / sc : 0, h = el ? el.offsetHeight / sc : 0;
+  const t = o.pageText;
+  const b0 = { x: t.x0, y: t.y0, w: w / view.W, h: h / view.H, rot: 0 };
+  const b1 = { x: o.x, y: o.y, w: w / view.W, h: h / view.H, rot: Number(o.rot) || 0 };
+  const D = pePageImgUserDelta(b0, b1, view);   // in default user space
+  const C = line.ops[0].ctm;
+  const Cinv = pmAffInv(C);
+  return Cinv ? pmAffMul(pmAffMul(C, D), Cinv) : null;
+}
+
+function pePageTextQueue(fn) {
+  const run = pePageTextChain.then(fn, fn);
+  pePageTextChain = run.catch(() => {});
+  return run;
+}
+
+/** The page anew after a change to it: the editor's render, the scan, history. */
+async function pePageTextAfterChange(opts) {
+  setDocumentDirty(true);
+  peState.pdfContentMutated = true;
+  await peReloadEditorPageFromPdfDoc();
+  if (typeof invalidatePageTextLayers === 'function') invalidatePageTextLayers();
+  if (opts && opts.keepEditing) return;
+  const bytesAfter = await pdfDoc.save();
+  peCommitEditorHistory(true);
+  const undo = peState.undoStack || [];
+  if (undo.length) undo[undo.length - 1].pdfBytes = bytesAfter;
+}
+
+/** Undo goes back to the page as it is now. */
+async function pePageTextUndoPoint() {
+  const undo = peState.undoStack || [];
+  const top = undo.length ? undo[undo.length - 1] : null;
+  if (top && !top.pdfBytes) top.pdfBytes = await pdfDoc.save();
+}
+
+/**
+ * Editing a stand-in begins: its line comes out of the page (a marker in
+ * its place) and the stand-in's text shows instead, until pePageTextSync
+ * writes it back.
+ */
+function pePageTextLift(o) {
+  if (!o || !o.pageText || o.pageText.live || o.pageText.lifting) return;
+  o.pageText.lifting = true;
+  void pePageTextQueue(async () => {
+    let ownsWriter = false;
+    try {
+      if (!peState || !peState.objects.includes(o)) return;
+      const data = await pePageTextData();
+      const line = data && pePageTextFind(data.lines, o.pageText.ref);
+      if (!line) return;
+      ownsWriter = await peClaimLivePdfDocWriter();
+      await pePageTextUndoPoint();
+      const token = Math.random().toString(36).slice(2, 10);
+      const ok = await pePageTextCut(pdfDoc, pdfDoc.getPage(peState.idx), line, '%' + PE_PAGETEXT_MARK + ' ' + token);
+      if (!ok) return;
+      o.pageText.live = true;
+      o.pageText.token = token;
+      o.pageText.line = line;
+      o.pageText.view = data.view;
+      o.pageText.siblings = pePageTextSiblings(data.scan);
+      if (!pePageTextLive.includes(o)) pePageTextLive.push(o);
+      const el = peGetInlineTextEl(o);
+      if (el) el.classList.remove('pe-pagetext-ghost');
+      await pePageTextAfterChange({ keepEditing: true });
+    } catch (err) {
+      console.error(err);
+      alert(t('alertPageTextError') + ': ' + (err.message || err));
+    } finally {
+      if (ownsWriter) pdfDocCriticalWriterActive = false;
+      o.pageText.lifting = false;
+    }
+  });
+}
+
+/** Whether something is waiting for the page: lifted lines no longer being edited, moved or deleted lines. */
+function pePageTextWaiting() {
+  if (!peState) return false;
+  if (pePageTextDeleted.length) return true;
+  if (pePageTextLive.some(o => peState.inlineEditId !== o.id)) return true;
+  return peState.objects.some(o => o.pageText && !o.pageText.live && pePageTextMoved(o));
+}
+
+/** Called on every editor history commit: an edit or a move of the page's text may be over. */
+function pePageTextMaybeSchedule() {
+  if (!pePageTextWaiting()) return;
+  clearTimeout(pePageTextTimer);
+  pePageTextTimer = setTimeout(() => {
+    pePageTextTimer = null;
+    pePageTextPending = pePageTextQueue(pePageTextSync);
+  }, 60);
+}
+
+/** Whatever is waiting for the page, written now (before Save, undo, redo). */
+async function pePageTextFlush() {
+  if (!peState) return;
+  const editing = pePageTextLive.find(o => peState.inlineEditId === o.id);
+  if (editing) peFinishTextInlineEdit({ keepSelection: true });
+  if (pePageTextTimer || pePageTextWaiting()) {
+    clearTimeout(pePageTextTimer);
+    pePageTextTimer = null;
+    pePageTextPending = pePageTextQueue(pePageTextSync);
+  }
+  await pePageTextChain;
+}
+
+function pePageTextFallbackNamer(page) {
+  const names = new Map();
+  return face => {
+    if (!names.has(face.key)) names.set(face.key, page.node.newFontDictionary('PMFont', face.font.ref).asString());
+    return names.get(face.key);
+  };
+}
+
+async function pePageTextSync() {
+  if (!peState || !pdfDoc) return;
+  const done = pePageTextLive.filter(o => peState.inlineEditId !== o.id);
+  const deleted = pePageTextDeleted.splice(0);
+  const moved = peState.objects.filter(o => o.pageText && !o.pageText.live && pePageTextMoved(o));
+  if (!done.length && !deleted.length && !moved.length) return;
+  let ownsWriter = false;
+  // Stand-ins to keep selected: where their line starts now (visual points).
+  const reselect = [];
+  const keepAt = (o, first, view) => {
+    if (!first || Math.abs(Number(o.rot) || 0) > 0.01) {
+      peState.objects = peState.objects.filter(x => x !== o);
+      return;
+    }
+    const t = o.pageText;
+    reselect.push({ o, x: first.x + (o.x - t.x0) * view.W, y: first.y + (o.y - t.y0) * view.H });
+  };
+  try {
+    ownsWriter = await peClaimLivePdfDocWriter();
+    await pePageTextUndoPoint();
+    const page = pdfDoc.getPage(peState.idx);
+    const fallbackName = pePageTextFallbackNamer(page);
+    let changed = 0;
+    for (const o of done) {
+      pePageTextLive.splice(pePageTextLive.indexOf(o), 1);
+      const t = o.pageText;
+      const gone = !peState.objects.includes(o);
+      const line = t.line, view = t.view;
+      const items = await pePageTextLayout(line, gone ? '' : String(o.text || ''), view, t.siblings);
+      const X = gone ? null : pePageTextDelta(o, line, view);
+      const body = pePageTextEmit(items, view, fallbackName);
+      if (await pePageTextFill(pdfDoc, page, t.token, body ? pePageTextInsertion(line, body, X) : '')) changed++;
+      t.live = false;
+      if (!gone) keepAt(o, items.find(i => !i.syn), view);
+    }
+    if (moved.length || deleted.length) {
+      const data = await pePageTextData();
+      for (const o of moved) {
+        const line = data && pePageTextFind(data.lines, o.pageText.ref);
+        if (!line) continue;
+        const X = pePageTextDelta(o, line, data.view);
+        const body = pePageTextEmit(line.chars.map(c => ({ ...c })), data.view, fallbackName);
+        if (await pePageTextCut(pdfDoc, page, line, pePageTextInsertion(line, body, X))) changed++;
+        keepAt(o, line.chars.find(c => !c.syn), data.view);
+      }
+      for (const d of deleted) {
+        const line = data && pePageTextFind(data.lines, d.ref);
+        if (line && await pePageTextCut(pdfDoc, page, line, '')) changed++;
+      }
+    }
+    if (!changed) return;
+    await pePageTextAfterChange();
+    // The line stays selected, read from the page as it is now.
+    if (reselect.length) {
+      const data = await pePageTextData();
+      reselect.forEach(({ o, x, y }) => {
+        if (!peState || !peState.objects.includes(o)) return;
+        const line = data && data.lines.find(l => Math.abs(l.y - y) < 0.3 * l.size && x >= l.x0 - 1 && x <= l.x1 + 1);
+        if (!line) {
+          peState.objects = peState.objects.filter(z => z !== o);
+          if (peState.sel === o) peState.sel = null;
+          return;
+        }
+        const f = pePageTextObjectFields(line, data.view);
+        Object.assign(o, { text: f.text, html: f.html, fontPt: f.fontPt, color: f.color, bold: f.bold, italic: f.italic, x: f.x, y: f.y, rot: 0 });
+        o.pageText = { ref: { text: line.text, x0: line.x0, y: line.y }, css: f.css, x0: f.x, y0: f.y, live: false, line: null };
+      });
+    }
+    if (peState.sel && !peState.objects.includes(peState.sel)) peState.sel = null;
+    peRedrawObjects();
+    peUpdateProps();
+  } catch (err) {
+    console.error(err);
+    alert(t('alertPageTextError') + ': ' + (err.message || err));
+  } finally {
+    if (ownsWriter) pdfDocCriticalWriterActive = false;
+  }
 }
 
 function peCloneObjectFromData(data) {
@@ -55607,13 +56780,27 @@ function peBindTextSelHandleDragGuards() {
   };
   const onPtrUp = () => {
     peTextSelPointerDown = false;
+    const tap = peTextLayerTouchPending;
     // Tap on page text (no pan): always clear object selection — the text
     // layer is outside the selected object's bounds.
-    if (peTextLayerTouchPending && peState?.objSelectMode
+    if (tap && peState?.objSelectMode
         && (peState.sel || (peState.multiSel && peState.multiSel.length))) {
       const onPageTextSel = peIsEditorPageTextSelection();
       peSelect(null, { keepPageTextSelection: onPageTextSel });
       if (!onPageTextSel) peClearEditorPageTextSelection();
+    }
+    // ...and selects the line of the page's text it landed on - once it is
+    // no double tap (that zooms, see peOnObjSelectTextLayerPointerDown).
+    if (tap && peState?.objSelectMode && !peIsEditorPageTextSelection()) {
+      clearTimeout(pePageTextTapTimer);
+      const scale0 = peState.scale;
+      pePageTextTapTimer = setTimeout(() => {
+        pePageTextTapTimer = null;
+        // (a zoom since: it was a double tap after all)
+        if (peState && peState.scale === scale0 && !peIsEditorPageTextSelection()) {
+          pePageTextLayerTap({ clientX: tap.startX, clientY: tap.startY, button: 0, detail: 1, touch: true });
+        }
+      }, 320);
     }
     peClearTextLayerTouchPending();
     peEndTextSelHandleDrag();
@@ -58148,6 +59335,9 @@ function peFlushTextLayerTouchPan(clientX, clientY) {
  *  - Finger moves before a selection forms → pan like Hand. */
 function peOnObjSelectTextLayerPointerDown(e) {
   if (!peState || !peState.objSelectMode) return false;
+  // A tap waiting to select a line of the page's text: this one is the second of a double tap.
+  clearTimeout(pePageTextTapTimer);
+  pePageTextTapTimer = null;
   if (!peIsPrimaryPointer(e)) return false;
   const touchLike = e.pointerType === 'touch' || e.pointerType === 'pen';
   if (!touchLike) return false;
@@ -59200,8 +60390,9 @@ function peObjMouseDown(e, o) {
     }
   });
 
-  // Desktop, Object-select: a dashed frame around an image of the page under
-  // the mouse - a click selects it (pePageImgTapSelect).
+  // Desktop, Object-select: a dashed frame around a line of the page's text
+  // or an image of the page under the mouse - a click selects it
+  // (pePageImgTapSelect), a double click edits the line.
   {
     let hoverEl = null, raf = 0, lastX = 0, lastY = 0;
     const hide = () => { if (hoverEl) hoverEl.style.display = 'none'; };
@@ -59211,16 +60402,20 @@ function peObjMouseDown(e, o) {
           document.getElementById('pageEditModal')?.classList.contains('pe-hand-mode')) { hide(); return; }
       const under = document.elementFromPoint(lastX, lastY);
       if (!under || !stage.contains(under) || (under.closest && under.closest('.pe-obj'))) { hide(); return; }
-      const pl = pePageImgAt(lastX, lastY);
-      const view = pePageImgCache && pePageImgCache.view;
-      if (!pl || !view) { hide(); return; }
+      const line = pePageTextAt(lastX, lastY);
+      const textView = line && pePageTextCache && pePageTextCache.data && pePageTextCache.data.view;
+      const pl = line ? null : pePageImgAt(lastX, lastY);
+      const view = textView || (pePageImgCache && pePageImgCache.view);
+      if ((!pl && !line) || !view) { hide(); return; }
       if (!hoverEl) {
         hoverEl = document.createElement('div');
         hoverEl.className = 'pe-pageimg-hover';
       }
       if (hoverEl.parentNode !== stage) stage.appendChild(hoverEl);
       const { w: W, h: H } = peStageSize();
-      const b = pl.box;
+      const b = line
+        ? { x: line.x0 / view.W, y: line.top / view.H, w: (line.x1 - line.x0) / view.W, h: (line.bottom - line.top) / view.H, rot: 0 }
+        : pl.box;
       hoverEl.style.left = (b.x * W) + 'px';
       hoverEl.style.top = (b.y * H) + 'px';
       hoverEl.style.width = (b.w * W) + 'px';
@@ -60038,6 +61233,18 @@ function peObjMouseDown(e, o) {
     }
     // Selected / hit object → object menu (handled on peObjLayer).
     if (e.target.closest && e.target.closest('.pe-obj')) return;
+
+    // RMB in Object-select on a line of the page's own text → it is
+    // selected, with the object menu (edit text, copy, delete).
+    const pageTextHit = peState.objSelectMode ? pePageTextAt(e.clientX, e.clientY) : null;
+    if (pageTextHit) {
+      e.preventDefault();
+      e.stopPropagation();
+      peHidePageToolsCtxMenu();
+      pePageTextSelect(pageTextHit);
+      peShowObjCtxMenu(e.clientX, e.clientY);
+      return;
+    }
 
     // RMB on an image the page paints itself → it is selected, with the
     // object menu (copy, save, replace, delete).
@@ -62768,7 +63975,7 @@ function peSerializeObjectsForMeta(objects) {
   // Unconfirmed redact frames are editor-only and must never persist to
   // page previews / reopen / export metadata - nor a selected image of the
   // page, which is part of the page (pePageImgSelect).
-  return (objects || []).filter(o => o && o.type !== 'redact' && !o.pageImg).map(o => {
+  return (objects || []).filter(o => o && o.type !== 'redact' && !o.pageImg && !o.pageText).map(o => {
     const copy = { ...o };
     delete copy.imgEl;
     if (copy.type === 'image') delete copy.dataUrl;
@@ -68624,7 +69831,7 @@ async function pageEditSave(options) {
     // Any remaining redact frames should already have been confirmed above;
     // strip leftovers so they never enter page metadata.
     // (a selected image of the page is in the page itself already)
-    const persistObjs = peState.objects.filter(o => o.type !== 'redact' && !o.pageImg);
+    const persistObjs = peState.objects.filter(o => o.type !== 'redact' && !o.pageImg && !o.pageText);
     peState.objects = persistObjs;
     // Capture real text box sizes (PDF points) so later page rotates in the
     // grid view keep the visual center - estimate-only rotate drifted at corners.
