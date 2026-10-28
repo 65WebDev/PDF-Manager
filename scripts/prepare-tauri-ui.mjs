@@ -119,6 +119,30 @@ const TAURI_OPEN_BRIDGE = `
     return getGlobalFn('loadPDF');
   }
 
+  // How opening a file went, into the app's log file (ui_log): a file that
+  // did not open can then be traced. Never in the way - an older shell
+  // without the command, or none at all, is fine.
+  function uiLog(message) {
+    try {
+      var core = window.__TAURI__ && window.__TAURI__.core;
+      if (!core || typeof core.invoke !== 'function') return;
+      Promise.resolve(core.invoke('ui_log', { message: String(message) })).catch(function () {});
+    } catch (_) {}
+  }
+
+  // The editor takes one document at a time: loadPDF returns at once while
+  // another one is loading, and the file was dropped without a word. A file
+  // from the system waits for the load before it instead.
+  function editorBusy() {
+    try { return typeof isLoading !== 'undefined' && !!isLoading; } catch (_) { return false; }
+  }
+  async function waitEditorIdle() {
+    if (!editorBusy()) return;
+    var t0 = Date.now();
+    var idle = await waitFor(function () { return !editorBusy(); }, 6000, 100);   // up to 10 min
+    uiLog('waited ' + (Date.now() - t0) + ' ms for the editor' + (idle ? '' : ' - still busy'));
+  }
+
   // Tauri drag-drop positions are PhysicalPosition (screen pixels). DOM APIs
   // (clientX / getBoundingClientRect) use CSS logical pixels. On Windows DPI
   // scaling (125%/150%/…) raw physical coords look “shifted” down-right.
@@ -401,6 +425,7 @@ const TAURI_OPEN_BRIDGE = `
         files.push(file);
       } catch (err) {
         console.error('[Tauri] failed to read', path, err);
+        uiLog('read failed: ' + path + ': ' + (err && err.message ? err.message : err));
         alert('Не удалось открыть файл:\\n' + path + '\\n\\n' + (err && err.message ? err.message : err));
       }
     }
@@ -453,8 +478,11 @@ const TAURI_OPEN_BRIDGE = `
       } else {
         throw new Error('loadPDF not available');
       }
+      var shown = (typeof currentFileName !== 'undefined' && typeof pdfDoc !== 'undefined' && pdfDoc) ? currentFileName : null;
+      uiLog('opened ' + files.map(function (f) { return f.name; }).join(', ') + ' -> ' + (shown ? 'showing ' + shown : 'no document'));
     } catch (err) {
       console.error('[Tauri] open failed', err);
+      uiLog('open failed: ' + (err && err.message ? err.message : err));
       alert('Ошибка открытия PDF: ' + (err && err.message ? err.message : err));
     }
   }
@@ -474,6 +502,7 @@ const TAURI_OPEN_BRIDGE = `
       endOsDragUi();
       return;
     }
+    await waitEditorIdle();
 
     // New document from OS / association / Explorer → maximize immediately.
     await maximizeMainWindow(invoke);
@@ -643,33 +672,32 @@ const TAURI_OPEN_BRIDGE = `
     }
   }
 
-  // Android: a PDF sent to the running app (onNewIntent) is announced by the
-  // plugin calling window.__pmAndroidFilesPending(); returning to the app is
-  // a second chance to pick it up.
-  function watchAndroidOpenedFiles(invoke) {
+  // Files the app is asked to open - the ones it was started with, a second
+  // launch's (desktop), files sent to it (Android) - wait in the shell until
+  // the page takes them (take_pending_open_files). One batch at a time; one
+  // that comes in meanwhile is taken right after.
+  function makePendingDrain(invoke) {
     var busy = false;
     var again = false;
-    async function poll() {
+    return async function drain(reason) {
       if (busy) { again = true; return; }
       busy = true;
       try {
         do {
           again = false;
           var paths = await invoke('take_pending_open_files');
-          if (paths && paths.length && await confirmReplaceUnsaved()) {
-            await openPaths(paths, invoke, null);
+          if (paths && paths.length) {
+            uiLog('take (' + reason + '): ' + paths.join(' | '));
+            if (await confirmReplaceUnsaved()) await openPaths(paths, invoke, null);
           }
         } while (again);
       } catch (err) {
         console.error('[Tauri] take_pending_open_files', err);
+        uiLog('take failed: ' + (err && err.message ? err.message : err));
       } finally {
         busy = false;
       }
-    }
-    window.__pmAndroidFilesPending = poll;
-    document.addEventListener('visibilitychange', function () {
-      if (document.visibilityState === 'visible') poll();
-    });
+    };
   }
 
   async function boot() {
@@ -685,7 +713,8 @@ const TAURI_OPEN_BRIDGE = `
     var tauri = window.__TAURI__;
     var invoke = tauri.core.invoke.bind(tauri.core);
 
-    await refreshDragScaleFactor();
+    // (only Explorer drag-and-drop needs it - opening files does not wait for it)
+    refreshDragScaleFactor();
     try {
       var winApi = tauri.window;
       var getWin = winApi && (winApi.getCurrentWindow || (winApi.Window && winApi.Window.getCurrent));
@@ -697,26 +726,28 @@ const TAURI_OPEN_BRIDGE = `
       }
     } catch (_) {}
 
-    try {
-      var pending = await invoke('take_pending_open_files');
-      console.log('[Tauri] pending open files:', pending);
-      await openPaths(pending, invoke, null);
-    } catch (err) {
-      console.error('[Tauri] take_pending_open_files', err);
-    }
-
-    if (IS_ANDROID) watchAndroidOpenedFiles(invoke);
-
+    var drain = makePendingDrain(invoke);
+    // Listening before the first files are taken: a second launch while this
+    // one starts only queues its paths in the shell and says so - a word that
+    // came before anyone listened was lost, and the file with it.
     if (tauri.event && typeof tauri.event.listen === 'function') {
       try {
-        await tauri.event.listen('open-files', function (event) {
-          console.log('[Tauri] open-files event:', event && event.payload);
-          openPaths(event && event.payload, invoke, null);
-        });
+        await tauri.event.listen('open-files', function () { drain('second launch'); });
       } catch (err) {
         console.error('[Tauri] listen open-files', err);
       }
     }
+    if (IS_ANDROID) {
+      // A PDF sent to the running app (onNewIntent) is announced by the
+      // plugin calling window.__pmAndroidFilesPending(); returning to the app
+      // is a second chance to pick it up.
+      window.__pmAndroidFilesPending = function () { drain('sent to the app'); };
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState === 'visible') drain('back to the app');
+      });
+    }
+    uiLog('page ready in ' + Math.round(performance.now()) + ' ms');
+    await drain('start');
 
     await bindDragDrop(invoke);
   }
