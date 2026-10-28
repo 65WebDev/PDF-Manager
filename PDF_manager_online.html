@@ -3730,6 +3730,16 @@
     }
     .pe-obj-img { overflow: visible; }
     .pe-obj-img img { display: block; width: 100%; height: 100%; pointer-events: none; transform-origin: center center; }
+    /*An image of the page itself (pePageImgSelect): the page shows it; its
+      picture only follows a move, until the page has it there.*/
+    .pe-obj-img.pe-pageimg img { opacity: 0; }
+    .pe-obj-img.pe-pageimg.pe-pageimg-moved img { opacity: .9; }
+    /*Desktop, Object-select: an image of the page under the pointer.*/
+    .pe-pageimg-hover {
+      position: absolute; pointer-events: none; z-index: 4;
+      outline: 1px dashed rgba(52, 152, 219, .95); outline-offset: 0;
+      transform-origin: center center;
+    }
     .pe-obj-comment {
       width: 22px; height: 22px; border-radius: 5px; background: #f5c542;
       border: 1.5px solid #a8811a; display: flex; align-items: center; justify-content: center; font-size: 13px;
@@ -8649,6 +8659,7 @@
       <div class="pe-mkb-keys" id="peMobileKbKeys" aria-label="Клавиатура" data-i18n-aria="peMobileKbKeysAria"></div>
     </div>
     <input type="file" id="peImgInput" accept="image/png,image/jpeg" style="display:none">
+    <input type="file" id="peReplaceImageInput" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none">
     <input type="file" id="peSignatureInput" accept="image/png,image/jpeg,application/pdf,.pdf" style="display:none">
     <input type="file" id="peSignatureLibraryInput" accept="image/png,image/jpeg,application/pdf,.pdf" style="display:none">
     <!-- Mobile Undo/Redo in page editor — same look/placement as preview chrome -->
@@ -8676,6 +8687,7 @@
   <div id="peObjCtxMenu" aria-hidden="true">
     <button type="button" data-action="copy" data-i18n="peCopy">Скопировать</button>
     <button type="button" data-action="save-image-as" hidden style="display:none" data-i18n="saveAs">Сохранить как</button>
+    <button type="button" data-action="replace-image" hidden style="display:none" data-i18n="peReplaceImage">Заменить изображение…</button>
     <button type="button" data-action="cut" data-i18n="peCut">Вырезать</button>
     <button type="button" data-action="paste" data-i18n="pePaste">Вставить</button>
     <button type="button" data-action="edit-text" hidden style="display:none" data-i18n="peEditText">Редактировать</button>
@@ -10296,6 +10308,7 @@
         peAlignRight: 'По правому краю',
         peCopy: 'Скопировать',
         peCut: 'Вырезать',
+        peReplaceImage: 'Заменить изображение…',
         pePaste: 'Вставить',
         peEditText: 'Редактировать',
         peDelete: 'Удалить',
@@ -10488,6 +10501,7 @@
         alertSelectCropAreaFirst: 'Сначала выделите область кадрирования',
         alertApplyCropError: 'Не удалось применить кадрирование',
         alertRedactAreaError: 'Не удалось затереть область',
+        alertPageImgError: 'Не удалось изменить изображение на странице',
         alertRedactTextError: 'Не удалось затереть текст',
         alertOpenEditorError: 'Не удалось открыть редактор страницы',
         alertRevertPageEditsError: 'Не удалось отменить изменения страницы',
@@ -10802,6 +10816,7 @@
         peAlignRight: 'Align right',
         peCopy: 'Copy',
         peCut: 'Cut',
+        peReplaceImage: 'Replace image…',
         pePaste: 'Paste',
         peEditText: 'Edit',
         peDelete: 'Delete',
@@ -10994,6 +11009,7 @@
         alertSelectCropAreaFirst: 'Select the crop area first',
         alertApplyCropError: 'Could not apply the crop',
         alertRedactAreaError: 'Could not redact the area',
+        alertPageImgError: 'Could not change the image on the page',
         alertRedactTextError: 'Could not redact the text',
         alertOpenEditorError: 'Could not open the page editor',
         alertRevertPageEditsError: 'Could not revert the page changes',
@@ -11308,6 +11324,7 @@
         peAlignRight: 'Alinear a la derecha',
         peCopy: 'Copiar',
         peCut: 'Cortar',
+        peReplaceImage: 'Reemplazar imagen…',
         pePaste: 'Pegar',
         peEditText: 'Editar',
         peDelete: 'Eliminar',
@@ -11500,6 +11517,7 @@
         alertSelectCropAreaFirst: 'Seleccione primero el área de recorte',
         alertApplyCropError: 'No se pudo aplicar el recorte',
         alertRedactAreaError: 'No se pudo tachar el área',
+        alertPageImgError: 'No se pudo cambiar la imagen de la página',
         alertRedactTextError: 'No se pudo tachar el texto',
         alertOpenEditorError: 'No se pudo abrir el editor de páginas',
         alertRevertPageEditsError: 'No se pudieron revertir los cambios de la página',
@@ -11881,6 +11899,7 @@
         peAlignRight: '右对齐',
         peCopy: '复制',
         peCut: '剪切',
+        peReplaceImage: '替换图片…',
         pePaste: '粘贴',
         peEditText: '编辑',
         peDelete: '删除',
@@ -12086,6 +12105,7 @@
         alertSelectCropAreaFirst: '请先选择裁剪区域',
         alertApplyCropError: '无法应用裁剪',
         alertRedactAreaError: '无法遮盖该区域',
+        alertPageImgError: '无法修改页面上的图片',
         alertRedactTextError: '无法遮盖该文字',
         alertOpenEditorError: '无法打开页面编辑器',
         alertRevertPageEditsError: '无法撤销页面更改',
@@ -44375,6 +44395,7 @@ async function peCropConfirm() {
 // used to cost on a big document.
 async function peLoadEditorPageFromLiveDoc() {
   if (!peState || !pdfDoc) return;
+  pePageImgGen++;
   const one = await peSinglePageDoc(pdfDoc, peState.idx);
   const doc = await pdfjsLib.getDocument({ data: await one.save() }).promise;
   const newPage = await doc.getPage(1);
@@ -46889,7 +46910,10 @@ function peCaptureEditorSnapshot() {
       pageCropBox = { x: cb.x, y: cb.y, w: cb.width, h: cb.height };
     }
   } catch (_) {}
-  const objects = peState.objects.map(o => {
+  // A selected image of the page is no object of the editor: the page's own
+  // bytes (snap.pdfBytes) carry it.
+  const isPageImg = o => !!(o && o.pageImg);
+  const objects = peState.objects.filter(o => !isPageImg(o)).map(o => {
     const copy = { ...o };
     delete copy.imgEl;
     if (copy.hlComment) copy.hlComment = { ...copy.hlComment };
@@ -46911,8 +46935,8 @@ function peCaptureEditorSnapshot() {
     toolBeforeCrop: peState.toolBeforeCrop || null,
     objSelectBeforeCrop: peState.objSelectBeforeCrop == null ? null : !!peState.objSelectBeforeCrop,
     inlineEditId: peState.inlineEditId || null,
-    selId: peState.sel ? peState.sel.id : null,
-    multiSelIds: (peState.multiSel || []).map(o => o.id),
+    selId: peState.sel && !isPageImg(peState.sel) ? peState.sel.id : null,
+    multiSelIds: (peState.multiSel || []).filter(o => !isPageImg(o)).map(o => o.id),
     objects
   };
   snap.__sig = peEditorSnapshotSignature(snap);
@@ -47320,6 +47344,8 @@ async function peExpandPageEditHistoryIntoDoc(pageIdx, baseRot, baselineBytes, u
 
 function peCommitEditorHistory(force) {
   if (!peState || peState.__historyLock) return;
+  // A gesture on an image of the page is over: it goes into the page itself.
+  pePageImgMaybeSchedule();
   const snap = peCaptureEditorSnapshot();
   if (!snap) return;
   const undo = peState.undoStack || [];
@@ -47334,6 +47360,10 @@ function peCommitEditorHistory(force) {
 
 async function peUndoEditor() {
   if (!peState || peState.__historyLock) return;
+  // An image of the page still on its way into the page lands first, and is
+  // then what this undoes.
+  await pePageImgFlush();
+  if (!peState) return;
   const undo = peState.undoStack || [];
   if (undo.length <= 1) return;
   if (peState.draftTextId && peState.inlineEditId === peState.draftTextId) {
@@ -47350,6 +47380,8 @@ async function peUndoEditor() {
 
 async function peRedoEditor() {
   if (!peState || peState.__historyLock) return;
+  await pePageImgFlush();
+  if (!peState) return;
   const redo = peState.redoStack || [];
   if (!redo.length) return;
   const snap = redo.pop();
@@ -47841,6 +47873,13 @@ function peRedrawObjects() {
   const layer = document.getElementById('peObjLayer');
   layer.innerHTML = '';
   const { w: W, h: H } = peStageSize();
+  // A selected image of the page goes with its selection - once whatever was
+  // done to it is in the page (pePageImgSync).
+  if (peState.objects.some(o => o.pageImg)) {
+    peState.objects = peState.objects.filter(o => !o.pageImg || o === peState.sel ||
+      (peState.multiSel || []).includes(o) || pePageImgMoved(o) ||
+      pePageImgReplaced.some(r => r.o === o));
+  }
   peState.objects.forEach(o => {
     if (o.type === 'comment') return;
     const el = document.createElement('div');
@@ -47955,6 +47994,13 @@ function peRedrawObjects() {
     } else if (o.type === 'image') {
       el.classList.add('pe-obj-img');
       const im = document.createElement('img'); im.src = o.dataUrl;
+      if (o.pageImg) {
+        // The page draws the image itself; its picture shows only while it
+        // is moved somewhere the page has not drawn it yet.
+        el.classList.add('pe-pageimg');
+        if (pePageImgMoved(o)) el.classList.add('pe-pageimg-moved');
+        if (o.pageImg.flip) im.style.transform = 'scaleY(-1)';
+      }
       el.appendChild(im);
       el.style.width = (o.w * W) + 'px'; el.style.height = (o.h * H) + 'px';
       el.style.transformOrigin = 'center center';
@@ -53289,6 +53335,8 @@ let peLastPointerOnStage = { x: 0, y: 0, inside: false };
 function peSerializeObject(o, mode) {
   const copy = { ...o };
   delete copy.imgEl;
+  // A copied image of the page pastes as an ordinary placed image.
+  delete copy.pageImg;
   if (mode === 'copy' && copy.type === 'highlight' && copy.hlComment) delete copy.hlComment;
   return JSON.parse(JSON.stringify(copy));
 }
@@ -53332,6 +53380,12 @@ function peDeleteObjects(objects, opts) {
     peState.inlineEditId = null;
     peState.inlineEditFocusPending = false;
   }
+  // An image of the page comes off the page (as it is there now: box0).
+  objects.forEach(o => {
+    if (o && o.pageImg && peState.objects.includes(o)) {
+      pePageImgDeleted.push({ kind: o.pageImg.kind, name: o.pageImg.name, box0: { ...o.pageImg.box0 } });
+    }
+  });
   peState.objects = peState.objects.filter(o => !ids.has(o.id));
   if (peState.sel && ids.has(peState.sel.id)) peState.sel = null;
   peState.multiSel = (peState.multiSel || []).filter(o => !ids.has(o.id));
@@ -53348,6 +53402,465 @@ function peRehydrateImageObject(o) {
     o.imgEl = im;
   }
   return o;
+}
+
+// ── Images of the page itself ──
+// A click on an image the PDF page paints selects it like an image object -
+// the same frame, handles, rotation, Delete and context menu - but what moves
+// is the page's own drawing. Once a gesture is over (pePageImgSync, from
+// peCommitEditorHistory) the image's operator is rewritten where it is in the
+// page's content (pePageImgRewrite): it keeps its place in the stacking order
+// (under text drawn over it), keeps its own encoding - nothing is
+// re-compressed - and is there to be edited again next time. The object only
+// lives while it is selected: it never goes into the editor meta or the
+// editor's undo snapshots (those carry the page bytes instead).
+
+// Affine maps in the PDF's row-vector convention: [a b c d e f] takes (x, y)
+// to (a x + c y + e, b x + d y + f); pmAffMul(A, B) applies A, then B.
+function pmAffMul(A, B) { return peMatMul(B, A[0], A[1], A[2], A[3], A[4], A[5]); }
+function pmAffInv(M) {
+  const det = M[0] * M[3] - M[1] * M[2];
+  if (!det || !Number.isFinite(det)) return null;
+  const a = M[3] / det, b = -M[1] / det, c = -M[2] / det, d = M[0] / det;
+  return [a, b, c, d, -(M[4] * a + M[5] * c), -(M[4] * b + M[5] * d)];
+}
+function pmAffApply(M, x, y) { return [M[0] * x + M[2] * y + M[4], M[1] * x + M[3] * y + M[5]]; }
+// Clockwise on screen (y down), as CSS rotate() turns an object.
+function pmAffRot(deg) {
+  const r = deg * Math.PI / 180, c = Math.cos(r), s = Math.sin(r);
+  return [c, s, -s, c, 0, 0];
+}
+
+let pePageImgGen = 0;           // bumped whenever the page under the editor is reloaded
+let pePageImgCache = null;
+let pePageImgIdSeq = 0;         // negative ids: outside peState.seq, which undo snapshots carry
+let pePageImgBusy = false, pePageImgAgain = false, pePageImgTimer = null, pePageImgRun = null;
+const pePageImgDeleted = [];    // { kind, name, box0 } waiting to come off the page
+const pePageImgReplaced = [];   // { o, file } waiting for their new picture
+const PE_PAGEIMG_BLANK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
+/** The page as the editor shows it: user space -> visual points (scale 1). */
+function pePageImgView() {
+  const vp = peState.page.getViewport({ scale: 1, rotation: peFinalRotation() });
+  return { V: Array.from(vp.transform), W: vp.width, H: vp.height };
+}
+
+/** An image's box as the editor's objects hold one (stage fractions, degrees). */
+function pePageImgBoxOf(ctm, view) {
+  const M = pmAffMul(ctm, view.V);   // unit square of the image -> visual points
+  const p00 = pmAffApply(M, 0, 0), p10 = pmAffApply(M, 1, 0), p01 = pmAffApply(M, 0, 1);
+  const ux = p10[0] - p00[0], uy = p10[1] - p00[1];
+  const vx = p01[0] - p00[0], vy = p01[1] - p00[1];   // towards the image's top row
+  const w = Math.hypot(ux, uy), h = Math.hypot(vx, vy);
+  const cx = p00[0] + (ux + vx) / 2, cy = p00[1] + (uy + vy) / 2;
+  let rot = Math.atan2(uy, ux) * 180 / Math.PI;
+  rot = Math.round(rot * 1000) / 1000;
+  if (Math.abs(rot) < 0.001) rot = 0;
+  return {
+    x: (cx - w / 2) / view.W, y: (cy - h / 2) / view.H, w: w / view.W, h: h / view.H, rot,
+    // Drawn upside down (its top row towards the bottom of its box).
+    flip: (ux * vy - uy * vx) > 0,
+    M
+  };
+}
+
+function pePageImgBoxNear(a, b, view) {
+  const tol = 1.5;   // points
+  const d = Math.abs(((a.rot - b.rot) % 360 + 540) % 360 - 180);
+  return Math.abs((a.x - b.x) * view.W) < tol && Math.abs((a.y - b.y) * view.H) < tol &&
+    Math.abs((a.w - b.w) * view.W) < tol && Math.abs((a.h - b.h) * view.H) < tol && d < 0.5;
+}
+
+/** The page's images, last painted last (topmost). Cached until the page changes. */
+function pePageImgList() {
+  if (!peState || !pdfDoc || !peState.page) return [];
+  const rot = peFinalRotation();
+  const c = pePageImgCache;
+  if (c && c.doc === pdfDoc && c.rot === rot && c.gen === pePageImgGen && c.idx === peState.idx) return c.list;
+  let view = null, list = [];
+  try {
+    view = pePageImgView();
+    list = pePageImgScan(pdfDoc, pdfDoc.getPage(peState.idx))
+      .map(pl => Object.assign(pl, { box: pePageImgBoxOf(pl.ctm, view) }))
+      .filter(pl => pl.box.w * view.W >= 3 && pl.box.h * view.H >= 3);
+  } catch (err) {
+    console.warn('pePageImgList', err);
+  }
+  pePageImgCache = { doc: pdfDoc, rot, gen: pePageImgGen, idx: peState.idx, view, list };
+  return list;
+}
+
+/** The topmost image of the page under a screen point, or null. */
+function pePageImgAt(clientX, clientY) {
+  const stage = document.getElementById('peStage');
+  if (!stage || !peState || !peState.page) return null;
+  const r = stage.getBoundingClientRect();
+  if (!(r.width > 0) || !(r.height > 0)) return null;
+  const list = pePageImgList();
+  const view = pePageImgCache && pePageImgCache.view;
+  if (!view || !list.length) return null;
+  const x = (clientX - r.left) / r.width * view.W;
+  const y = (clientY - r.top) / r.height * view.H;
+  for (let k = list.length - 1; k >= 0; k--) {
+    const inv = pmAffInv(list[k].box.M);
+    if (!inv) continue;
+    const st = pmAffApply(inv, x, y);
+    if (st[0] >= 0 && st[0] <= 1 && st[1] >= 0 && st[1] <= 1) return list[k];
+  }
+  return null;
+}
+
+function pePageImgMoved(o) {
+  const a = o.pageImg && o.pageImg.box0;
+  if (!a) return false;
+  const d = Math.abs((((Number(o.rot) || 0) - a.rot) % 360 + 540) % 360 - 180);
+  return Math.abs(o.x - a.x) > 1e-5 || Math.abs(o.y - a.y) > 1e-5 ||
+    Math.abs(o.w - a.w) > 1e-5 || Math.abs(o.h - a.h) > 1e-5 || d > 0.01;
+}
+
+/**
+ * A tap on the bare page in Object-select: picks the image of the page under
+ * it. With something else selected the tap only drops that selection, as
+ * before - a tap meant to deselect must not pick up a background picture.
+ */
+function pePageImgTapSelect(clientX, clientY) {
+  if (!peState || !peState.objSelectMode || peState.tool !== 'select') return false;
+  if ((peState.sel && !peState.sel.pageImg) || (peState.multiSel && peState.multiSel.length)) return false;
+  const pl = pePageImgAt(clientX, clientY);
+  if (!pl) return false;
+  pePageImgSelect(pl);
+  return true;
+}
+
+/** Select an image of the page: a stand-in image object over it. */
+function pePageImgSelect(pl) {
+  if (!peState || !pl) return null;
+  const view = pePageImgCache && pePageImgCache.view;
+  const b = pl.box;
+  const o = {
+    id: -(++pePageImgIdSeq),
+    type: 'image',
+    x: b.x, y: b.y, w: b.w, h: b.h, rot: b.rot,
+    origAspect: view ? Math.max(0.01, (b.w * view.W) / Math.max(1e-6, b.h * view.H)) : 1,
+    dataUrl: PE_PAGEIMG_BLANK,
+    imgEl: null,
+    pageImg: {
+      kind: pl.kind, name: pl.name, flip: b.flip,
+      box0: { x: b.x, y: b.y, w: b.w, h: b.h, rot: b.rot }
+    }
+  };
+  peState.objects.push(o);
+  peSelect(o);
+  peRedrawObjects();
+  peUpdateProps();
+  peUpdatePanUi();
+  // Its picture, for while it is being moved (until then the page shows it).
+  void pePageImgPixels(pl).then(url => {
+    if (!url || !peState || !peState.objects.includes(o)) return;
+    o.dataUrl = url;
+    o.imgEl = null;
+    peRehydrateImageObject(o);
+    peRedrawObjects();
+  });
+  return o;
+}
+
+/** The picture of a page image, from what pdf.js decoded to draw the page. */
+async function pePageImgPixels(pl) {
+  try {
+    const page = peState && peState.page;
+    const OPS = pdfjsLib && pdfjsLib.OPS;
+    if (!page || !OPS) return null;
+    const opList = await page.getOperatorList();
+    const near = (a, b) => a.every((v, k) => Math.abs(v - b[k]) < 0.01 * Math.max(1, Math.abs(b[k])));
+    let ctm = [1, 0, 0, 1, 0, 0];
+    const stack = [];
+    let found = null;
+    for (let i = 0; i < opList.fnArray.length && !found; i++) {
+      const fn = opList.fnArray[i];
+      const args = opList.argsArray[i];
+      if (fn === OPS.save) stack.push(ctm.slice());
+      else if (fn === OPS.restore) ctm = stack.pop() || [1, 0, 0, 1, 0, 0];
+      else if (fn === OPS.transform) ctm = peMatMul(ctm, args[0], args[1], args[2], args[3], args[4], args[5]);
+      else if (fn === OPS.paintFormXObjectBegin) {
+        stack.push(ctm.slice());
+        const m = args && args[0];
+        if (m && m.length === 6) ctm = peMatMul(ctm, m[0], m[1], m[2], m[3], m[4], m[5]);
+      } else if (fn === OPS.paintFormXObjectEnd) ctm = stack.pop() || [1, 0, 0, 1, 0, 0];
+      else if ((fn === OPS.paintImageXObject || fn === OPS.paintJpegXObject ||
+                fn === OPS.paintInlineImageXObject || fn === OPS.paintImageMaskXObject) && near(ctm, pl.ctm)) {
+        found = { fn, arg: args[0] };
+      }
+    }
+    if (!found) return null;
+    let data = found.arg;
+    if (typeof data === 'string') {
+      const objs = data.startsWith('g_') ? page.commonObjs : page.objs;
+      data = await Promise.race([
+        new Promise(res => { try { objs.get(found.arg, res); } catch (_) { res(null); } }),
+        new Promise(res => setTimeout(() => res(null), 4000))
+      ]);
+    }
+    const src = data ? pdfImageDataToCanvas(data) : null;
+    if (!src) return null;
+    const MAX = 2400;
+    const k = Math.min(1, MAX / Math.max(src.width, src.height));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(src.width * k));
+    c.height = Math.max(1, Math.round(src.height * k));
+    c.getContext('2d').drawImage(src, 0, 0, c.width, c.height);
+    return c.toDataURL('image/png');
+  } catch (err) {
+    console.warn('pePageImgPixels', err);
+    return null;
+  }
+}
+
+/** The image's own "q a b c d e f cm ... Q" right around its operator, if any. */
+function pePageImgWrapper(src, start, end) {
+  const from = Math.max(0, start - 400);
+  let before = '';
+  for (let k = from; k < start; k++) before += String.fromCharCode(src[k]);
+  const num = '([-+]?(?:\\d+\\.?\\d*|\\.\\d+)(?:[eE][-+]?\\d+)?)';
+  const re = new RegExp('(^|[\\s\\]\\)>}])q\\s+' + Array(6).fill(num).join('\\s+') + '\\s+cm\\s*$');
+  const mb = re.exec(before);
+  if (!mb) return null;
+  let after = '';
+  for (let k = end; k < Math.min(src.length, end + 16); k++) after += String.fromCharCode(src[k]);
+  const ma = /^\s*Q(?=[\s\[\]()<>{}\/%]|$)/.exec(after);
+  if (!ma) return null;
+  const m = mb.slice(2, 8).map(Number);
+  if (!m.every(Number.isFinite)) return null;
+  return { start: from + mb.index + mb[1].length, end: end + ma[0].length, m };
+}
+
+function pePageImgNum(v) {
+  if (!Number.isFinite(v)) return '0';
+  let s = v.toFixed(6);
+  if (s.indexOf('.') >= 0) s = s.replace(/0+$/, '').replace(/\.$/, '');
+  return s === '-0' ? '0' : s;
+}
+
+/** Visual box b0 -> b1 as a map of user space (scale, rotation, move about the box). */
+function pePageImgUserDelta(b0, b1, view) {
+  const c0x = (b0.x + b0.w / 2) * view.W, c0y = (b0.y + b0.h / 2) * view.H;
+  const c1x = (b1.x + b1.w / 2) * view.W, c1y = (b1.y + b1.h / 2) * view.H;
+  const sx = b0.w > 0 ? b1.w / b0.w : 1, sy = b0.h > 0 ? b1.h / b0.h : 1;
+  let T = [1, 0, 0, 1, -c0x, -c0y];
+  T = pmAffMul(T, pmAffRot(-(Number(b0.rot) || 0)));
+  T = pmAffMul(T, [sx, 0, 0, sy, 0, 0]);
+  T = pmAffMul(T, pmAffRot(Number(b1.rot) || 0));
+  T = pmAffMul(T, [1, 0, 0, 1, c1x, c1y]);
+  const Vinv = pmAffInv(view.V);
+  return pmAffMul(pmAffMul(view.V, T), Vinv);
+}
+
+/**
+ * Rewrite one image of the page in place. ref: { kind, name, box0 } - the
+ * image as it is on the page now. action: { box } to move/resize/rotate it to
+ * that box, { remove: true }, or { name, fitW, fitH } to paint another image
+ * XObject in its place (fitted into its box, proportions kept). Returns the
+ * image's new CTM (or true when removed), null when it was not found.
+ */
+async function pePageImgRewrite(doc, page, view, ref, action) {
+  const target = pePageImgScan(doc, page).find(pl =>
+    pl.kind === ref.kind && (pl.kind !== 'xobj' || pl.name === ref.name) &&
+    pePageImgBoxNear(pePageImgBoxOf(pl.ctm, view), ref.box0, view));
+  if (!target) return null;
+  const stream = pePageContentStreamsOnly(doc, page)[target.streamIdx];
+  const src = stream && peDecodePdfStreamBytes(stream);
+  if (!src) return null;
+  const wrap = pePageImgWrapper(src, target.start, target.end);
+  const C = target.ctm;
+  const mInv = wrap ? pmAffInv(wrap.m) : null;
+  const Cout = mInv ? pmAffMul(mInv, C) : C;   // the CTM outside the image's own q/cm/Q
+  const span = wrap && mInv ? wrap : { start: target.start, end: target.end };
+  let body = '';
+  for (let k = target.start; k < target.end; k++) body += String.fromCharCode(src[k]);
+  let text = '', newCtm = null;
+  if (!action.remove) {
+    if (action.box) {
+      newCtm = pmAffMul(C, pePageImgUserDelta(pePageImgBoxOf(C, view), action.box, view));
+    } else if (action.name) {
+      // The new picture fitted into the old one's box, centred.
+      const b = pePageImgBoxOf(C, view);
+      const boxA = (b.w * view.W) / Math.max(1e-6, b.h * view.H);
+      const imgA = action.fitW / Math.max(1, action.fitH);
+      let sw = 1, sh = 1;
+      if (imgA > boxA) sh = boxA / imgA; else sw = imgA / boxA;
+      newCtm = pmAffMul([sw, 0, 0, sh, (1 - sw) / 2, (1 - sh) / 2], C);
+      body = action.name + ' Do';
+    } else {
+      return null;
+    }
+    const CoutInv = pmAffInv(Cout);
+    if (!CoutInv) return null;
+    const M = pmAffMul(newCtm, CoutInv);
+    text = 'q ' + M.map(pePageImgNum).join(' ') + ' cm ' + body + ' Q';
+  }
+  const ins = new Uint8Array(text.length);
+  for (let k = 0; k < text.length; k++) ins[k] = text.charCodeAt(k) & 0xff;
+  const out = new Uint8Array(src.length - (span.end - span.start) + ins.length + 2);
+  out.set(src.subarray(0, span.start), 0);
+  let p = span.start;
+  // Keep it apart from whatever comes before and after it.
+  out[p++] = 0x0a;
+  out.set(ins, p); p += ins.length;
+  out[p++] = 0x0a;
+  out.set(src.subarray(span.end), p);
+  await peRewriteStreamBytes(doc, stream, out);
+  return action.remove ? true : newCtm;
+}
+
+/** An image file as something pdf-lib embeds: JPEG as it is, anything else as PNG. */
+async function pePageImgEmbedFile(doc, file) {
+  const isJpeg = /jpe?g$/i.test(file.type || '') || /\.jpe?g$/i.test(file.name || '');
+  const loaded = await peLoadImageFile(file);
+  const w = loaded.im.naturalWidth, h = loaded.im.naturalHeight;
+  let img;
+  if (isJpeg) {
+    img = await doc.embedJpg(new Uint8Array(await file.arrayBuffer()));
+  } else {
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    c.getContext('2d').drawImage(loaded.im, 0, 0);
+    const blob = await new Promise(res => c.toBlob(res, 'image/png'));
+    img = await doc.embedPng(new Uint8Array(await blob.arrayBuffer()));
+  }
+  return { img, w, h, dataUrl: loaded.dataUrl };
+}
+
+function pePageImgSchedule(ms) {
+  clearTimeout(pePageImgTimer);
+  pePageImgTimer = setTimeout(() => {
+    pePageImgTimer = null;
+    pePageImgRun = pePageImgSync();
+  }, ms == null ? 80 : ms);
+}
+
+/** Called on every editor history commit: a gesture on a page image is over. */
+function pePageImgMaybeSchedule() {
+  if (!peState) return;
+  if (pePageImgDeleted.length || pePageImgReplaced.length ||
+      peState.objects.some(o => o.pageImg && pePageImgMoved(o))) pePageImgSchedule();
+}
+
+/** Whatever is waiting for the page, written now (before Save, undo, redo). */
+async function pePageImgFlush() {
+  for (let guard = 0; guard < 4; guard++) {
+    if (pePageImgTimer) {
+      clearTimeout(pePageImgTimer);
+      pePageImgTimer = null;
+      pePageImgRun = pePageImgSync();
+    }
+    if (!pePageImgRun) return;
+    const run = pePageImgRun;
+    await run;
+    if (run === pePageImgRun && !pePageImgTimer) { pePageImgRun = null; return; }
+  }
+}
+
+async function pePageImgSync() {
+  if (!peState || !pdfDoc) return;
+  if (pePageImgBusy) { pePageImgAgain = true; return; }
+  const moved = peState.objects.filter(o => o.pageImg && pePageImgMoved(o));
+  const deleted = pePageImgDeleted.splice(0);
+  const replaced = pePageImgReplaced.splice(0);
+  if (!moved.length && !deleted.length && !replaced.length) return;
+  pePageImgBusy = true;
+  let ownsWriter = false;
+  try {
+    ownsWriter = await peClaimLivePdfDocWriter();
+    // Undo goes back to the page as it is now.
+    const undo = peState.undoStack || [];
+    const top = undo.length ? undo[undo.length - 1] : null;
+    if (top && !top.pdfBytes) top.pdfBytes = await pdfDoc.save();
+    const page = pdfDoc.getPage(peState.idx);
+    const view = pePageImgView();
+    let changed = 0;
+    const settle = (o, ctm) => {
+      const b = pePageImgBoxOf(ctm, view);
+      Object.assign(o, { x: b.x, y: b.y, w: b.w, h: b.h, rot: b.rot });
+      o.pageImg.flip = b.flip;
+      o.pageImg.box0 = { x: b.x, y: b.y, w: b.w, h: b.h, rot: b.rot };
+    };
+    for (const o of moved) {
+      const box = { x: o.x, y: o.y, w: o.w, h: o.h, rot: Number(o.rot) || 0 };
+      const ctm = await pePageImgRewrite(pdfDoc, page, view, o.pageImg, { box });
+      if (ctm) { settle(o, ctm); changed++; }
+    }
+    for (const d of deleted) {
+      if (await pePageImgRewrite(pdfDoc, page, view, d, { remove: true })) changed++;
+    }
+    for (const r of replaced) {
+      const o = r.o;
+      const emb = await pePageImgEmbedFile(pdfDoc, r.file);
+      const name = String(page.node.newXObject('Im', emb.img.ref));
+      const ctm = await pePageImgRewrite(pdfDoc, page, view, o.pageImg,
+        { name: name.startsWith('/') ? name : '/' + name, fitW: emb.w, fitH: emb.h });
+      if (!ctm) continue;
+      o.pageImg.kind = 'xobj';
+      o.pageImg.name = peDecodePdfNameToken(name.replace(/^\//, ''));
+      settle(o, ctm);
+      o.origAspect = emb.w / Math.max(1, emb.h);
+      o.dataUrl = emb.dataUrl;
+      o.imgEl = null;
+      peRehydrateImageObject(o);
+      changed++;
+    }
+    if (!changed) return;
+    setDocumentDirty(true);
+    peState.pdfContentMutated = true;
+    await peReloadEditorPageFromPdfDoc();
+    if (typeof invalidatePageTextLayers === 'function') invalidatePageTextLayers();
+    peRedrawObjects();
+    peUpdateProps();
+    const bytesAfter = await pdfDoc.save();
+    peCommitEditorHistory(true);
+    const undo2 = peState.undoStack || [];
+    if (undo2.length) undo2[undo2.length - 1].pdfBytes = bytesAfter;
+  } catch (err) {
+    console.error(err);
+    alert(t('alertPageImgError') + ': ' + (err.message || err));
+  } finally {
+    if (ownsWriter) pdfDocCriticalWriterActive = false;
+    pePageImgBusy = false;
+    if (pePageImgAgain) { pePageImgAgain = false; pePageImgSchedule(0); }
+  }
+}
+
+/** "Replace image…": a page image is swapped in the page, a placed one in place. */
+function pePickReplacementImage(o) {
+  const input = document.getElementById('peReplaceImageInput');
+  if (!input || !o) return;
+  input.onchange = () => {
+    const f = input.files && input.files[0];
+    input.value = '';
+    input.onchange = null;
+    if (!f || !peState || !peState.objects.includes(o)) return;
+    if (o.pageImg) {
+      pePageImgReplaced.push({ o, file: f });
+      pePageImgSchedule(0);
+      return;
+    }
+    void peLoadImageFile(f).then(({ dataUrl, im }) => {
+      if (!peState || !peState.objects.includes(o)) return;
+      const { w: W, h: H } = peStageSize();
+      // Same width and centre; the height follows the new picture.
+      const cx = o.x + o.w / 2, cy = o.y + o.h / 2;
+      const aspect = im.naturalWidth / Math.max(1, im.naturalHeight);
+      o.h = (o.w * W / aspect) / H;
+      o.x = cx - o.w / 2;
+      o.y = cy - o.h / 2;
+      o.dataUrl = dataUrl;
+      o.imgEl = im;
+      o.origAspect = aspect;
+      peRedrawObjects();
+      peUpdateProps();
+      peCommitEditorHistory();
+    }).catch(() => {});
+  };
+  input.click();
 }
 
 function peCloneObjectFromData(data) {
@@ -56218,6 +56731,12 @@ function peShowObjCtxMenu(clientX, clientY, overlapObjs) {
     if (showSave) saveAsBtn.dataset._editorImgId = String(sole.id);
     else delete saveAsBtn.dataset._editorImgId;
   }
+  const replaceBtn = menu.querySelector('[data-action="replace-image"]');
+  if (replaceBtn) {
+    const showReplace = !!(sole && sole.type === 'image');
+    replaceBtn.style.display = showReplace ? '' : 'none';
+    replaceBtn.hidden = !showReplace;
+  }
   if (cutBtn) {
     cutBtn.style.display = '';
     cutBtn.disabled = !sel.length;
@@ -58660,6 +59179,43 @@ function peObjMouseDown(e, o) {
     }
   });
 
+  // Desktop, Object-select: a dashed frame around an image of the page under
+  // the mouse - a click selects it (pePageImgTapSelect).
+  {
+    let hoverEl = null, raf = 0, lastX = 0, lastY = 0;
+    const hide = () => { if (hoverEl) hoverEl.style.display = 'none'; };
+    const update = () => {
+      raf = 0;
+      if (!peState || !peState.objSelectMode || peState.tool !== 'select' || peState.drag ||
+          document.getElementById('pageEditModal')?.classList.contains('pe-hand-mode')) { hide(); return; }
+      const under = document.elementFromPoint(lastX, lastY);
+      if (!under || !stage.contains(under) || (under.closest && under.closest('.pe-obj'))) { hide(); return; }
+      const pl = pePageImgAt(lastX, lastY);
+      const view = pePageImgCache && pePageImgCache.view;
+      if (!pl || !view) { hide(); return; }
+      if (!hoverEl) {
+        hoverEl = document.createElement('div');
+        hoverEl.className = 'pe-pageimg-hover';
+      }
+      if (hoverEl.parentNode !== stage) stage.appendChild(hoverEl);
+      const { w: W, h: H } = peStageSize();
+      const b = pl.box;
+      hoverEl.style.left = (b.x * W) + 'px';
+      hoverEl.style.top = (b.y * H) + 'px';
+      hoverEl.style.width = (b.w * W) + 'px';
+      hoverEl.style.height = (b.h * H) + 'px';
+      hoverEl.style.transform = b.rot ? 'rotate(' + b.rot + 'deg)' : '';
+      hoverEl.style.display = 'block';
+    };
+    stage.addEventListener('pointermove', (e) => {
+      if (e.pointerType !== 'mouse' || e.buttons) { hide(); return; }
+      lastX = e.clientX; lastY = e.clientY;
+      if (!raf) raf = requestAnimationFrame(update);
+    });
+    stage.addEventListener('pointerleave', hide);
+    stage.addEventListener('pointerdown', hide, true);
+  }
+
   // Signature stamp armed (peStartSignaturePlacement): intercept the very
   // first capture-phase pointerdown on the stage, before every other
   // handler below (text-layer hover/selection, per-object mousedown, border
@@ -59144,8 +59700,8 @@ function peObjMouseDown(e, o) {
       peCommitEditorHistory();
     }
     if (d.kind === 'obj-select-gesture') {
-      // Single tap without drag: clear selection.
-      if (!d.additive) peSelect(null);
+      // Single tap without drag: clear selection (or pick an image of the page).
+      if (!d.additive && !pePageImgTapSelect(d.startClientX, d.startClientY)) peSelect(null);
     }
     if (d.kind === 'pan-view' && d.fromObjSelectTap) {
       const moved = Math.hypot(
@@ -59155,8 +59711,10 @@ function peObjMouseDown(e, o) {
       if (moved < 6 && !d.additive) {
         // Tap outside the page-text selection clears it; tap on it keeps it.
         const onPageTextSel = peClientInsidePageTextSelection(d.startClientX, d.startClientY);
-        peSelect(null, { keepPageTextSelection: onPageTextSel });
-        if (!onPageTextSel) peClearEditorPageTextSelection();
+        if (onPageTextSel || !pePageImgTapSelect(d.startClientX, d.startClientY)) {
+          peSelect(null, { keepPageTextSelection: onPageTextSel });
+          if (!onPageTextSel) peClearEditorPageTextSelection();
+        }
       }
     }
     if (d.kind === 'obj-marquee') {
@@ -59386,6 +59944,9 @@ function peObjMouseDown(e, o) {
           void peSaveEditorImageAs(o, pageIdx);
         }
       }
+    } else if (action === 'replace-image') {
+      const sole = peGetSelectedObjects();
+      if (sole.length === 1 && sole[0].type === 'image') pePickReplacementImage(sole[0]);
     } else if (action === 'cut') {
       peCutSelectedObjects();
     } else if (action === 'paste') {
@@ -59456,7 +60017,21 @@ function peObjMouseDown(e, o) {
     // Selected / hit object → object menu (handled on peObjLayer).
     if (e.target.closest && e.target.closest('.pe-obj')) return;
 
-    // RMB on a native PDF embedded image on the page canvas → copy menu.
+    // RMB on an image the page paints itself → it is selected, with the
+    // object menu (copy, save, replace, delete).
+    const pageImgHit = pePageImgAt(e.clientX, e.clientY);
+    if (pageImgHit) {
+      e.preventDefault();
+      e.stopPropagation();
+      peHidePageToolsCtxMenu();
+      if (!peState.objSelectMode && typeof peSetObjSelectMode === 'function') peSetObjSelectMode(true);
+      pePageImgSelect(pageImgHit);
+      peShowObjCtxMenu(e.clientX, e.clientY);
+      return;
+    }
+
+    // RMB on a native PDF embedded image on the page canvas → copy menu
+    // (one inside a form XObject, which the editor leaves as it is).
     if (typeof gridHitTestPdfImages === 'function') {
       const idx = peState.idx != null ? peState.idx : (peState.pageIdx != null ? peState.pageIdx : null);
       const peStage = document.getElementById('peStage');
@@ -62169,8 +62744,9 @@ function peCopyPageEditorImagesToDoc(sourcePageIdx, targetPageIdx, targetDoc, ob
 
 function peSerializeObjectsForMeta(objects) {
   // Unconfirmed redact frames are editor-only and must never persist to
-  // page previews / reopen / export metadata.
-  return (objects || []).filter(o => o && o.type !== 'redact').map(o => {
+  // page previews / reopen / export metadata - nor a selected image of the
+  // page, which is part of the page (pePageImgSelect).
+  return (objects || []).filter(o => o && o.type !== 'redact' && !o.pageImg).map(o => {
     const copy = { ...o };
     delete copy.imgEl;
     if (copy.type === 'image') delete copy.dataUrl;
@@ -62684,7 +63260,7 @@ function peSavePageEditorObjects(pageIdx, objects) {
   const all = peReadAllEditorMeta();
   if (!all.pages) all.pages = {};
   (objects || []).forEach(o => {
-    if (o.type === 'image' && o.dataUrl) peSaveEditorImageData(pageIdx, o.id, o.dataUrl);
+    if (o.type === 'image' && o.dataUrl && !o.pageImg) peSaveEditorImageData(pageIdx, o.id, o.dataUrl);
   });
   all.pages[String(pageIdx)] = peSerializeObjectsForMeta(objects);
   peWriteAllEditorMeta(all);
@@ -66517,6 +67093,195 @@ function pmTrackImageUsage(doc, src, resourcesDict, initialCtm, usageMap, depth,
   }
 }
 
+// ============================================================================
+// The images a page paints itself, for the page editor to move, resize,
+// rotate, delete or replace them in place (pePageImg*). Only the page's own
+// content streams: an image inside a form XObject - a group, or a stamp shared
+// by several pages - is left alone. For each one: which content stream, the
+// byte range of its operator there ("/Name Do", or an inline "BI ... EI"), and
+// the CTM it is painted with, in default user space. The CTM and the q/Q
+// stack run on from one content stream into the next, as they are drawn.
+// ============================================================================
+function pePageContentStreamsOnly(doc, page) {
+  const streams = [];
+  try {
+    const contents = page.node.get(PDFLib.PDFName.of('Contents'));
+    const resolved = contents ? doc.context.lookup(contents) : null;
+    if (resolved instanceof PDFLib.PDFArray) {
+      resolved.asArray().forEach(ref => {
+        const s = doc.context.lookup(ref);
+        if (s && s.contents != null) streams.push(s);
+      });
+    } else if (resolved && resolved.contents != null) {
+      streams.push(resolved);
+    }
+  } catch (_) {}
+  return streams;
+}
+
+function pePageImgScan(doc, page) {
+  const out = [];
+  if (!doc || !page) return out;
+  let resources = null;
+  try { resources = page.node.Resources(); } catch (_) {}   // (inherited too; reads only)
+  const xobjMap = pmBuildXObjectRefMap(doc, resources);
+  let ctm = [1, 0, 0, 1, 0, 0];
+  const ctmStack = [];
+  pePageContentStreamsOnly(doc, page).forEach((stream, streamIdx) => {
+    const src = peDecodePdfStreamBytes(stream);
+    if (!src) return;
+    const len = src.length;
+    let i = 0;
+    const numBuf = [];
+    let lastName = '', lastNameStart = -1;
+    const isWS = c => c === 0x20 || c === 0x09 || c === 0x0d || c === 0x0a || c === 0x0c || c === 0;
+    const isDelim = c => c === 0x28 || c === 0x29 || c === 0x3c || c === 0x3e || c === 0x5b ||
+      c === 0x5d || c === 0x7b || c === 0x7d || c === 0x2f || c === 0x25;
+    const skipWS = () => {
+      while (i < len) {
+        const c = src[i];
+        if (isWS(c)) { i++; continue; }
+        if (c === 0x25) { while (i < len && src[i] !== 0x0a && src[i] !== 0x0d) i++; continue; }
+        break;
+      }
+    };
+    const skipLiteralString = () => {
+      i++;
+      let d = 1;
+      while (i < len && d > 0) {
+        const c = src[i];
+        if (c === 0x5c) { i += 2; continue; }
+        if (c === 0x28) d++;
+        else if (c === 0x29) d--;
+        i++;
+      }
+    };
+    const skipName = () => {
+      i++;
+      while (i < len && !isWS(src[i]) && !isDelim(src[i])) i++;
+    };
+    const skipHexOrDict = () => {
+      if (src[i + 1] === 0x3c) {
+        i += 2;
+        let d = 1;
+        while (i < len && d > 0) {
+          skipWS();
+          if (i >= len) break;
+          const c = src[i];
+          if (c === 0x3c && src[i + 1] === 0x3c) { d++; i += 2; continue; }
+          if (c === 0x3e && src[i + 1] === 0x3e) { d--; i += 2; continue; }
+          if (c === 0x28) { skipLiteralString(); continue; }
+          if (c === 0x2f) { skipName(); continue; }
+          if (c === 0x3c) { skipHexOrDict(); continue; }
+          i++;
+        }
+      } else {
+        i++;
+        while (i < len && src[i] !== 0x3e) i++;
+        if (i < len) i++;
+      }
+    };
+    const skipArray = () => {
+      i++;
+      let d = 1;
+      while (i < len && d > 0) {
+        skipWS();
+        if (i >= len) break;
+        const c = src[i];
+        if (c === 0x5b) { d++; i++; continue; }
+        if (c === 0x5d) { d--; i++; continue; }
+        if (c === 0x28) { skipLiteralString(); continue; }
+        if (c === 0x3c) { skipHexOrDict(); continue; }
+        if (c === 0x2f) { skipName(); continue; }
+        i++;
+      }
+    };
+    const skipInlineImage = () => {
+      i += 2; // past 'BI'
+      while (i < len) {
+        skipWS();
+        if (i >= len) return;
+        const c = src[i];
+        if (c === 0x2f) { skipName(); continue; }
+        if (c === 0x28) { skipLiteralString(); continue; }
+        if (c === 0x3c) { skipHexOrDict(); continue; }
+        if (c === 0x5b) { skipArray(); continue; }
+        if (src[i] === 0x49 && src[i + 1] === 0x44 &&
+            (i + 2 >= len || isWS(src[i + 2]) || isDelim(src[i + 2]))) {
+          i += 2;
+          if (i < len && isWS(src[i])) i++;
+          break;
+        }
+        i++;
+      }
+      while (i < len) {
+        if (src[i] === 0x45 && src[i + 1] === 0x49 &&
+            (i === 0 || isWS(src[i - 1])) &&
+            (i + 2 >= len || isWS(src[i + 2]) || isDelim(src[i + 2]))) {
+          i += 2;
+          return;
+        }
+        i++;
+      }
+    };
+    while (i < len) {
+      skipWS();
+      if (i >= len) break;
+      const c = src[i];
+      if (c === 0x28) { skipLiteralString(); numBuf.length = 0; continue; }
+      if (c === 0x3c) { skipHexOrDict(); numBuf.length = 0; continue; }
+      if (c === 0x5b) { skipArray(); numBuf.length = 0; continue; }
+      if (c === 0x2f) {
+        lastNameStart = i;
+        skipName();
+        lastName = peDecodePdfNameToken(String.fromCharCode.apply(null, src.subarray(lastNameStart + 1, i)));
+        continue;
+      }
+      if (c === 0x2b || c === 0x2d || c === 0x2e || (c >= 0x30 && c <= 0x39)) {
+        const start = i;
+        i++;
+        while (i < len && !isWS(src[i]) && !isDelim(src[i])) i++;
+        const n = parseFloat(String.fromCharCode.apply(null, src.subarray(start, i)));
+        if (Number.isFinite(n)) numBuf.push(n);
+        continue;
+      }
+      const start = i;
+      while (i < len && !isWS(src[i]) && !isDelim(src[i])) i++;
+      if (i === start) { i++; continue; }
+      const op = String.fromCharCode.apply(null, src.subarray(start, i));
+      if (op === 'q') { ctmStack.push(ctm.slice()); numBuf.length = 0; continue; }
+      if (op === 'Q') { if (ctmStack.length) ctm = ctmStack.pop(); numBuf.length = 0; continue; }
+      if (op === 'cm') {
+        if (numBuf.length >= 6) {
+          const m = numBuf.slice(-6);
+          ctm = peMatMul(ctm, m[0], m[1], m[2], m[3], m[4], m[5]);
+        }
+        numBuf.length = 0; continue;
+      }
+      if (op === 'Do') {
+        const info = xobjMap.get(lastName);
+        if (info && info.kind === 'image' && lastNameStart >= 0) {
+          let mask = false;
+          try {
+            const im = info.obj.dict.get(PDFLib.PDFName.of('ImageMask'));
+            mask = !!(im && (im === PDFLib.PDFBool.True || (im.asBoolean && im.asBoolean())));
+          } catch (_) {}
+          out.push({ kind: 'xobj', name: lastName, ref: info.ref, mask, streamIdx, start: lastNameStart, end: i, ctm: ctm.slice() });
+        }
+        numBuf.length = 0; continue;
+      }
+      if (op === 'BI') {
+        i = start;
+        skipInlineImage();
+        out.push({ kind: 'inline', name: null, ref: null, mask: false, streamIdx, start, end: i, ctm: ctm.slice() });
+        numBuf.length = 0; continue;
+      }
+      numBuf.length = 0;
+    }
+  });
+  return out;
+}
+
 function pmImageFilterIsDct(doc, obj) {
   try {
     const f = obj.dict.get(PDFLib.PDFName.of('Filter'));
@@ -67299,6 +68064,9 @@ async function peSaveLivePageEditAsOneStep(idx, persistObjs) {
 
 async function pageEditSave(options) {
   if (!peState || !pdfDoc) return;
+  // A gesture on an image of the page that has not reached the page yet.
+  await pePageImgFlush();
+  if (!peState || !pdfDoc) return;
   const openIdx = (options && typeof options.openIdx === 'number') ? options.openIdx : null;
   if (peColorPreview) peCloseColorPickerSession();
   peSyncInlineEditsFromDom();
@@ -67377,7 +68145,8 @@ async function pageEditSave(options) {
     try { page.node.delete(PDFLib.PDFName.of(PE_NEEDS_SHAPE_RASTER_KEY)); } catch (_) {}
     // Any remaining redact frames should already have been confirmed above;
     // strip leftovers so they never enter page metadata.
-    const persistObjs = peState.objects.filter(o => o.type !== 'redact');
+    // (a selected image of the page is in the page itself already)
+    const persistObjs = peState.objects.filter(o => o.type !== 'redact' && !o.pageImg);
     peState.objects = persistObjs;
     // Capture real text box sizes (PDF points) so later page rotates in the
     // grid view keep the visual center - estimate-only rotate drifted at corners.
