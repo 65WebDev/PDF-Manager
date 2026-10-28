@@ -40,8 +40,8 @@
 <a href="https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_online.html" title="Online version, PDF_manager_online.html: a compact file, libraries load from a CDN"><img src="docs/download-icons/html-online.svg" width="76" alt="Online version (HTML)"></a>
 <a href="https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_offline.html" title="Offline version, PDF_manager_offline.html: everything is inside the file, works without internet"><img src="docs/download-icons/html-offline.svg" width="76" alt="Offline version (HTML)"></a>
 &emsp;
-<a href="https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.50/PDF.Manager_0.1.50_x64-setup.exe" title="Windows: installer (x64)"><img src="docs/download-icons/windows-setup.svg" width="76" alt="Windows installer"></a>
-<a href="https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.50/pdf-manager.exe" title="Windows: portable .exe, runs without installation"><img src="docs/download-icons/windows-portable.svg" width="76" alt="Windows portable .exe"></a>
+<a href="https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.51/PDF.Manager_0.1.51_x64-setup.exe" title="Windows: installer (x64)"><img src="docs/download-icons/windows-setup.svg" width="76" alt="Windows installer"></a>
+<a href="https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.51/pdf-manager.exe" title="Windows: portable .exe, runs without installation"><img src="docs/download-icons/windows-portable.svg" width="76" alt="Windows portable .exe"></a>
 &emsp;
 <a href="https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.50/PDF.Manager_0.1.50_amd64.deb" title="Linux: .deb package for Debian, Ubuntu and their derivatives (x64)"><img src="docs/download-icons/linux-deb.svg" width="76" alt="Linux .deb"></a>
 <a href="https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.50/PDF.Manager_0.1.50_amd64.AppImage" title="Linux: AppImage, runs on most distributions without installation (x64)"><img src="docs/download-icons/linux-appimage.svg" width="76" alt="Linux AppImage"></a>
@@ -51,7 +51,7 @@
 
 *Click an icon to download the file (WEB opens the editor online); hover over it for a description.*
 
-Release pages: [Windows](https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.50) · [Linux](https://github.com/65WebDev/PDF-Manager/releases/tag/linux-v0.1.50) · [Android](https://github.com/65WebDev/PDF-Manager/releases/tag/android-v0.1.50)
+Release pages: [Windows](https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.51) · [Linux](https://github.com/65WebDev/PDF-Manager/releases/tag/linux-v0.1.50) · [Android](https://github.com/65WebDev/PDF-Manager/releases/tag/android-v0.1.50)
 
 After downloading, open the HTML file in your browser. The online version loads its libraries from a CDN; the offline version bundles everything inside the file and works without internet access.
 
@@ -127,8 +127,8 @@ Android app: Android 7.0+, phones and tablets. Open the downloaded `.apk` on the
 <a href="https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_online.html" title="Онлайн-версия, PDF_manager_online.html: компактный файл, библиотеки подгружаются из CDN"><img src="docs/download-icons/html-online.svg" width="76" alt="Онлайн-версия (HTML)"></a>
 <a href="https://github.com/65WebDev/PDF-Manager/releases/latest/download/PDF_manager_offline.html" title="Офлайн-версия, PDF_manager_offline.html: всё встроено в файл, работает без интернета"><img src="docs/download-icons/html-offline.svg" width="76" alt="Офлайн-версия (HTML)"></a>
 &emsp;
-<a href="https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.50/PDF.Manager_0.1.50_x64-setup.exe" title="Windows: установщик (x64)"><img src="docs/download-icons/windows-setup.svg" width="76" alt="Windows: установщик"></a>
-<a href="https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.50/pdf-manager.exe" title="Windows: портативная версия (.exe), запускается без установки"><img src="docs/download-icons/windows-portable.svg" width="76" alt="Windows: портативная версия .exe"></a>
+<a href="https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.51/PDF.Manager_0.1.51_x64-setup.exe" title="Windows: установщик (x64)"><img src="docs/download-icons/windows-setup.svg" width="76" alt="Windows: установщик"></a>
+<a href="https://github.com/65WebDev/PDF-Manager/releases/download/windows-v0.1.51/pdf-manager.exe" title="Windows: портативная версия (.exe), запускается без установки"><img src="docs/download-icons/windows-portable.svg" width="76" alt="Windows: портативная версия .exe"></a>
 &emsp;
 <a href="https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.50/PDF.Manager_0.1.50_amd64.deb" title="Linux: пакет .deb для Debian, Ubuntu и производных (x64)"><img src="docs/download-icons/linux-deb.svg" width="76" alt="Linux: .deb"></a>
 <a href="https://github.com/65WebDev/PDF-Manager/releases/download/linux-v0.1.50/PDF.Manager_0.1.50_amd64.AppImage" title="Linux: AppImage, запускается без установки на большинстве дистрибутивов (x64)"><img src="docs/download-icons/linux-appimage.svg" width="76" alt="Linux: AppImage"></a>
@@ -138,7 +138,7 @@ Android app: Android 7.0+, phones and tablets. Open the downloaded `.apk` on the
 
 *Нажмите на иконку, чтобы скачать файл (WEB открывает редактор онлайн); при наведении появится пояснение.*
 
-Страницы релизов: [Windows](https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.50) · [Linux](https://github.com/65WebDev/PDF-Manager/releases/tag/linux-v0.1.50) · [Android](https://github.com/65WebDev/PDF-Manager/releases/tag/android-v0.1.50)
+Страницы релизов: [Windows](https://github.com/65WebDev/PDF-Manager/releases/tag/windows-v0.1.51) · [Linux](https://github.com/65WebDev/PDF-Manager/releases/tag/linux-v0.1.50) · [Android](https://github.com/65WebDev/PDF-Manager/releases/tag/android-v0.1.50)
 
 После скачивания откройте HTML-файл в браузере. Онлайн-версия подгружает библиотеки из CDN; офлайн-версия содержит все библиотеки внутри файла и работает без интернета.
 
