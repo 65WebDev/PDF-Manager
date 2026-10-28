@@ -10,7 +10,11 @@ use tauri::State;
 #[cfg(target_os = "android")]
 mod android;
 
-/// PDF paths waiting to be opened by the web UI (cold start via file association).
+/// PDF paths waiting to be opened by the web UI: the ones the app was started
+/// with (file association) and the ones a second launch hands over. The UI
+/// takes them with `take_pending_open_files`; a second launch only nudges it
+/// with an `open-files` event, so a path handed over while the page is still
+/// loading - before anything listens - waits here instead of being lost.
 #[cfg(not(target_os = "android"))]
 struct PendingOpenFiles(Mutex<Vec<PathBuf>>);
 
@@ -92,30 +96,62 @@ fn maximize_main_window(app: &AppHandle) {
   }
 }
 
+/// Paths from a second launch: queued for the UI, which is told to take them.
 #[cfg(desktop)]
-fn emit_open_files(app: &AppHandle, paths: &[PathBuf]) {
+fn queue_open_files(app: &AppHandle, paths: Vec<PathBuf>) {
   if paths.is_empty() {
     return;
   }
-  let payload: Vec<String> = paths
-    .iter()
-    .map(|p| p.to_string_lossy().into_owned())
-    .collect();
-  let _ = app.emit("open-files", payload);
+  if let Some(state) = app.try_state::<PendingOpenFiles>() {
+    if let Ok(mut guard) = state.0.lock() {
+      guard.extend(paths);
+    }
+  }
+  let _ = app.emit("open-files", ());
 }
 
-/// Drain cold-start paths once the UI is ready.
+/// Hand the waiting paths to the UI (each one once).
 /// (Android: `android::take_pending_open_files` — files sent to the app.)
 #[cfg(not(target_os = "android"))]
 #[tauri::command]
 fn take_pending_open_files(state: State<'_, PendingOpenFiles>) -> Vec<String> {
-  match state.0.lock() {
+  let paths: Vec<String> = match state.0.lock() {
     Ok(mut guard) => guard
       .drain(..)
       .map(|p| p.to_string_lossy().into_owned())
       .collect(),
     Err(_) => Vec::new(),
+  };
+  if !paths.is_empty() {
+    log::info!("UI takes {paths:?}");
   }
+  paths
+}
+
+/// A line from the UI for the log file: how opening a file went, so a file
+/// that did not open can be traced afterwards (see `log_plugin`).
+#[tauri::command]
+fn ui_log(message: String) {
+  let message: String = message.chars().take(1000).collect();
+  log::info!(target: "ui", "{message}");
+}
+
+/// The log file, in release builds too: in the app's log folder (Windows:
+/// %LOCALAPPDATA%\io.github.pdfmanager.desktop\logs\PDF Manager.log), at
+/// most ~200 KB, older lines dropped. Opening files is logged in full; the
+/// libraries only report warnings and errors.
+fn log_plugin() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+  let level = if cfg!(debug_assertions) {
+    log::LevelFilter::Info
+  } else {
+    log::LevelFilter::Warn
+  };
+  tauri_plugin_log::Builder::default()
+    .level(level)
+    .level_for("pdf_manager_lib", log::LevelFilter::Info)
+    .level_for("ui", log::LevelFilter::Info)
+    .max_file_size(200_000)
+    .build()
 }
 
 /// Maximize the main window when the UI opens a document (file picker / DnD / etc.).
@@ -156,11 +192,15 @@ fn read_local_file(path: String) -> Result<tauri::ipc::Response, String> {
     return Err("Разрешено открывать только файлы .pdf".into());
   }
   if !path.is_file() {
+    log::warn!("read_local_file: no such file {}", path.display());
     return Err(format!("Файл не найден: {}", path.display()));
   }
   std::fs::read(&path)
     .map(tauri::ipc::Response::new)
-    .map_err(|e| format!("Не удалось прочитать файл: {e}"))
+    .map_err(|e| {
+      log::warn!("read_local_file {}: {e}", path.display());
+      format!("Не удалось прочитать файл: {e}")
+    })
 }
 
 /// Write bytes straight to a local path — used for regular Save on a
@@ -293,9 +333,10 @@ pub fn run() {
       // Second instance: focus the running app and forward any PDF paths.
       focus_main_window(app);
       let paths = collect_pdf_paths_from_args(args.iter().skip(1).map(String::as_str));
+      log::info!("second launch {args:?} -> {paths:?}");
       if !paths.is_empty() {
         maximize_main_window(app);
-        emit_open_files(app, &paths);
+        queue_open_files(app, paths);
       }
     }));
 
@@ -304,7 +345,7 @@ pub fn run() {
   #[cfg(target_os = "android")]
   let builder = builder.plugin(android::init());
 
-  let builder = builder.plugin(links_plugin());
+  let builder = builder.plugin(log_plugin()).plugin(links_plugin());
 
   builder
     .invoke_handler(tauri::generate_handler![
@@ -320,6 +361,7 @@ pub fn run() {
       #[cfg(target_os = "android")]
       android::open_external_url,
       maximize_main_window_cmd,
+      ui_log,
       #[cfg(desktop)]
       set_main_window_fullscreen,
       #[cfg(target_os = "android")]
@@ -353,12 +395,15 @@ pub fn run() {
       // menu used to open windowed at the tauri.conf.json default size.
       #[cfg(desktop)]
       maximize_main_window(app.handle());
-      if cfg!(debug_assertions) {
-        app.handle().plugin(
-          tauri_plugin_log::Builder::default()
-            .level(log::LevelFilter::Info)
-            .build(),
-        )?;
+      #[cfg(desktop)]
+      {
+        let pending = app.state::<PendingOpenFiles>();
+        let pending = pending.0.lock().map(|g| g.clone()).unwrap_or_default();
+        log::info!(
+          "start {} {:?} -> {pending:?}",
+          app.package_info().version,
+          std::env::args().skip(1).collect::<Vec<_>>()
+        );
       }
       Ok(())
     })
