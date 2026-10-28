@@ -8593,7 +8593,7 @@
         </div>
         <div class="pe-props-row" id="pePropRowFormat" style="display:none">
           <select id="pePropFont" title="Шрифт" data-i18n-title="peFont" aria-label="Шрифт" data-i18n-aria="peFont">
-            <option value="" data-i18n="peFontDefault">Стандартный</option>
+            <option value="" data-i18n="peFontDefault">Системный</option>
           </select>
           <span class="pe-props-sep" id="pePropFontSep"></span>
           <span id="pePropFormatWrap">
@@ -10297,7 +10297,7 @@
         peStrokeThicker: 'Толще на 1 px',
         peStrokeThinner: 'Тоньше на 1 px',
         peOpacity: 'Прозрачность',
-        peFont: 'Шрифт', peFontDefault: 'Стандартный',
+        peFont: 'Шрифт', peFontDefault: 'Системный',
         peBoldLetter: 'Ж', peItalicLetter: 'К', peUnderlineLetter: 'Ч',
         zoomTitle: 'Масштаб', peMobileKbKeysAria: 'Клавиатура',
         peBold: 'Жирный',
@@ -10805,7 +10805,7 @@
         peStrokeThicker: 'Thicker by 1 px',
         peStrokeThinner: 'Thinner by 1 px',
         peOpacity: 'Opacity',
-        peFont: 'Font', peFontDefault: 'Default',
+        peFont: 'Font', peFontDefault: 'System',
         peBoldLetter: 'B', peItalicLetter: 'I', peUnderlineLetter: 'U',
         zoomTitle: 'Zoom', peMobileKbKeysAria: 'Keyboard',
         peBold: 'Bold',
@@ -11313,7 +11313,7 @@
         peStrokeThicker: 'Aumentar 1 px',
         peStrokeThinner: 'Reducir 1 px',
         peOpacity: 'Opacidad',
-        peFont: 'Fuente', peFontDefault: 'Predeterminada',
+        peFont: 'Fuente', peFontDefault: 'Del sistema',
         peBoldLetter: 'N', peItalicLetter: 'K', peUnderlineLetter: 'S',
         zoomTitle: 'Zoom', peMobileKbKeysAria: 'Teclado',
         peBold: 'Negrita',
@@ -11888,7 +11888,7 @@
         peStrokeThicker: '加粗 1 像素',
         peStrokeThinner: '变细 1 像素',
         peOpacity: '不透明度',
-        peFont: '字体', peFontDefault: '默认',
+        peFont: '字体', peFontDefault: '系统',
         peBoldLetter: 'B', peItalicLetter: 'I', peUnderlineLetter: 'U',
         zoomTitle: '缩放', peMobileKbKeysAria: '键盘',
         peBold: '粗体',
@@ -46804,6 +46804,8 @@ function editSelectedPage() {
 async function openPageEditor(idx, restoreSelection) {
   if (!pageEditAvailable() || peState) return;
   if (idx < 0 || idx >= pdfDoc.getPageCount()) return;
+  // The bundled Roboto, new text blocks' font, ready before the page shows.
+  void pmWmLoadFonts().catch(() => {});
   try {
     peSavePageSelectionForRestore(restoreSelection);
     showLoading(t('loadingOpenEditor'));
@@ -52902,10 +52904,14 @@ function peApplyWholeFormatToObj(o, kind, value) {
   }
 }
 
-// The default text font of a block; o.fontFamily (a family name from the
-// font list, see peFillFontSelect) replaces it, with the default kept as the
-// fallback for a font this system does not have.
+// The text font of a block without one (the list's "System"); o.fontFamily
+// (a family name from the font list, see peFillFontSelect) replaces it, with
+// this kept as the fallback for a font this system does not have.
 const PE_TEXT_FONT_DEFAULT = '"Segoe UI", Arial, sans-serif';
+// What a new block is set in: the bundled Roboto (PM_WM_ROBOTO_FAMILY, not
+// yet defined this early in the script), the one font a save can put into
+// the file as real text (peVecTextOps).
+const PE_TEXT_FONT_NEW = 'PM Watermark Roboto';
 function peTextFontStack(o) {
   return (o && o.fontFamily) ? pmWmFontCss(o.fontFamily) + ', ' + PE_TEXT_FONT_DEFAULT : PE_TEXT_FONT_DEFAULT;
 }
@@ -54040,7 +54046,7 @@ async function pePasteAtStage(stageX, stageY) {
     const o = {
       id: ++peState.seq, type: 'text', text: clip.text,
       html: peEscapeHtml(clip.text).replace(/\n/g, '<br>'),
-      fontPt: 16, color: '#d90000', x: targetX, y: targetY
+      fontPt: 16, color: '#d90000', fontFamily: PE_TEXT_FONT_NEW, x: targetX, y: targetY
     };
     peState.objects.push(o);
     peSelect(o);
@@ -59544,6 +59550,7 @@ function peObjMouseDown(e, o) {
         peArmOskProxy(e.clientX, e.clientY);
       }
       const o = { id: ++peState.seq, type: 'text', text: '', fontPt: 16, color: '#d90000',
+        fontFamily: PE_TEXT_FONT_NEW,
         x: e.altKey ? pt.x / W : peSnapNewTextBlockX(pt.x / W, W), y: pt.y / H };
       peState.objects.push(o);
       peState.draftTextId = o.id;
