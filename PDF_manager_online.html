@@ -44425,13 +44425,21 @@ async function peCropConfirm() {
 async function peLoadEditorPageFromLiveDoc() {
   if (!peState || !pdfDoc) return;
   pePageImgGen++;
-  const one = await peSinglePageDoc(pdfDoc, peState.idx);
-  // fontExtraProperties: the fonts' ToUnicode, widths and glyphs, for editing the page's text.
-  const doc = await pdfjsLib.getDocument({ data: await one.save(), fontExtraProperties: true }).promise;
-  const newPage = await doc.getPage(1);
-  try { pmDestroyPdfjsDoc(peState.doc); } catch (_) {}
-  peState.doc = doc;
-  peState.page = newPage;
+  // Until pdf.js has the page anew, it and pdfDoc tell different pages (pePageTextData).
+  const st = peState;
+  st.pageLoading = true;
+  try {
+    const one = await peSinglePageDoc(pdfDoc, st.idx);
+    // fontExtraProperties: the fonts' ToUnicode, widths and glyphs, for editing the page's text.
+    const doc = await pdfjsLib.getDocument({ data: await one.save(), fontExtraProperties: true }).promise;
+    const newPage = await doc.getPage(1);
+    if (peState !== st) { try { pmDestroyPdfjsDoc(doc); } catch (_) {} return; }   // the editor closed meanwhile
+    try { pmDestroyPdfjsDoc(st.doc); } catch (_) {}
+    st.doc = doc;
+    st.page = newPage;
+  } finally {
+    st.pageLoading = false;
+  }
 }
 
 async function peReloadEditorPageFromPdfDoc() {
@@ -47702,13 +47710,17 @@ function peOnKeyDown(e) {
       void pePasteAtStage(px, py);
       return;
     }
+    // The page's own text being edited: the editing's own steps first.
+    const pageTextEditing = peState.inlineEditId != null && peState.objects.find(x => x.id === peState.inlineEditId && x.pageText);
     if (!e.shiftKey && e.code === 'KeyZ') {
       e.preventDefault(); e.stopPropagation();
+      if (pageTextEditing && pePageTextStep(pageTextEditing, true)) return;
       void peUndoEditor();
       return;
     }
     if (!e.shiftKey && e.code === 'KeyY') {
       e.preventDefault(); e.stopPropagation();
+      if (pageTextEditing && pePageTextStep(pageTextEditing, false)) return;
       void peRedoEditor();
       return;
     }
@@ -47974,10 +47986,11 @@ function peRedrawObjects() {
           inner.setAttribute('draggable', 'false');
           inner.addEventListener('dragstart', pePreventTextDragGhost);
           inner.addEventListener('paste', pePasteAsPlainText);
-          inner.addEventListener('input', () => {
+          inner.addEventListener('input', (ev) => {
             o.html = inner.innerHTML;
             o.text = peEditablePlainText(inner);
             peSyncTextEmptyClass(inner, o);
+            if (o.pageText) pePageTextNoteInput(o, inner, ev);
           });
         }
         peSyncTextEmptyClass(inner, o);
@@ -54351,6 +54364,11 @@ function pePageTextLines(scan, view) {
     });
     l.chars = chars;
     l.text = chars.map(ch => ch.ch).join('');
+    // Its right edge where its ink ends: a space at its end (Word and
+    // LibreOffice write one past a wrapped line's last word) is no part of it.
+    for (let k = chars.length - 1; k >= 0; k--) {
+      if (!/^\s$/.test(chars[k].ch)) { l.x1 = chars[k].x + chars[k].w; break; }
+    }
     let top = Infinity, bottom = -Infinity;
     l.cells.forEach(cell => {
       const f = cell.op.font;
@@ -54460,7 +54478,8 @@ function pePageTextUnits(lines) {
         const first = l.chars[0];
         if (prev && /^[-­]$/.test(prev.ch) && first && /^\p{Ll}/u.test(first.ch)) {
           prev.hyph = true;   // a word broken at the line's end
-        } else {
+        } else if (!(prev && !prev.syn && /^\s$/.test(prev.ch))) {
+          // (A line ending in a space of its own - as Word and LibreOffice write them - needs no other.)
           chars.push({ syn: true, soft: true, ch: ' ', x: ls[i - 1].x1, y: ls[i - 1].y, w: 0, size: l.size, op: (prev || first).op, line: i - 1 });
         }
       }
@@ -54497,17 +54516,20 @@ function pePageTextUnits(lines) {
 
 /** The page's text: its lines and units (paragraphs, lines on their own) - scanned once per state of the page. */
 function pePageTextData() {
-  if (!peState || !pdfDoc || !peState.page) return Promise.resolve(null);
+  if (!peState || !pdfDoc || !peState.page || peState.pageLoading) return Promise.resolve(null);
   const rot = peFinalRotation();
   const c = pePageTextCache;
-  if (c && c.doc === pdfDoc && c.gen === pePageImgGen && c.idx === peState.idx && c.rot === rot) return c.promise;
-  const page = peState.page, idx = peState.idx;
+  // Keyed to pdf.js's page, too: while the page is reloaded after a change,
+  // the document is new before the page read from it is - the two read
+  // together disagree, and that must not stay the page's text.
+  if (c && c.doc === pdfDoc && c.page === peState.page && c.gen === pePageImgGen && c.idx === peState.idx && c.rot === rot) return c.promise;
+  const page = peState.page, idx = peState.idx, doc = pdfDoc;
   const promise = (async () => {
     try {
       const view = pePageImgView();
       const pj = await pePageTextPdfjsOps(page);
-      if (!peState || peState.page !== page) return null;
-      const scan = pePageTextScan(pdfDoc, pdfDoc.getPage(idx), pj);
+      if (!peState || peState.page !== page || pdfDoc !== doc) return null;
+      const scan = pePageTextScan(doc, doc.getPage(idx), pj);
       if (!scan) {
         console.warn('Page text not editable: the page content and pdf.js disagree');
         return { view, scan: null, lines: [], units: [] };
@@ -54519,7 +54541,7 @@ function pePageTextData() {
       return null;
     }
   })();
-  const entry = { doc: pdfDoc, gen: pePageImgGen, idx, rot, promise, data: null };
+  const entry = { doc, page, gen: pePageImgGen, idx, rot, promise, data: null };
   pePageTextCache = entry;
   promise.then(d => { entry.data = d; });
   return promise;
@@ -54805,7 +54827,18 @@ function pePageTextSiblings(scan) {
 
 /** A PDF font's family, for its other faces on the page: no subset tag, no style ("Arial-BoldMT" -> "arial"). */
 function pePageTextFamily(font) {
-  return pePageTextFontName(font).split(/[-,]/)[0].replace(/MT$/, '').replace(/PS$/, '').toLowerCase();
+  return pePageTextFontName(font).split(/[-,]/)[0].replace(/MT$/, '').replace(/PS$/, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * The family a font resource of the page draws for: the bundled Roboto,
+ * where it stands in for a font of the page (letters its subset lacks), is
+ * named after that font's family (pePageTextFallbackNamer) - so text put
+ * back to its look later (bold off again) goes back to that font.
+ */
+function pePageTextResFamily(res, font) {
+  const m = /^PMFont_([a-z0-9]+)-/.exec(String(res || ''));
+  return m ? m[1] : pePageTextFamily(font);
 }
 
 /**
@@ -54854,11 +54887,11 @@ function pePageTextCandidates(style, anchor, siblings) {
   const aop = anchor.op;
   const looks0 = pePageTextFontLooks(aop.font);
   const want = style ? { bold: !!style.bold, italic: !!style.italic } : looks0;
-  const fam = pePageTextFamily(aop.font);
+  const fam = pePageTextResFamily(aop.ts.font, aop.font);
   const cands = [];
   if (looks0.bold === want.bold && looks0.italic === want.italic) cands.push({ res: aop.ts.font, font: aop.font, bpc: aop.bpc, fm0: aop.fm0 });
   (siblings ? [...siblings.values()] : []).forEach(list => list.forEach(f => {
-    if (cands.some(c => c.res === f.res) || pePageTextFamily(f.font) !== fam) return;
+    if (cands.some(c => c.res === f.res) || pePageTextResFamily(f.res, f.font) !== fam) return;
     const lk = pePageTextFontLooks(f.font);
     if (lk.bold === want.bold && lk.italic === want.italic) cands.push(f);
   }));
@@ -54917,7 +54950,7 @@ async function pePageTextMakeGlyph(ch, style, anchor, siblings, view, picked) {
   let units = 0;
   face.fk.layout(ch, face.font.embedder.fontFeatures).positions.forEach(q => { units += q.xAdvance; });
   const w = units * 1000 / face.fk.unitsPerEm;
-  return { syn: false, ch, w: adv(w, 0.001, false), size: sizeV, op, under, glyph: { hex, w, face } };
+  return { syn: false, ch, w: adv(w, 0.001, false), size: sizeV, op, under, glyph: { hex, w, face, fam: pePageTextResFamily(aop.ts.font, aop.font) } };
 }
 
 /** The natural width of a space where an item is (visual points): no word spacing, no justifying. */
@@ -55015,6 +55048,11 @@ async function pePageTextRelayout(unit, o, view, siblings, opts) {
   const relayAll = align !== P.align;
   const ratio = Math.abs((Number(o.fontPt) || s0.fontPt) - s0.fontPt) > 0.01 ? (Number(o.fontPt) || s0.fontPt) / s0.fontPt : 1;
   const lead = P.lead * ratio;
+  // Nothing changed: every character where it was.
+  if (p === n && !made.length && !relayAll && ratio === 1) {
+    chars.forEach((c, i) => { if (!c.soft) out.push(kept(i)); });
+    return out;
+  }
   const lines = unit.lines;
   // The first line with a change (a soft break belongs to the line before it).
   const L = relayAll ? 0 : (p < n ? chars[p].line : chars[n - 1].line);
@@ -55103,12 +55141,19 @@ async function pePageTextRelayout(unit, o, view, siblings, opts) {
   return out;
 }
 
+/** Whether laid-out items are a unit's own characters where they were: an editing that changed nothing. */
+function pePageTextSame(unit, items) {
+  const own = unit.chars.filter(c => !c.soft);
+  return items.length === own.length && items.every((it, i) => it.idx != null && unit.chars[it.idx] === own[i] &&
+    it.x === own[i].x && it.y === own[i].y && !it.under);
+}
+
 /**
  * Content-stream source for laid-out characters (pePageTextRelayout): runs of
  * one font, size and colour, each from its own text matrix - the original
  * glyph's, moved to its new place - and every glyph placed by TJ steps, with
  * character and word spacing 0 (they are in the places already). The fonts
- * are the page's own by their resource names, Roboto by fallbackName(face).
+ * are the page's own by their resource names, Roboto by fallbackName(face, family).
  */
 function pePageTextEmit(items, view, fallbackName) {
   const body = [];
@@ -55123,7 +55168,7 @@ function pePageTextEmit(items, view, fallbackName) {
     const op = it.op;
     const { Minv } = pePageTextViewOf(op, view);
     const g = it.glyph || { code: it.c.code, len: op.bpc, w: it.c.w };
-    const fontRes = g.face ? fallbackName(g.face) : PDFLib.PDFName.of(g.res || op.ts.font).asString();
+    const fontRes = g.face ? fallbackName(g.face, g.fam) : PDFLib.PDFName.of(g.res || op.ts.font).asString();
     const size = op.ts.size, Th = op.ts.Tz / 100;
     const fm0 = g.face ? 0.001 : (g.fm0 || op.fm0);
     // The glyph's text matrix: the one it had (or its run's), moved to (x, y).
@@ -55307,11 +55352,22 @@ async function pePageTextAfterChange(opts) {
   if (undo.length) undo[undo.length - 1].pdfBytes = bytesAfter;
 }
 
-/** Undo goes back to the page as it is now. */
-async function pePageTextUndoPoint() {
+/**
+ * Undo goes back to the page as it was before the change: before (its bytes)
+ * or as it is now. Every step since the last one that carries the page's
+ * bytes gets them - a step taken while a unit was lifted out of the page
+ * among them, which must never bring back the page without it; and a step
+ * that changed nothing of the editor's own (the editing's start or end) is
+ * dropped, so one Ctrl+Z takes back one change of the page.
+ */
+async function pePageTextUndoPoint(before) {
   const undo = peState.undoStack || [];
-  const top = undo.length ? undo[undo.length - 1] : null;
-  if (top && !top.pdfBytes) top.pdfBytes = await pdfDoc.save();
+  if (!undo.length || undo[undo.length - 1].pdfBytes) return;
+  // (A unit lifted out marks the page changed: that alone is no step.)
+  const sig = snap => peEditorSnapshotSignature({ ...snap, pdfContentMutated: false });
+  while (undo.length > 1 && !undo[undo.length - 1].pdfBytes && sig(undo[undo.length - 1]) === sig(undo[undo.length - 2])) undo.pop();
+  const bytes = before || await pdfDoc.save();
+  for (let k = undo.length - 1; k >= 0 && !undo[k].pdfBytes; k--) undo[k].pdfBytes = bytes;
 }
 
 /**
@@ -55322,6 +55378,7 @@ async function pePageTextUndoPoint() {
 function pePageTextLift(o) {
   if (!o || !o.pageText || o.pageText.live || o.pageText.lifting) return;
   o.pageText.lifting = true;
+  o.pageText.steps = { undo: [], redo: [], cur: { html: String(o.html || ''), sel: null }, kind: '', at: 0 };
   void pePageTextQueue(async () => {
     let ownsWriter = false;
     try {
@@ -55330,11 +55387,16 @@ function pePageTextLift(o) {
       const unit = data && pePageTextFind(data.units, o.pageText.ref);
       if (!unit) return;
       ownsWriter = await peClaimLivePdfDocWriter();
-      await pePageTextUndoPoint();
+      // The page as it is before the editing: undo's point, and what goes back
+      // if the editing changes nothing.
+      const before = await pdfDoc.save();
+      await pePageTextUndoPoint(before);
+      o.pageText.mutated0 = !!peState.pdfContentMutated;
       const token = Math.random().toString(36).slice(2, 10);
       const ok = await pePageTextCut(pdfDoc, pdfDoc.getPage(peState.idx), unit, '%' + PE_PAGETEXT_MARK + ' ' + token);
       if (!ok) return;
       o.pageText.live = true;
+      o.pageText.before = before;
       o.pageText.token = token;
       o.pageText.unit = unit;
       o.pageText.view = data.view;
@@ -55351,6 +55413,46 @@ function pePageTextLift(o) {
       o.pageText.lifting = false;
     }
   });
+}
+
+/**
+ * Ctrl+Z / Ctrl+Y while the page's own text is edited take back its own
+ * steps - the editor's history has the page only before and after the
+ * editing. A step is the text before a change (typing, deleting or the
+ * same formatting in a row is one), noted from the stand-in's input events.
+ */
+function pePageTextNoteInput(o, inner, e) {
+  const h = o.pageText && o.pageText.steps;
+  if (!h) return;
+  const type = (e && e.inputType) || '';
+  const kind = /^insert(Text|Composition)/.test(type) ? 'type' : /^delete(Content|Word|Soft|Hard)/.test(type) ? 'delete' : type || 'other';
+  const now = Date.now();
+  // (A colour picked by dragging over the picker is one step, too.)
+  if (!(kind === h.kind && kind !== 'other' && kind !== 'insertParagraph' && now - h.at < 1000)) h.undo.push(h.cur);
+  h.kind = kind;
+  h.at = now;
+  h.redo.length = 0;
+  h.cur = { html: inner.innerHTML, sel: peCaptureSelectionOffsets(inner) };
+}
+
+/** One step of the editing back (or forward again); false when there is none. */
+function pePageTextStep(o, back) {
+  const h = o && o.pageText && o.pageText.steps;
+  const inner = h && peGetInlineTextEl(o);
+  if (!inner || inner.contentEditable !== 'true') return false;
+  const from = back ? h.undo : h.redo;
+  if (!from.length) return false;
+  (back ? h.redo : h.undo).push(h.cur);
+  h.cur = from.pop();
+  h.kind = '';
+  inner.innerHTML = h.cur.html;
+  o.html = inner.innerHTML;
+  o.text = peEditablePlainText(inner);
+  peSyncTextEmptyClass(inner, o);
+  try { inner.focus({ preventScroll: true }); } catch (_) {}
+  const end = inner.textContent.length;
+  peRestoreSelectionOffsets(inner, h.cur.sel || { start: end, end });
+  return true;
 }
 
 /** Stand-ins changed while not lifted out: moved, turned or restyled. */
@@ -55391,9 +55493,10 @@ async function pePageTextFlush() {
 
 function pePageTextFallbackNamer(page) {
   const names = new Map();
-  return face => {
-    if (!names.has(face.key)) names.set(face.key, page.node.newFontDictionary('PMFont', face.font.ref).asString());
-    return names.get(face.key);
+  return (face, fam) => {
+    const key = face.key + '|' + (fam || '');
+    if (!names.has(key)) names.set(key, page.node.newFontDictionary(fam ? 'PMFont_' + fam : 'PMFont', face.font.ref).asString());
+    return names.get(key);
   };
 }
 
@@ -55421,19 +55524,30 @@ async function pePageTextSync() {
   };
   try {
     ownsWriter = await peClaimLivePdfDocWriter();
-    await pePageTextUndoPoint();
+    const lifted = done.find(o => o.pageText.before);
+    await pePageTextUndoPoint(lifted && lifted.pageText.before);
     const page = pdfDoc.getPage(peState.idx);
     const fallbackName = pePageTextFallbackNamer(page);
-    let changed = 0;
+    let changed = 0, same = 0;
     for (const o of done) {
       pePageTextLive.splice(pePageTextLive.indexOf(o), 1);
       const t = o.pageText;
       const gone = !peState.objects.includes(o);
       const items = await pePageTextRelayout(t.unit, o, t.view, t.siblings, { gone });
       const X = gone ? null : pePageTextDelta(o, t.unit, t.view);
-      if (await pePageTextFill(pdfDoc, page, t.token, items.length ? write(t.unit, items, X, t.view, fallbackName) : '')) changed++;
+      const before = t.before;
+      t.before = null;
       t.live = false;
       if (!gone) keepAt(o, items.find(i => !i.syn && !i.brk), t.view);
+      // An editing that changed nothing, and nothing else to write: the page
+      // goes back to its bytes from before it, as it was to the byte.
+      if (done.length === 1 && !changedObjs.length && !deleted.length && before && !X && pePageTextSame(t.unit, items)) {
+        pdfDoc = await PDFLib.PDFDocument.load(before);
+        peState.pdfContentMutated = t.mutated0;
+        same++;
+        break;
+      }
+      if (await pePageTextFill(pdfDoc, page, t.token, items.length ? write(t.unit, items, X, t.view, fallbackName) : '')) changed++;
     }
     if (changedObjs.length || deleted.length) {
       const data = await pePageTextData();
@@ -55451,8 +55565,14 @@ async function pePageTextSync() {
         if (unit && await pePageTextCut(pdfDoc, page, unit, '')) changed++;
       }
     }
-    if (!changed) return;
-    await pePageTextAfterChange();
+    if (same) {
+      await peReloadEditorPageFromPdfDoc();
+      if (typeof invalidatePageTextLayers === 'function') invalidatePageTextLayers();
+    } else if (!changed) {
+      return;
+    } else {
+      await pePageTextAfterChange();
+    }
     // The text stays selected, read from the page as it is now.
     if (reselect.length) {
       const data = await pePageTextData();
