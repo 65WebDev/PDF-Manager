@@ -3462,6 +3462,16 @@
       position: absolute; border: 1px solid #3498db;
       background: rgba(52, 152, 219, .12); pointer-events: none; z-index: 5;
     }
+    /* Object-select, Alt held: a selection frame starts anywhere, on objects
+       too - a crosshair, and a small frame mark by the cursor. */
+    #pageEditModal.pe-obj-select-mode.pe-alt-marquee .pe-stage-wrap,
+    #pageEditModal.pe-obj-select-mode.pe-alt-marquee .pe-stage-wrap * { cursor: crosshair !important; }
+    #peAltMarqueeBadge {
+      position: fixed; left: 0; top: 0; display: none; width: 11px; height: 8px;
+      border: 1.5px dashed #3498db; background: rgba(52, 152, 219, .18); border-radius: 1px;
+      transform: translate(13px, 13px); pointer-events: none; z-index: 99999;
+    }
+    #peAltMarqueeBadge.visible { display: block; }
     #peStage { position: relative; background: #fff; box-shadow: 0 8px 30px rgba(0,0,0,.5); flex: 0 0 auto; }
     #peStage canvas { display: block; }
     #peStage.pe-layout-zoom canvas { image-rendering: auto; }
@@ -27820,6 +27830,13 @@
       if (layer.dataset.eventsShielded !== '1') {
         layer.dataset.eventsShielded = '1';
         layer.addEventListener('mousedown', (e) => {
+          // A selection frame began with this press (peAltMarqueePress): no text selection.
+          if (layer.id === 'peTextLayer' && typeof peState !== 'undefined' && peState &&
+              peState.drag && peState.drag.kind === 'obj-marquee') {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
           if (e.button === 0) {
             // Touch Object-select pan is handled on pointerdown; ignore the
             // synthetic mouse follow-up so it does not start a text drag.
@@ -27875,6 +27892,8 @@
         }, true);
         layer.addEventListener('pointerdown', (e) => {
           if (e.button !== 0) return;
+          // Page editor, Object-select, Alt held: a selection frame, not a text selection.
+          if (layer.id === 'peTextLayer' && typeof peAltMarqueePress === 'function' && peAltMarqueePress(e, null)) return;
           // Object-select + touch on PDF text: start pan/marquee (otherwise the
           // text layer swallows the gesture and Hand-like pan never runs).
           if (layer.id === 'peTextLayer' &&
@@ -54752,6 +54771,7 @@ function pePageTextSameColor(a, b) {
  */
 function pePageTextLayerTap(e) {
   if (!peState || !peState.objSelectMode || peState.tool !== 'select' || e.button !== 0 || e.detail > 1) return;
+  if (Date.now() - peObjMarqueeEndedAt < 400) return;   // the end of a selection frame's press (peObjSelectMarqueeTap did its click)
   // The click a tap ends with: the tap itself is handled (once it is no double tap).
   if (!e.touch && (e.pointerType === 'touch' || e.pointerType === 'pen' ||
       (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents))) return;
@@ -59687,6 +59707,7 @@ function peCapturePointer(e, el) {
 let pePinchBlockObjUntil = 0;
 let peSelSnapBeforePinch = null;
 let peObjMarqueeTap = { t: 0, x: 0, y: 0 };
+let peObjMarqueeEndedAt = 0;   // the click a selection frame's press ends with is no click on the page's text
 /** Deferred touch hit on an object — committed on move/tap, cancelled on pinch. */
 let peTouchObjPending = null;
 let peTouchObjCommit = false;
@@ -59769,7 +59790,12 @@ function peRegisterObjSelectTap(clientX, clientY) {
   return isDbl;
 }
 
-function peBeginObjSelectMarquee(e) {
+/**
+ * A selection frame from the press on. opts.tap: a press that ends where it
+ * began is the click it was after all (peObjSelectMarqueeTap) - on
+ * opts.clickObj, or the bare page; opts.keepOnTap: that click changes nothing.
+ */
+function peBeginObjSelectMarquee(e, opts) {
   if (!peState || !peState.objSelectMode) return;
   const pt = peStagePoint(e);
   peCancelTouchObjPending();
@@ -59778,11 +59804,105 @@ function peBeginObjSelectMarquee(e) {
   peState.drag = {
     kind: 'obj-marquee',
     startX: pt.x, startY: pt.y, curX: pt.x, curY: pt.y,
+    startClientX: e.clientX, startClientY: e.clientY,
     additive: e.shiftKey,
-    baseIds: e.shiftKey ? peGetSelectedObjects().map(o => o.id) : null
+    baseIds: e.shiftKey ? peGetSelectedObjects().map(o => o.id) : null,
+    tap: !!(opts && opts.tap),
+    clickObj: (opts && opts.clickObj) || null,
+    keepOnTap: !!(opts && opts.keepOnTap)
   };
   peUpdatePanUi();
 }
+
+/**
+ * Object-select on the desktop with Alt held as the mouse button goes down:
+ * a selection frame starts wherever the press lands - on an object, the
+ * page's text or its images, too. (Alt pressed only once an object is being
+ * dragged still turns its snapping off.)
+ */
+function peAltMarqueePress(e, clickObj) {
+  if (!e || !e.altKey || e.pointerType !== 'mouse' || !peState || !peState.objSelectMode ||
+      peState.tool !== 'select' || peState.inlineEditId) return false;
+  if (e.cancelable) e.preventDefault();
+  e.stopPropagation();
+  peCapturePointer(e, document.getElementById('peStage'));
+  peBeginObjSelectMarquee(e, { tap: true, clickObj });
+  return true;
+}
+
+/** A click on the bare page in Object-select: the page's text or image under it, else no selection (a page-text selection clicked on stays). */
+function peObjSelectBlankTap(clientX, clientY) {
+  const onPageTextSel = peClientInsidePageTextSelection(clientX, clientY);
+  if (onPageTextSel || !pePageImgTapSelect(clientX, clientY)) {
+    peSelect(null, { keepPageTextSelection: onPageTextSel });
+    if (!onPageTextSel) peClearEditorPageTextSelection();
+  }
+}
+
+/** A selection frame's press that ended where it began (peBeginObjSelectMarquee opts.tap): the click it was. */
+function peObjSelectMarqueeTap(d) {
+  if (d.keepOnTap) return;
+  const o = d.clickObj && peState.objects.includes(d.clickObj) ? d.clickObj : null;
+  if (o) {
+    if (!d.additive) peSelect(o);
+    else if (!peGetSelectedObjects().includes(o)) peSelectMultiple(peGetSelectedObjects().concat([o]));
+    return;
+  }
+  if (!d.additive) peObjSelectBlankTap(d.startClientX, d.startClientY);
+}
+
+/**
+ * Alt held in Object-select on the desktop (peAltMarqueePress): a small
+ * frame mark by the cursor over the page, and a crosshair.
+ */
+const peAltCue = { held: false, mouse: false, over: false, x: 0, y: 0, shown: false };
+function peUpdateAltMarqueeCue() {
+  const modal = document.getElementById('pageEditModal');
+  const d = peState && peState.drag;
+  const on = !!(peAltCue.held && peAltCue.mouse && peAltCue.over && peState && peState.objSelectMode &&
+    peState.tool === 'select' && !peState.inlineEditId && (!d || d.kind === 'obj-marquee') &&
+    modal && !modal.classList.contains('pe-hand-mode'));
+  if (!on && !peAltCue.shown) return;
+  peAltCue.shown = on;
+  if (modal) modal.classList.toggle('pe-alt-marquee', on);
+  let badge = document.getElementById('peAltMarqueeBadge');
+  if (on && !badge) {
+    badge = document.createElement('div');
+    badge.id = 'peAltMarqueeBadge';
+    badge.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(badge);
+  }
+  if (!badge) return;
+  badge.classList.toggle('visible', on);
+  if (on) {
+    badge.style.left = peAltCue.x + 'px';
+    badge.style.top = peAltCue.y + 'px';
+  }
+}
+window.addEventListener('keydown', (e) => {
+  if (e.key !== 'Alt') return;
+  peAltCue.held = true;
+  peUpdateAltMarqueeCue();
+}, true);
+window.addEventListener('keyup', (e) => {
+  if (e.key !== 'Alt') return;
+  peAltCue.held = false;
+  peUpdateAltMarqueeCue();
+}, true);
+window.addEventListener('blur', () => {
+  peAltCue.held = false;
+  peUpdateAltMarqueeCue();
+});
+window.addEventListener('pointermove', (e) => {
+  if (!peState && !peAltCue.shown) return;
+  const wrap = document.getElementById('peStageWrap');
+  peAltCue.held = e.altKey;
+  peAltCue.mouse = e.pointerType === 'mouse';
+  peAltCue.over = !!(wrap && e.target && wrap.contains(e.target));
+  peAltCue.x = e.clientX;
+  peAltCue.y = e.clientY;
+  peUpdateAltMarqueeCue();
+}, true);
 
 /**
  * Touch double-tap on an object or PDF text: start marquee (same as blank stage).
@@ -59804,6 +59924,12 @@ function peTryStartObjSelectMarqueeFromTouch(e) {
 
 function peStartObjSelectBlankGesture(e, opts) {
   if (!peState || !peState.objSelectMode) return;
+  // Desktop mouse: a drag from the bare page draws a selection frame (a
+  // click stays a click); the view pans by the wheel, the scroll bars or Hand.
+  if (e.pointerType === 'mouse' && !(opts && opts.forcePan)) {
+    peBeginObjSelectMarquee(e, { tap: true });
+    return;
+  }
   // forcePan: finger moved on the text layer — pan only; do not treat as dbl-tap
   // (the pointerdown already registered the first tap).
   const forcePan = !!(opts && opts.forcePan);
@@ -59941,6 +60067,7 @@ function peObjMouseDown(e, o) {
     peCancelTouchObjPending();
     return;
   }
+  if (peAltMarqueePress(e, o)) return;
   // Double-tap-zoom needs a chance at a tap landing on a placed object too -
   // this handler is bound directly on each object, ahead of the stage's own
   // dispatcher in bubble order, so every path below claims the tap for
@@ -60925,6 +61052,11 @@ function peObjMouseDown(e, o) {
     if (peState.tool === 'select' && !peState.sel && peCanPan() && !peState.objSelectMode) {
       peCapturePointer(e, wrap);
       peStartPanView(e);
+    } else if (peState.tool === 'select' && peState.objSelectMode && e.pointerType === 'mouse' && !peState.inlineEditId) {
+      // Desktop: a selection frame may start beside the page, too (a click there changes nothing, as before).
+      e.preventDefault();
+      peCapturePointer(e, wrap);
+      peBeginObjSelectMarquee(e, { tap: true, keepOnTap: true });
     } else if (peState.tool === 'crop' && peState.cropPdf && peCanPan()) {
       peCapturePointer(e, wrap);
       peStartPanView(e);
@@ -61466,16 +61598,11 @@ function peObjMouseDown(e, o) {
         (d.lastClientX != null ? d.lastClientX : d.startClientX) - d.startClientX,
         (d.lastClientY != null ? d.lastClientY : d.startClientY) - d.startClientY
       );
-      if (moved < 6 && !d.additive) {
-        // Tap outside the page-text selection clears it; tap on it keeps it.
-        const onPageTextSel = peClientInsidePageTextSelection(d.startClientX, d.startClientY);
-        if (onPageTextSel || !pePageImgTapSelect(d.startClientX, d.startClientY)) {
-          peSelect(null, { keepPageTextSelection: onPageTextSel });
-          if (!onPageTextSel) peClearEditorPageTextSelection();
-        }
-      }
+      // Tap outside the page-text selection clears it; tap on it keeps it.
+      if (moved < 6 && !d.additive) peObjSelectBlankTap(d.startClientX, d.startClientY);
     }
     if (d.kind === 'obj-marquee') {
+      peObjMarqueeEndedAt = Date.now();
       document.getElementById('pageEditModal')?.classList.remove('pe-obj-marquee-active');
       const marqueeEl = document.getElementById('peObjMarquee');
       if (marqueeEl) marqueeEl.remove();
@@ -61498,6 +61625,8 @@ function peObjMouseDown(e, o) {
         } else {
           peSelectMultiple(hits);
         }
+      } else if (d.tap) {
+        peObjSelectMarqueeTap(d);
       } else if (!d.additive) {
         peSelect(null);
       }
