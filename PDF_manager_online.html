@@ -27855,6 +27855,11 @@
               e.stopPropagation();
               return;
             }
+            // Whether something was selected as this press began: the click that follows then only
+            // drops it (pePageTextLayerTap), as a tap on the bare page does.
+            if (layer.id === 'peTextLayer' && typeof peState !== 'undefined' && peState) {
+              peState.textLayerDownHadSel = !!(peState.sel || (peState.multiSel && peState.multiSel.length));
+            }
             // This capture-phase stopPropagation prevents the event from ever
             // reaching the inner .textLayer, so the selection gap-guard must be
             // armed right here - it cannot listen for this event itself.
@@ -53738,9 +53743,10 @@ function pePageImgTapSelect(clientX, clientY) {
   return true;
 }
 
-/** Select an image of the page: a stand-in image object over it. */
-function pePageImgSelect(pl) {
+/** Select an image of the page: a stand-in image object over it (opts.additive: one more for the selection). */
+function pePageImgSelect(pl, opts) {
   if (!peState || !pl) return null;
+  const keep = opts && opts.additive ? peGetSelectedObjects() : [];
   const view = pePageImgCache && pePageImgCache.view;
   const b = pl.box;
   const o = {
@@ -53756,7 +53762,8 @@ function pePageImgSelect(pl) {
     }
   };
   peState.objects.push(o);
-  peSelect(o);
+  if (keep.length) peSelectMultiple(keep.concat([o]));
+  else peSelect(o);
   peRedrawObjects();
   peUpdateProps();
   peUpdatePanUi();
@@ -53936,11 +53943,13 @@ async function pePageImgEmbedFile(doc, file) {
   return { img, w, h, dataUrl: loaded.dataUrl };
 }
 
+// The page's images and its text both rewrite the page's content streams, by offsets they read: one after
+// the other, never at once (a group of both kinds moves at once) - in the page text's queue.
 function pePageImgSchedule(ms) {
   clearTimeout(pePageImgTimer);
   pePageImgTimer = setTimeout(() => {
     pePageImgTimer = null;
-    pePageImgRun = pePageImgSync();
+    pePageImgRun = pePageTextQueue(pePageImgSync);
   }, ms == null ? 80 : ms);
 }
 
@@ -53958,7 +53967,7 @@ async function pePageImgFlush() {
     if (pePageImgTimer) {
       clearTimeout(pePageImgTimer);
       pePageImgTimer = null;
-      pePageImgRun = pePageImgSync();
+      pePageImgRun = pePageTextQueue(pePageImgSync);
     }
     if (!pePageImgRun) return;
     const run = pePageImgRun;
@@ -55033,7 +55042,16 @@ function pePageTextLayerTap(e) {
   const sel = window.getSelection();
   if (sel && !sel.isCollapsed) return;
   const unit = pePageTextAt(e.clientX, e.clientY);
-  if (unit) pePageTextSelect(unit, { additive: e.shiftKey });
+  if (unit) {
+    pePageTextSelect(unit, { additive: e.shiftKey });
+    return;
+  }
+  // No text of the page to edit here, but the text layer is over the picture (a line's box over a logo, a
+  // scan's own text): an image of the page under the click is picked - a page-sized one only with Shift.
+  const pl = pePageImgAt(e.clientX, e.clientY);
+  const view = pePageImgCache && pePageImgCache.view;
+  const pageSized = !!(pl && view && pl.box.w * pl.box.h > 0.6);
+  if (pl && (e.shiftKey || (!pageSized && !peState.textLayerDownHadSel))) pePageImgSelect(pl, { additive: e.shiftKey });
 }
 
 /** Codes a font of the page can write a character with (one with a glyph), and their widths. */
@@ -60192,6 +60210,24 @@ function peAltMarqueePress(e, clickObj) {
   return true;
 }
 
+/**
+ * Shift+click on the bare page in Object-select: the paragraph, line or
+ * image of the page under it joins the selection (the ones already selected
+ * are covered by their stand-ins, which take such a click themselves).
+ */
+function peObjSelectAddPageThing(clientX, clientY) {
+  if (!peState || !peState.objSelectMode || peState.tool !== 'select') return false;
+  const unit = pePageTextAt(clientX, clientY);
+  if (unit) {
+    pePageTextSelect(unit, { additive: true });
+    return true;
+  }
+  const pl = pePageImgAt(clientX, clientY);
+  if (!pl) return false;
+  pePageImgSelect(pl, { additive: true });
+  return true;
+}
+
 /** A click on the bare page in Object-select: the page's text or image under it, else no selection (a page-text selection clicked on stays). */
 function peObjSelectBlankTap(clientX, clientY) {
   const onPageTextSel = peClientInsidePageTextSelection(clientX, clientY);
@@ -60210,7 +60246,8 @@ function peObjSelectMarqueeTap(d) {
     else if (!peGetSelectedObjects().includes(o)) peSelectMultiple(peGetSelectedObjects().concat([o]));
     return;
   }
-  if (!d.additive) peObjSelectBlankTap(d.startClientX, d.startClientY);
+  if (d.additive) peObjSelectAddPageThing(d.startClientX, d.startClientY);
+  else peObjSelectBlankTap(d.startClientX, d.startClientY);
 }
 
 /**
