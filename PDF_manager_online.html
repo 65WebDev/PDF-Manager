@@ -3462,6 +3462,16 @@
       position: absolute; border: 1px solid #3498db;
       background: rgba(52, 152, 219, .12); pointer-events: none; z-index: 5;
     }
+    /* Object-select, Alt held: a selection frame starts anywhere, on objects
+       too - a crosshair, and a small frame mark by the cursor. */
+    #pageEditModal.pe-obj-select-mode.pe-alt-marquee .pe-stage-wrap,
+    #pageEditModal.pe-obj-select-mode.pe-alt-marquee .pe-stage-wrap * { cursor: crosshair !important; }
+    #peAltMarqueeBadge {
+      position: fixed; left: 0; top: 0; display: none; width: 11px; height: 8px;
+      border: 1.5px dashed #3498db; background: rgba(52, 152, 219, .18); border-radius: 1px;
+      transform: translate(13px, 13px); pointer-events: none; z-index: 99999;
+    }
+    #peAltMarqueeBadge.visible { display: block; }
     #peStage { position: relative; background: #fff; box-shadow: 0 8px 30px rgba(0,0,0,.5); flex: 0 0 auto; }
     #peStage canvas { display: block; }
     #peStage.pe-layout-zoom canvas { image-rendering: auto; }
@@ -13390,6 +13400,7 @@
       });
       pmUpdateThemeToggleUI(pmCurrentTheme());
       pmUpdateLangToggleUI();
+      try { if (typeof peApplyHotkeyTips === 'function') peApplyHotkeyTips(); } catch (_) {}
       try { if (typeof updateMergeButtonTooltip === 'function') updateMergeButtonTooltip(); } catch (_) {}
       try { if (typeof updateFitWidthDefaultUI === 'function') updateFitWidthDefaultUI(); } catch (_) {}
       try {
@@ -27820,6 +27831,22 @@
       if (layer.dataset.eventsShielded !== '1') {
         layer.dataset.eventsShielded = '1';
         layer.addEventListener('mousedown', (e) => {
+          // A selection frame began with this press (peAltMarqueePress): no text selection.
+          if (layer.id === 'peTextLayer' && typeof peState !== 'undefined' && peState &&
+              peState.drag && peState.drag.kind === 'obj-marquee') {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
+          // Object-select, Shift: the click adds the paragraph under it to the
+          // selection (pePageTextLayerTap) - no text selection, none cleared;
+          // only a text selection already there is extended, as before.
+          if (layer.id === 'peTextLayer' && e.button === 0 && e.shiftKey && typeof peState !== 'undefined' && peState &&
+              peState.objSelectMode && typeof peIsEditorPageTextSelection === 'function' && !peIsEditorPageTextSelection()) {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
           if (e.button === 0) {
             // Touch Object-select pan is handled on pointerdown; ignore the
             // synthetic mouse follow-up so it does not start a text drag.
@@ -27827,6 +27854,11 @@
                 peState.objSelectMode && typeof isTouchDevice !== 'undefined' && isTouchDevice) {
               e.stopPropagation();
               return;
+            }
+            // Whether something was selected as this press began: the click that follows then only
+            // drops it (pePageTextLayerTap), as a tap on the bare page does.
+            if (layer.id === 'peTextLayer' && typeof peState !== 'undefined' && peState) {
+              peState.textLayerDownHadSel = !!(peState.sel || (peState.multiSel && peState.multiSel.length));
             }
             // This capture-phase stopPropagation prevents the event from ever
             // reaching the inner .textLayer, so the selection gap-guard must be
@@ -27875,6 +27907,8 @@
         }, true);
         layer.addEventListener('pointerdown', (e) => {
           if (e.button !== 0) return;
+          // Page editor, Object-select, Alt held: a selection frame, not a text selection.
+          if (layer.id === 'peTextLayer' && typeof peAltMarqueePress === 'function' && peAltMarqueePress(e, null)) return;
           // Object-select + touch on PDF text: start pan/marquee (otherwise the
           // text layer swallows the gesture and Hand-like pan never runs).
           if (layer.id === 'peTextLayer' &&
@@ -46829,6 +46863,7 @@ async function openPageEditor(idx, restoreSelection) {
   if (idx < 0 || idx >= pdfDoc.getPageCount()) return;
   // The bundled Roboto, new text blocks' font, ready before the page shows.
   void pmWmLoadFonts().catch(() => {});
+  peApplyHotkeyTips();
   try {
     peSavePageSelectionForRestore(restoreSelection);
     showLoading(t('loadingOpenEditor'));
@@ -47611,6 +47646,65 @@ function peOnWinResize() {
   peScheduleFullRender(180);
 }
 
+/**
+ * The page editor's hotkeys, by the physical key (e.code) so they work in any
+ * keyboard layout - Б and Ю are the , and . keys. Each presses its toolbar
+ * button, so it does what a click on it does (and nothing while it is
+ * disabled); their tooltips name them (peApplyHotkeyTips).
+ */
+const PE_HOTKEY_BUTTONS = {
+  KeyH: 'peToolHand', KeyC: 'peToolObjSelect', KeyQ: 'peRotL', KeyW: 'peRotR',
+  Digit1: 'peToolCrop', Digit2: 'peToolRedact', Digit3: 'peToolText', Digit4: 'peToolImage',
+  Numpad1: 'peToolCrop', Numpad2: 'peToolRedact', Numpad3: 'peToolText', Numpad4: 'peToolImage',
+  Comma: 'pePagePrev', Period: 'pePageNext'
+};
+const PE_HOTKEY_SAVE = 'peSaveBtn';   // Ctrl+Enter
+
+function pePressHotkeyButton(id) {
+  const btn = document.getElementById(id);
+  if (!btn || btn.disabled || btn.hidden || btn.getAttribute('aria-hidden') === 'true' || !btn.offsetParent) return;
+  btn.click();
+}
+
+function peHandleEditorHotkey(e, typing) {
+  if (!peState || e.isComposing) return false;
+  // Over a confirmation or another dialog (the editor itself is one of these overlays): not for the page.
+  if (document.querySelector('.modal-overlay-active:not(#pageEditModal)')) return false;
+  if ((e.code === 'Enter' || e.code === 'NumpadEnter') && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
+    // Ctrl+Enter saves - from the text being typed, too.
+    e.preventDefault(); e.stopPropagation();
+    if (!e.repeat && !peState.drag) pePressHotkeyButton(PE_HOTKEY_SAVE);
+    return true;
+  }
+  if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || typing) return false;
+  const id = PE_HOTKEY_BUTTONS[e.code];
+  if (!id) return false;
+  // While a text block is being edited the keys are its text; a gesture under way is not interrupted.
+  if (peState.inlineEditId || peState.drag || peColorPreview) return false;
+  e.preventDefault(); e.stopPropagation();
+  if (!e.repeat) pePressHotkeyButton(id);
+  return true;
+}
+
+/** The hotkeys in the tooltips of the buttons they press: "Hand (H)". */
+function peApplyHotkeyTips() {
+  const tips = [
+    ['peToolHand', 'H'], ['peToolObjSelect', 'C'], ['peRotL', 'Q'], ['peRotR', 'W'],
+    ['peToolCrop', '1'], ['peToolRedact', '2'], ['peToolText', '3'], ['peToolImage', '4'],
+    ['pePagePrev', ','], ['pePageNext', '.'], ['peSaveBtn', 'Ctrl+Enter']
+  ];
+  tips.forEach(([id, keys]) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const mark = ' (' + keys + ')';
+    // Its tooltip as the language gives it (a button without one: its caption); the key after the first line.
+    const key = el.getAttribute('data-i18n-title') || el.getAttribute('data-i18n');
+    const base = (key ? t(key) : '') || el.title || '';
+    el.title = base.replace(/^[^\n]*/, m => (m.endsWith(mark) ? m : m + mark));
+    el.setAttribute('aria-keyshortcuts', keys === 'Ctrl+Enter' ? 'Control+Enter' : keys);
+  });
+}
+
 function peOnKeyDown(e) {
   if (!peState) return;
   if (e.key === 'Shift') {
@@ -47637,6 +47731,7 @@ function peOnKeyDown(e) {
   }
   const tag = (e.target.tagName || '').toLowerCase();
   const typing = tag === 'textarea' || tag === 'input' || e.target.isContentEditable;
+  if (peHandleEditorHotkey(e, typing || tag === 'select')) return;
   if ((e.ctrlKey || e.metaKey) && !e.altKey && peState.inlineEditId) {
     if (!e.shiftKey && e.code === 'KeyB') {
       e.preventDefault(); e.stopPropagation();
@@ -47990,6 +48085,7 @@ function peRedrawObjects() {
             o.html = inner.innerHTML;
             o.text = peEditablePlainText(inner);
             peSyncTextEmptyClass(inner, o);
+            if (peState) peState.inlineEditCaretAt = null;
             if (o.pageText) pePageTextNoteInput(o, inner, ev);
           });
         }
@@ -48009,7 +48105,7 @@ function peRedrawObjects() {
         if (peState.drag?.kind === 'move-pending' && peState.drag.obj === o) {
           peState.drag = null;
         }
-        peBeginInlineEdit(o);
+        peBeginInlineEdit(o, { caretAt: { x: ev.clientX, y: ev.clientY } });
       });
     } else if (o.type === 'highlight') {
       el.classList.add('pe-obj-hl');
@@ -50181,7 +50277,7 @@ function peFocusInlineEditorNow() {
   try { el.focus({ preventScroll: true }); } catch (_) { try { el.focus(); } catch (__) {} }
   const focused = document.activeElement === el;
   if (focused) peState.inlineEditFocusPending = false;
-  if (focused) {
+  if (focused && !pePlaceCaretAtPoint(el, o)) {
     try {
       const range = document.createRange();
       range.selectNodeContents(el);
@@ -50192,6 +50288,30 @@ function peFocusInlineEditorNow() {
     } catch (_) {}
   }
   return focused;
+}
+
+/** A text block opened by a double click: the caret where it was clicked (peBeginInlineEdit opts.caretAt), not at its end. */
+function pePlaceCaretAtPoint(el, o) {
+  const at = peState && peState.inlineEditCaretAt;
+  if (!at || at.id !== o.id || Date.now() > at.until) return false;
+  let range = null;
+  try {
+    if (document.caretRangeFromPoint) {
+      range = document.caretRangeFromPoint(at.x, at.y);
+    } else if (document.caretPositionFromPoint) {
+      const pos = document.caretPositionFromPoint(at.x, at.y);
+      if (pos) {
+        range = document.createRange();
+        range.setStart(pos.offsetNode, pos.offset);
+      }
+    }
+  } catch (_) {}
+  if (!range || !el.contains(range.startContainer)) return false;
+  range.collapse(true);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+  return true;
 }
 
 function peFocusInlineEditorIfNeeded() {
@@ -51198,6 +51318,8 @@ function peBeginInlineEdit(o, opts) {
   document.getElementById('pageEditModal')?.classList.remove('pe-text-geom-dragging');
   peState.inlineEditId = o.id;
   peState.inlineEditFocusPending = true;
+  // A double click: the caret goes where it was (pePlaceCaretAtPoint), until the typing starts.
+  peState.inlineEditCaretAt = opts && opts.caretAt ? { id: o.id, x: opts.caretAt.x, y: opts.caretAt.y, until: Date.now() + 1500 } : null;
   // A line of the page's text: out of the page while it is edited.
   if (o.pageText) pePageTextLift(o);
   const skipSelectionHistory = !!(opts && opts.isNewDraft) || peState.draftTextId === o.id;
@@ -52795,8 +52917,10 @@ function peApplyTextLayoutStyles(inner, o, W) {
   inner.style.textIndent = '';
   inner.style.lineHeight = '';
   if (t && t.wrapW && peState) {
-    inner.style.width = (t.wrapW * peState.scale) + 'px';
-    inner.style.textIndent = ((t.indent || 0) * peState.scale) + 'px';
+    // (Resized - its size changed - the paragraph's box scales with it, its lines as they were.)
+    const r = (Number(o.fontPt) || t.style0.fontPt) / t.style0.fontPt;
+    inner.style.width = (t.wrapW * r * peState.scale) + 'px';
+    inner.style.textIndent = ((t.indent || 0) * r * peState.scale) + 'px';
     if (align === t.style0.textAlign) inner.style.textAlign = t.align;
   }
   if (t && t.lh) inner.style.lineHeight = String(t.lh);
@@ -53619,9 +53743,10 @@ function pePageImgTapSelect(clientX, clientY) {
   return true;
 }
 
-/** Select an image of the page: a stand-in image object over it. */
-function pePageImgSelect(pl) {
+/** Select an image of the page: a stand-in image object over it (opts.additive: one more for the selection). */
+function pePageImgSelect(pl, opts) {
   if (!peState || !pl) return null;
+  const keep = opts && opts.additive ? peGetSelectedObjects() : [];
   const view = pePageImgCache && pePageImgCache.view;
   const b = pl.box;
   const o = {
@@ -53637,7 +53762,8 @@ function pePageImgSelect(pl) {
     }
   };
   peState.objects.push(o);
-  peSelect(o);
+  if (keep.length) peSelectMultiple(keep.concat([o]));
+  else peSelect(o);
   peRedrawObjects();
   peUpdateProps();
   peUpdatePanUi();
@@ -53742,11 +53868,53 @@ function pePageImgUserDelta(b0, b1, view) {
   return pmAffMul(pmAffMul(view.V, T), Vinv);
 }
 
+/** A form's bounding box as numbers (null: it has none, or none that can be read). */
+function pePageFormBBox(doc, stream) {
+  const arr = stream && stream.dict ? peLookupPdfObj(doc, stream.dict.get(PDFLib.PDFName.of('BBox'))) : null;
+  if (!arr || typeof arr.asArray !== 'function') return null;
+  const b = arr.asArray().map(x => pePdfNumValue(doc, x));
+  return b.length === 4 && b.every(v => v != null) ? [Math.min(b[0], b[2]), Math.min(b[1], b[3]), Math.max(b[0], b[2]), Math.max(b[1], b[3])] : null;
+}
+
+/**
+ * What a form draws is clipped to its bounding box - Chromium's and others' groups have the one their
+ * content had: text that grows, an image that is moved, would be cut off at its edge. The boxes of the form
+ * (and of the forms it is in: form.levels) are widened to take in visual points; as little as it takes.
+ */
+function pePageFormsWiden(doc, form, pts, view) {
+  if (!form || !pts || !pts.length) return;
+  const pad = 0.5;
+  for (const lv of form.levels || []) {
+    const cur = pePageFormBBox(doc, lv.stream);
+    const inv = pmAffInv(pmAffMul(lv.base, view.V));
+    if (!cur || !inv) continue;
+    const q = pts.map(p => pmAffApply(inv, p[0], p[1]));
+    const xs = q.map(p => p[0]), ys = q.map(p => p[1]);
+    const nb = [Math.min(cur[0], Math.min(...xs) - pad), Math.min(cur[1], Math.min(...ys) - pad),
+      Math.max(cur[2], Math.max(...xs) + pad), Math.max(cur[3], Math.max(...ys) + pad)];
+    if (nb.some((v, i) => Math.abs(v - cur[i]) > 1e-6)) lv.stream.dict.set(PDFLib.PDFName.of('BBox'), doc.context.obj(nb.map(v => Math.round(v * 1000) / 1000)));
+  }
+}
+
+/** An XObject put into a resource dictionary (a form's): its resource name, as a string. */
+function pePageImgResAddXObject(doc, res, tag, ref) {
+  const key = PDFLib.PDFName.of('XObject');
+  let xo = doc.context.lookup(res.get(key));
+  if (!(xo instanceof PDFLib.PDFDict)) {
+    xo = doc.context.obj({});
+    res.set(key, xo);
+  }
+  const name = xo.uniqueKey(tag);
+  xo.set(name, ref);
+  return name.asString();
+}
+
 /**
  * Rewrite one image of the page in place. ref: { kind, name, box0 } - the
  * image as it is on the page now. action: { box } to move/resize/rotate it to
  * that box, { remove: true }, or { name, fitW, fitH } to paint another image
- * XObject in its place (fitted into its box, proportions kept). Returns the
+ * XObject in its place (fitted into its box, proportions kept; embedRef: that image's ref, named in the
+ * resources it is painted from, action.nameOut then its name). Returns the
  * image's new CTM (or true when removed), null when it was not found.
  */
 async function pePageImgRewrite(doc, page, view, ref, action) {
@@ -53754,7 +53922,7 @@ async function pePageImgRewrite(doc, page, view, ref, action) {
     pl.kind === ref.kind && (pl.kind !== 'xobj' || pl.name === ref.name) &&
     pePageImgBoxNear(pePageImgBoxOf(pl.ctm, view), ref.box0, view));
   if (!target) return null;
-  const stream = pePageContentStreamsOnly(doc, page)[target.streamIdx];
+  const stream = target.stream;   // (the page's own content stream, or a form's)
   const src = stream && peDecodePdfStreamBytes(stream);
   if (!src) return null;
   const wrap = pePageImgWrapper(src, target.start, target.end);
@@ -53768,7 +53936,14 @@ async function pePageImgRewrite(doc, page, view, ref, action) {
   if (!action.remove) {
     if (action.box) {
       newCtm = pmAffMul(C, pePageImgUserDelta(pePageImgBoxOf(C, view), action.box, view));
-    } else if (action.name) {
+    } else if (action.name || action.embedRef) {
+      let nm = action.name;
+      if (action.embedRef) {
+        // (Named in the resources of the stream it is painted from: the page's, or a form's.)
+        const key = target.form && target.resDict ? pePageImgResAddXObject(doc, target.resDict, 'Im', action.embedRef) : String(page.node.newXObject('Im', action.embedRef));
+        nm = key.startsWith('/') ? key : '/' + key;
+        action.nameOut = nm;
+      }
       // The new picture fitted into the old one's box, centred.
       const b = pePageImgBoxOf(C, view);
       const boxA = (b.w * view.W) / Math.max(1e-6, b.h * view.H);
@@ -53776,12 +53951,16 @@ async function pePageImgRewrite(doc, page, view, ref, action) {
       let sw = 1, sh = 1;
       if (imgA > boxA) sh = boxA / imgA; else sw = imgA / boxA;
       newCtm = pmAffMul([sw, 0, 0, sh, (1 - sw) / 2, (1 - sh) / 2], C);
-      body = action.name + ' Do';
+      body = nm + ' Do';
     } else {
       return null;
     }
     const CoutInv = pmAffInv(Cout);
     if (!CoutInv) return null;
+    if (target.form) {
+      const Q = pmAffMul(newCtm, view.V);
+      pePageFormsWiden(doc, target.form, [[0, 0], [1, 0], [0, 1], [1, 1]].map(q => pmAffApply(Q, q[0], q[1])), view);
+    }
     const M = pmAffMul(newCtm, CoutInv);
     text = 'q ' + M.map(pePageImgNum).join(' ') + ' cm ' + body + ' Q';
   }
@@ -53817,11 +53996,13 @@ async function pePageImgEmbedFile(doc, file) {
   return { img, w, h, dataUrl: loaded.dataUrl };
 }
 
+// The page's images and its text both rewrite the page's content streams, by offsets they read: one after
+// the other, never at once (a group of both kinds moves at once) - in the page text's queue.
 function pePageImgSchedule(ms) {
   clearTimeout(pePageImgTimer);
   pePageImgTimer = setTimeout(() => {
     pePageImgTimer = null;
-    pePageImgRun = pePageImgSync();
+    pePageImgRun = pePageTextQueue(pePageImgSync);
   }, ms == null ? 80 : ms);
 }
 
@@ -53839,7 +54020,7 @@ async function pePageImgFlush() {
     if (pePageImgTimer) {
       clearTimeout(pePageImgTimer);
       pePageImgTimer = null;
-      pePageImgRun = pePageImgSync();
+      pePageImgRun = pePageTextQueue(pePageImgSync);
     }
     if (!pePageImgRun) return;
     const run = pePageImgRun;
@@ -53883,12 +54064,11 @@ async function pePageImgSync() {
     for (const r of replaced) {
       const o = r.o;
       const emb = await pePageImgEmbedFile(pdfDoc, r.file);
-      const name = String(page.node.newXObject('Im', emb.img.ref));
-      const ctm = await pePageImgRewrite(pdfDoc, page, view, o.pageImg,
-        { name: name.startsWith('/') ? name : '/' + name, fitW: emb.w, fitH: emb.h });
+      const act = { embedRef: emb.img.ref, fitW: emb.w, fitH: emb.h };
+      const ctm = await pePageImgRewrite(pdfDoc, page, view, o.pageImg, act);
       if (!ctm) continue;
       o.pageImg.kind = 'xobj';
-      o.pageImg.name = peDecodePdfNameToken(name.replace(/^\//, ''));
+      o.pageImg.name = peDecodePdfNameToken(String(act.nameOut || '').replace(/^\//, ''));
       settle(o, ctm);
       o.origAspect = emb.w / Math.max(1, emb.h);
       o.dataUrl = emb.dataUrl;
@@ -53975,6 +54155,7 @@ function pePickReplacementImage(o) {
 // ============================================================================
 
 const PE_PAGETEXT_MARK = 'PMTextEdit';
+const PE_PAGETEXT_WRAP = 'PMWrap';   // the q / Q streams around a page's own content (pePageTextAppendFree)
 let pePageTextCache = null;
 const pePageTextDeleted = [];   // { ref } units to take off the page
 const pePageTextLive = [];      // stand-ins whose unit is lifted out of the page, waiting to go back
@@ -54144,18 +54325,22 @@ function pePageTextIdentityH(cm) {
     !(Array.isArray(cm._map) ? cm._map.length : cm._map && Object.keys(cm._map).length);
 }
 
-/** The text operators pdf.js decoded on the page (not inside forms), in order, and their fonts. */
+/** The text operators pdf.js decoded on the page (those inside forms, too: depth > 0), in order, and their fonts. */
 async function pePageTextPdfjsOps(pjPage) {
   const OPS = pdfjsLib.OPS;
   const list = await pjPage.getOperatorList({ annotationMode: pdfjsLib.AnnotationMode.DISABLE });
   const ops = [];
   let depth = 0, font = null, size = 0, fill = '#000000';
   const stack = [];
+  const formStack = [];   // a form is drawn in a graphics state of its own: what it sets (a font) is gone after it
   for (let i = 0; i < list.fnArray.length; i++) {
     const fn = list.fnArray[i], args = list.argsArray[i] || [];
-    if (fn === OPS.paintFormXObjectBegin) depth++;
-    else if (fn === OPS.paintFormXObjectEnd) depth--;
-    else if (fn === OPS.save) stack.push({ font, size, fill });
+    if (fn === OPS.paintFormXObjectBegin) { depth++; formStack.push({ font, size, fill, stack: stack.slice() }); }
+    else if (fn === OPS.paintFormXObjectEnd) {
+      depth--;
+      const st = formStack.pop();
+      if (st) { font = st.font; size = st.size; fill = st.fill; stack.length = 0; stack.push(...st.stack); }
+    } else if (fn === OPS.save) stack.push({ font, size, fill });
     else if (fn === OPS.restore) {
       const st = stack.pop();
       if (st) { font = st.font; size = st.size; fill = st.fill; }
@@ -54163,7 +54348,7 @@ async function pePageTextPdfjsOps(pjPage) {
     else if (fn === OPS.setFillRGBColor) {
       if (typeof args[0] === 'string') fill = args[0];
       else if (args.length >= 3) fill = '#' + [0, 1, 2].map(j => (args[j] | 0).toString(16).padStart(2, '0')).join('');
-    } else if (fn === OPS.showText && depth === 0) ops.push({ font, size, items: args[0] || [], fill });
+    } else if (fn === OPS.showText) ops.push({ font, size, items: args[0] || [], fill, depth });
   }
   const fonts = new Map();
   ops.forEach(r => {
@@ -54180,18 +54365,48 @@ async function pePageTextPdfjsOps(pjPage) {
  * (written back as they are), and per character its code, Unicode, width and
  * text matrix. null when the two readings of the page disagree.
  */
-function pePageTextScan(doc, page, pj) {
-  const recs = pj.ops;
+function pePageTextScan(doc, page, pj, opts) {
+  // formsOn: the text inside Form XObjects (transparency groups, a magazine's effects) is read too, as pdf.js
+  // has it in its list (depth > 0); off, only the page's own (what an earlier reading of such a page falls back to).
+  const formsOn = !opts || opts.forms !== false;
+  const recs = formsOn ? pj.ops : pj.ops.filter(r => !r.depth);
   const ops = [];
   let k = 0, bad = false;
   let ctm = [1, 0, 0, 1, 0, 0], Tm = [1, 0, 0, 1, 0, 0], Tlm = [1, 0, 0, 1, 0, 0], inText = false;
   let ts = { font: null, size: 0, Tc: 0, Tw: 0, Tz: 100, TL: 0, Ts: 0, Tr: 0 };
   let fill = '0 g', stroke = '0 G', fillCs = '', strokeCs = '';
-  const stack = [];
+  let stack = [];
+  let marks = [];   // open marked-content sequences: the units this editor wrote are PMPara ones (pePageTextReadMark)
+  // The clip in force, in default user space: null (none), { x0, y0, x1, y1 } (rectangles), 'x' (a path of another shape).
+  let clip = null;
+  let pathRects = [], pathOther = false, clipNext = false;
+  const endPath = () => {
+    if (clipNext) {
+      if (pathOther || !pathRects.length) clip = 'x';
+      else if (clip !== 'x') {
+        const b = pathRects.reduce((a, r) => ({ x0: Math.min(a.x0, r.x0), y0: Math.min(a.y0, r.y0), x1: Math.max(a.x1, r.x1), y1: Math.max(a.y1, r.y1) }));
+        clip = clip ? { x0: Math.max(clip.x0, b.x0), y0: Math.max(clip.y0, b.y0), x1: Math.min(clip.x1, b.x1), y1: Math.min(clip.y1, b.y1) } : b;
+      }
+    }
+    pathRects = [];
+    pathOther = false;
+    clipNext = false;
+  };
   const streams = pePageContentStreamsOnly(doc, page);
-  for (let si = 0; si < streams.length && !bad; si++) {
-    const src = peDecodePdfStreamBytes(streams[si]);
-    if (!src) continue;
+  let pageRes = null;
+  try { pageRes = page.node.Resources(); } catch (_) {}   // (inherited too; reads only)
+  const xmaps = new Map();
+  const xmapOf = res => {
+    if (!res) return new Map();
+    if (!xmaps.has(res)) xmaps.set(res, pmBuildXObjectRefMap(doc, res));
+    return xmaps.get(res);
+  };
+  const uses = new Map();   // form stream -> how many times the page draws it
+  let formSeq = 0;
+  // One content stream - the page's or a form's (form: null, or { stream, chain }: the forms it is in, outermost first).
+  const runStream = (stream, sid, resDict, form, depth) => {
+    const src = peDecodePdfStreamBytes(stream);
+    if (!src) return;
     const lex = pePdfContentLexer(src);
     const args = [];
     const show = (op, start, end) => {
@@ -54228,10 +54443,12 @@ function pePageTextScan(doc, page, pj) {
         });
       }
       const rop = {
-        streamIdx: si, start, end, op, quote, inText, ctm: ctm.slice(), tlm: Tlm.slice(),
+        streamIdx: sid, stream, form, resDict, start, end, op, quote, inText, ctm: ctm.slice(), tlm: Tlm.slice(),
         ts: { ...ts }, fill: (fillCs ? fillCs + ' ' : '') + fill, stroke: (strokeCs ? strokeCs + ' ' : '') + stroke,
-        loaded: rec.font, css: rec.fill, font, fm0, bpc, cells: [], editable: false
+        loaded: rec.font, css: rec.fill, font, fm0, bpc, cells: [], editable: false, mark: null, clip
       };
+      for (let j = marks.length - 1; j >= 0 && !rop.mark; j--) rop.mark = marks[j];
+      if (rop.mark) rop.mark.nOps++;
       let ci = 0;
       for (const it of rec.items) {
         if (typeof it === 'number') {
@@ -54247,7 +54464,8 @@ function pePageTextScan(doc, page, pj) {
       }
       if (bpc && ci !== codes.length) { bad = true; return; }
       rop.tmEnd = Tm.slice();
-      rop.editable = !!(font && bpc && !font.isType3Font && !font.vertical && font.toUnicode && font.toFontChar &&
+      // (A Type3 font's glyphs are drawn by procedures: what is there stays and moves as it is - see pePageTextEncoder.)
+      rop.editable = !!(font && bpc && !font.vertical && font.toUnicode && font.toFontChar &&
         ts.Tr >= 0 && ts.Tr <= 2 && Th > 0 && ts.size > 0);
       ops.push(rop);
     };
@@ -54259,12 +54477,22 @@ function pePageTextScan(doc, page, pj) {
       const last = N.length ? N[N.length - 1] : NaN;
       const raw = () => pmLatin1(src, start, end);
       switch (op) {
-        case 'q': stack.push({ ctm, ts: { ...ts }, fill, stroke, fillCs, strokeCs }); break;
+        case 'q': stack.push({ ctm, ts: { ...ts }, fill, stroke, fillCs, strokeCs, clip }); break;
         case 'Q': {
           const st = stack.pop();
-          if (st) { ctm = st.ctm; ts = st.ts; fill = st.fill; stroke = st.stroke; fillCs = st.fillCs; strokeCs = st.strokeCs; }
+          if (st) { ctm = st.ctm; ts = st.ts; fill = st.fill; stroke = st.stroke; fillCs = st.fillCs; strokeCs = st.strokeCs; clip = st.clip; }
           break;
         }
+        case 're':
+          if (N.length >= 4) {
+            const [x, y, w, h] = N.slice(-4);
+            const ps = [[x, y], [x + w, y], [x, y + h], [x + w, y + h]].map(q => pmAffApply(ctm, q[0], q[1]));
+            pathRects.push({ x0: Math.min(...ps.map(q => q[0])), y0: Math.min(...ps.map(q => q[1])), x1: Math.max(...ps.map(q => q[0])), y1: Math.max(...ps.map(q => q[1])) });
+          }
+          break;
+        case 'm': case 'l': case 'c': case 'v': case 'y': case 'h': pathOther = true; break;
+        case 'W': case 'W*': clipNext = true; break;
+        case 'n': case 'S': case 's': case 'f': case 'F': case 'f*': case 'B': case 'B*': case 'b': case 'b*': endPath(); break;
         case 'cm': if (N.length >= 6) { const m = N.slice(-6); ctm = peMatMul(ctm, m[0], m[1], m[2], m[3], m[4], m[5]); } break;
         case 'BT': inText = true; Tm = [1, 0, 0, 1, 0, 0]; Tlm = Tm.slice(); break;
         case 'ET': inText = false; break;
@@ -54297,14 +54525,146 @@ function pePageTextScan(doc, page, pj) {
         case 'sc': case 'scn': fill = raw(); break;
         case 'CS': strokeCs = raw(); stroke = ''; break;
         case 'SC': case 'SCN': stroke = raw(); break;
+        case 'BDC': case 'BMC': {
+          const nm = args.filter(a => a.t === 'name').shift();
+          const dict = args.find(a => a.t === 'dict');
+          marks.push(nm && nm.v === 'PMPara' ? pePageTextReadMark(dict ? pmLatin1(src, dict.s, dict.e) : '', sid, start, stream) : null);
+          break;
+        }
+        case 'EMC': {
+          const m = marks.pop();
+          if (m && m.streamIdx === sid) m.end = end;
+          break;
+        }
+        case 'Do': {
+          // A form XObject is drawn in a graphics state of its own, its content in place (as in pdf.js's list).
+          if (!formsOn || depth >= 8) break;
+          const nm = args.filter(a => a.t === 'name').pop();
+          const info = nm ? xmapOf(resDict).get(nm.v) : null;
+          if (info && info.kind === 'form' && !(form && form.chain.includes(info.obj))) runForm(info, resDict, form, depth);
+          break;
+        }
         case 'BI': lex.skipInlineImage(); break;
         default: break;
       }
       args.length = 0;
     }
-  }
+  };
+  const runForm = (info, resDict, form, depth) => {
+    uses.set(info.obj, (uses.get(info.obj) || 0) + 1);
+    const saved = { ctm, Tm, Tlm, inText, ts, fill, stroke, fillCs, strokeCs, stack, marks, clip, pathRects, pathOther, clipNext };
+    ctm = peMatMul(ctm, info.matrix[0], info.matrix[1], info.matrix[2], info.matrix[3], info.matrix[4], info.matrix[5]);
+    if (info.bbox) {
+      // (Its bounding box clips what it draws - as a rectangle when the form is not turned.)
+      const b = info.bbox;
+      const ps = [[b[0], b[1]], [b[2], b[1]], [b[0], b[3]], [b[2], b[3]]].map(q => pmAffApply(ctm, q[0], q[1]));
+      const box = { x0: Math.min(...ps.map(q => q[0])), y0: Math.min(...ps.map(q => q[1])), x1: Math.max(...ps.map(q => q[0])), y1: Math.max(...ps.map(q => q[1])) };
+      const square = (Math.abs(ctm[1]) < 1e-9 && Math.abs(ctm[2]) < 1e-9) || (Math.abs(ctm[0]) < 1e-9 && Math.abs(ctm[3]) < 1e-9);
+      if (!square || clip === 'x') clip = 'x';
+      else clip = clip ? { x0: Math.max(clip.x0, box.x0), y0: Math.max(clip.y0, box.y0), x1: Math.min(clip.x1, box.x1), y1: Math.min(clip.y1, box.y1) } : box;
+    }
+    ts = { ...ts };
+    stack = [];
+    marks = [];
+    inText = false;
+    pathRects = [];
+    pathOther = false;
+    clipNext = false;
+    const inner = {
+      stream: info.obj, chain: (form ? form.chain : []).concat([info.obj]),
+      levels: (form ? form.levels : []).concat([{ stream: info.obj, base: ctm.slice() }])   // (base: its space -> user space)
+    };
+    runStream(info.obj, 100000 + (++formSeq), info.resources || resDict, inner, depth + 1);
+    ({ ctm, Tm, Tlm, inText, ts, fill, stroke, fillCs, strokeCs, stack, marks, clip, pathRects, pathOther, clipNext } = saved);
+  };
+  for (let si = 0; si < streams.length && !bad; si++) runStream(streams[si], si, pageRes, null, 0);
   if (bad || k !== recs.length) return null;
-  return { ops, fonts: pj.fonts };
+  // What is in a form that the page draws once, and that no other page has, can be rewritten; a form that is
+  // shared (a stamp, a running head every page draws) would change on all the pages that draw it.
+  const share = ops.some(op => op.form) ? pePageFormShare(doc) : null;
+  ops.forEach(op => {
+    if (!op.form) return;
+    op.shared = !op.form.chain.every(st => uses.get(st) === 1 && (share.get(st) || 0) <= 1);
+    if (op.shared) op.editable = false;
+  });
+  return { ops, fonts: pj.fonts, forms: formsOn };
+}
+
+/**
+ * A unit this editor wrote (pePageTextInsertion) is a marked-content
+ * sequence of its own: /PMPara <</A /justify /W .. /I .. /L ..>> BDC ... EMC
+ * - its alignment, and a paragraph's width, first-line indent and line
+ * spacing in the text space of its first glyph. Read again, its lines are
+ * one unit as written (pePageTextUnits) whatever the page around it looks
+ * like; and it is cut out whole (pePageTextWholeMark), leaving nothing of
+ * it behind. Other viewers ignore it.
+ */
+function pePageTextReadMark(dict, streamIdx, start, stream) {
+  const num = k => { const m = new RegExp('/' + k + '\\s+([+-]?(?:\\d+\\.?\\d*|\\.\\d+))').exec(dict); return m ? parseFloat(m[1]) : 0; };
+  const a = /\/A\s*\/(\w+)/.exec(dict);
+  return { streamIdx, stream, start, end: null, nOps: 0, align: a ? a[1] : 'line', w: num('W'), indent: num('I'), lead: num('L') };
+}
+
+/** The mark a unit can be cut out by as a whole (all its operators, and nothing else, are in it). */
+function pePageTextWholeMark(unit) {
+  const m = unit && unit.ops.length ? unit.ops[0].mark : null;
+  return m && m.end != null && m.nOps === unit.ops.length && unit.ops.every(op => op.mark === m) ? m : null;
+}
+
+/**
+ * Whether laid-out items (moved by X, a map of the user space at the unit)
+ * reach out of the clip the unit is drawn in - where its own characters did
+ * not: text moved or grown into a page's margin that the page clips its
+ * content to (as Chromium's PDFs do) would be cut off there.
+ */
+function pePageTextOutsideClip(unit, items, X, view) {
+  const op = unit.ops[0];
+  const clip = op && op.clip;
+  if (!clip || clip === 'x' || op.form) return false;   // (text in a form is written in the form: it has no way out of it)
+  const cs = [[clip.x0, clip.y0], [clip.x1, clip.y0], [clip.x0, clip.y1], [clip.x1, clip.y1]].map(q => pmAffApply(view.V, q[0], q[1]));
+  const cx0 = Math.min(...cs.map(q => q[0])) - 0.5, cx1 = Math.max(...cs.map(q => q[0])) + 0.5;
+  const cy0 = Math.min(...cs.map(q => q[1])) - 0.5, cy1 = Math.max(...cs.map(q => q[1])) + 0.5;
+  const { M, Minv } = pePageTextViewOf(op, view);
+  const at = X && Minv ? (x, y) => { const u = pmAffApply(Minv, x, y); const v = pmAffApply(X, u[0], u[1]); return pmAffApply(M, v[0], v[1]); } : (x, y) => [x, y];
+  const out = (list, map) => list.some(it => {
+    if (it.syn || it.brk || it.soft) return false;
+    const a = map(it.x, it.y - it.size * 0.75), b = map(it.x + it.w, it.y + it.size * 0.25);
+    return Math.min(a[0], b[0]) < cx0 || Math.max(a[0], b[0]) > cx1 || Math.min(a[1], b[1]) < cy0 || Math.max(a[1], b[1]) > cy1;
+  });
+  return out(items, at) && !out(unit.chars, (x, y) => [x, y]);
+}
+
+/** The corners of laid-out items' boxes where they will be drawn (visual points), X moving them as in pePageTextOutsideClip. */
+function pePageTextItemPoints(unit, items, X, view) {
+  const op = unit.ops[0];
+  const { M, Minv } = pePageTextViewOf(op, view);
+  const at = X && Minv ? (x, y) => { const u = pmAffApply(Minv, x, y); const v = pmAffApply(X, u[0], u[1]); return pmAffApply(M, v[0], v[1]); } : (x, y) => [x, y];
+  const pts = [];
+  items.forEach(it => {
+    if (it.syn || it.brk || it.soft) return;
+    pts.push(at(it.x, it.y - it.size * 0.8), at(it.x + it.w, it.y - it.size * 0.8), at(it.x, it.y + it.size * 0.25), at(it.x + it.w, it.y + it.size * 0.25));
+  });
+  return pts;
+}
+
+/**
+ * Source drawn after all of the page's content, in a graphics state of its
+ * own: the page's own content wrapped in q/Q (once), the source after it.
+ */
+function pePageTextAppendFree(doc, page, src) {
+  const node = page.node;
+  const key = PDFLib.PDFName.of('Contents');
+  let arr = doc.context.lookup(node.get(key));
+  if (!(arr instanceof PDFLib.PDFArray)) {
+    arr = doc.context.obj([node.get(key)]);
+    node.set(key, arr);
+  }
+  const first = doc.context.lookup(arr.get(0));
+  if (!(first && first.dict && first.dict.get(PDFLib.PDFName.of(PE_PAGETEXT_WRAP)))) {
+    arr.insert(0, doc.context.register(doc.context.flateStream('q', { [PE_PAGETEXT_WRAP]: true })));
+    arr.push(doc.context.register(doc.context.flateStream('Q', { [PE_PAGETEXT_WRAP]: true })));
+  }
+  arr.push(doc.context.register(doc.context.flateStream(src)));
 }
 
 /** User space at a text operator -> the editor's visual points, and back. */
@@ -54338,7 +54698,7 @@ function pePageTextLines(scan, view) {
       return { op, c, x: p[0], y: p[1], w: c.adv * su, size };
     });
     const a = cells[0], z = cells[cells.length - 1];
-    if (cur && sameCtm(cur.ops[0].ctm, op.ctm) && Math.abs(a.y - cur.y) < 0.2 * Math.min(size, cur.size) &&
+    if (cur && cur.ops[0].mark === op.mark && cur.ops[0].form === op.form && sameCtm(cur.ops[0].ctm, op.ctm) && Math.abs(a.y - cur.y) < 0.2 * Math.min(size, cur.size) &&
         a.x > cur.x1 - 0.3 * size && a.x - cur.x1 < 1.5 * Math.max(size, cur.size)) {
       cur.ops.push(op);
       cur.cells.push(...cells);
@@ -54412,20 +54772,34 @@ function pePageTextFirstWordW(line) {
  * How much room a line had is measured up to its column's edge: the widest
  * line on the page starting where it does (ending where it does, for right
  * alignment; centred where it is, for centring).
+ * An edge only one line reaches proves nothing - unless lines read from
+ * the page earlier in this session reached it (edges: { x0, x1, y }), so a
+ * paragraph does not fall apart when the lines that proved its edge are
+ * edited away. A unit this editor wrote is one as its mark says
+ * (pePageTextReadMark).
  * A unit is what is selected and edited: a paragraph, or a line on its own.
  * Its chars: the lines' characters with a soft break ({ syn, soft }) between
  * lines, a hyphen at a break left out of its text ({ hyph }).
  */
-function pePageTextUnits(lines) {
+function pePageTextUnits(lines, view, edges) {
   const units = [];
   let cur = null;
   const near = (a, b, tol) => Math.abs(a - b) <= tol;
   const centre = l => (l.x0 + l.x1) / 2;
   const sameCtm = (a, b) => a.every((v, j) => Math.abs(v - b[j]) <= 1e-6 * Math.max(1, Math.abs(v)));
   const column = (l, key) => lines.filter(m => near(key(m), key(l), 2) && near(m.size, l.size, 0.1 * l.size));
+  // A left edge (x0) a line other than prev reached x1 from, in this session.
+  const edgeKnown = (prev, x0) => (edges || []).some(m => near(m.x0, x0, 1.5) && near(m.x1, prev.x1, 1) && !near(m.y, prev.y, 0.5));
   const continues = (u, l) => {
     const prev = u.lines[u.lines.length - 1];
-    if (!sameCtm(prev.ops[0].ctm, l.ops[0].ctm)) return false;
+    // Lines of a unit this editor wrote: together exactly as written, apart from all others.
+    const mk = prev.ops[0].mark;
+    if (mk || l.ops[0].mark) {
+      if (mk !== l.ops[0].mark || !(mk.w > 0)) return false;
+      u.align = mk.align;
+      return true;
+    }
+    if (!sameCtm(prev.ops[0].ctm, l.ops[0].ctm) || prev.ops[0].form !== l.ops[0].form) return false;
     if (!near(l.size, prev.size, 0.03 * prev.size)) return false;
     const lead = l.y - prev.y;
     if (lead < 1.0 * prev.size || lead > 2.0 * prev.size) return false;
@@ -54447,7 +54821,7 @@ function pePageTextUnits(lines) {
     if (align === 'left') {
       const o = others(m => m.x0);
       room = o.length ? Math.max(...o.map(x => x.x1)) - prev.x1 : -1;
-      if (!o.some(x => x.x1 >= prev.x1 - 1)) return false;
+      if (!o.some(x => x.x1 >= prev.x1 - 1) && !edgeKnown(prev, l.x0) && !edgeKnown(prev, prev.x0)) return false;
     } else if (align === 'right') {
       const o = others(m => m.x1);
       if (!o.some(x => x.x0 <= prev.x0 + 1)) return false;
@@ -54491,7 +54865,23 @@ function pePageTextUnits(lines) {
       x0: Math.min(...ls.map(l => l.x0)), x1: Math.max(...ls.map(l => l.x1)),
       y: ls[0].y, top: ls[0].top, bottom: ls[ls.length - 1].bottom, size: ls[0].size, para: null
     };
-    if (ls.length > 1) {
+    const mk = ls[0].ops[0].mark;
+    if (mk && mk.w > 0 && view) {
+      // A paragraph this editor wrote: its box as its mark has it (text space -> visual points).
+      const op0 = ls[0].ops[0];
+      const G = pmAffMul(op0.cells[0].tm, pePageTextViewOf(op0, view).M);
+      const su = Math.hypot(G[0], G[1]) || 1;
+      const W = mk.w * su;
+      const align = mk.align;
+      const x0 = align === 'center' ? centre(ls[0]) - W / 2 : align === 'right' ? ls[0].x1 - W
+        : ls.length > 1 ? Math.min(...ls.slice(1).map(l => l.x0)) : ls[0].x0 - mk.indent * su;
+      unit.para = {
+        align, lead: ls.length > 1 ? ls[1].y - ls[0].y : (mk.lead * su || unit.size * 1.2),
+        x0, x1: x0 + W, indent: align === 'left' || align === 'justify' ? Math.max(0, ls[0].x0 - x0) : 0
+      };
+      unit.x0 = unit.para.x0;
+      unit.x1 = Math.max(unit.x1, unit.para.x1);
+    } else if (ls.length > 1) {
       let align = u.align;
       // A left paragraph's right edge: its column's (the widest line on the page from its left edge).
       const right = align === 'left'
@@ -54514,6 +54904,20 @@ function pePageTextUnits(lines) {
   });
 }
 
+/** The lines' edges read from a page so far in this editor session, these among them (pePageTextUnits). */
+function pePageTextEdges(idx, rot, lines) {
+  if (!peState) return [];
+  const all = peState.pageTextEdges || (peState.pageTextEdges = {});
+  const key = idx + '|' + rot;
+  const edges = all[key] || (all[key] = []);
+  lines.forEach(l => {
+    if (edges.length < 4000 && !edges.some(m => Math.abs(m.x0 - l.x0) < 0.5 && Math.abs(m.x1 - l.x1) < 0.5 && Math.abs(m.y - l.y) < 0.5)) {
+      edges.push({ x0: l.x0, x1: l.x1, y: l.y });
+    }
+  });
+  return edges;
+}
+
 /** The page's text: its lines and units (paragraphs, lines on their own) - scanned once per state of the page. */
 function pePageTextData() {
   if (!peState || !pdfDoc || !peState.page || peState.pageLoading) return Promise.resolve(null);
@@ -54529,13 +54933,16 @@ function pePageTextData() {
       const view = pePageImgView();
       const pj = await pePageTextPdfjsOps(page);
       if (!peState || peState.page !== page || pdfDoc !== doc) return null;
-      const scan = pePageTextScan(doc, doc.getPage(idx), pj);
+      // The text inside forms too; where that does not agree with pdf.js (what a mask draws is in its list
+      // and not in the page's content), the page's own text only.
+      const pageObj = doc.getPage(idx);
+      const scan = pePageTextScan(doc, pageObj, pj) || pePageTextScan(doc, pageObj, pj, { forms: false });
       if (!scan) {
         console.warn('Page text not editable: the page content and pdf.js disagree');
         return { view, scan: null, lines: [], units: [] };
       }
       const lines = pePageTextLines(scan, view);
-      return { view, scan, lines, units: pePageTextUnits(lines) };
+      return { view, scan, lines, units: pePageTextUnits(lines, view, pePageTextEdges(idx, rot, lines)) };
     } catch (err) {
       console.warn('pePageTextData', err);
       return null;
@@ -54689,6 +55096,8 @@ function pePageTextObjectFields(unit, view) {
     // baseline's place in the first line box.
     x: ((para ? para.x0 : unit.x0) - 2 / sc) / view.W,
     y: (unit.y - 1 / sc - share * fontPt) / view.H,
+    // Where its text box starts (visual points): a resize scales the text about it.
+    anchor: { x: para ? para.x0 : unit.x0, y: unit.y - share * fontPt },
     css, wrapW: para ? para.x1 - para.x0 : 0, lh: para ? lh : 0, indent: para ? para.indent : 0
   };
 }
@@ -54699,7 +55108,7 @@ function pePageTextApply(o, unit, view) {
   Object.assign(o, { text: f.text, html: f.html, fontPt: f.fontPt, color: f.color, bold: f.bold, italic: f.italic,
     underline: false, textAlign: f.textAlign, x: f.x, y: f.y, rot: 0 });
   o.pageText = {
-    ref: { text: unit.text, x0: unit.x0, y: unit.y }, css: f.css, x0: f.x, y0: f.y,
+    ref: { text: unit.text, x0: unit.x0, y: unit.y }, css: f.css, x0: f.x, y0: f.y, anchor: f.anchor,
     wrapW: f.wrapW, lh: f.lh, indent: f.indent, align: f.align, live: false, unit: null,
     style0: { fontPt: f.fontPt, bold: f.bold, italic: f.italic, underline: false, color: f.color, textAlign: f.textAlign, html: f.html }
   };
@@ -54707,12 +55116,15 @@ function pePageTextApply(o, unit, view) {
 }
 
 /** Select a unit of the page's text: a see-through stand-in text object over it. */
-function pePageTextSelect(unit) {
+function pePageTextSelect(unit, opts) {
   const data = pePageTextCache && pePageTextCache.data;
   if (!peState || !unit || !data) return null;
   const o = pePageTextApply({ id: -(++pePageImgIdSeq), type: 'text' }, unit, data.view);
+  // Shift: one more for the selection (pePageTextLayerTap).
+  const keep = opts && opts.additive ? peGetSelectedObjects() : [];
   peState.objects.push(o);
-  peSelect(o);
+  if (keep.length) peSelectMultiple(keep.concat([o]));
+  else peSelect(o);
   peRedrawObjects();
   peUpdateProps();
   peUpdatePanUi();
@@ -54752,6 +55164,7 @@ function pePageTextSameColor(a, b) {
  */
 function pePageTextLayerTap(e) {
   if (!peState || !peState.objSelectMode || peState.tool !== 'select' || e.button !== 0 || e.detail > 1) return;
+  if (Date.now() - peObjMarqueeEndedAt < 400) return;   // the end of a selection frame's press (peObjSelectMarqueeTap did its click)
   // The click a tap ends with: the tap itself is handled (once it is no double tap).
   if (!e.touch && (e.pointerType === 'touch' || e.pointerType === 'pen' ||
       (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents))) return;
@@ -54759,7 +55172,16 @@ function pePageTextLayerTap(e) {
   const sel = window.getSelection();
   if (sel && !sel.isCollapsed) return;
   const unit = pePageTextAt(e.clientX, e.clientY);
-  if (unit) pePageTextSelect(unit);
+  if (unit) {
+    pePageTextSelect(unit, { additive: e.shiftKey });
+    return;
+  }
+  // No text of the page to edit here, but the text layer is over the picture (a line's box over a logo, a
+  // scan's own text): an image of the page under the click is picked - a page-sized one only with Shift.
+  const pl = pePageImgAt(e.clientX, e.clientY);
+  const view = pePageImgCache && pePageImgCache.view;
+  const pageSized = !!(pl && view && pl.box.w * pl.box.h > 0.6);
+  if (pl && (e.shiftKey || (!pageSized && !peState.textLayerDownHadSel))) pePageImgSelect(pl, { additive: e.shiftKey });
 }
 
 /** Codes a font of the page can write a character with (one with a glyph), and their widths. */
@@ -54784,6 +55206,13 @@ function pePageTextEncoder(font) {
   }
   const toFontChar = font.toFontChar || {};
   const widths = font.widths || {};
+  // A Type3 font draws each glyph with a procedure of its own, and which codes have one is not told here:
+  // what the page has of it stays as it is, and nothing new is written in it (a new letter is Roboto's).
+  if (font.isType3Font) {
+    enc = { has: () => true, width: code => (typeof widths[code] === 'number' ? widths[code] : 0), code: () => null };
+    pePageTextEncoders.set(font, enc);
+    return enc;
+  }
   enc = {
     has: code => toFontChar[code] !== undefined,
     width: code => (typeof widths[code] === 'number' ? widths[code] : (Number(font.defaultWidth) || 0)),
@@ -54815,12 +55244,16 @@ function pePageTextFontName(font) {
 function pePageTextSiblings(scan) {
   const byName = new Map();
   const seen = new Set();
+  const dicts = [];   // (a font's resource name means its font only in the resources of the content stream it is used in)
   (scan ? scan.ops : []).forEach(op => {
-    if (!op.editable || seen.has(op.ts.font)) return;
-    seen.add(op.ts.font);
+    let di = dicts.indexOf(op.resDict);
+    if (di < 0) di = dicts.push(op.resDict) - 1;
+    const key = di + '|' + op.ts.font;
+    if (!op.editable || seen.has(key)) return;
+    seen.add(key);
     const name = pePageTextFontName(op.font);
     if (!byName.has(name)) byName.set(name, []);
-    byName.get(name).push({ res: op.ts.font, font: op.font, bpc: op.bpc, fm0: op.fm0 });
+    byName.get(name).push({ res: op.ts.font, font: op.font, bpc: op.bpc, fm0: op.fm0, resDict: op.resDict });
   });
   return byName;
 }
@@ -54889,9 +55322,9 @@ function pePageTextCandidates(style, anchor, siblings) {
   const want = style ? { bold: !!style.bold, italic: !!style.italic } : looks0;
   const fam = pePageTextResFamily(aop.ts.font, aop.font);
   const cands = [];
-  if (looks0.bold === want.bold && looks0.italic === want.italic) cands.push({ res: aop.ts.font, font: aop.font, bpc: aop.bpc, fm0: aop.fm0 });
+  if (looks0.bold === want.bold && looks0.italic === want.italic) cands.push({ res: aop.ts.font, font: aop.font, bpc: aop.bpc, fm0: aop.fm0, resDict: aop.resDict });
   (siblings ? [...siblings.values()] : []).forEach(list => list.forEach(f => {
-    if (cands.some(c => c.res === f.res) || pePageTextResFamily(f.res, f.font) !== fam) return;
+    if (f.resDict !== aop.resDict || cands.some(c => c.res === f.res) || pePageTextResFamily(f.res, f.font) !== fam) return;
     const lk = pePageTextFontLooks(f.font);
     if (lk.bold === want.bold && lk.italic === want.italic) cands.push(f);
   }));
@@ -55014,11 +55447,31 @@ async function pePageTextRelayout(unit, o, view, siblings, opts) {
   const kept = i => ({ ...chars[i], idx: i });
   const P = unit.para;
   const out = [];
+  // Its size changed: the text scales about the stand-in's box corner (anchor), as the stand-in shows it.
+  const s0 = o.pageText.style0;
+  const ratio = Math.abs((Number(o.fontPt) || s0.fontPt) - s0.fontPt) > 0.01 ? (Number(o.fontPt) || s0.fontPt) / s0.fontPt : 1;
+  const A = o.pageText.anchor || { x: unit.x0, y: unit.y };
+  const scaled = (v, a) => a + (v - a) * ratio;
+  // The mark it is written with (pePageTextInsertion): a paragraph's box, or a line.
+  out.mark = P ? { align: P.align, w: P.x1 - P.x0, indent: P.indent, lead: P.lead } : { align: 'line' };
+  // Only resized (the size of all of it, nothing else): every character where it was, scaled - its lines stay as they are.
+  if (ratio !== 1 && (o.textAlign || 'left') === s0.textAlign && pePageTextOnlyScaled(unit, newText, styles, ratio)) {
+    const ops = new Map();
+    const opOf = op => {
+      if (!ops.has(op)) ops.set(op, { ...op, ts: { ...op.ts, size: op.ts.size * ratio, Ts: op.ts.Ts * ratio } });
+      return ops.get(op);
+    };
+    chars.forEach((c, i) => {
+      if (!c.soft) out.push({ ...kept(i), x: scaled(c.x, A.x), y: scaled(c.y, A.y), w: c.w * ratio, size: c.size * ratio, op: opOf(c.op) });
+    });
+    if (P) out.mark = { align: P.align, w: (P.x1 - P.x0) * ratio, indent: P.indent * ratio, lead: P.lead * ratio };
+    return out;
+  }
   if (!P) {
     for (let i = 0; i < p; i++) out.push(kept(i));
     const a = p > 0 ? chars[p - 1] : null;
-    let x = a ? a.x + a.w : (n ? chars[0].x : unit.x0);
-    let y = a ? a.y : unit.y;
+    let x = a ? a.x + a.w : (n ? scaled(chars[0].x, A.x) : unit.x0);
+    let y = a ? a.y : scaled(unit.y, A.y);
     const lead = (unit.size || 12) * 1.2;
     made.forEach(m => {
       if (m.brk) { x = unit.x0; y += lead; return; }
@@ -55043,10 +55496,8 @@ async function pePageTextRelayout(unit, o, view, siblings, opts) {
     return out;
   }
   // A paragraph.
-  const s0 = o.pageText.style0;
   const align = (o.textAlign || 'left') !== s0.textAlign ? (o.textAlign || 'left') : P.align;
   const relayAll = align !== P.align;
-  const ratio = Math.abs((Number(o.fontPt) || s0.fontPt) - s0.fontPt) > 0.01 ? (Number(o.fontPt) || s0.fontPt) / s0.fontPt : 1;
   const lead = P.lead * ratio;
   // Nothing changed: every character where it was.
   if (p === n && !made.length && !relayAll && ratio === 1) {
@@ -55064,10 +55515,14 @@ async function pePageTextRelayout(unit, o, view, siblings, opts) {
   for (let i = Math.max(0, fromIdx); i < p; i++) seq.push(kept(i));
   made.forEach(m => seq.push(m));
   for (let i = n - s; i < n; i++) seq.push(kept(i));
-  const lineY = k => (k < lines.length && ratio === 1 ? lines[k].y : (k < lines.length ? lines[0].y + (lines[k].y - lines[0].y) * ratio : lines[lines.length - 1].y + (k - lines.length + 1) * lead));
-  const W = P.x1 - P.x0;
-  const lineLeft = k => P.x0 + (k === 0 ? P.indent : 0);
-  const lineWidth = k => W - (k === 0 ? P.indent : 0);
+  // Its box (scaled with its size).
+  const x0 = scaled(P.x0, A.x), x1 = scaled(P.x1, A.x), indent = P.indent * ratio, y0 = scaled(lines[0].y, A.y);
+  const lineY = k => y0 + (k < lines.length ? (lines[k].y - lines[0].y) * ratio
+    : (lines[lines.length - 1].y - lines[0].y) * ratio + (k - lines.length + 1) * lead);
+  const W = x1 - x0;
+  const lineLeft = k => x0 + (k === 0 ? indent : 0);
+  const lineWidth = k => W - (k === 0 ? indent : 0);
+  out.mark = { align, w: W, indent, lead };
   // Words and the gaps before them.
   const words = [];
   let word = null, gap = null, hard = false;
@@ -55098,8 +55553,8 @@ async function pePageTextRelayout(unit, o, view, siblings, opts) {
     const gaps = lineWords.slice(1).map(w => (w.gap ? pePageTextGapW(w.gap, view) : 0));
     const total = lineWords.reduce((acc, w) => acc + w.w, 0) + gaps.reduce((a, b) => a + b, 0);
     let x = lineLeft(k);
-    if (align === 'center') x = P.x0 + (W - total) / 2;
-    else if (align === 'right') x = P.x1 - total;
+    if (align === 'center') x = x0 + (W - total) / 2;
+    else if (align === 'right') x = x1 - total;
     const extra = align === 'justify' && !last && gaps.length ? (width - total) / gaps.length : 0;
     lineWords.forEach((w, i) => {
       if (i) {
@@ -55141,6 +55596,20 @@ async function pePageTextRelayout(unit, o, view, siblings, opts) {
   return out;
 }
 
+/** Whether the stand-in's text is the unit's own in its own look, only its size times ratio. */
+function pePageTextOnlyScaled(unit, text, styles, ratio) {
+  if (text !== unit.text) return false;
+  let pos = 0;
+  return unit.chars.every(c => {
+    const t = c.hyph ? '' : c.ch;
+    const st = styles[pos];
+    pos += t.length;
+    if (!t || c.syn) return true;
+    const cs = pePageTextCharStyle(c);
+    return pePageTextSameStyle({ ...cs, fontPt: cs.fontPt * ratio }, st);
+  });
+}
+
 /** Whether laid-out items are a unit's own characters where they were: an editing that changed nothing. */
 function pePageTextSame(unit, items) {
   const own = unit.chars.filter(c => !c.soft);
@@ -55153,7 +55622,8 @@ function pePageTextSame(unit, items) {
  * one font, size and colour, each from its own text matrix - the original
  * glyph's, moved to its new place - and every glyph placed by TJ steps, with
  * character and word spacing 0 (they are in the places already). The fonts
- * are the page's own by their resource names, Roboto by fallbackName(face, family).
+ * are the page's own by their resource names, Roboto by fallbackName(face, family, op) - a name in
+ * the resources of the content stream the operator is in.
  */
 function pePageTextEmit(items, view, fallbackName) {
   const body = [];
@@ -55168,7 +55638,7 @@ function pePageTextEmit(items, view, fallbackName) {
     const op = it.op;
     const { Minv } = pePageTextViewOf(op, view);
     const g = it.glyph || { code: it.c.code, len: op.bpc, w: it.c.w };
-    const fontRes = g.face ? fallbackName(g.face, g.fam) : PDFLib.PDFName.of(g.res || op.ts.font).asString();
+    const fontRes = g.face ? fallbackName(g.face, g.fam, op) : PDFLib.PDFName.of(g.res || op.ts.font).asString();
     const size = op.ts.size, Th = op.ts.Tz / 100;
     const fm0 = g.face ? 0.001 : (g.fm0 || op.fm0);
     // The glyph's text matrix: the one it had (or its run's), moved to (x, y).
@@ -55234,19 +55704,41 @@ function pePageTextUnderlines(items, view) {
   return out.join('\n');
 }
 
-/** The source that goes where a unit was: its new text, in a text object and q/Q of its own. */
-function pePageTextInsertion(unit, body, X, under) {
+/**
+ * The source that goes where a unit was: its new text, in a text object and
+ * q/Q of its own, in a mark of its own (markSrc: pePageTextMarkSrc). whole:
+ * it replaces the unit's mark as a whole (pePageTextWholeMark), outside any
+ * text object.
+ */
+function pePageTextInsertion(unit, body, X, under, markSrc, whole) {
   const op = unit.ops[0];
+  const inText = !whole && op.inText;
   const parts = [];
-  if (op.inText) parts.push('ET');
+  if (inText) parts.push('ET');
   parts.push('q');
   if (X) parts.push(X.map(pePageImgNum).join(' ') + ' cm');
+  if (markSrc) parts.push(markSrc);
   if (body) parts.push('BT', '0 Tc 0 Tw', body, 'ET');
   if (under) parts.push(under);
+  if (markSrc) parts.push('EMC');
   parts.push('Q');
   // Back in the text object it was in, with the line matrix the operators after it build on.
-  if (op.inText) parts.push('BT', op.tlm.map(pePageImgNum).join(' ') + ' Tm');
+  if (inText) parts.push('BT', op.tlm.map(pePageImgNum).join(' ') + ' Tm');
   return parts.join('\n');
+}
+
+/** The mark laid-out items are written in (items.mark, pePageTextRelayout), its lengths in the text space of the first glyph. */
+function pePageTextMarkSrc(items, view) {
+  const m = items.mark;
+  const it = items.find(i => !i.syn && !i.brk);
+  if (!m || !it) return '';
+  const props = ['/A /' + m.align];
+  if (m.w > 0) {
+    const G = pmAffMul(it.c ? it.c.tm : it.op.cells[0].tm, pePageTextViewOf(it.op, view).M);
+    const su = Math.hypot(G[0], G[1]) || 1;
+    props.push('/W ' + peVecNum(m.w / su), '/I ' + peVecNum((m.indent || 0) / su), '/L ' + peVecNum((m.lead || 0) / su));
+  }
+  return '/PMPara <<' + props.join(' ') + '>> BDC';
 }
 
 function pePageTextBytes(text) {
@@ -55256,45 +55748,70 @@ function pePageTextBytes(text) {
 }
 
 /**
- * Take a unit's operators out of the page; what goes in place of the first
- * one: insertion (content-stream source) - or a marker comment the edited
- * text replaces later (pePageTextFill). The unit must still be on the page
- * as it was read (units from pePageTextData of the current page).
+ * Take units' operators out of the page; what goes in place of the first
+ * one of each: its insertion (content-stream source) - or a marker comment
+ * the edited text replaces later (pePageTextFill). jobs: [{ unit,
+ * insertion }]. The units must still be on the page as they were read
+ * (units from pePageTextData of the current page) - and all that is
+ * cut goes in ONE pass: every cut moves what is after it in its stream, so
+ * the offsets the units were read with are good only until the first one.
+ * Done from the end of each stream back, none of them is moved by another.
  */
-async function pePageTextCut(doc, page, unit, insertion) {
-  const streams = pePageContentStreamsOnly(doc, page);
-  const byStream = new Map();
-  unit.ops.forEach(op => {
-    if (!byStream.has(op.streamIdx)) byStream.set(op.streamIdx, []);
-    byStream.get(op.streamIdx).push(op);
-  });
-  const first = unit.ops.reduce((a, b) => (b.streamIdx < a.streamIdx || (b.streamIdx === a.streamIdx && b.start < a.start) ? b : a));
-  for (const [si, ops] of byStream) {
-    const stream = streams[si];
-    const src = stream && peDecodePdfStreamBytes(stream);
-    if (!src) return false;
-    ops.sort((a, b) => b.start - a.start);
-    let cur = src;
-    for (const op of ops) {
+async function pePageTextCutMany(doc, page, jobs) {
+  // By the streams themselves, not their places in the page's list: that list changes as pdf-lib wraps the page's content.
+  const edits = new Map();   // stream -> [{ start, end, text }]
+  const add = (stream, start, end, text) => {
+    if (!edits.has(stream)) edits.set(stream, []);
+    edits.get(stream).push({ start, end, text });
+  };
+  for (const { unit, insertion } of jobs) {
+    // A unit this editor wrote: its whole mark goes (what is left of its earlier writing, its underlines, too).
+    const whole = pePageTextWholeMark(unit);
+    if (whole) {
+      add(whole.stream, whole.start, whole.end, '\n' + insertion + '\n');
+      continue;
+    }
+    const first = unit.ops.reduce((a, b) => (b.streamIdx < a.streamIdx || (b.streamIdx === a.streamIdx && b.start < a.start) ? b : a));
+    for (const op of unit.ops) {
       // ' and " move to the next line first: that stays.
       let rep = op.op === "'" ? 'T*' : op.op === '"' ? (op.quote || [0, 0]).map(pePageImgNum).join(' Tw ') + ' Tc T*' : '';
       if (op === first) rep += '\n' + insertion;
-      const ins = pePageTextBytes('\n' + rep + '\n');
-      const next = new Uint8Array(cur.length - (op.end - op.start) + ins.length);
-      next.set(cur.subarray(0, op.start), 0);
-      next.set(ins, op.start);
-      next.set(cur.subarray(op.end), op.start + ins.length);
+      add(op.stream, op.start, op.end, '\n' + rep + '\n');
+    }
+  }
+  const rewritten = new Map();
+  for (const [stream, list] of edits) {
+    const src = stream && peDecodePdfStreamBytes(stream);
+    if (!src) return false;
+    list.sort((a, b) => b.start - a.start);
+    // Cuts that overlap would mean the page is not as it was read.
+    for (let i = 1; i < list.length; i++) if (list[i].end > list[i - 1].start) return false;
+    let cur = src;
+    for (const { start, end, text } of list) {
+      const ins = pePageTextBytes(text);
+      const next = new Uint8Array(cur.length - (end - start) + ins.length);
+      next.set(cur.subarray(0, start), 0);
+      next.set(ins, start);
+      next.set(cur.subarray(end), start + ins.length);
       cur = next;
     }
-    await peRewriteStreamBytes(doc, stream, cur);
+    rewritten.set(stream, cur);
   }
+  // Written only once all of it has been worked out: a page is not left half cut.
+  for (const [stream, bytes] of rewritten) await peRewriteStreamBytes(doc, stream, bytes);
   return true;
 }
 
+/** One unit out of the page (pePageTextCutMany). */
+function pePageTextCut(doc, page, unit, insertion) {
+  return pePageTextCutMany(doc, page, [{ unit, insertion }]);
+}
+
 /** Replace the marker a lifted unit left (pePageTextCut) with source; false when it is not there. */
-async function pePageTextFill(doc, page, token, text) {
+async function pePageTextFill(doc, page, token, text, where) {
   const mark = pePageTextBytes('%' + PE_PAGETEXT_MARK + ' ' + token);
-  for (const stream of pePageContentStreamsOnly(doc, page)) {
+  // (where: the stream the marker was left in - a form's, perhaps.)
+  for (const stream of (where ? [where] : []).concat(pePageContentStreamsOnly(doc, page))) {
     const src = peDecodePdfStreamBytes(stream);
     if (!src) continue;
     let at = -1;
@@ -55397,7 +55914,9 @@ function pePageTextLift(o) {
       if (!ok) return;
       o.pageText.live = true;
       o.pageText.before = before;
+      o.pageText.whole = !!pePageTextWholeMark(unit);
       o.pageText.token = token;
+      o.pageText.where = unit.ops[0].stream;
       o.pageText.unit = unit;
       o.pageText.view = data.view;
       o.pageText.siblings = pePageTextSiblings(data.scan);
@@ -55491,12 +56010,37 @@ async function pePageTextFlush() {
   await pePageTextChain;
 }
 
-function pePageTextFallbackNamer(page) {
-  const names = new Map();
-  return (face, fam) => {
+/** A font put into a resource dictionary (a form's): its resource name, as a string. */
+function pePageTextResAddFont(doc, res, tag, ref) {
+  const key = PDFLib.PDFName.of('Font');
+  let fonts = doc.context.lookup(res.get(key));
+  if (!(fonts instanceof PDFLib.PDFDict)) {
+    fonts = doc.context.obj({});
+    res.set(key, fonts);
+  }
+  const name = fonts.uniqueKey(tag);
+  fonts.set(name, ref);
+  return name.asString();
+}
+
+/**
+ * Names for the bundled Roboto in the resources of the content stream a text is written into: the page's
+ * own, or a form's - a font name means a font only where the stream's resources have it.
+ */
+function pePageTextFallbackNamer(page, doc) {
+  const names = new Map();   // resource dictionary (null: the page's) -> key -> name
+  let pageRes = null;
+  try { pageRes = page.node.Resources(); } catch (_) {}
+  return (face, fam, op) => {
+    const dict = op && op.resDict && op.resDict !== pageRes ? op.resDict : null;
+    if (!names.has(dict)) names.set(dict, new Map());
+    const own = names.get(dict);
     const key = face.key + '|' + (fam || '');
-    if (!names.has(key)) names.set(key, page.node.newFontDictionary(fam ? 'PMFont_' + fam : 'PMFont', face.font.ref).asString());
-    return names.get(key);
+    if (!own.has(key)) {
+      const tag = fam ? 'PMFont_' + fam : 'PMFont';
+      own.set(key, dict ? pePageTextResAddFont(doc, dict, tag, face.font.ref) : page.node.newFontDictionary(tag, face.font.ref).asString());
+    }
+    return own.get(key);
   };
 }
 
@@ -55517,18 +56061,31 @@ async function pePageTextSync() {
     const t = o.pageText;
     reselect.push({ o, x: first.x + (o.x - t.x0) * view.W, y: first.y + (o.y - t.y0) * view.H });
   };
-  const write = (unit, items, X, view, fallbackName) => {
+  const write = (unit, items, X, view, fallbackName, whole) => {
     const body = pePageTextEmit(items, view, fallbackName);
     const under = pePageTextUnderlines(items, view);
-    return body || under || X ? pePageTextInsertion(unit, body, X, under) : '';
+    return body || under || X ? pePageTextInsertion(unit, body, X, under, body ? pePageTextMarkSrc(items, view) : '', whole) : '';
+  };
+  // Text out of the clip it is in goes after all of the page's content, where nothing clips it (pePageTextOutsideClip).
+  const free = [];
+  const place = (unit, items, X, view, fallbackName, whole) => {
+    if (!items.length) return '';
+    if (unit.ops[0].form) pePageFormsWiden(pdfDoc, unit.ops[0].form, pePageTextItemPoints(unit, items, X, view), view);
+    if (!pePageTextOutsideClip(unit, items, X, view)) return write(unit, items, X, view, fallbackName, whole);
+    const src = write(unit, items, X, view, fallbackName, true);
+    if (src) free.push('q\n' + unit.ops[0].ctm.map(pePageImgNum).join(' ') + ' cm\n' + src + '\nQ');
+    return '';
   };
   try {
     ownsWriter = await peClaimLivePdfDocWriter();
     const lifted = done.find(o => o.pageText.before);
     await pePageTextUndoPoint(lifted && lifted.pageText.before);
     const page = pdfDoc.getPage(peState.idx);
-    const fallbackName = pePageTextFallbackNamer(page);
+    const fallbackName = pePageTextFallbackNamer(page, pdfDoc);
     let changed = 0, same = 0;
+    // What goes into the page: the units cut out (all in one pass - pePageTextCutMany) and, by their
+    // markers, the lifted ones' text. The cuts come first: they are by offsets, which the markers' fill moves.
+    const cuts = [], fills = [];
     for (const o of done) {
       pePageTextLive.splice(pePageTextLive.indexOf(o), 1);
       const t = o.pageText;
@@ -55547,9 +56104,9 @@ async function pePageTextSync() {
         same++;
         break;
       }
-      if (await pePageTextFill(pdfDoc, page, t.token, items.length ? write(t.unit, items, X, t.view, fallbackName) : '')) changed++;
+      fills.push({ token: t.token, where: t.where, src: place(t.unit, items, X, t.view, fallbackName, t.whole) });
     }
-    if (changedObjs.length || deleted.length) {
+    if (!same && (changedObjs.length || deleted.length)) {
       const data = await pePageTextData();
       const siblings = pePageTextSiblings(data && data.scan);
       for (const o of changedObjs) {
@@ -55557,13 +56114,19 @@ async function pePageTextSync() {
         if (!unit) continue;
         const items = await pePageTextRelayout(unit, o, data.view, siblings);
         const X = pePageTextDelta(o, unit, data.view);
-        if (await pePageTextCut(pdfDoc, page, unit, write(unit, items, X, data.view, fallbackName))) changed++;
+        cuts.push({ unit, insertion: place(unit, items, X, data.view, fallbackName, !!pePageTextWholeMark(unit)) });
         keepAt(o, items.find(i => !i.syn && !i.brk), data.view);
       }
       for (const d of deleted) {
         const unit = data && pePageTextFind(data.units, d.ref);
-        if (unit && await pePageTextCut(pdfDoc, page, unit, '')) changed++;
+        if (unit) cuts.push({ unit, insertion: '' });
       }
+    }
+    if (cuts.length && await pePageTextCutMany(pdfDoc, page, cuts)) changed += cuts.length;
+    for (const f of fills) if (await pePageTextFill(pdfDoc, page, f.token, f.src, f.where)) changed++;
+    if (free.length) {
+      pePageTextAppendFree(pdfDoc, page, free.join('\n'));
+      changed++;
     }
     if (same) {
       await peReloadEditorPageFromPdfDoc();
@@ -59687,6 +60250,7 @@ function peCapturePointer(e, el) {
 let pePinchBlockObjUntil = 0;
 let peSelSnapBeforePinch = null;
 let peObjMarqueeTap = { t: 0, x: 0, y: 0 };
+let peObjMarqueeEndedAt = 0;   // the click a selection frame's press ends with is no click on the page's text
 /** Deferred touch hit on an object — committed on move/tap, cancelled on pinch. */
 let peTouchObjPending = null;
 let peTouchObjCommit = false;
@@ -59769,7 +60333,12 @@ function peRegisterObjSelectTap(clientX, clientY) {
   return isDbl;
 }
 
-function peBeginObjSelectMarquee(e) {
+/**
+ * A selection frame from the press on. opts.tap: a press that ends where it
+ * began is the click it was after all (peObjSelectMarqueeTap) - on
+ * opts.clickObj, or the bare page; opts.keepOnTap: that click changes nothing.
+ */
+function peBeginObjSelectMarquee(e, opts) {
   if (!peState || !peState.objSelectMode) return;
   const pt = peStagePoint(e);
   peCancelTouchObjPending();
@@ -59778,11 +60347,124 @@ function peBeginObjSelectMarquee(e) {
   peState.drag = {
     kind: 'obj-marquee',
     startX: pt.x, startY: pt.y, curX: pt.x, curY: pt.y,
+    startClientX: e.clientX, startClientY: e.clientY,
     additive: e.shiftKey,
-    baseIds: e.shiftKey ? peGetSelectedObjects().map(o => o.id) : null
+    baseIds: e.shiftKey ? peGetSelectedObjects().map(o => o.id) : null,
+    tap: !!(opts && opts.tap),
+    clickObj: (opts && opts.clickObj) || null,
+    keepOnTap: !!(opts && opts.keepOnTap)
   };
   peUpdatePanUi();
 }
+
+/**
+ * Object-select on the desktop with Alt held as the mouse button goes down:
+ * a selection frame starts wherever the press lands - on an object, the
+ * page's text or its images, too. (Alt pressed only once an object is being
+ * dragged still turns its snapping off.)
+ */
+function peAltMarqueePress(e, clickObj) {
+  if (!e || !e.altKey || e.pointerType !== 'mouse' || !peState || !peState.objSelectMode ||
+      peState.tool !== 'select' || peState.inlineEditId) return false;
+  if (e.cancelable) e.preventDefault();
+  e.stopPropagation();
+  peCapturePointer(e, document.getElementById('peStage'));
+  peBeginObjSelectMarquee(e, { tap: true, clickObj });
+  return true;
+}
+
+/**
+ * Shift+click on the bare page in Object-select: the paragraph, line or
+ * image of the page under it joins the selection (the ones already selected
+ * are covered by their stand-ins, which take such a click themselves).
+ */
+function peObjSelectAddPageThing(clientX, clientY) {
+  if (!peState || !peState.objSelectMode || peState.tool !== 'select') return false;
+  const unit = pePageTextAt(clientX, clientY);
+  if (unit) {
+    pePageTextSelect(unit, { additive: true });
+    return true;
+  }
+  const pl = pePageImgAt(clientX, clientY);
+  if (!pl) return false;
+  pePageImgSelect(pl, { additive: true });
+  return true;
+}
+
+/** A click on the bare page in Object-select: the page's text or image under it, else no selection (a page-text selection clicked on stays). */
+function peObjSelectBlankTap(clientX, clientY) {
+  const onPageTextSel = peClientInsidePageTextSelection(clientX, clientY);
+  if (onPageTextSel || !pePageImgTapSelect(clientX, clientY)) {
+    peSelect(null, { keepPageTextSelection: onPageTextSel });
+    if (!onPageTextSel) peClearEditorPageTextSelection();
+  }
+}
+
+/** A selection frame's press that ended where it began (peBeginObjSelectMarquee opts.tap): the click it was. */
+function peObjSelectMarqueeTap(d) {
+  if (d.keepOnTap) return;
+  const o = d.clickObj && peState.objects.includes(d.clickObj) ? d.clickObj : null;
+  if (o) {
+    if (!d.additive) peSelect(o);
+    else if (!peGetSelectedObjects().includes(o)) peSelectMultiple(peGetSelectedObjects().concat([o]));
+    return;
+  }
+  if (d.additive) peObjSelectAddPageThing(d.startClientX, d.startClientY);
+  else peObjSelectBlankTap(d.startClientX, d.startClientY);
+}
+
+/**
+ * Alt held in Object-select on the desktop (peAltMarqueePress): a small
+ * frame mark by the cursor over the page, and a crosshair.
+ */
+const peAltCue = { held: false, mouse: false, over: false, x: 0, y: 0, shown: false };
+function peUpdateAltMarqueeCue() {
+  const modal = document.getElementById('pageEditModal');
+  const d = peState && peState.drag;
+  const on = !!(peAltCue.held && peAltCue.mouse && peAltCue.over && peState && peState.objSelectMode &&
+    peState.tool === 'select' && !peState.inlineEditId && (!d || d.kind === 'obj-marquee') &&
+    modal && !modal.classList.contains('pe-hand-mode'));
+  if (!on && !peAltCue.shown) return;
+  peAltCue.shown = on;
+  if (modal) modal.classList.toggle('pe-alt-marquee', on);
+  let badge = document.getElementById('peAltMarqueeBadge');
+  if (on && !badge) {
+    badge = document.createElement('div');
+    badge.id = 'peAltMarqueeBadge';
+    badge.setAttribute('aria-hidden', 'true');
+    document.body.appendChild(badge);
+  }
+  if (!badge) return;
+  badge.classList.toggle('visible', on);
+  if (on) {
+    badge.style.left = peAltCue.x + 'px';
+    badge.style.top = peAltCue.y + 'px';
+  }
+}
+window.addEventListener('keydown', (e) => {
+  if (e.key !== 'Alt') return;
+  peAltCue.held = true;
+  peUpdateAltMarqueeCue();
+}, true);
+window.addEventListener('keyup', (e) => {
+  if (e.key !== 'Alt') return;
+  peAltCue.held = false;
+  peUpdateAltMarqueeCue();
+}, true);
+window.addEventListener('blur', () => {
+  peAltCue.held = false;
+  peUpdateAltMarqueeCue();
+});
+window.addEventListener('pointermove', (e) => {
+  if (!peState && !peAltCue.shown) return;
+  const pad = document.getElementById('peStagePad');
+  peAltCue.held = e.altKey;
+  peAltCue.mouse = e.pointerType === 'mouse';
+  peAltCue.over = !!(pad && e.target && (pad.contains(e.target) || e.target.id === 'peStageWrap'));
+  peAltCue.x = e.clientX;
+  peAltCue.y = e.clientY;
+  peUpdateAltMarqueeCue();
+}, true);
 
 /**
  * Touch double-tap on an object or PDF text: start marquee (same as blank stage).
@@ -59804,6 +60486,12 @@ function peTryStartObjSelectMarqueeFromTouch(e) {
 
 function peStartObjSelectBlankGesture(e, opts) {
   if (!peState || !peState.objSelectMode) return;
+  // Desktop mouse: a drag from the bare page draws a selection frame (a
+  // click stays a click); the view pans by the wheel, the scroll bars or Hand.
+  if (e.pointerType === 'mouse' && !(opts && opts.forcePan)) {
+    peBeginObjSelectMarquee(e, { tap: true });
+    return;
+  }
   // forcePan: finger moved on the text layer — pan only; do not treat as dbl-tap
   // (the pointerdown already registered the first tap).
   const forcePan = !!(opts && opts.forcePan);
@@ -59941,6 +60629,7 @@ function peObjMouseDown(e, o) {
     peCancelTouchObjPending();
     return;
   }
+  if (peAltMarqueePress(e, o)) return;
   // Double-tap-zoom needs a chance at a tap landing on a placed object too -
   // this handler is bound directly on each object, ahead of the stage's own
   // dispatcher in bubble order, so every path below claims the tap for
@@ -60075,8 +60764,9 @@ function peObjMouseDown(e, o) {
   if (touchLike) peSelSnapBeforePinch = peSelectionSnapshot();
   // Double-tap to edit callout/text: detect before preventDefault so the
   // focus() call stays inside an uncancelled user gesture (mobile OSK).
+  // (Not on a resize/rotate handle: a grab soon after the click that selected the block is no double click.)
   const maybeDblEdit = (peIsCalloutLike(o) || o.type === 'text')
-    && peState?.tool === 'select' && peState.inlineEditId !== o.id;
+    && peState?.tool === 'select' && peState.inlineEditId !== o.id && !onHandle;
   if (maybeDblEdit) {
     const now = Date.now();
     const dblMs = touchLike ? 550 : 400;
@@ -60095,7 +60785,7 @@ function peObjMouseDown(e, o) {
       peTextClickSeq = { id: null, t: 0 };
       if (peState.drag?.kind === 'move-pending') peState.drag = null;
       if (peIsCalloutLike(o)) peBeginCalloutEdit(o);
-      else peBeginInlineEdit(o);
+      else peBeginInlineEdit(o, { caretAt: { x: e.clientX, y: e.clientY } });
       peFocusInlineEditorNow();
       return;
     }
@@ -60925,6 +61615,13 @@ function peObjMouseDown(e, o) {
     if (peState.tool === 'select' && !peState.sel && peCanPan() && !peState.objSelectMode) {
       peCapturePointer(e, wrap);
       peStartPanView(e);
+    } else if (peState.tool === 'select' && peState.objSelectMode && e.pointerType === 'mouse' && !peState.inlineEditId &&
+        (e.target === wrap || e.target.id === 'peStagePad')) {
+      // Desktop: a selection frame may start beside the page, too (a click there changes nothing, as before) -
+      // on the bare grey only, not on the panels over it.
+      e.preventDefault();
+      peCapturePointer(e, wrap);
+      peBeginObjSelectMarquee(e, { tap: true, keepOnTap: true });
     } else if (peState.tool === 'crop' && peState.cropPdf && peCanPan()) {
       peCapturePointer(e, wrap);
       peStartPanView(e);
@@ -61466,16 +62163,11 @@ function peObjMouseDown(e, o) {
         (d.lastClientX != null ? d.lastClientX : d.startClientX) - d.startClientX,
         (d.lastClientY != null ? d.lastClientY : d.startClientY) - d.startClientY
       );
-      if (moved < 6 && !d.additive) {
-        // Tap outside the page-text selection clears it; tap on it keeps it.
-        const onPageTextSel = peClientInsidePageTextSelection(d.startClientX, d.startClientY);
-        if (onPageTextSel || !pePageImgTapSelect(d.startClientX, d.startClientY)) {
-          peSelect(null, { keepPageTextSelection: onPageTextSel });
-          if (!onPageTextSel) peClearEditorPageTextSelection();
-        }
-      }
+      // Tap outside the page-text selection clears it; tap on it keeps it.
+      if (moved < 6 && !d.additive) peObjSelectBlankTap(d.startClientX, d.startClientY);
     }
     if (d.kind === 'obj-marquee') {
+      peObjMarqueeEndedAt = Date.now();
       document.getElementById('pageEditModal')?.classList.remove('pe-obj-marquee-active');
       const marqueeEl = document.getElementById('peObjMarquee');
       if (marqueeEl) marqueeEl.remove();
@@ -61498,6 +62190,8 @@ function peObjMouseDown(e, o) {
         } else {
           peSelectMultiple(hits);
         }
+      } else if (d.tap) {
+        peObjSelectMarqueeTap(d);
       } else if (!d.additive) {
         peSelect(null);
       }
@@ -68693,7 +69387,13 @@ function pmBuildXObjectRefMap(doc, resourcesDict) {
         if (m.length === 6 && m.every(v => v != null)) matrix = m;
       }
       const resources = peLookupPdfObj(doc, obj.dict.get(PDFLib.PDFName.of('Resources')));
-      out.set(name, { kind: 'form', obj, matrix, resources });
+      let bbox = null;
+      const bObj = peLookupPdfObj(doc, obj.dict.get(PDFLib.PDFName.of('BBox')));
+      if (bObj && typeof bObj.asArray === 'function') {
+        const b = bObj.asArray().map(x => pePdfNumValue(doc, x));
+        if (b.length === 4 && b.every(v => v != null)) bbox = [Math.min(b[0], b[2]), Math.min(b[1], b[3]), Math.max(b[0], b[2]), Math.max(b[1], b[3])];
+      }
+      out.set(name, { kind: 'form', ref, obj, matrix, bbox, resources });
     }
   }
   return out;
@@ -68875,16 +69575,61 @@ function pmTrackImageUsage(doc, src, resourcesDict, initialCtm, usageMap, depth,
 // the CTM it is painted with, in default user space. The CTM and the q/Q
 // stack run on from one content stream into the next, as they are drawn.
 // ============================================================================
+const pePageFormShareCache = new WeakMap();
+/**
+ * How many pages of the document reach each form XObject (a Map: form stream -> count) by their resources:
+ * one that two pages have is shared, and writing into it would change both.
+ */
+function pePageFormShare(doc) {
+  const n = doc.context.largestObjectNumber;
+  const hit = pePageFormShareCache.get(doc);
+  if (hit && hit.n === n) return hit.map;
+  const map = new Map();
+  const Subtype = PDFLib.PDFName.of('Subtype'), XObject = PDFLib.PDFName.of('XObject'), Resources = PDFLib.PDFName.of('Resources');
+  const visit = (res, seen, depth) => {
+    if (!res || typeof res.get !== 'function' || depth > 8) return;
+    const xo = peLookupPdfObj(doc, res.get(XObject));
+    if (!xo || typeof xo.keys !== 'function') return;
+    for (const key of xo.keys()) {
+      const obj = peLookupPdfObj(doc, xo.get(key));
+      if (!obj || !obj.dict || obj.contents == null || seen.has(obj) || pePdfResName(obj.dict.get(Subtype)) !== 'Form') continue;
+      seen.add(obj);
+      map.set(obj, (map.get(obj) || 0) + 1);
+      visit(peLookupPdfObj(doc, obj.dict.get(Resources)), seen, depth + 1);
+    }
+  };
+  try {
+    for (const pg of doc.getPages()) {
+      let res = null;
+      try { res = pg.node.Resources(); } catch (_) {}
+      visit(res, new Set(), 0);
+    }
+  } catch (err) {
+    console.warn('pePageFormShare', err);
+  }
+  pePageFormShareCache.set(doc, { n, map });
+  return map;
+}
+
 function pePageContentStreamsOnly(doc, page) {
   const streams = [];
   try {
     const contents = page.node.get(PDFLib.PDFName.of('Contents'));
     const resolved = contents ? doc.context.lookup(contents) : null;
     if (resolved instanceof PDFLib.PDFArray) {
-      resolved.asArray().forEach(ref => {
-        const s = doc.context.lookup(ref);
+      for (let i = 0; i < resolved.size(); i++) {
+        let s = doc.context.lookup(resolved.get(i));
+        // A content stream pdf-lib itself made - what it drew onto the page this session, and the q ... Q
+        // it wraps the page's own content in - becomes an ordinary stream: the scans must see all of the
+        // page, and the q/Q most of all (without them the page's own leftover CTM runs on into what follows).
+        if (s && s.contents == null && typeof s.getUnencodedContents === 'function') {
+          const raw = doc.context.flateStream(s.getUnencodedContents());
+          resolved.set(i, doc.context.register(raw));
+          if (page.contentStream === s) { page.contentStream = undefined; page.contentStreamRef = undefined; }
+          s = raw;
+        }
         if (s && s.contents != null) streams.push(s);
-      });
+      }
     } else if (resolved && resolved.contents != null) {
       streams.push(resolved);
     }
@@ -68892,15 +69637,25 @@ function pePageContentStreamsOnly(doc, page) {
   return streams;
 }
 
-function pePageImgScan(doc, page) {
+function pePageImgScan(doc, page, opts) {
   const out = [];
   if (!doc || !page) return out;
+  // The images in Form XObjects (a transparency group, a magazine's effects and backgrounds) are the page's
+  // too; with their form, if it is the page's alone (not drawn twice, no other page has it).
+  const formsOn = !opts || opts.forms !== false;
   let resources = null;
   try { resources = page.node.Resources(); } catch (_) {}   // (inherited too; reads only)
-  const xobjMap = pmBuildXObjectRefMap(doc, resources);
+  const xmaps = new Map();
+  const xmapOf = res => {
+    if (!res) return new Map();
+    if (!xmaps.has(res)) xmaps.set(res, pmBuildXObjectRefMap(doc, res));
+    return xmaps.get(res);
+  };
   let ctm = [1, 0, 0, 1, 0, 0];
-  const ctmStack = [];
-  pePageContentStreamsOnly(doc, page).forEach((stream, streamIdx) => {
+  let ctmStack = [];
+  const uses = new Map();   // form stream -> how many times the page draws it
+  const scanStream = (stream, streamIdx, resDict, form, depth) => {
+    const xobjMap = xmapOf(resDict);
     const src = peDecodePdfStreamBytes(stream);
     if (!src) return;
     const len = src.length;
@@ -69039,20 +69794,33 @@ function pePageImgScan(doc, page) {
             const im = info.obj.dict.get(PDFLib.PDFName.of('ImageMask'));
             mask = !!(im && (im === PDFLib.PDFBool.True || (im.asBoolean && im.asBoolean())));
           } catch (_) {}
-          out.push({ kind: 'xobj', name: lastName, ref: info.ref, mask, streamIdx, start: lastNameStart, end: i, ctm: ctm.slice() });
+          out.push({ kind: 'xobj', name: lastName, ref: info.ref, mask, streamIdx, stream, form, resDict, start: lastNameStart, end: i, ctm: ctm.slice() });
+        } else if (info && info.kind === 'form' && formsOn && depth < 8 && !(form && form.chain.includes(info.obj))) {
+          uses.set(info.obj, (uses.get(info.obj) || 0) + 1);
+          const saved = { ctm, ctmStack };
+          ctm = peMatMul(ctm, info.matrix[0], info.matrix[1], info.matrix[2], info.matrix[3], info.matrix[4], info.matrix[5]);
+          ctmStack = [];
+          scanStream(info.obj, -1, info.resources || resDict, {
+            stream: info.obj, chain: (form ? form.chain : []).concat([info.obj]),
+            levels: (form ? form.levels : []).concat([{ stream: info.obj, base: ctm.slice() }])
+          }, depth + 1);
+          ({ ctm, ctmStack } = saved);
         }
         numBuf.length = 0; continue;
       }
       if (op === 'BI') {
         i = start;
         skipInlineImage();
-        out.push({ kind: 'inline', name: null, ref: null, mask: false, streamIdx, start, end: i, ctm: ctm.slice() });
+        out.push({ kind: 'inline', name: null, ref: null, mask: false, streamIdx, stream, form, resDict, start, end: i, ctm: ctm.slice() });
         numBuf.length = 0; continue;
       }
       numBuf.length = 0;
     }
-  });
-  return out;
+  };
+  pePageContentStreamsOnly(doc, page).forEach((stream, streamIdx) => scanStream(stream, streamIdx, resources, null, 0));
+  if (!out.some(pl => pl.form)) return out;
+  const share = pePageFormShare(doc);
+  return out.filter(pl => !pl.form || pl.form.chain.every(st => uses.get(st) === 1 && (share.get(st) || 0) <= 1));
 }
 
 function pmImageFilterIsDct(doc, obj) {
@@ -72024,6 +72792,29 @@ function pmHfPageContexts(indices, s, date) {
   return out;
 }
 
+/**
+ * The pieces of a header/footer line that are text (pmHfApply) as page
+ * text: one graphics state for the line - its baseline's start a (user
+ * space), turned by the page's rotation - and each piece placed along it by
+ * its text matrix, so the page editor reads them back as one line. Kerning
+ * and the underline as the canvas drew them (pmHfRenderLine).
+ */
+function pmHfVectorLine(face, fontRes, pieces, s, color, a, rot) {
+  const rad = rot * Math.PI / 180;
+  const c = Math.round(Math.cos(rad) * 1e6) / 1e6, si = Math.round(Math.sin(rad) * 1e6) / 1e6;
+  const parts = ['q', [c, si, -si, c, a.x, a.y].map(peVecNum).join(' ') + ' cm', color + ' rg'];
+  pieces.forEach(p => {
+    const g = peVecGlyphs(face, p.text);
+    if (p.text.trim()) parts.push('BT ' + fontRes + ' ' + peVecNum(s.size) + ' Tf 1 0 0 1 ' + peVecNum(p.dx) + ' 0 Tm ' + g.tj + ' ET');
+    if (s.underline) {
+      const w = g.units * s.size / face.fk.unitsPerEm, th = s.size * 0.06;
+      parts.push(peVecNum(p.dx) + ' ' + peVecNum(-s.size * 0.1 - th) + ' ' + peVecNum(w) + ' ' + peVecNum(th) + ' re f');
+    }
+  });
+  parts.push('Q');
+  return parts.join('\n');
+}
+
 async function pmHfApply(s, indices, date) {
   if (!pdfDoc || !indices.length) return false;
   const ctxs = pmHfPageContexts(indices, s, date);
@@ -72047,29 +72838,58 @@ async function pmHfApply(s, indices, date) {
   let bytes = null;
   const done = [];
   try {
-    for (const text of pieces.keys()) {
+    // In the bundled Roboto the text goes into the page as text (pmHfVectorPiece): sharp, searchable, and
+    // editable in the page editor as any text of the page. Anything else - another font, a character Roboto
+    // lacks, no fontkit - is a picture, as it was.
+    const vec = new Set();
+    let probe = null;
+    if (s.font === PM_WM_ROBOTO_FAMILY) {
+      try { probe = await peVecProbeFont(); } catch (_) { probe = null; }
+    }
+    if (probe) for (const text of pieces.keys()) if ([...text].every(ch => peVecHasChar(probe, ch))) vec.add(text);
+    const renderPiece = async (text) => {
       const r = pmHfRenderLine(s, text, PM_WM_PX_PER_PT, true);
       pieces.set(text, r ? { r, png: await pmWmCanvasToBytes(r.canvas, 'image/png') } : null);
-    }
+    };
+    for (const text of pieces.keys()) if (!vec.has(text)) await renderPiece(text);
     const hPt = pmHfMetrics(s, '0');
     const boxH = hPt.asc + hPt.desc;
     claimed = await peClaimLivePdfDocWriter();
     const docRef = pdfDoc;
     if (!docRef) return false;
+    let face = null;
+    if (vec.size) {
+      try { face = await peVecFont(docRef, !!s.bold, !!s.italic); } catch (err) { console.warn('Header text not embedded', err); }
+      if (!face) {
+        for (const text of vec) await renderPiece(text);
+        vec.clear();
+      }
+    }
     const embedded = new Map();
     for (const [text, piece] of pieces) {
-      if (piece) embedded.set(text, await docRef.embedPng(piece.png));
+      if (piece && !vec.has(text)) embedded.set(text, await docRef.embedPng(piece.png));
     }
     const count = docRef.getPageCount();
+    const color = peVecColor(s.color).rgb;
     for (const { idx, items } of plan) {
       if (idx < 0 || idx >= count) continue;
       const page = docRef.getPage(idx);
       const { rot, full, W, H } = pmWmPageFrame(page);
       peFreshContentStream(page);
+      let fontRes = null;
+      const texts = [];
       for (const { slot, L } of items) {
         const x0 = pmHfLineX(slot, L.w, W, s);
         const top = pmHfLineTop(slot, boxH, H, s);
+        const vecPieces = L.pieces.filter(p => vec.has(p.text));
+        if (vecPieces.length) {
+          if (!fontRes) fontRes = page.node.newFontDictionary('PMHF', face.font.ref).asString();
+          // The baseline's start, the line's own frame: the box's top and the font's ascent below it.
+          const a = peRotatePointAround(full.x + x0, full.y + (H - top) - hPt.asc, full.x, full.y, rot);
+          texts.push(pmHfVectorLine(face, fontRes, vecPieces, s, color, a, rot));
+        }
         for (const p of L.pieces) {
+          if (vec.has(p.text)) continue;
           const piece = pieces.get(p.text);
           if (!piece) continue;
           const r = piece.r;
@@ -72080,6 +72900,8 @@ async function pmHfApply(s, indices, date) {
           });
         }
       }
+      // After the page's own content, in a stream of its own (its graphics state is the page's default).
+      if (texts.length) page.node.addContentStream(docRef.context.register(docRef.context.flateStream(texts.join('\n'))));
       done.push(idx);
     }
     if (pdfDoc !== docRef || !done.length) return false;
