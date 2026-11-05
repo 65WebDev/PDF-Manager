@@ -53868,11 +53868,53 @@ function pePageImgUserDelta(b0, b1, view) {
   return pmAffMul(pmAffMul(view.V, T), Vinv);
 }
 
+/** A form's bounding box as numbers (null: it has none, or none that can be read). */
+function pePageFormBBox(doc, stream) {
+  const arr = stream && stream.dict ? peLookupPdfObj(doc, stream.dict.get(PDFLib.PDFName.of('BBox'))) : null;
+  if (!arr || typeof arr.asArray !== 'function') return null;
+  const b = arr.asArray().map(x => pePdfNumValue(doc, x));
+  return b.length === 4 && b.every(v => v != null) ? [Math.min(b[0], b[2]), Math.min(b[1], b[3]), Math.max(b[0], b[2]), Math.max(b[1], b[3])] : null;
+}
+
+/**
+ * What a form draws is clipped to its bounding box - Chromium's and others' groups have the one their
+ * content had: text that grows, an image that is moved, would be cut off at its edge. The boxes of the form
+ * (and of the forms it is in: form.levels) are widened to take in visual points; as little as it takes.
+ */
+function pePageFormsWiden(doc, form, pts, view) {
+  if (!form || !pts || !pts.length) return;
+  const pad = 0.5;
+  for (const lv of form.levels || []) {
+    const cur = pePageFormBBox(doc, lv.stream);
+    const inv = pmAffInv(pmAffMul(lv.base, view.V));
+    if (!cur || !inv) continue;
+    const q = pts.map(p => pmAffApply(inv, p[0], p[1]));
+    const xs = q.map(p => p[0]), ys = q.map(p => p[1]);
+    const nb = [Math.min(cur[0], Math.min(...xs) - pad), Math.min(cur[1], Math.min(...ys) - pad),
+      Math.max(cur[2], Math.max(...xs) + pad), Math.max(cur[3], Math.max(...ys) + pad)];
+    if (nb.some((v, i) => Math.abs(v - cur[i]) > 1e-6)) lv.stream.dict.set(PDFLib.PDFName.of('BBox'), doc.context.obj(nb.map(v => Math.round(v * 1000) / 1000)));
+  }
+}
+
+/** An XObject put into a resource dictionary (a form's): its resource name, as a string. */
+function pePageImgResAddXObject(doc, res, tag, ref) {
+  const key = PDFLib.PDFName.of('XObject');
+  let xo = doc.context.lookup(res.get(key));
+  if (!(xo instanceof PDFLib.PDFDict)) {
+    xo = doc.context.obj({});
+    res.set(key, xo);
+  }
+  const name = xo.uniqueKey(tag);
+  xo.set(name, ref);
+  return name.asString();
+}
+
 /**
  * Rewrite one image of the page in place. ref: { kind, name, box0 } - the
  * image as it is on the page now. action: { box } to move/resize/rotate it to
  * that box, { remove: true }, or { name, fitW, fitH } to paint another image
- * XObject in its place (fitted into its box, proportions kept). Returns the
+ * XObject in its place (fitted into its box, proportions kept; embedRef: that image's ref, named in the
+ * resources it is painted from, action.nameOut then its name). Returns the
  * image's new CTM (or true when removed), null when it was not found.
  */
 async function pePageImgRewrite(doc, page, view, ref, action) {
@@ -53880,7 +53922,7 @@ async function pePageImgRewrite(doc, page, view, ref, action) {
     pl.kind === ref.kind && (pl.kind !== 'xobj' || pl.name === ref.name) &&
     pePageImgBoxNear(pePageImgBoxOf(pl.ctm, view), ref.box0, view));
   if (!target) return null;
-  const stream = pePageContentStreamsOnly(doc, page)[target.streamIdx];
+  const stream = target.stream;   // (the page's own content stream, or a form's)
   const src = stream && peDecodePdfStreamBytes(stream);
   if (!src) return null;
   const wrap = pePageImgWrapper(src, target.start, target.end);
@@ -53894,7 +53936,14 @@ async function pePageImgRewrite(doc, page, view, ref, action) {
   if (!action.remove) {
     if (action.box) {
       newCtm = pmAffMul(C, pePageImgUserDelta(pePageImgBoxOf(C, view), action.box, view));
-    } else if (action.name) {
+    } else if (action.name || action.embedRef) {
+      let nm = action.name;
+      if (action.embedRef) {
+        // (Named in the resources of the stream it is painted from: the page's, or a form's.)
+        const key = target.form && target.resDict ? pePageImgResAddXObject(doc, target.resDict, 'Im', action.embedRef) : String(page.node.newXObject('Im', action.embedRef));
+        nm = key.startsWith('/') ? key : '/' + key;
+        action.nameOut = nm;
+      }
       // The new picture fitted into the old one's box, centred.
       const b = pePageImgBoxOf(C, view);
       const boxA = (b.w * view.W) / Math.max(1e-6, b.h * view.H);
@@ -53902,12 +53951,16 @@ async function pePageImgRewrite(doc, page, view, ref, action) {
       let sw = 1, sh = 1;
       if (imgA > boxA) sh = boxA / imgA; else sw = imgA / boxA;
       newCtm = pmAffMul([sw, 0, 0, sh, (1 - sw) / 2, (1 - sh) / 2], C);
-      body = action.name + ' Do';
+      body = nm + ' Do';
     } else {
       return null;
     }
     const CoutInv = pmAffInv(Cout);
     if (!CoutInv) return null;
+    if (target.form) {
+      const Q = pmAffMul(newCtm, view.V);
+      pePageFormsWiden(doc, target.form, [[0, 0], [1, 0], [0, 1], [1, 1]].map(q => pmAffApply(Q, q[0], q[1])), view);
+    }
     const M = pmAffMul(newCtm, CoutInv);
     text = 'q ' + M.map(pePageImgNum).join(' ') + ' cm ' + body + ' Q';
   }
@@ -54011,12 +54064,11 @@ async function pePageImgSync() {
     for (const r of replaced) {
       const o = r.o;
       const emb = await pePageImgEmbedFile(pdfDoc, r.file);
-      const name = String(page.node.newXObject('Im', emb.img.ref));
-      const ctm = await pePageImgRewrite(pdfDoc, page, view, o.pageImg,
-        { name: name.startsWith('/') ? name : '/' + name, fitW: emb.w, fitH: emb.h });
+      const act = { embedRef: emb.img.ref, fitW: emb.w, fitH: emb.h };
+      const ctm = await pePageImgRewrite(pdfDoc, page, view, o.pageImg, act);
       if (!ctm) continue;
       o.pageImg.kind = 'xobj';
-      o.pageImg.name = peDecodePdfNameToken(name.replace(/^\//, ''));
+      o.pageImg.name = peDecodePdfNameToken(String(act.nameOut || '').replace(/^\//, ''));
       settle(o, ctm);
       o.origAspect = emb.w / Math.max(1, emb.h);
       o.dataUrl = emb.dataUrl;
@@ -54273,18 +54325,22 @@ function pePageTextIdentityH(cm) {
     !(Array.isArray(cm._map) ? cm._map.length : cm._map && Object.keys(cm._map).length);
 }
 
-/** The text operators pdf.js decoded on the page (not inside forms), in order, and their fonts. */
+/** The text operators pdf.js decoded on the page (those inside forms, too: depth > 0), in order, and their fonts. */
 async function pePageTextPdfjsOps(pjPage) {
   const OPS = pdfjsLib.OPS;
   const list = await pjPage.getOperatorList({ annotationMode: pdfjsLib.AnnotationMode.DISABLE });
   const ops = [];
   let depth = 0, font = null, size = 0, fill = '#000000';
   const stack = [];
+  const formStack = [];   // a form is drawn in a graphics state of its own: what it sets (a font) is gone after it
   for (let i = 0; i < list.fnArray.length; i++) {
     const fn = list.fnArray[i], args = list.argsArray[i] || [];
-    if (fn === OPS.paintFormXObjectBegin) depth++;
-    else if (fn === OPS.paintFormXObjectEnd) depth--;
-    else if (fn === OPS.save) stack.push({ font, size, fill });
+    if (fn === OPS.paintFormXObjectBegin) { depth++; formStack.push({ font, size, fill, stack: stack.slice() }); }
+    else if (fn === OPS.paintFormXObjectEnd) {
+      depth--;
+      const st = formStack.pop();
+      if (st) { font = st.font; size = st.size; fill = st.fill; stack.length = 0; stack.push(...st.stack); }
+    } else if (fn === OPS.save) stack.push({ font, size, fill });
     else if (fn === OPS.restore) {
       const st = stack.pop();
       if (st) { font = st.font; size = st.size; fill = st.fill; }
@@ -54292,7 +54348,7 @@ async function pePageTextPdfjsOps(pjPage) {
     else if (fn === OPS.setFillRGBColor) {
       if (typeof args[0] === 'string') fill = args[0];
       else if (args.length >= 3) fill = '#' + [0, 1, 2].map(j => (args[j] | 0).toString(16).padStart(2, '0')).join('');
-    } else if (fn === OPS.showText && depth === 0) ops.push({ font, size, items: args[0] || [], fill });
+    } else if (fn === OPS.showText) ops.push({ font, size, items: args[0] || [], fill, depth });
   }
   const fonts = new Map();
   ops.forEach(r => {
@@ -54309,15 +54365,18 @@ async function pePageTextPdfjsOps(pjPage) {
  * (written back as they are), and per character its code, Unicode, width and
  * text matrix. null when the two readings of the page disagree.
  */
-function pePageTextScan(doc, page, pj) {
-  const recs = pj.ops;
+function pePageTextScan(doc, page, pj, opts) {
+  // formsOn: the text inside Form XObjects (transparency groups, a magazine's effects) is read too, as pdf.js
+  // has it in its list (depth > 0); off, only the page's own (what an earlier reading of such a page falls back to).
+  const formsOn = !opts || opts.forms !== false;
+  const recs = formsOn ? pj.ops : pj.ops.filter(r => !r.depth);
   const ops = [];
   let k = 0, bad = false;
   let ctm = [1, 0, 0, 1, 0, 0], Tm = [1, 0, 0, 1, 0, 0], Tlm = [1, 0, 0, 1, 0, 0], inText = false;
   let ts = { font: null, size: 0, Tc: 0, Tw: 0, Tz: 100, TL: 0, Ts: 0, Tr: 0 };
   let fill = '0 g', stroke = '0 G', fillCs = '', strokeCs = '';
-  const stack = [];
-  const marks = [];   // open marked-content sequences: the units this editor wrote are PMPara ones (pePageTextReadMark)
+  let stack = [];
+  let marks = [];   // open marked-content sequences: the units this editor wrote are PMPara ones (pePageTextReadMark)
   // The clip in force, in default user space: null (none), { x0, y0, x1, y1 } (rectangles), 'x' (a path of another shape).
   let clip = null;
   let pathRects = [], pathOther = false, clipNext = false;
@@ -54334,9 +54393,20 @@ function pePageTextScan(doc, page, pj) {
     clipNext = false;
   };
   const streams = pePageContentStreamsOnly(doc, page);
-  for (let si = 0; si < streams.length && !bad; si++) {
-    const src = peDecodePdfStreamBytes(streams[si]);
-    if (!src) continue;
+  let pageRes = null;
+  try { pageRes = page.node.Resources(); } catch (_) {}   // (inherited too; reads only)
+  const xmaps = new Map();
+  const xmapOf = res => {
+    if (!res) return new Map();
+    if (!xmaps.has(res)) xmaps.set(res, pmBuildXObjectRefMap(doc, res));
+    return xmaps.get(res);
+  };
+  const uses = new Map();   // form stream -> how many times the page draws it
+  let formSeq = 0;
+  // One content stream - the page's or a form's (form: null, or { stream, chain }: the forms it is in, outermost first).
+  const runStream = (stream, sid, resDict, form, depth) => {
+    const src = peDecodePdfStreamBytes(stream);
+    if (!src) return;
     const lex = pePdfContentLexer(src);
     const args = [];
     const show = (op, start, end) => {
@@ -54373,7 +54443,7 @@ function pePageTextScan(doc, page, pj) {
         });
       }
       const rop = {
-        streamIdx: si, stream: streams[si], start, end, op, quote, inText, ctm: ctm.slice(), tlm: Tlm.slice(),
+        streamIdx: sid, stream, form, resDict, start, end, op, quote, inText, ctm: ctm.slice(), tlm: Tlm.slice(),
         ts: { ...ts }, fill: (fillCs ? fillCs + ' ' : '') + fill, stroke: (strokeCs ? strokeCs + ' ' : '') + stroke,
         loaded: rec.font, css: rec.fill, font, fm0, bpc, cells: [], editable: false, mark: null, clip
       };
@@ -54458,12 +54528,20 @@ function pePageTextScan(doc, page, pj) {
         case 'BDC': case 'BMC': {
           const nm = args.filter(a => a.t === 'name').shift();
           const dict = args.find(a => a.t === 'dict');
-          marks.push(nm && nm.v === 'PMPara' ? pePageTextReadMark(dict ? pmLatin1(src, dict.s, dict.e) : '', si, start, streams[si]) : null);
+          marks.push(nm && nm.v === 'PMPara' ? pePageTextReadMark(dict ? pmLatin1(src, dict.s, dict.e) : '', sid, start, stream) : null);
           break;
         }
         case 'EMC': {
           const m = marks.pop();
-          if (m && m.streamIdx === si) m.end = end;
+          if (m && m.streamIdx === sid) m.end = end;
+          break;
+        }
+        case 'Do': {
+          // A form XObject is drawn in a graphics state of its own, its content in place (as in pdf.js's list).
+          if (!formsOn || depth >= 8) break;
+          const nm = args.filter(a => a.t === 'name').pop();
+          const info = nm ? xmapOf(resDict).get(nm.v) : null;
+          if (info && info.kind === 'form' && !(form && form.chain.includes(info.obj))) runForm(info, resDict, form, depth);
           break;
         }
         case 'BI': lex.skipInlineImage(); break;
@@ -54471,9 +54549,45 @@ function pePageTextScan(doc, page, pj) {
       }
       args.length = 0;
     }
-  }
+  };
+  const runForm = (info, resDict, form, depth) => {
+    uses.set(info.obj, (uses.get(info.obj) || 0) + 1);
+    const saved = { ctm, Tm, Tlm, inText, ts, fill, stroke, fillCs, strokeCs, stack, marks, clip, pathRects, pathOther, clipNext };
+    ctm = peMatMul(ctm, info.matrix[0], info.matrix[1], info.matrix[2], info.matrix[3], info.matrix[4], info.matrix[5]);
+    if (info.bbox) {
+      // (Its bounding box clips what it draws - as a rectangle when the form is not turned.)
+      const b = info.bbox;
+      const ps = [[b[0], b[1]], [b[2], b[1]], [b[0], b[3]], [b[2], b[3]]].map(q => pmAffApply(ctm, q[0], q[1]));
+      const box = { x0: Math.min(...ps.map(q => q[0])), y0: Math.min(...ps.map(q => q[1])), x1: Math.max(...ps.map(q => q[0])), y1: Math.max(...ps.map(q => q[1])) };
+      const square = (Math.abs(ctm[1]) < 1e-9 && Math.abs(ctm[2]) < 1e-9) || (Math.abs(ctm[0]) < 1e-9 && Math.abs(ctm[3]) < 1e-9);
+      if (!square || clip === 'x') clip = 'x';
+      else clip = clip ? { x0: Math.max(clip.x0, box.x0), y0: Math.max(clip.y0, box.y0), x1: Math.min(clip.x1, box.x1), y1: Math.min(clip.y1, box.y1) } : box;
+    }
+    ts = { ...ts };
+    stack = [];
+    marks = [];
+    inText = false;
+    pathRects = [];
+    pathOther = false;
+    clipNext = false;
+    const inner = {
+      stream: info.obj, chain: (form ? form.chain : []).concat([info.obj]),
+      levels: (form ? form.levels : []).concat([{ stream: info.obj, base: ctm.slice() }])   // (base: its space -> user space)
+    };
+    runStream(info.obj, 100000 + (++formSeq), info.resources || resDict, inner, depth + 1);
+    ({ ctm, Tm, Tlm, inText, ts, fill, stroke, fillCs, strokeCs, stack, marks, clip, pathRects, pathOther, clipNext } = saved);
+  };
+  for (let si = 0; si < streams.length && !bad; si++) runStream(streams[si], si, pageRes, null, 0);
   if (bad || k !== recs.length) return null;
-  return { ops, fonts: pj.fonts };
+  // What is in a form that the page draws once, and that no other page has, can be rewritten; a form that is
+  // shared (a stamp, a running head every page draws) would change on all the pages that draw it.
+  const share = ops.some(op => op.form) ? pePageFormShare(doc) : null;
+  ops.forEach(op => {
+    if (!op.form) return;
+    op.shared = !op.form.chain.every(st => uses.get(st) === 1 && (share.get(st) || 0) <= 1);
+    if (op.shared) op.editable = false;
+  });
+  return { ops, fonts: pj.fonts, forms: formsOn };
 }
 
 /**
@@ -54506,7 +54620,7 @@ function pePageTextWholeMark(unit) {
 function pePageTextOutsideClip(unit, items, X, view) {
   const op = unit.ops[0];
   const clip = op && op.clip;
-  if (!clip || clip === 'x') return false;
+  if (!clip || clip === 'x' || op.form) return false;   // (text in a form is written in the form: it has no way out of it)
   const cs = [[clip.x0, clip.y0], [clip.x1, clip.y0], [clip.x0, clip.y1], [clip.x1, clip.y1]].map(q => pmAffApply(view.V, q[0], q[1]));
   const cx0 = Math.min(...cs.map(q => q[0])) - 0.5, cx1 = Math.max(...cs.map(q => q[0])) + 0.5;
   const cy0 = Math.min(...cs.map(q => q[1])) - 0.5, cy1 = Math.max(...cs.map(q => q[1])) + 0.5;
@@ -54518,6 +54632,19 @@ function pePageTextOutsideClip(unit, items, X, view) {
     return Math.min(a[0], b[0]) < cx0 || Math.max(a[0], b[0]) > cx1 || Math.min(a[1], b[1]) < cy0 || Math.max(a[1], b[1]) > cy1;
   });
   return out(items, at) && !out(unit.chars, (x, y) => [x, y]);
+}
+
+/** The corners of laid-out items' boxes where they will be drawn (visual points), X moving them as in pePageTextOutsideClip. */
+function pePageTextItemPoints(unit, items, X, view) {
+  const op = unit.ops[0];
+  const { M, Minv } = pePageTextViewOf(op, view);
+  const at = X && Minv ? (x, y) => { const u = pmAffApply(Minv, x, y); const v = pmAffApply(X, u[0], u[1]); return pmAffApply(M, v[0], v[1]); } : (x, y) => [x, y];
+  const pts = [];
+  items.forEach(it => {
+    if (it.syn || it.brk || it.soft) return;
+    pts.push(at(it.x, it.y - it.size * 0.8), at(it.x + it.w, it.y - it.size * 0.8), at(it.x, it.y + it.size * 0.25), at(it.x + it.w, it.y + it.size * 0.25));
+  });
+  return pts;
 }
 
 /**
@@ -54571,7 +54698,7 @@ function pePageTextLines(scan, view) {
       return { op, c, x: p[0], y: p[1], w: c.adv * su, size };
     });
     const a = cells[0], z = cells[cells.length - 1];
-    if (cur && cur.ops[0].mark === op.mark && sameCtm(cur.ops[0].ctm, op.ctm) && Math.abs(a.y - cur.y) < 0.2 * Math.min(size, cur.size) &&
+    if (cur && cur.ops[0].mark === op.mark && cur.ops[0].form === op.form && sameCtm(cur.ops[0].ctm, op.ctm) && Math.abs(a.y - cur.y) < 0.2 * Math.min(size, cur.size) &&
         a.x > cur.x1 - 0.3 * size && a.x - cur.x1 < 1.5 * Math.max(size, cur.size)) {
       cur.ops.push(op);
       cur.cells.push(...cells);
@@ -54672,7 +54799,7 @@ function pePageTextUnits(lines, view, edges) {
       u.align = mk.align;
       return true;
     }
-    if (!sameCtm(prev.ops[0].ctm, l.ops[0].ctm)) return false;
+    if (!sameCtm(prev.ops[0].ctm, l.ops[0].ctm) || prev.ops[0].form !== l.ops[0].form) return false;
     if (!near(l.size, prev.size, 0.03 * prev.size)) return false;
     const lead = l.y - prev.y;
     if (lead < 1.0 * prev.size || lead > 2.0 * prev.size) return false;
@@ -54806,7 +54933,10 @@ function pePageTextData() {
       const view = pePageImgView();
       const pj = await pePageTextPdfjsOps(page);
       if (!peState || peState.page !== page || pdfDoc !== doc) return null;
-      const scan = pePageTextScan(doc, doc.getPage(idx), pj);
+      // The text inside forms too; where that does not agree with pdf.js (what a mask draws is in its list
+      // and not in the page's content), the page's own text only.
+      const pageObj = doc.getPage(idx);
+      const scan = pePageTextScan(doc, pageObj, pj) || pePageTextScan(doc, pageObj, pj, { forms: false });
       if (!scan) {
         console.warn('Page text not editable: the page content and pdf.js disagree');
         return { view, scan: null, lines: [], units: [] };
@@ -55114,12 +55244,16 @@ function pePageTextFontName(font) {
 function pePageTextSiblings(scan) {
   const byName = new Map();
   const seen = new Set();
+  const dicts = [];   // (a font's resource name means its font only in the resources of the content stream it is used in)
   (scan ? scan.ops : []).forEach(op => {
-    if (!op.editable || seen.has(op.ts.font)) return;
-    seen.add(op.ts.font);
+    let di = dicts.indexOf(op.resDict);
+    if (di < 0) di = dicts.push(op.resDict) - 1;
+    const key = di + '|' + op.ts.font;
+    if (!op.editable || seen.has(key)) return;
+    seen.add(key);
     const name = pePageTextFontName(op.font);
     if (!byName.has(name)) byName.set(name, []);
-    byName.get(name).push({ res: op.ts.font, font: op.font, bpc: op.bpc, fm0: op.fm0 });
+    byName.get(name).push({ res: op.ts.font, font: op.font, bpc: op.bpc, fm0: op.fm0, resDict: op.resDict });
   });
   return byName;
 }
@@ -55188,9 +55322,9 @@ function pePageTextCandidates(style, anchor, siblings) {
   const want = style ? { bold: !!style.bold, italic: !!style.italic } : looks0;
   const fam = pePageTextResFamily(aop.ts.font, aop.font);
   const cands = [];
-  if (looks0.bold === want.bold && looks0.italic === want.italic) cands.push({ res: aop.ts.font, font: aop.font, bpc: aop.bpc, fm0: aop.fm0 });
+  if (looks0.bold === want.bold && looks0.italic === want.italic) cands.push({ res: aop.ts.font, font: aop.font, bpc: aop.bpc, fm0: aop.fm0, resDict: aop.resDict });
   (siblings ? [...siblings.values()] : []).forEach(list => list.forEach(f => {
-    if (cands.some(c => c.res === f.res) || pePageTextResFamily(f.res, f.font) !== fam) return;
+    if (f.resDict !== aop.resDict || cands.some(c => c.res === f.res) || pePageTextResFamily(f.res, f.font) !== fam) return;
     const lk = pePageTextFontLooks(f.font);
     if (lk.bold === want.bold && lk.italic === want.italic) cands.push(f);
   }));
@@ -55488,7 +55622,8 @@ function pePageTextSame(unit, items) {
  * one font, size and colour, each from its own text matrix - the original
  * glyph's, moved to its new place - and every glyph placed by TJ steps, with
  * character and word spacing 0 (they are in the places already). The fonts
- * are the page's own by their resource names, Roboto by fallbackName(face, family).
+ * are the page's own by their resource names, Roboto by fallbackName(face, family, op) - a name in
+ * the resources of the content stream the operator is in.
  */
 function pePageTextEmit(items, view, fallbackName) {
   const body = [];
@@ -55503,7 +55638,7 @@ function pePageTextEmit(items, view, fallbackName) {
     const op = it.op;
     const { Minv } = pePageTextViewOf(op, view);
     const g = it.glyph || { code: it.c.code, len: op.bpc, w: it.c.w };
-    const fontRes = g.face ? fallbackName(g.face, g.fam) : PDFLib.PDFName.of(g.res || op.ts.font).asString();
+    const fontRes = g.face ? fallbackName(g.face, g.fam, op) : PDFLib.PDFName.of(g.res || op.ts.font).asString();
     const size = op.ts.size, Th = op.ts.Tz / 100;
     const fm0 = g.face ? 0.001 : (g.fm0 || op.fm0);
     // The glyph's text matrix: the one it had (or its run's), moved to (x, y).
@@ -55673,9 +55808,10 @@ function pePageTextCut(doc, page, unit, insertion) {
 }
 
 /** Replace the marker a lifted unit left (pePageTextCut) with source; false when it is not there. */
-async function pePageTextFill(doc, page, token, text) {
+async function pePageTextFill(doc, page, token, text, where) {
   const mark = pePageTextBytes('%' + PE_PAGETEXT_MARK + ' ' + token);
-  for (const stream of pePageContentStreamsOnly(doc, page)) {
+  // (where: the stream the marker was left in - a form's, perhaps.)
+  for (const stream of (where ? [where] : []).concat(pePageContentStreamsOnly(doc, page))) {
     const src = peDecodePdfStreamBytes(stream);
     if (!src) continue;
     let at = -1;
@@ -55780,6 +55916,7 @@ function pePageTextLift(o) {
       o.pageText.before = before;
       o.pageText.whole = !!pePageTextWholeMark(unit);
       o.pageText.token = token;
+      o.pageText.where = unit.ops[0].stream;
       o.pageText.unit = unit;
       o.pageText.view = data.view;
       o.pageText.siblings = pePageTextSiblings(data.scan);
@@ -55873,12 +56010,37 @@ async function pePageTextFlush() {
   await pePageTextChain;
 }
 
-function pePageTextFallbackNamer(page) {
-  const names = new Map();
-  return (face, fam) => {
+/** A font put into a resource dictionary (a form's): its resource name, as a string. */
+function pePageTextResAddFont(doc, res, tag, ref) {
+  const key = PDFLib.PDFName.of('Font');
+  let fonts = doc.context.lookup(res.get(key));
+  if (!(fonts instanceof PDFLib.PDFDict)) {
+    fonts = doc.context.obj({});
+    res.set(key, fonts);
+  }
+  const name = fonts.uniqueKey(tag);
+  fonts.set(name, ref);
+  return name.asString();
+}
+
+/**
+ * Names for the bundled Roboto in the resources of the content stream a text is written into: the page's
+ * own, or a form's - a font name means a font only where the stream's resources have it.
+ */
+function pePageTextFallbackNamer(page, doc) {
+  const names = new Map();   // resource dictionary (null: the page's) -> key -> name
+  let pageRes = null;
+  try { pageRes = page.node.Resources(); } catch (_) {}
+  return (face, fam, op) => {
+    const dict = op && op.resDict && op.resDict !== pageRes ? op.resDict : null;
+    if (!names.has(dict)) names.set(dict, new Map());
+    const own = names.get(dict);
     const key = face.key + '|' + (fam || '');
-    if (!names.has(key)) names.set(key, page.node.newFontDictionary(fam ? 'PMFont_' + fam : 'PMFont', face.font.ref).asString());
-    return names.get(key);
+    if (!own.has(key)) {
+      const tag = fam ? 'PMFont_' + fam : 'PMFont';
+      own.set(key, dict ? pePageTextResAddFont(doc, dict, tag, face.font.ref) : page.node.newFontDictionary(tag, face.font.ref).asString());
+    }
+    return own.get(key);
   };
 }
 
@@ -55908,6 +56070,7 @@ async function pePageTextSync() {
   const free = [];
   const place = (unit, items, X, view, fallbackName, whole) => {
     if (!items.length) return '';
+    if (unit.ops[0].form) pePageFormsWiden(pdfDoc, unit.ops[0].form, pePageTextItemPoints(unit, items, X, view), view);
     if (!pePageTextOutsideClip(unit, items, X, view)) return write(unit, items, X, view, fallbackName, whole);
     const src = write(unit, items, X, view, fallbackName, true);
     if (src) free.push('q\n' + unit.ops[0].ctm.map(pePageImgNum).join(' ') + ' cm\n' + src + '\nQ');
@@ -55918,7 +56081,7 @@ async function pePageTextSync() {
     const lifted = done.find(o => o.pageText.before);
     await pePageTextUndoPoint(lifted && lifted.pageText.before);
     const page = pdfDoc.getPage(peState.idx);
-    const fallbackName = pePageTextFallbackNamer(page);
+    const fallbackName = pePageTextFallbackNamer(page, pdfDoc);
     let changed = 0, same = 0;
     // What goes into the page: the units cut out (all in one pass - pePageTextCutMany) and, by their
     // markers, the lifted ones' text. The cuts come first: they are by offsets, which the markers' fill moves.
@@ -55941,7 +56104,7 @@ async function pePageTextSync() {
         same++;
         break;
       }
-      fills.push({ token: t.token, src: place(t.unit, items, X, t.view, fallbackName, t.whole) });
+      fills.push({ token: t.token, where: t.where, src: place(t.unit, items, X, t.view, fallbackName, t.whole) });
     }
     if (!same && (changedObjs.length || deleted.length)) {
       const data = await pePageTextData();
@@ -55960,7 +56123,7 @@ async function pePageTextSync() {
       }
     }
     if (cuts.length && await pePageTextCutMany(pdfDoc, page, cuts)) changed += cuts.length;
-    for (const f of fills) if (await pePageTextFill(pdfDoc, page, f.token, f.src)) changed++;
+    for (const f of fills) if (await pePageTextFill(pdfDoc, page, f.token, f.src, f.where)) changed++;
     if (free.length) {
       pePageTextAppendFree(pdfDoc, page, free.join('\n'));
       changed++;
@@ -69224,7 +69387,13 @@ function pmBuildXObjectRefMap(doc, resourcesDict) {
         if (m.length === 6 && m.every(v => v != null)) matrix = m;
       }
       const resources = peLookupPdfObj(doc, obj.dict.get(PDFLib.PDFName.of('Resources')));
-      out.set(name, { kind: 'form', obj, matrix, resources });
+      let bbox = null;
+      const bObj = peLookupPdfObj(doc, obj.dict.get(PDFLib.PDFName.of('BBox')));
+      if (bObj && typeof bObj.asArray === 'function') {
+        const b = bObj.asArray().map(x => pePdfNumValue(doc, x));
+        if (b.length === 4 && b.every(v => v != null)) bbox = [Math.min(b[0], b[2]), Math.min(b[1], b[3]), Math.max(b[0], b[2]), Math.max(b[1], b[3])];
+      }
+      out.set(name, { kind: 'form', ref, obj, matrix, bbox, resources });
     }
   }
   return out;
@@ -69406,6 +69575,42 @@ function pmTrackImageUsage(doc, src, resourcesDict, initialCtm, usageMap, depth,
 // the CTM it is painted with, in default user space. The CTM and the q/Q
 // stack run on from one content stream into the next, as they are drawn.
 // ============================================================================
+const pePageFormShareCache = new WeakMap();
+/**
+ * How many pages of the document reach each form XObject (a Map: form stream -> count) by their resources:
+ * one that two pages have is shared, and writing into it would change both.
+ */
+function pePageFormShare(doc) {
+  const n = doc.context.largestObjectNumber;
+  const hit = pePageFormShareCache.get(doc);
+  if (hit && hit.n === n) return hit.map;
+  const map = new Map();
+  const Subtype = PDFLib.PDFName.of('Subtype'), XObject = PDFLib.PDFName.of('XObject'), Resources = PDFLib.PDFName.of('Resources');
+  const visit = (res, seen, depth) => {
+    if (!res || typeof res.get !== 'function' || depth > 8) return;
+    const xo = peLookupPdfObj(doc, res.get(XObject));
+    if (!xo || typeof xo.keys !== 'function') return;
+    for (const key of xo.keys()) {
+      const obj = peLookupPdfObj(doc, xo.get(key));
+      if (!obj || !obj.dict || obj.contents == null || seen.has(obj) || pePdfResName(obj.dict.get(Subtype)) !== 'Form') continue;
+      seen.add(obj);
+      map.set(obj, (map.get(obj) || 0) + 1);
+      visit(peLookupPdfObj(doc, obj.dict.get(Resources)), seen, depth + 1);
+    }
+  };
+  try {
+    for (const pg of doc.getPages()) {
+      let res = null;
+      try { res = pg.node.Resources(); } catch (_) {}
+      visit(res, new Set(), 0);
+    }
+  } catch (err) {
+    console.warn('pePageFormShare', err);
+  }
+  pePageFormShareCache.set(doc, { n, map });
+  return map;
+}
+
 function pePageContentStreamsOnly(doc, page) {
   const streams = [];
   try {
@@ -69432,15 +69637,25 @@ function pePageContentStreamsOnly(doc, page) {
   return streams;
 }
 
-function pePageImgScan(doc, page) {
+function pePageImgScan(doc, page, opts) {
   const out = [];
   if (!doc || !page) return out;
+  // The images in Form XObjects (a transparency group, a magazine's effects and backgrounds) are the page's
+  // too; with their form, if it is the page's alone (not drawn twice, no other page has it).
+  const formsOn = !opts || opts.forms !== false;
   let resources = null;
   try { resources = page.node.Resources(); } catch (_) {}   // (inherited too; reads only)
-  const xobjMap = pmBuildXObjectRefMap(doc, resources);
+  const xmaps = new Map();
+  const xmapOf = res => {
+    if (!res) return new Map();
+    if (!xmaps.has(res)) xmaps.set(res, pmBuildXObjectRefMap(doc, res));
+    return xmaps.get(res);
+  };
   let ctm = [1, 0, 0, 1, 0, 0];
-  const ctmStack = [];
-  pePageContentStreamsOnly(doc, page).forEach((stream, streamIdx) => {
+  let ctmStack = [];
+  const uses = new Map();   // form stream -> how many times the page draws it
+  const scanStream = (stream, streamIdx, resDict, form, depth) => {
+    const xobjMap = xmapOf(resDict);
     const src = peDecodePdfStreamBytes(stream);
     if (!src) return;
     const len = src.length;
@@ -69579,20 +69794,33 @@ function pePageImgScan(doc, page) {
             const im = info.obj.dict.get(PDFLib.PDFName.of('ImageMask'));
             mask = !!(im && (im === PDFLib.PDFBool.True || (im.asBoolean && im.asBoolean())));
           } catch (_) {}
-          out.push({ kind: 'xobj', name: lastName, ref: info.ref, mask, streamIdx, start: lastNameStart, end: i, ctm: ctm.slice() });
+          out.push({ kind: 'xobj', name: lastName, ref: info.ref, mask, streamIdx, stream, form, resDict, start: lastNameStart, end: i, ctm: ctm.slice() });
+        } else if (info && info.kind === 'form' && formsOn && depth < 8 && !(form && form.chain.includes(info.obj))) {
+          uses.set(info.obj, (uses.get(info.obj) || 0) + 1);
+          const saved = { ctm, ctmStack };
+          ctm = peMatMul(ctm, info.matrix[0], info.matrix[1], info.matrix[2], info.matrix[3], info.matrix[4], info.matrix[5]);
+          ctmStack = [];
+          scanStream(info.obj, -1, info.resources || resDict, {
+            stream: info.obj, chain: (form ? form.chain : []).concat([info.obj]),
+            levels: (form ? form.levels : []).concat([{ stream: info.obj, base: ctm.slice() }])
+          }, depth + 1);
+          ({ ctm, ctmStack } = saved);
         }
         numBuf.length = 0; continue;
       }
       if (op === 'BI') {
         i = start;
         skipInlineImage();
-        out.push({ kind: 'inline', name: null, ref: null, mask: false, streamIdx, start, end: i, ctm: ctm.slice() });
+        out.push({ kind: 'inline', name: null, ref: null, mask: false, streamIdx, stream, form, resDict, start, end: i, ctm: ctm.slice() });
         numBuf.length = 0; continue;
       }
       numBuf.length = 0;
     }
-  });
-  return out;
+  };
+  pePageContentStreamsOnly(doc, page).forEach((stream, streamIdx) => scanStream(stream, streamIdx, resources, null, 0));
+  if (!out.some(pl => pl.form)) return out;
+  const share = pePageFormShare(doc);
+  return out.filter(pl => !pl.form || pl.form.chain.every(st => uses.get(st) === 1 && (share.get(st) || 0) <= 1));
 }
 
 function pmImageFilterIsDct(doc, obj) {
