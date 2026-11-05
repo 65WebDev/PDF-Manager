@@ -21387,6 +21387,10 @@
     // Pinch-to-zoom (zoom with two fingers) - instead of the slider on mobile
     // ═══════════════════════════════════════════════════════════════════
     let pinchStartDist = 0;     // distance between fingers at the beginning of the gesture
+    // The distance and the scale it is measured from: the gesture's start - or, once the scale has run into a
+    // limit, the point where it did, so the zoom answers at once when the fingers turn back (else it waited
+    // until they had gone all the way back to where the limit began, and seemed to have stopped).
+    let pinchRefDist = 0, pinchRefScale = 100;
     // Zoom anchor: a specific page under your fingers and a fraction of a point inside it
     let pinchAnchorIndex = null;
     let pinchAnchorFx = 0.5, pinchAnchorFy = 0.5;
@@ -21625,6 +21629,8 @@
         const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
         pmBeginPinch(midX, midY);
         pinchStartDist = touchDist(e.touches[0], e.touches[1]);
+        pinchRefDist = pinchStartDist;
+        pinchRefScale = pinchStartScale;
         e.preventDefault();
       }
     }, { passive: false });
@@ -21683,9 +21689,12 @@
       // bottoms out near 70%, which on phones sits ABOVE the 3-/4-column
       // fill scales — so a pinch-out almost never changed the column count
       // and the post-pinch fill-snap never had a chance to run.
-      const ratio = dist / pinchStartDist;
       const minS = mobileMinScale || computeMobilePinchMinScale();
-      const newScale = Math.max(minS, Math.min(700, Math.round(pinchStartScale * ratio)));
+      const raw = Math.round(pinchRefScale * (dist / (pinchRefDist > 0 ? pinchRefDist : pinchStartDist)));
+      const newScale = Math.max(minS, Math.min(700, raw));
+      // At a limit: measured anew from here.
+      // (Not from fingers closer than a finger's width: their jitter would be a big ratio.)
+      if (newScale !== raw) { pinchRefDist = Math.max(dist, 48); pinchRefScale = newScale; }
 
       const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
       const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
@@ -21699,6 +21708,14 @@
       if (!pinchActive) return;
       // We complete only when there are less than two fingers
       if (!e.touches || e.touches.length < 2) {
+        // One finger of the two stays down: it pans from here on (the browser scrolls nothing for it - see
+        // pmPostPinchPanStart). Armed before the layout of the new scale settles, which it waits for.
+        if (e.type === 'touchend' && e.touches && e.touches.length === 1) {
+          pmPostPinchPanStart(scrollContainer, e.touches, {
+            holdMs: 150,
+            lockX: () => document.body.classList.contains('pm-vertical-scroll-lock')
+          });
+        }
         const anchorFx = pinchAnchorFx;
         const anchorFy = pinchAnchorFy;
         const midX = pinchLastMidX;
@@ -21763,6 +21780,7 @@
     }
     scrollContainer.addEventListener('touchend', endPinch);
     scrollContainer.addEventListener('touchcancel', endPinch);
+    pmPostPinchPanBind(scrollContainer);
 
     // ── One-finger zoom (phones, one page a row) ──
     // Double tap and keep the finger down, then slide it: below the line of
@@ -21800,8 +21818,11 @@
       const dy = t.clientY - z.y;
       const travel = Math.sign(dy) * Math.max(0, Math.abs(dy) - TAP_MOVE_MAX);
       const minS = mobileMinScale || computeMobilePinchMinScale();
-      applyPinchScaleChange(Math.max(minS, Math.min(700,
-        Math.round(pinchStartScale * Math.pow(2, travel / PM_ONE_FINGER_ZOOM_PX)))));
+      // (From the gesture's start, or from where the scale ran into a limit: see pinchRefDist.)
+      const raw = Math.round((z.refScale || pinchStartScale) * Math.pow(2, (travel - (z.refTravel || 0)) / PM_ONE_FINGER_ZOOM_PX));
+      const sc = Math.max(minS, Math.min(700, raw));
+      if (sc !== raw) { z.refTravel = travel; z.refScale = sc; }
+      applyPinchScaleChange(sc);
     }, { passive: true });
     const pmEndOneFingerZoom = () => { pmOneFingerZoom = null; };
     scrollContainer.addEventListener('touchend', pmEndOneFingerZoom);
@@ -42657,9 +42678,96 @@ let peLastZoomMouseX = null, peLastZoomMouseY = null;
 // suppressed the browser's own "solo Alt press" menu-focus behavior, so
 // the matching keyup gets the same treatment.
 let peAltMenuGuardActive = false;
+// ── The finger left after a pinch pans ──
+// While two fingers pinch, every touchmove is cancelled (preventDefault), and the browser does not scroll for
+// a touch whose moves were cancelled: of the two fingers the one that stayed down when the other was lifted
+// moved nothing, and had to be lifted and put down again before it panned. It pans the work area itself
+// instead (pmPostPinchPanStart from the pinch's end), and flings on release as the browser's own scrolling does.
+let pmPostPinchPan = null;
+let pmPostPinchFling = 0;   // requestAnimationFrame id
+
+function pmPostPinchPanStop() {
+  pmPostPinchPan = null;
+  if (pmPostPinchFling) { cancelAnimationFrame(pmPostPinchFling); pmPostPinchFling = 0; }
+}
+
+/**
+ * The pinch on scroller is over and one finger (touches) is still down: it pans scroller from now on.
+ * opts.holdMs: for this long the page is still settling after the pinch (it sets the scroll itself) - the
+ * finger's moves are only followed, not applied. opts.lockX(): true when the work area must not scroll sideways.
+ */
+function pmPostPinchPanStart(scroller, touches, opts) {
+  pmPostPinchPanStop();
+  if (!scroller || !touches || touches.length !== 1) return;
+  const t = touches[0], now = performance.now();
+  pmPostPinchPan = {
+    scroller, id: t.identifier, x: t.clientX, y: t.clientY, t: now, vx: 0, vy: 0, native: false,
+    hold: now + ((opts && opts.holdMs) || 0), lockX: opts && opts.lockX
+  };
+}
+
+/** The listeners that carry the finger left after a pinch on scroller (once per scrolling element). */
+function pmPostPinchPanBind(scroller) {
+  if (!scroller || scroller._pmPostPinchBound) return;
+  scroller._pmPostPinchBound = true;
+  // A finger put down stops a fling, as the browser's own scrolling stops under one; a second one is a pinch again.
+  scroller.addEventListener('touchstart', () => pmPostPinchPanStop(), { passive: true, capture: true });
+  scroller.addEventListener('touchmove', (e) => {
+    const p = pmPostPinchPan;
+    if (!p || p.scroller !== scroller) return;
+    if (e.touches.length !== 1 || e.touches[0].identifier !== p.id) { pmPostPinchPanStop(); return; }
+    const t = e.touches[0];
+    // A move that cannot be cancelled is one the browser already scrolls for: it carries the finger itself.
+    if (!e.cancelable) { p.native = true; p.x = t.clientX; p.y = t.clientY; p.t = performance.now(); return; }
+    e.preventDefault();
+    const now = performance.now();
+    const dx = p.x - t.clientX, dy = p.y - t.clientY, dt = Math.max(1, now - p.t);
+    p.x = t.clientX; p.y = t.clientY; p.t = now;
+    if (now < p.hold) return;
+    const lockX = p.lockX && p.lockX();
+    if (!lockX) scroller.scrollLeft += dx;
+    scroller.scrollTop += dy;
+    // (The speed it is let go at, smoothed over the last few moves: px per ms.)
+    p.vx = lockX ? 0 : 0.6 * p.vx + 0.4 * dx / dt;
+    p.vy = 0.6 * p.vy + 0.4 * dy / dt;
+  }, { passive: false });
+  const end = (e) => {
+    const p = pmPostPinchPan;
+    if (!p || p.scroller !== scroller) return;
+    // (The pinch's own touchend - a finger up, one left - is what starts the pan: it goes on.)
+    if (e.type === 'touchend' && e.touches && e.touches.length) return;
+    pmPostPinchPan = null;
+    if (e.type === 'touchcancel' || p.native) return;
+    let vx = p.vx, vy = p.vy;
+    if (performance.now() - p.t > 80 || Math.hypot(vx, vy) < 0.15) return;
+    let last = performance.now();
+    const step = (now) => {
+      const dt = Math.min(48, Math.max(1, now - last));
+      last = now;
+      const l0 = scroller.scrollLeft, t0 = scroller.scrollTop;
+      scroller.scrollLeft += vx * dt;
+      scroller.scrollTop += vy * dt;
+      const k = Math.exp(-dt / 325);
+      vx *= k;
+      vy *= k;
+      if ((Math.abs(vx) < 0.02 && Math.abs(vy) < 0.02) || (scroller.scrollLeft === l0 && scroller.scrollTop === t0)) {
+        pmPostPinchFling = 0;
+        return;
+      }
+      pmPostPinchFling = requestAnimationFrame(step);
+    };
+    pmPostPinchFling = requestAnimationFrame(step);
+  };
+  scroller.addEventListener('touchend', end);
+  scroller.addEventListener('touchcancel', end);
+}
+
 let pePinchActive = false;
 let pePinchStartDist = 0;
 let pePinchStartSlider = 100;
+// The distance and the zoom it is measured from: the gesture's start, or where the zoom ran into a limit (the
+// fingers turning back then zoom at once, not after they are back where the limit began).
+let pePinchRefDist = 0, pePinchRefMul = 0;
 let pePinchLastMidX = null;
 let pePinchLastMidY = null;
 let pePinchLastAppliedMidX = null;
@@ -61229,12 +61337,19 @@ function peObjMouseDown(e, o) {
         : peSliderToZoomMul(pePinchStartSlider);
     }
     // Multiplicative zoom + light dampening; keep as a continuous float.
-    const startMul = peSliderToZoomMul(pePinchStartSlider);
-    const ratio = Math.max(0.25, dist / pePinchStartDist);
+    if (!(pePinchRefDist > 0)) {
+      pePinchRefDist = pePinchStartDist;
+      pePinchRefMul = peSliderToZoomMul(pePinchStartSlider);
+    }
+    const ratio = Math.max(0.25, dist / pePinchRefDist);
     const damped = Math.pow(ratio, 0.72);
     const minMul = peSliderToZoomMul(peScaleSlider ? parseInt(peScaleSlider.min, 10) : 100);
     const maxMul = peSliderToZoomMul(peScaleSlider ? parseInt(peScaleSlider.max, 10) : 200);
-    return Math.max(minMul, Math.min(maxMul, startMul * damped));
+    const raw = pePinchRefMul * damped;
+    const mul = Math.max(minMul, Math.min(maxMul, raw));
+    // At a limit: measured anew from here.
+    if (mul !== raw) { pePinchRefDist = Math.max(dist, 48); pePinchRefMul = mul; }   // (not from fingers closer than a finger's width)
+    return mul;
   }
   function peFlushPinchFrame() {
     pePinchRaf = 0;
@@ -61295,6 +61410,7 @@ function peObjMouseDown(e, o) {
     }
     pePinchActive = false;
     pePinchStartDist = 0;
+    pePinchRefDist = 0;
     pePinchLastMidX = null;
     pePinchLastMidY = null;
     pePinchLastAppliedMidX = null;
@@ -61315,6 +61431,10 @@ function peObjMouseDown(e, o) {
     }
     // Keep blocking object hits briefly while fingers lift.
     pePinchBlockObjUntil = Date.now() + 350;
+    // The finger that stays down pans the page (a pinch leaves the browser no scrolling for it).
+    if (e.type === 'touchend' && e.touches && e.touches.length === 1) {
+      pmPostPinchPanStart(wrap, e.touches, { holdMs: 120 });
+    }
   }
   wrap.addEventListener('touchstart', (e) => {
     if (!peState || typeof isTouchDevice === 'undefined' || !isTouchDevice) return;
@@ -61358,6 +61478,7 @@ function peObjMouseDown(e, o) {
     }
     pePinchStartDist = peTouchDist(e.touches[0], e.touches[1]);
     pePinchStartSlider = peState.zoomSlider || 100;
+    pePinchRefDist = 0;
     peState._liveZoomMul = peSliderToZoomMul(pePinchStartSlider);
     pePageSwipeCancel();
     pePinchLastMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
@@ -61401,6 +61522,7 @@ function peObjMouseDown(e, o) {
   }, { passive: false });
   wrap.addEventListener('touchend', peEndEditorPinch);
   wrap.addEventListener('touchcancel', peEndEditorPinch);
+  pmPostPinchPanBind(wrap);
 
   // Mobile fit-zoom: vertical swipe → save + prev/next page (edge fill to 30%).
   (function initPePageSwipeNav() {
