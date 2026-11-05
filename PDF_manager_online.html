@@ -21387,6 +21387,10 @@
     // Pinch-to-zoom (zoom with two fingers) - instead of the slider on mobile
     // ═══════════════════════════════════════════════════════════════════
     let pinchStartDist = 0;     // distance between fingers at the beginning of the gesture
+    // The distance and the scale it is measured from: the gesture's start - or, once the scale has run into a
+    // limit, the point where it did, so the zoom answers at once when the fingers turn back (else it waited
+    // until they had gone all the way back to where the limit began, and seemed to have stopped).
+    let pinchRefDist = 0, pinchRefScale = 100;
     // Zoom anchor: a specific page under your fingers and a fraction of a point inside it
     let pinchAnchorIndex = null;
     let pinchAnchorFx = 0.5, pinchAnchorFy = 0.5;
@@ -21625,6 +21629,8 @@
         const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
         pmBeginPinch(midX, midY);
         pinchStartDist = touchDist(e.touches[0], e.touches[1]);
+        pinchRefDist = pinchStartDist;
+        pinchRefScale = pinchStartScale;
         e.preventDefault();
       }
     }, { passive: false });
@@ -21683,9 +21689,12 @@
       // bottoms out near 70%, which on phones sits ABOVE the 3-/4-column
       // fill scales — so a pinch-out almost never changed the column count
       // and the post-pinch fill-snap never had a chance to run.
-      const ratio = dist / pinchStartDist;
       const minS = mobileMinScale || computeMobilePinchMinScale();
-      const newScale = Math.max(minS, Math.min(700, Math.round(pinchStartScale * ratio)));
+      const raw = Math.round(pinchRefScale * (dist / (pinchRefDist > 0 ? pinchRefDist : pinchStartDist)));
+      const newScale = Math.max(minS, Math.min(700, raw));
+      // At a limit: measured anew from here.
+      // (Not from fingers closer than a finger's width: their jitter would be a big ratio.)
+      if (newScale !== raw) { pinchRefDist = Math.max(dist, 48); pinchRefScale = newScale; }
 
       const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
       const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
@@ -21809,8 +21818,11 @@
       const dy = t.clientY - z.y;
       const travel = Math.sign(dy) * Math.max(0, Math.abs(dy) - TAP_MOVE_MAX);
       const minS = mobileMinScale || computeMobilePinchMinScale();
-      applyPinchScaleChange(Math.max(minS, Math.min(700,
-        Math.round(pinchStartScale * Math.pow(2, travel / PM_ONE_FINGER_ZOOM_PX)))));
+      // (From the gesture's start, or from where the scale ran into a limit: see pinchRefDist.)
+      const raw = Math.round((z.refScale || pinchStartScale) * Math.pow(2, (travel - (z.refTravel || 0)) / PM_ONE_FINGER_ZOOM_PX));
+      const sc = Math.max(minS, Math.min(700, raw));
+      if (sc !== raw) { z.refTravel = travel; z.refScale = sc; }
+      applyPinchScaleChange(sc);
     }, { passive: true });
     const pmEndOneFingerZoom = () => { pmOneFingerZoom = null; };
     scrollContainer.addEventListener('touchend', pmEndOneFingerZoom);
@@ -42753,6 +42765,9 @@ function pmPostPinchPanBind(scroller) {
 let pePinchActive = false;
 let pePinchStartDist = 0;
 let pePinchStartSlider = 100;
+// The distance and the zoom it is measured from: the gesture's start, or where the zoom ran into a limit (the
+// fingers turning back then zoom at once, not after they are back where the limit began).
+let pePinchRefDist = 0, pePinchRefMul = 0;
 let pePinchLastMidX = null;
 let pePinchLastMidY = null;
 let pePinchLastAppliedMidX = null;
@@ -61322,12 +61337,19 @@ function peObjMouseDown(e, o) {
         : peSliderToZoomMul(pePinchStartSlider);
     }
     // Multiplicative zoom + light dampening; keep as a continuous float.
-    const startMul = peSliderToZoomMul(pePinchStartSlider);
-    const ratio = Math.max(0.25, dist / pePinchStartDist);
+    if (!(pePinchRefDist > 0)) {
+      pePinchRefDist = pePinchStartDist;
+      pePinchRefMul = peSliderToZoomMul(pePinchStartSlider);
+    }
+    const ratio = Math.max(0.25, dist / pePinchRefDist);
     const damped = Math.pow(ratio, 0.72);
     const minMul = peSliderToZoomMul(peScaleSlider ? parseInt(peScaleSlider.min, 10) : 100);
     const maxMul = peSliderToZoomMul(peScaleSlider ? parseInt(peScaleSlider.max, 10) : 200);
-    return Math.max(minMul, Math.min(maxMul, startMul * damped));
+    const raw = pePinchRefMul * damped;
+    const mul = Math.max(minMul, Math.min(maxMul, raw));
+    // At a limit: measured anew from here.
+    if (mul !== raw) { pePinchRefDist = Math.max(dist, 48); pePinchRefMul = mul; }   // (not from fingers closer than a finger's width)
+    return mul;
   }
   function peFlushPinchFrame() {
     pePinchRaf = 0;
@@ -61388,6 +61410,7 @@ function peObjMouseDown(e, o) {
     }
     pePinchActive = false;
     pePinchStartDist = 0;
+    pePinchRefDist = 0;
     pePinchLastMidX = null;
     pePinchLastMidY = null;
     pePinchLastAppliedMidX = null;
@@ -61455,6 +61478,7 @@ function peObjMouseDown(e, o) {
     }
     pePinchStartDist = peTouchDist(e.touches[0], e.touches[1]);
     pePinchStartSlider = peState.zoomSlider || 100;
+    pePinchRefDist = 0;
     peState._liveZoomMul = peSliderToZoomMul(pePinchStartSlider);
     pePageSwipeCancel();
     pePinchLastMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
