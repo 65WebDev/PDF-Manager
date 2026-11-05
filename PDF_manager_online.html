@@ -13400,6 +13400,7 @@
       });
       pmUpdateThemeToggleUI(pmCurrentTheme());
       pmUpdateLangToggleUI();
+      try { if (typeof peApplyHotkeyTips === 'function') peApplyHotkeyTips(); } catch (_) {}
       try { if (typeof updateMergeButtonTooltip === 'function') updateMergeButtonTooltip(); } catch (_) {}
       try { if (typeof updateFitWidthDefaultUI === 'function') updateFitWidthDefaultUI(); } catch (_) {}
       try {
@@ -46857,6 +46858,7 @@ async function openPageEditor(idx, restoreSelection) {
   if (idx < 0 || idx >= pdfDoc.getPageCount()) return;
   // The bundled Roboto, new text blocks' font, ready before the page shows.
   void pmWmLoadFonts().catch(() => {});
+  peApplyHotkeyTips();
   try {
     peSavePageSelectionForRestore(restoreSelection);
     showLoading(t('loadingOpenEditor'));
@@ -47639,6 +47641,65 @@ function peOnWinResize() {
   peScheduleFullRender(180);
 }
 
+/**
+ * The page editor's hotkeys, by the physical key (e.code) so they work in any
+ * keyboard layout - Б and Ю are the , and . keys. Each presses its toolbar
+ * button, so it does what a click on it does (and nothing while it is
+ * disabled); their tooltips name them (peApplyHotkeyTips).
+ */
+const PE_HOTKEY_BUTTONS = {
+  KeyH: 'peToolHand', KeyC: 'peToolObjSelect', KeyQ: 'peRotL', KeyW: 'peRotR',
+  Digit1: 'peToolCrop', Digit2: 'peToolRedact', Digit3: 'peToolText', Digit4: 'peToolImage',
+  Numpad1: 'peToolCrop', Numpad2: 'peToolRedact', Numpad3: 'peToolText', Numpad4: 'peToolImage',
+  Comma: 'pePagePrev', Period: 'pePageNext'
+};
+const PE_HOTKEY_SAVE = 'peSaveBtn';   // Ctrl+Enter
+
+function pePressHotkeyButton(id) {
+  const btn = document.getElementById(id);
+  if (!btn || btn.disabled || btn.hidden || btn.getAttribute('aria-hidden') === 'true' || !btn.offsetParent) return;
+  btn.click();
+}
+
+function peHandleEditorHotkey(e, typing) {
+  if (!peState || e.isComposing) return false;
+  // Over a confirmation or another dialog (the editor itself is one of these overlays): not for the page.
+  if (document.querySelector('.modal-overlay-active:not(#pageEditModal)')) return false;
+  if ((e.code === 'Enter' || e.code === 'NumpadEnter') && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey) {
+    // Ctrl+Enter saves - from the text being typed, too.
+    e.preventDefault(); e.stopPropagation();
+    if (!e.repeat && !peState.drag) pePressHotkeyButton(PE_HOTKEY_SAVE);
+    return true;
+  }
+  if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || typing) return false;
+  const id = PE_HOTKEY_BUTTONS[e.code];
+  if (!id) return false;
+  // While a text block is being edited the keys are its text; a gesture under way is not interrupted.
+  if (peState.inlineEditId || peState.drag || peColorPreview) return false;
+  e.preventDefault(); e.stopPropagation();
+  if (!e.repeat) pePressHotkeyButton(id);
+  return true;
+}
+
+/** The hotkeys in the tooltips of the buttons they press: "Hand (H)". */
+function peApplyHotkeyTips() {
+  const tips = [
+    ['peToolHand', 'H'], ['peToolObjSelect', 'C'], ['peRotL', 'Q'], ['peRotR', 'W'],
+    ['peToolCrop', '1'], ['peToolRedact', '2'], ['peToolText', '3'], ['peToolImage', '4'],
+    ['pePagePrev', ','], ['pePageNext', '.'], ['peSaveBtn', 'Ctrl+Enter']
+  ];
+  tips.forEach(([id, keys]) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const mark = ' (' + keys + ')';
+    // Its tooltip as the language gives it (a button without one: its caption); the key after the first line.
+    const key = el.getAttribute('data-i18n-title') || el.getAttribute('data-i18n');
+    const base = (key ? t(key) : '') || el.title || '';
+    el.title = base.replace(/^[^\n]*/, m => (m.endsWith(mark) ? m : m + mark));
+    el.setAttribute('aria-keyshortcuts', keys === 'Ctrl+Enter' ? 'Control+Enter' : keys);
+  });
+}
+
 function peOnKeyDown(e) {
   if (!peState) return;
   if (e.key === 'Shift') {
@@ -47665,6 +47726,7 @@ function peOnKeyDown(e) {
   }
   const tag = (e.target.tagName || '').toLowerCase();
   const typing = tag === 'textarea' || tag === 'input' || e.target.isContentEditable;
+  if (peHandleEditorHotkey(e, typing || tag === 'select')) return;
   if ((e.ctrlKey || e.metaKey) && !e.altKey && peState.inlineEditId) {
     if (!e.shiftKey && e.code === 'KeyB') {
       e.preventDefault(); e.stopPropagation();
@@ -54302,7 +54364,7 @@ function pePageTextScan(doc, page, pj) {
         });
       }
       const rop = {
-        streamIdx: si, start, end, op, quote, inText, ctm: ctm.slice(), tlm: Tlm.slice(),
+        streamIdx: si, stream: streams[si], start, end, op, quote, inText, ctm: ctm.slice(), tlm: Tlm.slice(),
         ts: { ...ts }, fill: (fillCs ? fillCs + ' ' : '') + fill, stroke: (strokeCs ? strokeCs + ' ' : '') + stroke,
         loaded: rec.font, css: rec.fill, font, fm0, bpc, cells: [], editable: false, mark: null, clip
       };
@@ -54323,7 +54385,8 @@ function pePageTextScan(doc, page, pj) {
       }
       if (bpc && ci !== codes.length) { bad = true; return; }
       rop.tmEnd = Tm.slice();
-      rop.editable = !!(font && bpc && !font.isType3Font && !font.vertical && font.toUnicode && font.toFontChar &&
+      // (A Type3 font's glyphs are drawn by procedures: what is there stays and moves as it is - see pePageTextEncoder.)
+      rop.editable = !!(font && bpc && !font.vertical && font.toUnicode && font.toFontChar &&
         ts.Tr >= 0 && ts.Tr <= 2 && Th > 0 && ts.size > 0);
       ops.push(rop);
     };
@@ -54386,7 +54449,7 @@ function pePageTextScan(doc, page, pj) {
         case 'BDC': case 'BMC': {
           const nm = args.filter(a => a.t === 'name').shift();
           const dict = args.find(a => a.t === 'dict');
-          marks.push(nm && nm.v === 'PMPara' ? pePageTextReadMark(dict ? pmLatin1(src, dict.s, dict.e) : '', si, start) : null);
+          marks.push(nm && nm.v === 'PMPara' ? pePageTextReadMark(dict ? pmLatin1(src, dict.s, dict.e) : '', si, start, streams[si]) : null);
           break;
         }
         case 'EMC': {
@@ -54413,10 +54476,10 @@ function pePageTextScan(doc, page, pj) {
  * like; and it is cut out whole (pePageTextWholeMark), leaving nothing of
  * it behind. Other viewers ignore it.
  */
-function pePageTextReadMark(dict, streamIdx, start) {
+function pePageTextReadMark(dict, streamIdx, start, stream) {
   const num = k => { const m = new RegExp('/' + k + '\\s+([+-]?(?:\\d+\\.?\\d*|\\.\\d+))').exec(dict); return m ? parseFloat(m[1]) : 0; };
   const a = /\/A\s*\/(\w+)/.exec(dict);
-  return { streamIdx, start, end: null, nOps: 0, align: a ? a[1] : 'line', w: num('W'), indent: num('I'), lead: num('L') };
+  return { streamIdx, stream, start, end: null, nOps: 0, align: a ? a[1] : 'line', w: num('W'), indent: num('I'), lead: num('L') };
 }
 
 /** The mark a unit can be cut out by as a whole (all its operators, and nothing else, are in it). */
@@ -54995,6 +55058,13 @@ function pePageTextEncoder(font) {
   }
   const toFontChar = font.toFontChar || {};
   const widths = font.widths || {};
+  // A Type3 font draws each glyph with a procedure of its own, and which codes have one is not told here:
+  // what the page has of it stays as it is, and nothing new is written in it (a new letter is Roboto's).
+  if (font.isType3Font) {
+    enc = { has: () => true, width: code => (typeof widths[code] === 'number' ? widths[code] : 0), code: () => null };
+    pePageTextEncoders.set(font, enc);
+    return enc;
+  }
   enc = {
     has: code => toFontChar[code] !== undefined,
     width: code => (typeof widths[code] === 'number' ? widths[code] : (Number(font.defaultWidth) || 0)),
@@ -55525,53 +55595,63 @@ function pePageTextBytes(text) {
 }
 
 /**
- * Take a unit's operators out of the page; what goes in place of the first
- * one: insertion (content-stream source) - or a marker comment the edited
- * text replaces later (pePageTextFill). The unit must still be on the page
- * as it was read (units from pePageTextData of the current page).
+ * Take units' operators out of the page; what goes in place of the first
+ * one of each: its insertion (content-stream source) - or a marker comment
+ * the edited text replaces later (pePageTextFill). jobs: [{ unit,
+ * insertion }]. The units must still be on the page as they were read
+ * (units from pePageTextData of the current page) - and all that is
+ * cut goes in ONE pass: every cut moves what is after it in its stream, so
+ * the offsets the units were read with are good only until the first one.
+ * Done from the end of each stream back, none of them is moved by another.
  */
-async function pePageTextCut(doc, page, unit, insertion) {
-  const streams = pePageContentStreamsOnly(doc, page);
-  // A unit this editor wrote: its whole mark goes (what is left of its earlier writing, its underlines, too).
-  const whole = pePageTextWholeMark(unit);
-  if (whole) {
-    const stream = streams[whole.streamIdx];
-    const src = stream && peDecodePdfStreamBytes(stream);
-    if (!src) return false;
-    const ins = pePageTextBytes('\n' + insertion + '\n');
-    const next = new Uint8Array(src.length - (whole.end - whole.start) + ins.length);
-    next.set(src.subarray(0, whole.start), 0);
-    next.set(ins, whole.start);
-    next.set(src.subarray(whole.end), whole.start + ins.length);
-    await peRewriteStreamBytes(doc, stream, next);
-    return true;
-  }
-  const byStream = new Map();
-  unit.ops.forEach(op => {
-    if (!byStream.has(op.streamIdx)) byStream.set(op.streamIdx, []);
-    byStream.get(op.streamIdx).push(op);
-  });
-  const first = unit.ops.reduce((a, b) => (b.streamIdx < a.streamIdx || (b.streamIdx === a.streamIdx && b.start < a.start) ? b : a));
-  for (const [si, ops] of byStream) {
-    const stream = streams[si];
-    const src = stream && peDecodePdfStreamBytes(stream);
-    if (!src) return false;
-    ops.sort((a, b) => b.start - a.start);
-    let cur = src;
-    for (const op of ops) {
+async function pePageTextCutMany(doc, page, jobs) {
+  // By the streams themselves, not their places in the page's list: that list changes as pdf-lib wraps the page's content.
+  const edits = new Map();   // stream -> [{ start, end, text }]
+  const add = (stream, start, end, text) => {
+    if (!edits.has(stream)) edits.set(stream, []);
+    edits.get(stream).push({ start, end, text });
+  };
+  for (const { unit, insertion } of jobs) {
+    // A unit this editor wrote: its whole mark goes (what is left of its earlier writing, its underlines, too).
+    const whole = pePageTextWholeMark(unit);
+    if (whole) {
+      add(whole.stream, whole.start, whole.end, '\n' + insertion + '\n');
+      continue;
+    }
+    const first = unit.ops.reduce((a, b) => (b.streamIdx < a.streamIdx || (b.streamIdx === a.streamIdx && b.start < a.start) ? b : a));
+    for (const op of unit.ops) {
       // ' and " move to the next line first: that stays.
       let rep = op.op === "'" ? 'T*' : op.op === '"' ? (op.quote || [0, 0]).map(pePageImgNum).join(' Tw ') + ' Tc T*' : '';
       if (op === first) rep += '\n' + insertion;
-      const ins = pePageTextBytes('\n' + rep + '\n');
-      const next = new Uint8Array(cur.length - (op.end - op.start) + ins.length);
-      next.set(cur.subarray(0, op.start), 0);
-      next.set(ins, op.start);
-      next.set(cur.subarray(op.end), op.start + ins.length);
+      add(op.stream, op.start, op.end, '\n' + rep + '\n');
+    }
+  }
+  const rewritten = new Map();
+  for (const [stream, list] of edits) {
+    const src = stream && peDecodePdfStreamBytes(stream);
+    if (!src) return false;
+    list.sort((a, b) => b.start - a.start);
+    // Cuts that overlap would mean the page is not as it was read.
+    for (let i = 1; i < list.length; i++) if (list[i].end > list[i - 1].start) return false;
+    let cur = src;
+    for (const { start, end, text } of list) {
+      const ins = pePageTextBytes(text);
+      const next = new Uint8Array(cur.length - (end - start) + ins.length);
+      next.set(cur.subarray(0, start), 0);
+      next.set(ins, start);
+      next.set(cur.subarray(end), start + ins.length);
       cur = next;
     }
-    await peRewriteStreamBytes(doc, stream, cur);
+    rewritten.set(stream, cur);
   }
+  // Written only once all of it has been worked out: a page is not left half cut.
+  for (const [stream, bytes] of rewritten) await peRewriteStreamBytes(doc, stream, bytes);
   return true;
+}
+
+/** One unit out of the page (pePageTextCutMany). */
+function pePageTextCut(doc, page, unit, insertion) {
+  return pePageTextCutMany(doc, page, [{ unit, insertion }]);
 }
 
 /** Replace the marker a lifted unit left (pePageTextCut) with source; false when it is not there. */
@@ -55822,6 +55902,9 @@ async function pePageTextSync() {
     const page = pdfDoc.getPage(peState.idx);
     const fallbackName = pePageTextFallbackNamer(page);
     let changed = 0, same = 0;
+    // What goes into the page: the units cut out (all in one pass - pePageTextCutMany) and, by their
+    // markers, the lifted ones' text. The cuts come first: they are by offsets, which the markers' fill moves.
+    const cuts = [], fills = [];
     for (const o of done) {
       pePageTextLive.splice(pePageTextLive.indexOf(o), 1);
       const t = o.pageText;
@@ -55840,9 +55923,9 @@ async function pePageTextSync() {
         same++;
         break;
       }
-      if (await pePageTextFill(pdfDoc, page, t.token, place(t.unit, items, X, t.view, fallbackName, t.whole))) changed++;
+      fills.push({ token: t.token, src: place(t.unit, items, X, t.view, fallbackName, t.whole) });
     }
-    if (changedObjs.length || deleted.length) {
+    if (!same && (changedObjs.length || deleted.length)) {
       const data = await pePageTextData();
       const siblings = pePageTextSiblings(data && data.scan);
       for (const o of changedObjs) {
@@ -55850,14 +55933,16 @@ async function pePageTextSync() {
         if (!unit) continue;
         const items = await pePageTextRelayout(unit, o, data.view, siblings);
         const X = pePageTextDelta(o, unit, data.view);
-        if (await pePageTextCut(pdfDoc, page, unit, place(unit, items, X, data.view, fallbackName, !!pePageTextWholeMark(unit)))) changed++;
+        cuts.push({ unit, insertion: place(unit, items, X, data.view, fallbackName, !!pePageTextWholeMark(unit)) });
         keepAt(o, items.find(i => !i.syn && !i.brk), data.view);
       }
       for (const d of deleted) {
         const unit = data && pePageTextFind(data.units, d.ref);
-        if (unit && await pePageTextCut(pdfDoc, page, unit, '')) changed++;
+        if (unit) cuts.push({ unit, insertion: '' });
       }
     }
+    if (cuts.length && await pePageTextCutMany(pdfDoc, page, cuts)) changed += cuts.length;
+    for (const f of fills) if (await pePageTextFill(pdfDoc, page, f.token, f.src)) changed++;
     if (free.length) {
       pePageTextAppendFree(pdfDoc, page, free.join('\n'));
       changed++;
@@ -69290,10 +69375,19 @@ function pePageContentStreamsOnly(doc, page) {
     const contents = page.node.get(PDFLib.PDFName.of('Contents'));
     const resolved = contents ? doc.context.lookup(contents) : null;
     if (resolved instanceof PDFLib.PDFArray) {
-      resolved.asArray().forEach(ref => {
-        const s = doc.context.lookup(ref);
+      for (let i = 0; i < resolved.size(); i++) {
+        let s = doc.context.lookup(resolved.get(i));
+        // A content stream pdf-lib itself made - what it drew onto the page this session, and the q ... Q
+        // it wraps the page's own content in - becomes an ordinary stream: the scans must see all of the
+        // page, and the q/Q most of all (without them the page's own leftover CTM runs on into what follows).
+        if (s && s.contents == null && typeof s.getUnencodedContents === 'function') {
+          const raw = doc.context.flateStream(s.getUnencodedContents());
+          resolved.set(i, doc.context.register(raw));
+          if (page.contentStream === s) { page.contentStream = undefined; page.contentStreamRef = undefined; }
+          s = raw;
+        }
         if (s && s.contents != null) streams.push(s);
-      });
+      }
     } else if (resolved && resolved.contents != null) {
       streams.push(resolved);
     }
@@ -72433,6 +72527,29 @@ function pmHfPageContexts(indices, s, date) {
   return out;
 }
 
+/**
+ * The pieces of a header/footer line that are text (pmHfApply) as page
+ * text: one graphics state for the line - its baseline's start a (user
+ * space), turned by the page's rotation - and each piece placed along it by
+ * its text matrix, so the page editor reads them back as one line. Kerning
+ * and the underline as the canvas drew them (pmHfRenderLine).
+ */
+function pmHfVectorLine(face, fontRes, pieces, s, color, a, rot) {
+  const rad = rot * Math.PI / 180;
+  const c = Math.round(Math.cos(rad) * 1e6) / 1e6, si = Math.round(Math.sin(rad) * 1e6) / 1e6;
+  const parts = ['q', [c, si, -si, c, a.x, a.y].map(peVecNum).join(' ') + ' cm', color + ' rg'];
+  pieces.forEach(p => {
+    const g = peVecGlyphs(face, p.text);
+    if (p.text.trim()) parts.push('BT ' + fontRes + ' ' + peVecNum(s.size) + ' Tf 1 0 0 1 ' + peVecNum(p.dx) + ' 0 Tm ' + g.tj + ' ET');
+    if (s.underline) {
+      const w = g.units * s.size / face.fk.unitsPerEm, th = s.size * 0.06;
+      parts.push(peVecNum(p.dx) + ' ' + peVecNum(-s.size * 0.1 - th) + ' ' + peVecNum(w) + ' ' + peVecNum(th) + ' re f');
+    }
+  });
+  parts.push('Q');
+  return parts.join('\n');
+}
+
 async function pmHfApply(s, indices, date) {
   if (!pdfDoc || !indices.length) return false;
   const ctxs = pmHfPageContexts(indices, s, date);
@@ -72456,29 +72573,58 @@ async function pmHfApply(s, indices, date) {
   let bytes = null;
   const done = [];
   try {
-    for (const text of pieces.keys()) {
+    // In the bundled Roboto the text goes into the page as text (pmHfVectorPiece): sharp, searchable, and
+    // editable in the page editor as any text of the page. Anything else - another font, a character Roboto
+    // lacks, no fontkit - is a picture, as it was.
+    const vec = new Set();
+    let probe = null;
+    if (s.font === PM_WM_ROBOTO_FAMILY) {
+      try { probe = await peVecProbeFont(); } catch (_) { probe = null; }
+    }
+    if (probe) for (const text of pieces.keys()) if ([...text].every(ch => peVecHasChar(probe, ch))) vec.add(text);
+    const renderPiece = async (text) => {
       const r = pmHfRenderLine(s, text, PM_WM_PX_PER_PT, true);
       pieces.set(text, r ? { r, png: await pmWmCanvasToBytes(r.canvas, 'image/png') } : null);
-    }
+    };
+    for (const text of pieces.keys()) if (!vec.has(text)) await renderPiece(text);
     const hPt = pmHfMetrics(s, '0');
     const boxH = hPt.asc + hPt.desc;
     claimed = await peClaimLivePdfDocWriter();
     const docRef = pdfDoc;
     if (!docRef) return false;
+    let face = null;
+    if (vec.size) {
+      try { face = await peVecFont(docRef, !!s.bold, !!s.italic); } catch (err) { console.warn('Header text not embedded', err); }
+      if (!face) {
+        for (const text of vec) await renderPiece(text);
+        vec.clear();
+      }
+    }
     const embedded = new Map();
     for (const [text, piece] of pieces) {
-      if (piece) embedded.set(text, await docRef.embedPng(piece.png));
+      if (piece && !vec.has(text)) embedded.set(text, await docRef.embedPng(piece.png));
     }
     const count = docRef.getPageCount();
+    const color = peVecColor(s.color).rgb;
     for (const { idx, items } of plan) {
       if (idx < 0 || idx >= count) continue;
       const page = docRef.getPage(idx);
       const { rot, full, W, H } = pmWmPageFrame(page);
       peFreshContentStream(page);
+      let fontRes = null;
+      const texts = [];
       for (const { slot, L } of items) {
         const x0 = pmHfLineX(slot, L.w, W, s);
         const top = pmHfLineTop(slot, boxH, H, s);
+        const vecPieces = L.pieces.filter(p => vec.has(p.text));
+        if (vecPieces.length) {
+          if (!fontRes) fontRes = page.node.newFontDictionary('PMHF', face.font.ref).asString();
+          // The baseline's start, the line's own frame: the box's top and the font's ascent below it.
+          const a = peRotatePointAround(full.x + x0, full.y + (H - top) - hPt.asc, full.x, full.y, rot);
+          texts.push(pmHfVectorLine(face, fontRes, vecPieces, s, color, a, rot));
+        }
         for (const p of L.pieces) {
+          if (vec.has(p.text)) continue;
           const piece = pieces.get(p.text);
           if (!piece) continue;
           const r = piece.r;
@@ -72489,6 +72635,8 @@ async function pmHfApply(s, indices, date) {
           });
         }
       }
+      // After the page's own content, in a stream of its own (its graphics state is the page's default).
+      if (texts.length) page.node.addContentStream(docRef.context.register(docRef.context.flateStream(texts.join('\n'))));
       done.push(idx);
     }
     if (pdfDoc !== docRef || !done.length) return false;
