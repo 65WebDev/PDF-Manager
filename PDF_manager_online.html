@@ -615,7 +615,7 @@
        parallel view (its tab stays). Sticky, so it stays in sight as the pages scroll. */
     .pm-par-head { display: none; }
     body.pm-par-on .pm-par-head {
-      display: flex; align-items: center; gap: 8px; position: sticky; top: 0; z-index: 6;
+      display: flex; align-items: center; gap: 8px; position: sticky; top: -10px; left: -6px; z-index: 6;
       margin: -10px -6px 16px; padding: 5px 8px 5px 12px; min-height: 22px;
       background: rgba(238,241,244,.97); color: #2c3e50; font-size: 13px;
       border-bottom: 2px solid rgba(0,0,0,.08);
@@ -642,12 +642,14 @@
     .pm-par-swap { display: none; }
     body.pm-par-on:not(.pm-par-picking) .pm-par-swap {
       display: flex; align-items: center; justify-content: center;
-      position: absolute; left: 50%; top: 4px; transform: translateX(-50%); z-index: 9;
+      position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 45;
       width: 26px; height: 26px; padding: 0; border-radius: 50%;
       border: 1px solid #aeb8c2; background: #fff; color: #34495e; cursor: pointer;
       box-shadow: 0 1px 4px rgba(0,0,0,.2);
+      /* 80% transparent; the nearer the pointer, the more of it shows (pmParSwapProximity), fully at the button */
+      opacity: var(--pm-par-swap-op, .2); transition: opacity .12s ease, background .15s, color .15s;
     }
-    .pm-par-swap:hover { background: #3498db; color: #fff; border-color: #3498db; }
+    .pm-par-swap:hover { opacity: 1; background: #3498db; color: #fff; border-color: #3498db; }
     .pm-par-swap svg { display: block; pointer-events: none; }
     /* Asking for the tab of the right area: the screen goes dark, the right half says so. */
     .pm-par-pick { display: none; }
@@ -674,6 +676,10 @@
       content: ''; align-self: stretch; margin: 7px 3px 7px 0; width: 1px; flex: 0 0 1px; background: currentColor; opacity: .4;
     }
     .pm-tab.pm-tab-pair-l .pm-tab-close { display: none; }
+    /* The pointer on either half lights both (the halves are adjacent siblings, the left one first). */
+    .pm-tab.pm-tab-pair-l:not(.active):not(.pm-tab-selected):hover + .pm-tab.pm-tab-pair-r:not(.active):not(.pm-tab-selected),
+    .pm-tab.pm-tab-pair-l:not(.active):not(.pm-tab-selected):has(+ .pm-tab.pm-tab-pair-r:hover) { background: #46596c; color: #eaf0f5; }
+    .pm-tab.pm-tab-pair-l:hover + .pm-tab.pm-tab-pair-r .pm-tab-close { opacity: .65; }
     .pm-tab.pm-tab-pair-l.active, .pm-tab.pm-tab-pair-r.active { font-weight: 400; }
     .pm-tab.pm-tab-pair-l.pm-tab-half-focus, .pm-tab.pm-tab-pair-r.pm-tab-half-focus { font-weight: 700; }
     /*Drag and drop tabs (like in a browser)*/
@@ -765,6 +771,7 @@
     }
     #pmTabMenu button:hover:not(:disabled), #pmDzMenu button:hover:not(:disabled) { background: #eef4fb; }
     #pmTabMenu button:disabled, #pmDzMenu button:disabled { opacity: .45; cursor: default; }
+    #pmTabMenu button[hidden] { display: none; }
     /*Note shown by the drop-zone menu (e.g. "press Ctrl+V").*/
     #pmDzHint {
       position: fixed; z-index: 100061; max-width: 340px; padding: 9px 14px;
@@ -9042,6 +9049,7 @@
     <button type="button" data-action="close-right" data-i18n="tabCloseRight">Закрыть вкладки справа</button>
     <button type="button" data-action="rename" data-i18n="tabRename">Переименовать</button>
     <button type="button" data-action="parallel" data-i18n="parView">Параллельный просмотр</button>
+    <button type="button" data-action="split" data-i18n="parSplit" hidden>Раздельный просмотр</button>
   </div>
 
   <!--Right-click menu of the empty work area ("click here or drag files...")-->
@@ -10232,7 +10240,7 @@
         newDocumentHint: 'Будет создан новый документ', openInNewTabs: 'Откроется в новых вкладках',
         tabClose: 'Закрыть вкладку', tabCloseOthers: 'Закрыть другие вкладки', tabCloseRight: 'Закрыть вкладки справа',
         tabRename: 'Переименовать', tabRenameTitle: 'Переименовать документ',
-        parView: 'Параллельный просмотр', parPickRight: 'Выберите вкладку для правой области', parPickCancel: 'Esc — отмена', parSwap: 'Поменять местами', parClosePane: 'Закрыть в параллельном просмотре (вкладка останется)',
+        parView: 'Параллельный просмотр', parSplit: 'Раздельный просмотр', parPickRight: 'Выберите вкладку для правой области', parPickCancel: 'Esc — отмена', parSwap: 'Поменять местами', parClosePane: 'Закрыть в параллельном просмотре (вкладка останется)',
         acTitle: 'Обрезать белые поля', acTooltip: 'Автоматически обрезать белые поля страниц', acDialogTitle: 'Обрезать белые поля',
         acMargin: 'Отступ, мм', acMode: 'Обрезка', acModeEach: 'Каждая страница отдельно', acModeSame: 'Одинаково для всех',
         acModeEachHint: 'у каждой страницы обрезается своё пустое поле',
@@ -10742,7 +10750,7 @@
         newDocumentHint: 'A new document will be created', openInNewTabs: 'Open in new tabs',
         tabClose: 'Close tab', tabCloseOthers: 'Close other tabs', tabCloseRight: 'Close tabs to the right',
         tabRename: 'Rename', tabRenameTitle: 'Rename document',
-        parView: 'Parallel view', parPickRight: 'Select a tab for the right area', parPickCancel: 'Esc to cancel', parSwap: 'Swap', parClosePane: 'Close in the parallel view (the tab stays)',
+        parView: 'Parallel view', parSplit: 'Separate view', parPickRight: 'Select a tab for the right area', parPickCancel: 'Esc to cancel', parSwap: 'Swap', parClosePane: 'Close in the parallel view (the tab stays)',
         acTitle: 'Trim white margins', acTooltip: 'Automatically trim the white margins of pages', acDialogTitle: 'Trim white margins',
         acMargin: 'Margin, mm', acMode: 'Trim', acModeEach: 'Each page separately', acModeSame: 'Same for all',
         acModeEachHint: 'each page loses its own empty margin',
@@ -11252,7 +11260,7 @@
         newDocumentHint: 'Se creará un nuevo documento', openInNewTabs: 'Se abrirá en nuevas pestañas',
         tabClose: 'Cerrar pestaña', tabCloseOthers: 'Cerrar otras pestañas', tabCloseRight: 'Cerrar pestañas a la derecha',
         tabRename: 'Cambiar nombre', tabRenameTitle: 'Cambiar el nombre del documento',
-        parView: 'Vista en paralelo', parPickRight: 'Seleccione una pestaña para el área derecha', parPickCancel: 'Esc para cancelar', parSwap: 'Intercambiar', parClosePane: 'Cerrar en la vista en paralelo (la pestaña permanece)',
+        parView: 'Vista en paralelo', parSplit: 'Vista por separado', parPickRight: 'Seleccione una pestaña para el área derecha', parPickCancel: 'Esc para cancelar', parSwap: 'Intercambiar', parClosePane: 'Cerrar en la vista en paralelo (la pestaña permanece)',
         acTitle: 'Recortar márgenes blancos', acTooltip: 'Recortar automáticamente los márgenes blancos de las páginas', acDialogTitle: 'Recortar márgenes blancos',
         acMargin: 'Margen, mm', acMode: 'Recorte', acModeEach: 'Cada página por separado', acModeSame: 'Igual para todas',
         acModeEachHint: 'cada página pierde su propio margen vacío',
@@ -11812,7 +11820,7 @@
         tabCloseOthers: '关闭其他标签页',
         tabCloseRight: '关闭右侧标签页',
         tabRename: '重命名',
-        parView: '并排查看', parPickRight: '请选择要显示在右侧区域的标签页', parPickCancel: '按 Esc 取消', parSwap: '交换位置', parClosePane: '在并排查看中关闭（标签页保留）',
+        parView: '并排查看', parSplit: '分开查看', parPickRight: '请选择要显示在右侧区域的标签页', parPickCancel: '按 Esc 取消', parSwap: '交换位置', parClosePane: '在并排查看中关闭（标签页保留）',
         acTitle: '裁剪白边', acTooltip: '自动裁剪页面的白边', acDialogTitle: '裁剪白边',
         acMargin: '留边（毫米）', acMode: '裁剪方式', acModeEach: '每页单独裁剪', acModeSame: '所有页面相同',
         acModeEachHint: '每一页裁去各自的空白边',
@@ -30546,7 +30554,10 @@
       return markedForDeletion.has(draggedIndex) ? [] : [draggedIndex];
     }
 
+    // (the last answer came from a pane of the parallel view, not from the tab bar)
+    let pageDropTargetFromPane = false;
     function findPageDropTargetTab(clientX, clientY) {
+      pageDropTargetFromPane = false;
       if (!tabBarEl) return null;
       const tabs = tabBarEl.querySelectorAll('.pm-tab');
       for (let i = 0; i < tabs.length; i++) {
@@ -30562,7 +30573,10 @@
         for (const q of pmPar.panes) {
           if (q.tabId == null) continue;
           const r = q.scroll.getBoundingClientRect();
-          if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) return q.tabId;
+          if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) {
+            pageDropTargetFromPane = true;
+            return q.tabId;
+          }
         }
       }
       return null;
@@ -30772,6 +30786,15 @@
         pageCrossTabTargetTabId = sourceId;
         pmUpdatePageDragTabVisuals();
         if (pmActiveId !== sourceId) switchTo(sourceId);
+        return;
+      }
+
+      // Over the pane of the document being worked in (the other pane, once it has been switched to): the pages
+      // go in among its pages, where the insert marker shows - not to the end, as when dropped on a tab.
+      if (pageDropTargetFromPane && tid === pmActiveId) {
+        pageDragOverTabId = null;
+        pageCrossTabTargetTabId = tid;
+        pmUpdatePageDragTabVisuals();
         return;
       }
 
@@ -38065,8 +38088,26 @@ function pmParBuildChrome() {
   pmPar.work.appendChild(swap);
   pmPar.work.appendChild(pick);
   pmPar.dividerEl = div; pmPar.swapEl = swap; pmPar.pickEl = pick;
+  document.addEventListener('mousemove', pmParSwapProximity, true);
+  document.documentElement.addEventListener('mouseleave', pmParSwapProximityReset);
+}
+// The swap button is 80% transparent and fades in as the pointer comes close (full at about 24 px from it).
+function pmParSwapProximity(e) {
+  const el = pmPar.swapEl;
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  const dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
+  const d = Math.sqrt(dx * dx + dy * dy);
+  const NEAR = 28, FAR = 170;
+  const k = d <= NEAR ? 1 : (d >= FAR ? 0 : 1 - (d - NEAR) / (FAR - NEAR));
+  el.style.setProperty('--pm-par-swap-op', (0.2 + 0.8 * k).toFixed(3));
+}
+function pmParSwapProximityReset() {
+  if (pmPar.swapEl) pmPar.swapEl.style.removeProperty('--pm-par-swap-op');
 }
 function pmParRemoveChrome() {
+  document.removeEventListener('mousemove', pmParSwapProximity, true);
+  document.documentElement.removeEventListener('mouseleave', pmParSwapProximityReset);
   pmPar.panes.forEach(q => { if (q.head) { q.head.remove(); q.head = null; } });
   ['dividerEl', 'swapEl', 'pickEl'].forEach(k => { if (pmPar[k]) { pmPar[k].remove(); pmPar[k] = null; } });
 }
@@ -38186,6 +38227,14 @@ async function pmParDropPairOf(tab) {
   pmParTeardown();
   const act = pmTabs.find(x => x.id === pmActiveId);
   if (act) await pmActivateStandard(act.id, true, true);
+}
+
+// "Раздельный просмотр" on a merged tab: the two tabs stay next to each other, as two; the one worked in stays shown.
+async function pmParSplit(tabId) {
+  const tab = pmTabs.find(x => x.id === tabId);
+  if (!tab || tab.pairId == null) return;
+  await pmParDropPairOf(tab);
+  pmRenderBar(); pmSyncLayout();
 }
 
 // The two documents swap sides: the two panes by their order in the row, the two tabs in the bar.
@@ -39137,6 +39186,8 @@ function pmOpenTabMenu(clientX, clientY, tabId) {
   if (!(pmSelectedTabIds.size > 0 && pmSelectedTabIds.has(tabId))) {
     pmClearTabSelection();
     pmSelectedTabIds.add(tabId);
+    // A merged tab is one tab: its menu is for both halves.
+    if (pmTabs[idx].pairId != null && pmTabs.some(x => x.id === pmTabs[idx].pairId)) pmSelectedTabIds.add(pmTabs[idx].pairId);
     pmTabSelectAnchor = tabId;
     pmUpdateTabSelectionVisual();
   }
@@ -39159,8 +39210,12 @@ function pmOpenTabMenu(clientX, clientY, tabId) {
   // One name at a time: with several tabs selected it would be unclear which.
   const renameBtn = menu.querySelector('[data-action="rename"]');
   if (renameBtn) renameBtn.disabled = selCount > 1;
+  // On a merged tab the menu offers to split it; elsewhere, to start a parallel view.
   const parBtn = menu.querySelector('[data-action="parallel"]');
-  if (parBtn) parBtn.disabled = !pmParCanStart(pmGetSelectedTabIds());
+  const splitBtn = menu.querySelector('[data-action="split"]');
+  const inPair = pmTabs[idx] && pmTabs[idx].pairId != null;
+  if (parBtn) { parBtn.hidden = !!inPair; parBtn.disabled = !pmParCanStart(pmGetSelectedTabIds()); }
+  if (splitBtn) splitBtn.hidden = !inPair;
   const w = menu.offsetWidth || 210;
   const h = menu.offsetHeight || 120;
   let nx = clientX + 4, ny = clientY + 4;
@@ -39336,6 +39391,7 @@ function pmShowTabHoldMenu(el, tabId) {
     else if (action === 'close-right') await pmCloseTabsToRight(tabId);
     else if (action === 'rename') pmStartTabRename(tabId);
     else if (action === 'parallel') await pmParStart(pmGetSelectedTabIds());
+    else if (action === 'split') await pmParSplit(tabId);
   });
   document.addEventListener('mousedown', (e) => {
     if (menu.style.display !== 'block' || menu.contains(e.target)) return;
@@ -39360,9 +39416,14 @@ function pmShowTabHoldMenu(el, tabId) {
 // 3px: .tab-bar's gap between tabs.
 // Touch: no narrower than PM_TOUCH_TAB_MIN_W - the bar scrolls sideways
 // instead, a name squeezed to a few letters being of no use under a finger.
+// A merged tab (two tabs of a parallel view) is a little wider than an ordinary one, not twice as wide.
+const PM_PAIR_WIDTH_K = 1.25;
 function pmComputeWidth(n, avail) {
   if (n <= 0) return 0;
-  const w = Math.max(1, Math.min(TAB_MAX_W, Math.floor((avail - 3 * (n - 1)) / n)));
+  const pairs = Math.min(Math.floor(n / 2), Math.floor(pmTabs.filter(x => x.pairId != null).length / 2));
+  const units = n - pairs;                                   // ordinary tabs and merged tabs
+  const eff = (n - 2 * pairs) + pairs * PM_PAIR_WIDTH_K;      // widths of an ordinary tab they take together
+  const w = Math.max(1, Math.min(TAB_MAX_W, Math.floor((avail - 3 * (units - 1)) / eff)));
   return isTouchDevice ? Math.max(PM_TOUCH_TAB_MIN_W, w) : w;
 }
 
@@ -39718,13 +39779,38 @@ function pmTabDragMove(e) {
     return;
   }
 
-  const { stride, n, els, isGroup, groupStart, groupSize, draggedEl, groupEls } = pmDrag;
-  const minDx = -groupStart * stride;
-  const maxDx = (n - groupSize - groupStart) * stride;
-  dx = Math.max(minDx, Math.min(maxDx, dx));
-
-  const targetStart = groupStart + Math.round(dx / stride);
+  const { n, els, isGroup, groupStart, groupSize, draggedEl, groupEls } = pmDrag;
+  // The tabs are not all of one width (the halves of a merged tab are narrower) and a merged tab goes
+  // as one piece: where the dragged block lands is worked out from the tabs' real edges, a merged tab
+  // counting as one tab whose middle the block has to pass.
+  const lefts = els.map(el => el.offsetLeft);
+  const rights = els.map(el => el.offsetLeft + el.offsetWidth);
+  const GAP = 3;
+  const blockLeft = lefts[groupStart], blockRight = rights[groupStart + groupSize - 1];
+  dx = Math.max(lefts[0] - blockLeft, Math.min(rights[n - 1] - blockRight, dx));
+  const joined = (i) => els.length === pmTabs.length && i >= 0 && i + 1 < n &&
+    pmTabs[i].pairId != null && pmTabs[i].pairId === pmTabs[i + 1].id;
+  const spanFrom = (i) => (i < n ? lefts[i] : rights[n - 1] + GAP);   // where tab i starts (the bar's end if none)
+  let targetStart = groupStart;
+  if (dx > 0) {
+    let end = groupStart + groupSize;
+    while (end < n) {
+      let last = end; while (joined(last)) last++;
+      if (blockRight + dx > (lefts[end] + rights[last]) / 2) end = last + 1; else break;
+    }
+    targetStart = end - groupSize;
+  } else if (dx < 0) {
+    let start = groupStart;
+    while (start > 0) {
+      let first = start - 1; while (joined(first - 1)) first--;
+      if (blockLeft + dx < (lefts[first] + rights[start - 1]) / 2) start = first; else break;
+    }
+    targetStart = start;
+  }
   pmDrag.targetStart = targetStart;
+  const blockSpan = spanFrom(groupStart + groupSize) - blockLeft;
+  pmDrag.finalDx = targetStart > groupStart ? spanFrom(targetStart + groupSize) - spanFrom(groupStart + groupSize)
+    : (targetStart < groupStart ? -(lefts[groupStart] - lefts[targetStart]) : 0);
 
   if (isGroup && groupEls && groupEls.length > 1) {
     groupEls.forEach(el => { el.style.transform = 'translateX(' + dx + 'px)'; });
@@ -39737,9 +39823,9 @@ function pmTabDragMove(e) {
     if (!isGroup && i === pmDrag.fromIndex) return;
     let shift = 0;
     if (groupStart < targetStart) {
-      if (i >= groupStart + groupSize && i < targetStart + groupSize) shift = -groupSize * stride;
+      if (i >= groupStart + groupSize && i < targetStart + groupSize) shift = -blockSpan;
     } else if (groupStart > targetStart) {
-      if (i >= targetStart && i < groupStart) shift = groupSize * stride;
+      if (i >= targetStart && i < groupStart) shift = blockSpan;
     }
     el.style.transform = shift ? ('translateX(' + shift + 'px)') : '';
   });
@@ -39763,8 +39849,8 @@ function pmTabDragEnd() {
     pmDragSuppressClick = true;
     setTimeout(() => { pmDragSuppressClick = false; }, 50);
 
-    const { isGroup, groupStart, groupSize, targetStart, stride, draggedEl, groupEls } = drag;
-    const finalDx = (targetStart - groupStart) * stride;
+    const { isGroup, groupStart, groupSize, targetStart, draggedEl, groupEls } = drag;
+    const finalDx = drag.finalDx || 0;
     const animateEls = (isGroup && groupEls && groupEls.length > 1) ? groupEls : [draggedEl];
     if (!animateEls[0]) { pmRenderBar(); return; }
 
@@ -39815,11 +39901,11 @@ function pmRenderBar() {
   tabBarEl.innerHTML = '';
   if (!pmTabs.length) { pmTabRename = null; return; }
   pmAlignBarLeft();
+  pmParNormalizePairs();
   const w = pmComputeWidth(pmTabs.length, pmAvailWidth());
   const tabNoNameLabel = t('tabNoName');
   // (touch: no tooltip - holding the cross would show it along with the tab's menu)
   const tabCloseTitle = isTouchDevice ? '' : ' title="' + escapeHtml(t('tabCloseTitle')) + '"';
-  pmParNormalizePairs();
   pmTabs.forEach((tab, tabIdx) => {
     const el = document.createElement('div');
     const sel = pmSelectedTabIds.has(tab.id);
@@ -39830,7 +39916,7 @@ function pmRenderBar() {
     el.className = 'pm-tab' + ((tab.id === pmActiveId || pairActive) ? ' active' : '') + (sel ? ' pm-tab-selected' : '') +
       (pairSide ? ' pm-tab-pair-' + pairSide : '') + (pairActive && tab.id === pmActiveId ? ' pm-tab-half-focus' : '');
     // (touch: the active tab is a little wider - its close cross takes room)
-    el.style.width = (isTouchDevice && tab.id === pmActiveId ? Math.max(w, PM_TOUCH_TAB_MIN_W + 32) : w) + 'px';
+    el.style.width = (pairSide ? Math.round(w * PM_PAIR_WIDTH_K / 2) : (isTouchDevice && tab.id === pmActiveId ? Math.max(w, PM_TOUCH_TAB_MIN_W + 32) : w)) + 'px';
     el.title = mate ? ((pairSide === 'l' ? tab : mate).fileName || '') + ' | ' + ((pairSide === 'l' ? mate : tab).fileName || '') : (tab.fileName || '');
     el.dataset.tabId = tab.id;
     if (mate) el.dataset.pairId = mate.id;
