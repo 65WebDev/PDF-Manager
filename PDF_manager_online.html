@@ -603,6 +603,85 @@
     .pm-tab-close:hover,
     .pm-tab.active .pm-tab-close:hover,
     html[data-theme="dark"] .pm-tab .pm-tab-close:hover { opacity: 1; background: #e05548; color: #fff; }
+    /* ── Parallel view (desktop): two documents side by side ──
+       The work area is a row of two scrolling panes (the left is #scrollContainer, the right is made by
+       the script); outside that view the wrapper takes no part in the layout at all. */
+    .pm-work { display: contents; }
+    body.pm-par-on .pm-work { display: flex; flex: 1 1 auto; min-height: 0; min-width: 0; position: relative; }
+    body.pm-par-on .pm-work > .main { flex: 1 1 0; min-width: 0; }
+    .main.pm-pane-r { display: none; }
+    body.pm-par-on .main.pm-pane-r { display: block; }
+    /* A pane's title bar: the file's name, its pages, and the cross that takes the document out of the
+       parallel view (its tab stays). Sticky, so it stays in sight as the pages scroll. */
+    .pm-par-head { display: none; }
+    body.pm-par-on .pm-par-head {
+      display: flex; align-items: center; gap: 8px; position: sticky; top: -10px; left: -6px; z-index: 6;
+      margin: -10px -6px 16px; padding: 5px 8px 5px 12px; min-height: 22px;
+      background: rgba(238,241,244,.97); color: #2c3e50; font-size: 13px;
+      border-bottom: 2px solid rgba(0,0,0,.08);
+    }
+    body.pm-par-on .main.pm-pane-active > .pm-par-head { border-bottom-color: #3498db; }
+    .pm-par-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+    .pm-par-count { flex: 0 0 auto; opacity: .7; font-size: 12px; }
+    .pm-par-star { color: #e74c3c; font-weight: 700; margin-right: 2px; }
+    .pm-par-close {
+      flex: 0 0 auto; width: 22px; height: 22px; padding: 0; border: none; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      background: transparent; color: inherit; opacity: .65; cursor: pointer;
+    }
+    .pm-par-close:hover { opacity: 1; background: #e05548; color: #fff; }
+    .pm-par-close svg { display: block; pointer-events: none; }
+    /* The left pane's own header (file name, page count) gives way to the title bar. */
+    body.pm-par-on #scrollContainer > .content-header,
+    body.pm-par-on .pm-page-nav-btn { display: none !important; }
+    .pm-par-divider { display: none; }
+    body.pm-par-on .pm-par-divider {
+      display: block; position: absolute; left: 50%; top: 0; bottom: 0; width: 3px; margin-left: -1.5px;
+      background: #aeb8c2; z-index: 7; pointer-events: none;
+    }
+    .pm-par-swap { display: none; }
+    body.pm-par-on:not(.pm-par-picking) .pm-par-swap {
+      display: flex; align-items: center; justify-content: center;
+      position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 45;
+      width: 26px; height: 26px; padding: 0; border-radius: 50%;
+      border: 1px solid #aeb8c2; background: #fff; color: #34495e; cursor: pointer;
+      box-shadow: 0 1px 4px rgba(0,0,0,.2);
+      /* 80% transparent; the nearer the pointer, the more of it shows (pmParSwapProximity), fully at the button */
+      opacity: var(--pm-par-swap-op, .2); transition: opacity .12s ease, background .15s, color .15s;
+    }
+    .pm-par-swap:hover { opacity: 1; background: #3498db; color: #fff; border-color: #3498db; }
+    .pm-par-swap svg { display: block; pointer-events: none; }
+    /* Asking for the tab of the right area: the screen goes dark, the right half says so. */
+    .pm-par-pick { display: none; }
+    body.pm-par-picking .pm-par-pick {
+      display: block; position: absolute; inset: 0; z-index: 20; background: rgba(10,14,20,.62);
+    }
+    .pm-par-pick-msg {
+      position: absolute; left: 50%; right: 0; top: 0; bottom: 0; padding: 24px;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+      color: #fff; font-size: 22px; font-weight: 600; text-align: center; text-shadow: 0 1px 6px rgba(0,0,0,.5);
+    }
+    .pm-par-pick-msg small { font-size: 13px; font-weight: 400; opacity: .8; }
+    body.pm-par-picking .pm-pane-r > .pm-par-head { visibility: hidden; }
+    body.read-mode-active .pm-par-head, body.read-mode-active .pm-par-swap { display: none !important; }
+    html[data-theme="dark"] body.pm-par-on .pm-par-head { background: rgba(26,30,37,.97); color: #d7dbe0; border-bottom-color: rgba(255,255,255,.1); }
+    html[data-theme="dark"] body.pm-par-on .main.pm-pane-active > .pm-par-head { border-bottom-color: #4aa3df; }
+    html[data-theme="dark"] body.pm-par-on .pm-par-divider { background: #4b5563; }
+    html[data-theme="dark"] .pm-par-swap { background: #2c333c; color: #d7dbe0; border-color: #4b5563; }
+    html[data-theme="dark"] .pm-par-swap:hover { background: #3498db; color: #fff; border-color: #3498db; }
+    /* Two tabs of one parallel view look like one tab: a bar between the names, the cross at the end. */
+    .pm-tab.pm-tab-pair-l { border-radius: 8px 0 0 0; border-right: none; margin-right: -3px; padding-right: 4px; }
+    .pm-tab.pm-tab-pair-r { border-radius: 0 8px 0 0; border-left: none; padding-left: 4px; }
+    .pm-tab.pm-tab-pair-r::before {
+      content: ''; align-self: stretch; margin: 7px 3px 7px 0; width: 1px; flex: 0 0 1px; background: currentColor; opacity: .4;
+    }
+    .pm-tab.pm-tab-pair-l .pm-tab-close { display: none; }
+    /* The pointer on either half lights both (the halves are adjacent siblings, the left one first). */
+    .pm-tab.pm-tab-pair-l:not(.active):not(.pm-tab-selected):hover + .pm-tab.pm-tab-pair-r:not(.active):not(.pm-tab-selected),
+    .pm-tab.pm-tab-pair-l:not(.active):not(.pm-tab-selected):has(+ .pm-tab.pm-tab-pair-r:hover) { background: #46596c; color: #eaf0f5; }
+    .pm-tab.pm-tab-pair-l:hover + .pm-tab.pm-tab-pair-r .pm-tab-close { opacity: .65; }
+    .pm-tab.pm-tab-pair-l.active, .pm-tab.pm-tab-pair-r.active { font-weight: 400; }
+    .pm-tab.pm-tab-pair-l.pm-tab-half-focus, .pm-tab.pm-tab-pair-r.pm-tab-half-focus { font-weight: 700; }
     /*Drag and drop tabs (like in a browser)*/
     .pm-tab.pm-shift {
       transition: transform .18s cubic-bezier(.2,.7,.3,1), background .15s ease, color .15s ease;
@@ -692,6 +771,7 @@
     }
     #pmTabMenu button:hover:not(:disabled), #pmDzMenu button:hover:not(:disabled) { background: #eef4fb; }
     #pmTabMenu button:disabled, #pmDzMenu button:disabled { opacity: .45; cursor: default; }
+    #pmTabMenu button[hidden] { display: none; }
     /*Note shown by the drop-zone menu (e.g. "press Ctrl+V").*/
     #pmDzHint {
       position: fixed; z-index: 100061; max-width: 340px; padding: 9px 14px;
@@ -8968,6 +9048,8 @@
     <button type="button" data-action="close-others" data-i18n="tabCloseOthers">Закрыть другие вкладки</button>
     <button type="button" data-action="close-right" data-i18n="tabCloseRight">Закрыть вкладки справа</button>
     <button type="button" data-action="rename" data-i18n="tabRename">Переименовать</button>
+    <button type="button" data-action="parallel" data-i18n="parView">Параллельный просмотр</button>
+    <button type="button" data-action="split" data-i18n="parSplit" hidden>Раздельный просмотр</button>
   </div>
 
   <!--Right-click menu of the empty work area ("click here or drag files...")-->
@@ -9566,6 +9648,7 @@
       }
     }
     let historyPushTimer = null;
+    let pmHistInflight = 0;   // history steps being taken right now (parallel view: panes are not switched under one)
     let selectionHistoryTimer = null;
     let historyPushSuspended = false;
     let undoRedoBusy = false;
@@ -10157,6 +10240,7 @@
         newDocumentHint: 'Будет создан новый документ', openInNewTabs: 'Откроется в новых вкладках',
         tabClose: 'Закрыть вкладку', tabCloseOthers: 'Закрыть другие вкладки', tabCloseRight: 'Закрыть вкладки справа',
         tabRename: 'Переименовать', tabRenameTitle: 'Переименовать документ',
+        parView: 'Параллельный просмотр', parSplit: 'Раздельный просмотр', parPickRight: 'Выберите вкладку для правой области', parPickCancel: 'Esc — отмена', parSwap: 'Поменять местами', parClosePane: 'Закрыть в параллельном просмотре (вкладка останется)',
         acTitle: 'Обрезать белые поля', acTooltip: 'Автоматически обрезать белые поля страниц', acDialogTitle: 'Обрезать белые поля',
         acMargin: 'Отступ, мм', acMode: 'Обрезка', acModeEach: 'Каждая страница отдельно', acModeSame: 'Одинаково для всех',
         acModeEachHint: 'у каждой страницы обрезается своё пустое поле',
@@ -10666,6 +10750,7 @@
         newDocumentHint: 'A new document will be created', openInNewTabs: 'Open in new tabs',
         tabClose: 'Close tab', tabCloseOthers: 'Close other tabs', tabCloseRight: 'Close tabs to the right',
         tabRename: 'Rename', tabRenameTitle: 'Rename document',
+        parView: 'Parallel view', parSplit: 'Separate view', parPickRight: 'Select a tab for the right area', parPickCancel: 'Esc to cancel', parSwap: 'Swap', parClosePane: 'Close in the parallel view (the tab stays)',
         acTitle: 'Trim white margins', acTooltip: 'Automatically trim the white margins of pages', acDialogTitle: 'Trim white margins',
         acMargin: 'Margin, mm', acMode: 'Trim', acModeEach: 'Each page separately', acModeSame: 'Same for all',
         acModeEachHint: 'each page loses its own empty margin',
@@ -11175,6 +11260,7 @@
         newDocumentHint: 'Se creará un nuevo documento', openInNewTabs: 'Se abrirá en nuevas pestañas',
         tabClose: 'Cerrar pestaña', tabCloseOthers: 'Cerrar otras pestañas', tabCloseRight: 'Cerrar pestañas a la derecha',
         tabRename: 'Cambiar nombre', tabRenameTitle: 'Cambiar el nombre del documento',
+        parView: 'Vista en paralelo', parSplit: 'Vista por separado', parPickRight: 'Seleccione una pestaña para el área derecha', parPickCancel: 'Esc para cancelar', parSwap: 'Intercambiar', parClosePane: 'Cerrar en la vista en paralelo (la pestaña permanece)',
         acTitle: 'Recortar márgenes blancos', acTooltip: 'Recortar automáticamente los márgenes blancos de las páginas', acDialogTitle: 'Recortar márgenes blancos',
         acMargin: 'Margen, mm', acMode: 'Recorte', acModeEach: 'Cada página por separado', acModeSame: 'Igual para todas',
         acModeEachHint: 'cada página pierde su propio margen vacío',
@@ -11734,6 +11820,7 @@
         tabCloseOthers: '关闭其他标签页',
         tabCloseRight: '关闭右侧标签页',
         tabRename: '重命名',
+        parView: '并排查看', parSplit: '分开查看', parPickRight: '请选择要显示在右侧区域的标签页', parPickCancel: '按 Esc 取消', parSwap: '交换位置', parClosePane: '在并排查看中关闭（标签页保留）',
         acTitle: '裁剪白边', acTooltip: '自动裁剪页面的白边', acDialogTitle: '裁剪白边',
         acMargin: '留边（毫米）', acMode: '裁剪方式', acModeEach: '每页单独裁剪', acModeSame: '所有页面相同',
         acModeEachHint: '每一页裁去各自的空白边',
@@ -12368,9 +12455,53 @@
       });
     }
 
-    const scrollContainer = document.getElementById('scrollContainer');
-    const pagesContainer = document.getElementById('pagesContainer');
-    const dropZone = document.getElementById('dropZone');
+    // (let: in the parallel view they point at the pane being worked in - see PARALLEL VIEW by the tabs)
+    let scrollContainer = document.getElementById('scrollContainer');
+    let pagesContainer = document.getElementById('pagesContainer');
+    let dropZone = document.getElementById('dropZone');
+
+    // ── Parallel view (desktop): the page area exists twice ──
+    // The left pane is the page area of the page, the right one is made here. Whatever is listened for on
+    // the left pane's container is listened for on the right one's too, but only the pane being worked
+    // in (scrollContainer / pagesContainer at that moment) answers - and a press, a wheel turn or a right
+    // click in the other one makes it the one being worked in first (pmParOnPaneEvent), so everything
+    // that reads those two variables, i.e. the whole page area's code, works on the document under the mouse.
+    const pmPar = { on: false, pick: null, panes: [], work: null, swapEl: null, pickEl: null, dividerEl: null, switching: false };
+    (function pmParBuildPanes() {
+      const addNative = EventTarget.prototype.addEventListener;
+      const work = document.createElement('div');
+      work.id = 'pmWork';
+      work.className = 'pm-work';
+      scrollContainer.parentNode.insertBefore(work, scrollContainer);
+      work.appendChild(scrollContainer);
+      const rScroll = document.createElement('div');
+      rScroll.className = 'main pm-pane-r';
+      rScroll.setAttribute('data-pm-pane', 'R');
+      const rPages = document.createElement('div');
+      rPages.className = 'pages';
+      rScroll.appendChild(rPages);
+      const rDz = document.createElement('div');   // (where a document-less right pane would invite files: nowhere)
+      rDz.style.display = 'none';
+      work.appendChild(rScroll);
+      pmPar.work = work;
+      pmPar.panes = [
+        { side: 'L', scroll: scrollContainer, pages: pagesContainer, dz: dropZone, tabId: null, bag: null, head: null },
+        { side: 'R', scroll: rScroll, pages: rPages, dz: rDz, tabId: null, bag: null, head: null }
+      ];
+      const mirror = (src, dst, isPages) => {
+        src.addEventListener = function (type, fn, opts) {
+          if (typeof fn !== 'function') { addNative.call(this, type, fn, opts); return; }
+          const mk = (el) => function (e) {
+            if (pmPar.on && el !== (isPages ? pagesContainer : scrollContainer)) return;
+            return fn.call(this, e);
+          };
+          addNative.call(src, type, mk(src), opts);
+          addNative.call(dst, type, mk(dst), opts);
+        };
+      };
+      mirror(scrollContainer, rScroll, false);
+      mirror(pagesContainer, rPages, true);
+    })();
 
     // HTML5 drag listeners on container removed — used custom mouse drag
     const infoDiv = document.getElementById('info');
@@ -14148,7 +14279,7 @@
       if (lastSelectedIndex != null && (lastSelectedIndex < 0 || lastSelectedIndex > maxIdx)) {
         lastSelectedIndex = null;
       }
-      document.querySelectorAll('.page').forEach(p => {
+      pagesContainer.querySelectorAll('.page').forEach(p => {
         const idx = parseInt(p.dataset.index, 10);
         if (Number.isNaN(idx)) return;
         p.classList.toggle('selected', selectedPages.has(idx));
@@ -14279,6 +14410,7 @@
         // Serialize saves on the commit chain and wait until history thumbnail
         // fills release the live pdfDoc — overlapping pdfDoc.save() during a
         // borrow captured intermediate /Rotate and later poisoned the preview.
+        pmHistInflight++;
         historyCommitChain = historyCommitChain
           .then(async () => {
             if (!pdfDoc) return;
@@ -14288,7 +14420,8 @@
               : pdfDoc.save().then(b => new Uint8Array(b));
             return commitHistoryStep(savePromise, marked, hint, { label });
           })
-          .catch(e => console.error(e));
+          .catch(e => console.error(e))
+          .finally(() => { pmHistInflight--; });
         return;
       }
       clearTimeout(historyPushTimer);
@@ -14560,6 +14693,10 @@
     }
 
     async function commitHistoryPush() {
+      pmHistInflight++;
+      try { return await commitHistoryPushBody(); } finally { pmHistInflight--; }
+    }
+    async function commitHistoryPushBody() {
       if (historyPushSuspended || undoRedoBusy || !pdfDoc || pmPageEditorOpen()) return;
       //We wait until the rotation/updating of the thumbnails is completed - otherwise it will be taken into the snapshot
       //an intermediate frame (old picture) will appear, and the step will be “broken”.
@@ -14593,6 +14730,10 @@
     //Force photo status for rare cases where the UI shows a loading overlay,
     //but we need to commit the step immediately (like moving between tabs).
     async function commitHistoryPushForce() {
+      pmHistInflight++;
+      try { return await commitHistoryPushForceBody(); } finally { pmHistInflight--; }
+    }
+    async function commitHistoryPushForceBody() {
       if (historyPushSuspended || undoRedoBusy || !pdfDoc) return;
       const snap = await captureDocSnapshot();
       if (!snap) return;
@@ -15373,8 +15514,9 @@
       // The active tab's "*" follows along - it used to wait for the next
       // full redraw of the tab bar (a tab switch), however the document
       // changed.
-      const tabStar = tabBarEl && tabBarEl.querySelector('.pm-tab.active .pm-tab-star');
+      const tabStar = tabBarEl && tabBarEl.querySelector('.pm-tab[data-tab-id="' + pmActiveId + '"] .pm-tab-star');
       if (tabStar) tabStar.hidden = !documentDirty;
+      if (typeof pmParRefreshHeads === 'function') pmParRefreshHeads();
       if (typeof pmLoadBarSchedule === 'function') pmLoadBarSchedule();
     }
 
@@ -18380,7 +18522,7 @@
 
     /** Client rect of the visible page bitmap in preview (object-fit: contain letterboxing). */
     function gridGetPreviewPageContentClientRect(pageIdx) {
-      const pageDiv = document.querySelector('.page[data-index="' + pageIdx + '"]');
+      const pageDiv = pagesContainer.querySelector('.page[data-index="' + pageIdx + '"]');
       if (!pageDiv) return null;
       const wrapper = pageDiv.querySelector('.img-wrapper');
       const img = wrapper ? wrapper.querySelector('img') : null;
@@ -20758,7 +20900,7 @@
       selectedPages.clear();
       snapshot.selected.forEach(idx => selectedPages.add(idx));
       lastSelectedIndex = snapshot.last;
-      document.querySelectorAll('.page').forEach(p => {
+      pagesContainer.querySelectorAll('.page').forEach(p => {
         p.classList.toggle('selected', selectedPages.has(parseInt(p.dataset.index, 10)));
       });
       refreshCheckboxes();
@@ -20900,7 +21042,7 @@
         document.body.removeChild(dragGhostEl);
         dragGhostEl = null;
       }
-      pagesContainer.classList.remove('dragging-active');
+      pmClearDragActive();
       // Removing charging + fill together (no lingering transition class) so
       // an aborted charge (e.g. movement turned out to be a scroll) snaps
       // back instantly instead of visibly fading back out.
@@ -22337,7 +22479,7 @@
 
     function pmSelectOnlyPage(idx, pageDiv, opts) {
       selectedPages.clear();
-      document.querySelectorAll('.page.selected').forEach(p => p.classList.remove('selected'));
+      pagesContainer.querySelectorAll('.page.selected').forEach(p => p.classList.remove('selected'));
       selectedPages.add(idx);
       if (pageDiv) pageDiv.classList.add('selected');
       lastSelectedIndex = idx;
@@ -23172,7 +23314,7 @@
         const hadSelection = selectedPages.size > 0;
         selectedPages.clear();
         lastSelectedIndex = null;
-        document.querySelectorAll('.page').forEach(p => p.classList.remove('selected'));
+        pagesContainer.querySelectorAll('.page').forEach(p => p.classList.remove('selected'));
         // We also exit multi-select mode
         if (multiSelectCheckbox && multiSelectCheckbox.checked) {
           multiSelectCheckbox.checked = false;
@@ -23830,7 +23972,7 @@
       const hadSelection = selectedPages.size > 0;
       selectedPages.clear();
       lastSelectedIndex = null;
-      document.querySelectorAll('.page').forEach(p => p.classList.remove('selected'));
+      pagesContainer.querySelectorAll('.page').forEach(p => p.classList.remove('selected'));
 
       if (multiSelectMode) {
         multiSelectLabel.classList.add('active');
@@ -23850,7 +23992,7 @@
     }
 
     function refreshCheckboxes() {
-      document.querySelectorAll('.page').forEach(page => {
+      pagesContainer.querySelectorAll('.page').forEach(page => {
         const cb = page.querySelector('.selection-checkbox');
         if (cb) {
           const idx = parseInt(page.dataset.index);
@@ -23865,7 +24007,7 @@
     function selectAllPages() {
       if (!pdfDoc) return;
       selectedPages.clear();
-      document.querySelectorAll('.page').forEach(page => {
+      pagesContainer.querySelectorAll('.page').forEach(page => {
         if (page.style.display === 'none') return;          // hidden (marked) skip
         const idx = parseInt(page.dataset.index);
         if (markedForDeletion.has(idx)) return;
@@ -24057,7 +24199,7 @@
     function deselectAllPages() {
       if (!pdfDoc || selectedPages.size === 0) return;
       selectedPages.clear();
-      document.querySelectorAll('.page.selected').forEach(p => p.classList.remove('selected'));
+      pagesContainer.querySelectorAll('.page.selected').forEach(p => p.classList.remove('selected'));
       lastSelectedIndex = null;
       refreshCheckboxes();
       updateUIState();
@@ -25271,7 +25413,7 @@
       document.body.classList.add('nav-mode-active');
       selectedPages.clear();
       lastSelectedIndex = null;
-      document.querySelectorAll('.page').forEach(p => p.classList.remove('selected'));
+      pagesContainer.querySelectorAll('.page').forEach(p => p.classList.remove('selected'));
       if (typeof clearHoverInsert === 'function') clearHoverInsert();
       if (typeof hideInsertIndicator === 'function') hideInsertIndicator();
       refreshCheckboxes();
@@ -26890,7 +27032,7 @@
         }
 
         if (dragGhostEl)   { document.body.removeChild(dragGhostEl); dragGhostEl = null; }
-        pagesContainer.classList.remove('dragging-active');
+        pmClearDragActive();
         // Repeat just in case something might have managed to add the class again.
         pagesContainer.querySelectorAll('.page.drag-source, .page.page-press-pending').forEach(p => {
           p.classList.remove('drag-source', 'page-press-pending', 'page-press-pending-instant');
@@ -26925,7 +27067,7 @@
         document.body.removeChild(dragGhostEl);
         dragGhostEl = null;
       }
-      pagesContainer.classList.remove('dragging-active');
+      pmClearDragActive();
       pagesContainer.querySelectorAll('.page.drag-source, .page.page-press-pending').forEach(p => {
         p.classList.remove('drag-source', 'page-press-pending', 'page-press-pending-instant');
       });
@@ -30317,7 +30459,7 @@
       toggleDeletedBtn.title = deletedPagesHidden
         ? t('deletedPagesHidden')
         : t('deletedPagesShown');
-      document.querySelectorAll('.page.to-delete').forEach(p => {
+      pagesContainer.querySelectorAll('.page.to-delete').forEach(p => {
         p.style.display = deletedPagesHidden ? 'none' : '';
       });
       renumberVisiblePages();
@@ -30391,7 +30533,7 @@
     }
 
     function clearInsertIndicators() {
-      document.querySelectorAll('.page').forEach(p => p.classList.remove('insert-before', 'insert-after'));
+      pagesContainer.querySelectorAll('.page').forEach(p => p.classList.remove('insert-before', 'insert-after'));
       insertMarkedEl = null;   // superset of clearInsertMarkerClass(); keep them in step
       hideInsertIndicator();
     }
@@ -30412,7 +30554,10 @@
       return markedForDeletion.has(draggedIndex) ? [] : [draggedIndex];
     }
 
+    // (the last answer came from a pane of the parallel view, not from the tab bar)
+    let pageDropTargetFromPane = false;
     function findPageDropTargetTab(clientX, clientY) {
+      pageDropTargetFromPane = false;
       if (!tabBarEl) return null;
       const tabs = tabBarEl.querySelectorAll('.pm-tab');
       for (let i = 0; i < tabs.length; i++) {
@@ -30421,6 +30566,17 @@
         if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) {
           const tid = parseInt(el.dataset.tabId, 10);
           if (Number.isFinite(tid)) return tid;
+        }
+      }
+      // The parallel view: over a pane is over its document's tab - dropped there, pages go into that document.
+      if (pmPar.on && !pmPar.pick) {
+        for (const q of pmPar.panes) {
+          if (q.tabId == null) continue;
+          const r = q.scroll.getBoundingClientRect();
+          if (clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom) {
+            pageDropTargetFromPane = true;
+            return q.tabId;
+          }
         }
       }
       return null;
@@ -30630,6 +30786,15 @@
         pageCrossTabTargetTabId = sourceId;
         pmUpdatePageDragTabVisuals();
         if (pmActiveId !== sourceId) switchTo(sourceId);
+        return;
+      }
+
+      // Over the pane of the document being worked in (the other pane, once it has been switched to): the pages
+      // go in among its pages, where the insert marker shows - not to the end, as when dropped on a tab.
+      if (pageDropTargetFromPane && tid === pmActiveId) {
+        pageDragOverTabId = null;
+        pageCrossTabTargetTabId = tid;
+        pmUpdatePageDragTabVisuals();
         return;
       }
 
@@ -31261,14 +31426,14 @@
           // Click on an already selected page with multiple selection →
           // We leave only this page selected (do not remove it).
           selectedPages.clear();
-          document.querySelectorAll('.page').forEach(p => p.classList.remove('selected'));
+          pagesContainer.querySelectorAll('.page').forEach(p => p.classList.remove('selected'));
           selectedPages.add(idx);
           pageDiv.classList.add('selected');
           lastSelectedIndex = idx;
         } else {
           // Single click: if the page was the only one selected, remove it, otherwise select it.
           selectedPages.clear();
-          document.querySelectorAll('.page').forEach(p => p.classList.remove('selected'));
+          pagesContainer.querySelectorAll('.page').forEach(p => p.classList.remove('selected'));
           if (!alreadySelected) {
             selectedPages.add(idx);
             pageDiv.classList.add('selected');
@@ -31290,7 +31455,7 @@
             const start = Math.min(nearest, idx);
             const end   = Math.max(nearest, idx);
             for (let i = start; i <= end; i++) selectedPages.add(i);
-            document.querySelectorAll('.page').forEach(p =>
+            pagesContainer.querySelectorAll('.page').forEach(p =>
               p.classList.toggle('selected', selectedPages.has(parseInt(p.dataset.index))));
             lastSelectedIndex = idx;
           }
@@ -31300,7 +31465,7 @@
           const end   = Math.max(lastSelectedIndex, idx);
           selectedPages.clear();
           for (let i = start; i <= end; i++) selectedPages.add(i);
-          document.querySelectorAll('.page').forEach(p =>
+          pagesContainer.querySelectorAll('.page').forEach(p =>
             p.classList.toggle('selected', selectedPages.has(parseInt(p.dataset.index))));
         }
       } else {
@@ -31421,7 +31586,7 @@
     function anyPageHasPendingRotateRaster() {
       if (thumbFlushBusy || (thumbFlushQueue && thumbFlushQueue.size)) return true;
       if (document.querySelector('.page.rotate-anim-active')) return true;
-      const pages = document.querySelectorAll('.page');
+      const pages = pagesContainer.querySelectorAll('.page');
       for (const div of pages) {
         if (pageNeedsRotateRasterSwap(div)) return true;
       }
@@ -31516,7 +31681,7 @@
     function anyPageRotateAnimating() {
       if (document.querySelector('.page.rotate-anim-active')) return true;
       for (const idx of thumbFlushQueue) {
-        const div = document.querySelector(`.page[data-index="${idx}"]`);
+        const div = pagesContainer.querySelector(`.page[data-index="${idx}"]`);
         if (isPageRotateBusy(pageRotateState.get(div))) return true;
       }
       return false;
@@ -31555,7 +31720,7 @@
       // Only wait on an in-flight CSS transition. After finishPageRotateAnimation,
       // rotate-anim-active stays until raster swap — that must NOT block flush.
       for (const idx of thumbFlushQueue) {
-        const div = document.querySelector(`.page[data-index="${idx}"]`);
+        const div = pagesContainer.querySelector(`.page[data-index="${idx}"]`);
         if (isPageRotateBusy(pageRotateState.get(div))) {
           clearTimeout(thumbFlushTimer);
           thumbFlushTimer = setTimeout(flushRotateThumbnails, 80);
@@ -31571,7 +31736,7 @@
       const shouldAbort = () => {
         if (gen !== rotateThumbGen) return true;
         for (const idx of batch) {
-          const div = document.querySelector(`.page[data-index="${idx}"]`);
+          const div = pagesContainer.querySelector(`.page[data-index="${idx}"]`);
           if (isPageRotateBusy(pageRotateState.get(div))) return true;
         }
         return false;
@@ -31613,7 +31778,7 @@
 
       const entries = [];
       for (const idx of batch) {
-        const div = document.querySelector(`.page[data-index="${idx}"]`);
+        const div = pagesContainer.querySelector(`.page[data-index="${idx}"]`);
         const st = pageRotateState.get(div);
         if (isPageRotateBusy(st)) {
           thumbFlushQueue.add(idx);
@@ -31864,7 +32029,7 @@
       // Invalidate any in-flight thumbnail flush from a previous angle.
       rotateThumbGen++;
       const divs = valid
-        .map(idx => document.querySelector(`.page[data-index="${idx}"]`))
+        .map(idx => pagesContainer.querySelector(`.page[data-index="${idx}"]`))
         .filter(Boolean);
       divs.forEach(div => bumpPageRotateAnimation(div, degrees));
       // We DO NOT run prefetch during animation - heavy rendering (pdf.js) on the main one
@@ -31874,7 +32039,7 @@
     }
 
     async function updateThumbnail(idx) {
-      const div = document.querySelector(`.page[data-index="${idx}"]`);
+      const div = pagesContainer.querySelector(`.page[data-index="${idx}"]`);
       if (!div) return;
       const thumbs = await refreshThumbnails([idx]);
       applyThumbnailToDiv(div, thumbs.get(idx));
@@ -31888,7 +32053,7 @@
       const confirmed = await showConfirmDialog(t('confirmDeletePage'));
       if (!confirmed) return;
 
-      const div = document.querySelector(`.page[data-index="${idx}"]`);
+      const div = pagesContainer.querySelector(`.page[data-index="${idx}"]`);
       if (div) {
         div.classList.add('to-delete');
         div.title = t('doubleClickUnmarkDeletion');
@@ -31900,7 +32065,7 @@
       // Remove from global selection if there was one
       if (selectedPages.has(idx)) {
         selectedPages.delete(idx);
-        const pageDiv = document.querySelector(`.page[data-index="${idx}"]`);
+        const pageDiv = pagesContainer.querySelector(`.page[data-index="${idx}"]`);
         if (pageDiv) pageDiv.classList.remove('selected');
       }
 
@@ -33392,7 +33557,7 @@
       // We mark only pages without a deletion mark and deselect them
       const toMark = [...selectedPages].filter(idx => !markedForDeletion.has(idx));
       toMark.forEach(idx => {
-        const div = document.querySelector(`.page[data-index="${idx}"]`);
+        const div = pagesContainer.querySelector(`.page[data-index="${idx}"]`);
         if (div) {
           div.classList.add('to-delete');
           div.classList.remove('selected');
@@ -37619,18 +37784,14 @@ function pmCaptureActive() {
   t.unsavedNewDoc = pmUnsavedNewDoc;
 }
 
-// Expands the session to a global state and redraws the editor
-// (via the same path as Undo/Redo - restoreDocSnapshot from a history snapshot).
-async function pmActivate(id, skipCapture, keepSelection) {
-  if (!skipCapture && pmActiveId != null && pmActiveId !== id) pmCaptureActive();
-  const t = pmTabs.find(x => x.id === id);
-  if (!t) return;
-  pmActiveId = id;
+// The session's own state into the globals - the part of showing a tab that needs no pages.
+function pmSessionToGlobals(t, keepSelection) {
+  pmActiveId = t.id;
   if (!keepSelection) {
     pmClearTabSelection();
-    pmTabSelectAnchor = id;
+    pmTabSelectAnchor = t.id;
   } else {
-    pmTabSelectAnchor = id;
+    pmTabSelectAnchor = t.id;
   }
 
   currentFileName = t.fileName; sourceFileHandle = t.sourceHandle;
@@ -37644,19 +37805,12 @@ async function pmActivate(id, skipCapture, keepSelection) {
   // has to be THIS tab's by then rather than the one left behind by the tab
   // being switched away from.
   pmWriteZoomView(t.zoomView);
+}
 
-  historyPushSuspended = true;
-  pdfDoc = null;  // We guarantee a complete rebuild (not a quick comparison)
-  const snap = (docHistoryIndex >= 0) ? docHistory[docHistoryIndex] : null;
-  if (snap) {
-    await restoreDocSnapshot(snap, docHistoryIndex);
-  } else {
-    destroyLazyThumbnailPipeline();
-    pagesContainer.innerHTML = '';
-    dropZone.style.display = '';
-  }
-  historyPushSuspended = false;
-
+// What a tab shown has to have done once its pages are there: the scale, the
+// selection, the buttons, the bookmarks. restoreScroll: put the work area back
+// where the tab was left (a pane that was kept has not lost its place).
+function pmActivateFinish(t, restoreScroll) {
   if (scaleSlider) scaleSlider.value = Math.max(0, Math.min(200, scaleToSlider(currentScale)));
   applyScale();
   // Cursor tool (select / nav / loupe) is global — do not restore per-tab mode.
@@ -37682,9 +37836,60 @@ async function pmActivate(id, skipCapture, keepSelection) {
     pmBookmarksLoadAndRender();
   }
 
+  if (!restoreScroll) return;
   const top = t.scrollTop || 0;
   scrollContainer.scrollTop = top;
   requestAnimationFrame(() => { scrollContainer.scrollTop = top; });
+}
+
+// Shows a tab: its document into the page area (rebuilt from its last history snapshot).
+// In the parallel view the page area is the pane being worked in; pmActivate decides which.
+async function pmActivateStandard(id, skipCapture, keepSelection) {
+  if (!skipCapture && pmActiveId != null && pmActiveId !== id) pmCaptureActive();
+  const t = pmTabs.find(x => x.id === id);
+  if (!t) return;
+  pmSessionToGlobals(t, keepSelection);
+
+  historyPushSuspended = true;
+  pdfDoc = null;  // We guarantee a complete rebuild (not a quick comparison)
+  const snap = (docHistoryIndex >= 0) ? docHistory[docHistoryIndex] : null;
+  if (snap) {
+    await restoreDocSnapshot(snap, docHistoryIndex);
+  } else {
+    destroyLazyThumbnailPipeline();
+    pagesContainer.innerHTML = '';
+    dropZone.style.display = '';
+  }
+  historyPushSuspended = false;
+
+  pmActivateFinish(t, true);
+}
+
+// Makes a tab the document being worked on - the one the buttons, the keys and the page area's code act on.
+// Of the tabs of a parallel view the one in the pane that is not being worked in is brought forward at
+// once (pmParSwap: nothing is rebuilt); a tab of a view not on screen brings it back; any other tab ends
+// the parallel view first.
+async function pmActivate(id, skipCapture, keepSelection) {
+  const t = pmTabs.find(x => x.id === id);
+  if (!t) return;
+  if (pmPar.pick && id !== pmPar.pick.leftId) pmParCancelPick();   // another tab than the one waiting
+  if (pmPar.on && !pmPar.pick && pmPar.panes.some(q => q.tabId === id)) {
+    if (id === pmActiveId && pmParCurrentPane() && pmParCurrentPane().tabId === id) return;
+    await pmParSwap(id, keepSelection);
+    return;
+  }
+  const mate = t.pairId != null ? pmTabs.find(x => x.id === t.pairId) : null;
+  if (mate && !isTouchDevice) {
+    if (!skipCapture && pmActiveId != null) pmCaptureActive();
+    await pmParShow(t, mate, t);
+    return;
+  }
+  if (pmPar.on) {
+    if (!skipCapture && pmActiveId != null && pmActiveId !== id) pmCaptureActive();
+    skipCapture = true;
+    pmParTeardown();
+  }
+  await pmActivateStandard(id, skipCapture, keepSelection);
 }
 
 // A tab tapped / clicked. Not while a document is loading (the load would
@@ -37708,6 +37913,418 @@ async function pmActivateTapped(id) {
     pmTappedSwitching = false;
   }
 }
+
+// ============================================================
+// PARALLEL VIEW (desktop): two documents side by side
+// "Parallel view" in a tab's menu puts the document of the selected tab(s) in one half of the work area
+// and another in the other half. The two tabs sit side by side in the bar and look like one tab; each
+// half has a cross that takes its document out of the view again (the tab stays), and a button between
+// them swaps the two.
+//
+// The page area's code (386 places read scrollContainer, 240 pagesContainer, and the document's own state
+// is a set of globals) works on ONE document at a time, as the tabs do: a tab shown is rebuilt from its
+// last history snapshot. So the two panes are the page area twice, and the one being worked in is
+// "the page area": its container, its document and its state are what the globals are. Working in the
+// other one (a press, the wheel, a right click in it - pmParOnPaneEvent) swaps them over in an instant: the
+// pane that is left keeps its pages on screen as they are, and its document, its history and its
+// view state are put aside (the session, as for a tab, and the pane's "bag"). Nothing is rebuilt
+// by a swap; only when the view is shown again, or after another tab, are the pages built (as for a tab).
+// A tab (pmTabs entry) of a view has pairId: the other one.
+// ============================================================
+
+function pmParPaneOf(tabId) { return pmPar.panes.find(q => q.tabId === tabId) || null; }
+function pmParCurrentPane() { return pmPar.panes.find(q => q.scroll === scrollContainer) || null; }
+function pmParLeftPane() { return pmPar.panes.find(q => (q.scroll.style.order || '') !== '2') || pmPar.panes[0]; }
+
+// The globals' page area = this pane. The shared pieces of the page area that live in it (where a drag
+// would show where pages go, the frame drawn with the mouse) are moved into it.
+// A drag of a page can end in the other pane (dropped on the document there): the container
+// that got 'dragging-active' is then not the one 'pagesContainer' points to any more.
+function pmClearDragActive() {
+  document.querySelectorAll('.pages.dragging-active').forEach(el => el.classList.remove('dragging-active'));
+  document.querySelectorAll('.pages .page.drag-source').forEach(el => el.classList.remove('drag-source'));
+}
+function pmParUsePane(pane) {
+  scrollContainer = pane.scroll; pagesContainer = pane.pages; dropZone = pane.dz;
+  for (const id of ['insertIndicator', 'insertMenu', 'selectionRect', 'rubberCursorBadge', 'touchTooltip']) {
+    const el = document.getElementById(id);
+    if (el && el.parentNode !== pane.scroll) pane.scroll.appendChild(el);
+  }
+  pmPar.panes.forEach(q => q.scroll.classList.toggle('pm-pane-active', pmPar.on && q === pane));
+}
+
+// What of the document is not in its session: the live PDF, its bytes, the pages marked for deletion and
+// the pdf.js document and renders (the next pages drawn would have to make them anew).
+function pmParStashBag() {
+  return {
+    pdfDoc, originalFileBytes, markedForDeletion, hqPdfjsDoc, pdfDocKnownBytes, pdfDocKnownBytesDoc,
+    hqRenderedScale: new Map(hqRenderedScale), hqUpgraded: new Set(hqUpgraded)
+  };
+}
+function pmParRestoreBag(b) {
+  pdfDoc = b.pdfDoc; originalFileBytes = b.originalFileBytes; markedForDeletion = b.markedForDeletion;
+  hqPdfjsDoc = b.hqPdfjsDoc; pdfDocKnownBytes = b.pdfDocKnownBytes; pdfDocKnownBytesDoc = b.pdfDocKnownBytesDoc;
+  hqRenderedScale.clear(); b.hqRenderedScale.forEach((v, k) => hqRenderedScale.set(k, v));
+  hqUpgraded.clear(); b.hqUpgraded.forEach(i => hqUpgraded.add(i));
+}
+
+// A step of the document being worked on is still being written: the globals must not be turned over to
+// the other pane before it is (it would be taken from the wrong document).
+function pmParHistoryBusy() {
+  return !!(historyPushTimer || pmHistInflight > 0 || isHistoryCaptureBusy());
+}
+
+// Works in the pane of tab id at once (no awaiting): the part of a swap that has to be done before the
+// event that asked for it goes on being handled.
+function pmParSwapNow(id, keepSelection) {
+  const nxt = pmParPaneOf(id);
+  const t = pmTabs.find(x => x.id === id);
+  if (!nxt || !t) return false;
+  const cur = pmParCurrentPane();
+  if (cur === nxt) return true;
+  if (!nxt.bag) return false;
+  if (cur && pmActiveId != null) {
+    pmCaptureActive();
+    cur.bag = pmParStashBag();
+  }
+  // What was under way for the document left is dropped, as when a tab is left (the pages not yet drawn are
+  // drawn when its pane is worked in again).
+  activeOperationId++;
+  destroyLazyThumbnailPipeline();
+  invalidateHQ();
+  thumbFlushQueue.clear();
+  clearTimeout(thumbFlushTimer);
+  rotateThumbPrefetch.clear();
+  pmParUsePane(nxt);
+  pmSessionToGlobals(t, keepSelection);
+  const bag = nxt.bag;
+  nxt.bag = null;
+  pmParRestoreBag(bag);
+  pmActivateFinish(t, false);
+  pmParRefreshHeads();
+  return true;
+}
+
+// ...and the pages of its pane that were not drawn yet get drawn.
+async function pmParSwap(id, keepSelection) {
+  if (!pmParSwapNow(id, keepSelection)) return;
+  const snap = docHistoryIndex >= 0 ? docHistory[docHistoryIndex] : null;
+  if (snap && snap.pdfBytes) await setupLazyForExistingShells(snap.pdfBytes);
+}
+
+function pmParSwapWhenIdle(id) {
+  const t0 = Date.now();
+  const tick = () => {
+    if (!pmPar.on || pmPar.pick) return;
+    if (pmParHistoryBusy() && Date.now() - t0 < 4000) { setTimeout(tick, 30); return; }
+    pmParSwap(id, true).catch(err => console.error(err));
+  };
+  tick();
+}
+
+// A press, a wheel turn or a right click in the pane that is not being worked in.
+function pmParOnPaneEvent(e) {
+  if (!pmPar.on || pmPar.pick || isLoading) return;
+  const pane = pmPar.panes.find(q => q.scroll === e.currentTarget);
+  if (!pane || pane.scroll === scrollContainer || pane.tabId == null || !pane.bag) return;
+  if (pmParHistoryBusy()) {
+    // The other document's last step is not written yet: this press goes unheard, the swap follows it.
+    e.stopImmediatePropagation();
+    pmParSwapWhenIdle(pane.tabId);
+    return;
+  }
+  pmParSwap(pane.tabId, true).catch(err => console.error(err));
+}
+(function pmParListenOnPanes() {
+  const addNative = EventTarget.prototype.addEventListener;
+  for (const pane of pmPar.panes) {
+    ['pointerdown', 'mousedown', 'wheel', 'contextmenu', 'keydown', 'focusin'].forEach(type => {
+      addNative.call(pane.scroll, type, pmParOnPaneEvent, { capture: true, passive: true });
+    });
+  }
+})();
+
+// ── the chrome: title bars, the divider, the swap button, the "choose a tab" dimming ──
+function pmParCrossIcon() {
+  return '<svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M1 1l8 8M9 1l-8 8" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>';
+}
+function pmParBuildChrome() {
+  if (pmPar.dividerEl) return;
+  const mkHead = (pane) => {
+    const head = document.createElement('div');
+    head.className = 'pm-par-head';
+    head.innerHTML = '<span class="pm-par-title"></span><span class="pm-par-count"></span>' +
+      '<button type="button" class="pm-par-close">' + pmParCrossIcon() + '</button>';
+    pane.scroll.insertBefore(head, pane.scroll.firstChild);
+    const btn = head.querySelector('.pm-par-close');
+    btn.title = t('parClosePane');
+    btn.setAttribute('aria-label', t('parClosePane'));
+    btn.addEventListener('mousedown', (e) => e.stopPropagation());
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (pmPar.pick) { pmParCancelPick(); return; }
+      const mate = pmPar.panes.find(q => q !== pane && q.tabId != null);
+      pmParUngroup(mate ? mate.tabId : null).catch(err => console.error(err));
+    });
+    pane.head = head;
+  };
+  pmPar.panes.forEach(mkHead);
+  const div = document.createElement('div');
+  div.className = 'pm-par-divider';
+  const swap = document.createElement('button');
+  swap.type = 'button';
+  swap.className = 'pm-par-swap';
+  swap.title = t('parSwap');
+  swap.setAttribute('aria-label', t('parSwap'));
+  swap.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 3l4 4-4 4"/><path d="M3 7h18"/><path d="M7 21l-4-4 4-4"/><path d="M21 17H3"/></svg>';
+  swap.addEventListener('click', (e) => { e.stopPropagation(); pmParSwapSides(); });
+  swap.addEventListener('mousedown', (e) => e.stopPropagation());
+  const pick = document.createElement('div');
+  pick.className = 'pm-par-pick';
+  pick.innerHTML = '<div class="pm-par-pick-msg"><span></span><small></small></div>';
+  pick.querySelector('span').textContent = t('parPickRight');
+  pick.querySelector('small').textContent = t('parPickCancel');
+  pmPar.work.appendChild(div);
+  pmPar.work.appendChild(swap);
+  pmPar.work.appendChild(pick);
+  pmPar.dividerEl = div; pmPar.swapEl = swap; pmPar.pickEl = pick;
+  document.addEventListener('mousemove', pmParSwapProximity, true);
+  document.documentElement.addEventListener('mouseleave', pmParSwapProximityReset);
+}
+// The swap button is 80% transparent and fades in as the pointer comes close (full at about 24 px from it).
+function pmParSwapProximity(e) {
+  const el = pmPar.swapEl;
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  const dx = e.clientX - (r.left + r.width / 2), dy = e.clientY - (r.top + r.height / 2);
+  const d = Math.sqrt(dx * dx + dy * dy);
+  const NEAR = 28, FAR = 170;
+  const k = d <= NEAR ? 1 : (d >= FAR ? 0 : 1 - (d - NEAR) / (FAR - NEAR));
+  el.style.setProperty('--pm-par-swap-op', (0.2 + 0.8 * k).toFixed(3));
+}
+function pmParSwapProximityReset() {
+  if (pmPar.swapEl) pmPar.swapEl.style.removeProperty('--pm-par-swap-op');
+}
+function pmParRemoveChrome() {
+  document.removeEventListener('mousemove', pmParSwapProximity, true);
+  document.documentElement.removeEventListener('mouseleave', pmParSwapProximityReset);
+  pmPar.panes.forEach(q => { if (q.head) { q.head.remove(); q.head = null; } });
+  ['dividerEl', 'swapEl', 'pickEl'].forEach(k => { if (pmPar[k]) { pmPar[k].remove(); pmPar[k] = null; } });
+}
+// Each title bar: the document's name (with the star of an unsaved one) and how many pages it has.
+function pmParRefreshHeads() {
+  if (!pmPar.on) return;
+  pmPar.panes.forEach(q => {
+    if (!q.head) return;
+    const tab = q.tabId != null ? pmTabs.find(x => x.id === q.tabId) : null;
+    const title = q.head.querySelector('.pm-par-title'), count = q.head.querySelector('.pm-par-count');
+    if (!tab) { title.textContent = ''; count.textContent = ''; return; }
+    const dirty = (tab.id === pmActiveId) ? documentDirty : tab.dirty;
+    title.innerHTML = (dirty ? '<span class="pm-par-star">*</span>' : '') + escapeHtml(tab.fileName || t('tabNoName'));
+    title.title = tab.fileName || '';
+    count.textContent = t('pages') + ' ' + q.pages.querySelectorAll('.page').length;
+  });
+}
+
+// ── entering, leaving ──
+// The tabs side by side, the left one first.
+function pmParLink(a, b) {
+  const ia = pmTabs.indexOf(a), ib = pmTabs.indexOf(b);
+  const left = ia <= ib ? a : b, right = ia <= ib ? b : a;
+  pmTabs.splice(pmTabs.indexOf(right), 1);
+  pmTabs.splice(pmTabs.indexOf(left) + 1, 0, right);
+  left.pairId = right.id;
+  right.pairId = left.id;
+  return { left, right };
+}
+// A pair whose tabs have been parted (a drag, a drop between them) is brought together again.
+function pmParNormalizePairs() {
+  for (const t0 of pmTabs.slice()) {
+    if (t0.pairId == null) continue;
+    const mate = pmTabs.find(x => x.id === t0.pairId);
+    if (!mate || mate.pairId !== t0.id) { t0.pairId = null; continue; }
+    const i = pmTabs.indexOf(t0), j = pmTabs.indexOf(mate);
+    if (i < j && j !== i + 1) { pmTabs.splice(j, 1); pmTabs.splice(i + 1, 0, mate); }
+  }
+}
+
+// Draws a tab into the pane (as showing it does), leaving the globals to describe it.
+async function pmParFillPane(pane) {
+  const t0 = pmTabs.find(x => x.id === pane.tabId);
+  if (!t0) return;
+  destroyLazyThumbnailPipeline();
+  pmParUsePane(pane);
+  await pmActivateStandard(t0.id, true, true);
+}
+
+// The view of tabs a (left) and b (right) on screen, and the tab active the one being worked in.
+async function pmParShow(a, b, activeTab) {
+  const { left, right } = (a.pairId === b.id && b.pairId === a.id) ? { left: pmTabs.indexOf(a) <= pmTabs.indexOf(b) ? a : b, right: pmTabs.indexOf(a) <= pmTabs.indexOf(b) ? b : a } : pmParLink(a, b);
+  const active = activeTab === right ? right : (activeTab === left ? left : (a === left ? a : left));
+  if (pmPar.on) {
+    if (pmActiveId != null) pmCaptureActive();
+    pmParTeardown();
+  }
+  pmPar.on = true;
+  pmPar.pick = null;
+  document.body.classList.add('pm-par-on');
+  document.body.classList.remove('pm-par-picking');
+  const [pl, pr] = pmPar.panes;
+  pl.tabId = left.id; pr.tabId = right.id;
+  pl.bag = pr.bag = null;
+  pl.scroll.style.order = ''; pr.scroll.style.order = '';
+  pmParBuildChrome();
+  const first = active === left ? pr : pl, second = active === left ? pl : pr;
+  await pmParFillPane(first);
+  first.bag = pmParStashBag();
+  await pmParFillPane(second);
+  pmParRefreshHeads();
+}
+
+// The layout of one page area again; the pages that are in the left pane are the next tab's to replace.
+function pmParTeardown() {
+  const wasOn = pmPar.on;
+  pmPar.on = false;
+  pmPar.pick = null;
+  document.body.classList.remove('pm-par-on', 'pm-par-picking');
+  const [pl, pr] = pmPar.panes;
+  pr.pages.innerHTML = '';
+  pl.tabId = pr.tabId = null;
+  pl.bag = pr.bag = null;
+  pl.scroll.style.order = ''; pr.scroll.style.order = '';
+  pmParRemoveChrome();
+  destroyLazyThumbnailPipeline();
+  pmParUsePane(pl);
+  pmPar.panes.forEach(q => q.scroll.classList.remove('pm-pane-active'));
+  return wasOn;
+}
+
+// The cross of a pane: its document leaves the view (its tab stays), the other one stays as it was,
+// the two tabs next to each other, not a pair any more.
+async function pmParUngroup(keepId) {
+  if (!pmPar.on) return;
+  if (pmPar.pick) { pmParCancelPick(); return; }
+  if (pmActiveId != null) pmCaptureActive();
+  pmPar.panes.forEach(q => {
+    const tab = q.tabId != null ? pmTabs.find(x => x.id === q.tabId) : null;
+    if (tab) tab.pairId = null;
+  });
+  pmParTeardown();
+  const keep = pmTabs.find(x => x.id === keepId) || pmTabs.find(x => x.id === pmActiveId);
+  if (keep) await pmActivateStandard(keep.id, true, true);
+  pmRenderBar(); pmSyncLayout();
+}
+
+// Closing a tab of a pair (or the pair): the view ends and the pair is no more; the tab worked on stays shown.
+async function pmParDropPairOf(tab) {
+  if (tab.pairId == null) return;
+  const mate = pmTabs.find(x => x.id === tab.pairId);
+  const shown = pmPar.on && (pmParPaneOf(tab.id) || (mate && pmParPaneOf(mate.id)));
+  tab.pairId = null;
+  if (mate) mate.pairId = null;
+  if (!shown) return;
+  if (pmActiveId != null) pmCaptureActive();
+  pmParTeardown();
+  const act = pmTabs.find(x => x.id === pmActiveId);
+  if (act) await pmActivateStandard(act.id, true, true);
+}
+
+// "Раздельный просмотр" on a merged tab: the two tabs stay next to each other, as two; the one worked in stays shown.
+async function pmParSplit(tabId) {
+  const tab = pmTabs.find(x => x.id === tabId);
+  if (!tab || tab.pairId == null) return;
+  await pmParDropPairOf(tab);
+  pmRenderBar(); pmSyncLayout();
+}
+
+// The two documents swap sides: the two panes by their order in the row, the two tabs in the bar.
+function pmParSwapSides() {
+  if (!pmPar.on || pmPar.pick) return;
+  const [pl, pr] = pmPar.panes;
+  const lNow = pmParLeftPane();
+  if (lNow === pl) { pl.scroll.style.order = '2'; pr.scroll.style.order = '1'; }
+  else { pl.scroll.style.order = ''; pr.scroll.style.order = ''; }
+  const a = pmTabs.find(x => x.id === pl.tabId), b = pmTabs.find(x => x.id === pr.tabId);
+  if (a && b) {
+    const ia = pmTabs.indexOf(a), ib = pmTabs.indexOf(b);
+    pmTabs[ia] = b; pmTabs[ib] = a;
+  }
+  pmRenderBar();
+}
+
+// ── the menu item: one tab selected asks for the other, two selected are shown at once ──
+function pmParCanStart(ids) {
+  if (isTouchDevice || !pmTabsEnabled() || isLoading) return false;
+  if (ids.length < 1 || ids.length > 2 || pmTabs.length < 2) return false;
+  return ids.every(id => {
+    const tab = pmTabs.find(x => x.id === id);
+    return tab && tab.pairId == null && !tab.newDocEmpty;
+  });
+}
+async function pmParStart(ids) {
+  if (!pmParCanStart(ids)) return;
+  if (ids.length === 2) {
+    const tabs = ids.map(id => pmTabs.find(x => x.id === id));
+    const { left, right } = pmParLink(tabs[0], tabs[1]);
+    const act = pmTabs.find(x => x.id === pmActiveId);
+    if (pmActiveId != null) pmCaptureActive();
+    await pmParShow(left, right, act === right ? right : left);
+    pmClearTabSelection();
+    pmRenderBar();
+    return;
+  }
+  await pmParBeginPick(ids[0]);
+}
+// One tab: it takes the left half, the screen goes dark and says that the right half's tab is asked for.
+async function pmParBeginPick(leftId) {
+  if (pmActiveId !== leftId || pmPar.on) await pmActivate(leftId);
+  const lt = pmTabs.find(x => x.id === leftId);
+  if (!lt) return;
+  pmParUsePane(pmPar.panes[0]);
+  pmPar.on = true;
+  pmPar.pick = { leftId };
+  document.body.classList.add('pm-par-on', 'pm-par-picking');
+  const [pl, pr] = pmPar.panes;
+  pl.tabId = leftId; pr.tabId = null; pl.bag = pr.bag = null;
+  pl.scroll.style.order = ''; pr.scroll.style.order = '';
+  pmParBuildChrome();
+  pmPar.pickEl.querySelector('span').textContent = t('parPickRight');
+  pmPar.pickEl.querySelector('small').textContent = t('parPickCancel');
+  pmParUsePane(pl);
+  applyScale();
+  pmParRefreshHeads();
+  pmRenderBar();
+}
+function pmParCancelPick() {
+  if (!pmPar.pick) return;
+  pmParTeardown();
+  const act = pmTabs.find(x => x.id === pmActiveId);
+  if (act) { applyScale(); }
+  pmRenderBar();
+}
+// A tab clicked while the right half is asked for.
+async function pmParPickChoose(id) {
+  const pk = pmPar.pick;
+  const rt = pmTabs.find(x => x.id === id);
+  const lt = pk ? pmTabs.find(x => x.id === pk.leftId) : null;
+  if (!pk || !rt || !lt) return;
+  if (rt.id === lt.id) { pmParCancelPick(); return; }
+  if (rt.pairId != null || rt.newDocEmpty) return;
+  pmPar.pick = null;
+  document.body.classList.remove('pm-par-picking');
+  pmParLink(lt, rt);
+  const [pl, pr] = pmPar.panes;
+  pmCaptureActive();
+  pl.bag = pmParStashBag();
+  pr.tabId = rt.id;
+  await pmParFillPane(pr);
+  pmClearTabSelection();
+  pmParRefreshHeads();
+  pmRenderBar();
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && pmPar.pick) { e.preventDefault(); pmParCancelPick(); }
+}, true);
 
 function pmResetGlobalsEmpty() {
   // A tab opening on a fresh document starts from a plain view - it must not
@@ -38410,6 +39027,11 @@ async function pmCloseTab(id) {
       { html: true, yesText: t('confirmCloseTabYes'), noText: t('confirmCloseTabNo') });
     if (!ok) return;
   }
+  // A tab of a parallel view closed: the view ends first (the other tab stays, shown on its own).
+  if (tab.pairId != null || (pmPar.on && pmParPaneOf(id))) {
+    await pmParDropPairOf(tab);
+    if (pmPar.pick) pmParCancelPick();
+  }
   if (typeof pmClearRecoverySnapshot === 'function') pmClearRecoverySnapshot('tab:' + id).catch(() => {});
   pmTabs.splice(idx, 1);
   pmSelectedTabIds.delete(id);
@@ -38564,6 +39186,8 @@ function pmOpenTabMenu(clientX, clientY, tabId) {
   if (!(pmSelectedTabIds.size > 0 && pmSelectedTabIds.has(tabId))) {
     pmClearTabSelection();
     pmSelectedTabIds.add(tabId);
+    // A merged tab is one tab: its menu is for both halves.
+    if (pmTabs[idx].pairId != null && pmTabs.some(x => x.id === pmTabs[idx].pairId)) pmSelectedTabIds.add(pmTabs[idx].pairId);
     pmTabSelectAnchor = tabId;
     pmUpdateTabSelectionVisual();
   }
@@ -38586,6 +39210,12 @@ function pmOpenTabMenu(clientX, clientY, tabId) {
   // One name at a time: with several tabs selected it would be unclear which.
   const renameBtn = menu.querySelector('[data-action="rename"]');
   if (renameBtn) renameBtn.disabled = selCount > 1;
+  // On a merged tab the menu offers to split it; elsewhere, to start a parallel view.
+  const parBtn = menu.querySelector('[data-action="parallel"]');
+  const splitBtn = menu.querySelector('[data-action="split"]');
+  const inPair = pmTabs[idx] && pmTabs[idx].pairId != null;
+  if (parBtn) { parBtn.hidden = !!inPair; parBtn.disabled = !pmParCanStart(pmGetSelectedTabIds()); }
+  if (splitBtn) splitBtn.hidden = !inPair;
   const w = menu.offsetWidth || 210;
   const h = menu.offsetHeight || 120;
   let nx = clientX + 4, ny = clientY + 4;
@@ -38760,6 +39390,8 @@ function pmShowTabHoldMenu(el, tabId) {
     else if (action === 'close-others') await pmCloseTabsExceptSelected();
     else if (action === 'close-right') await pmCloseTabsToRight(tabId);
     else if (action === 'rename') pmStartTabRename(tabId);
+    else if (action === 'parallel') await pmParStart(pmGetSelectedTabIds());
+    else if (action === 'split') await pmParSplit(tabId);
   });
   document.addEventListener('mousedown', (e) => {
     if (menu.style.display !== 'block' || menu.contains(e.target)) return;
@@ -38784,9 +39416,14 @@ function pmShowTabHoldMenu(el, tabId) {
 // 3px: .tab-bar's gap between tabs.
 // Touch: no narrower than PM_TOUCH_TAB_MIN_W - the bar scrolls sideways
 // instead, a name squeezed to a few letters being of no use under a finger.
+// A merged tab (two tabs of a parallel view) is a little wider than an ordinary one, not twice as wide.
+const PM_PAIR_WIDTH_K = 1.25;
 function pmComputeWidth(n, avail) {
   if (n <= 0) return 0;
-  const w = Math.max(1, Math.min(TAB_MAX_W, Math.floor((avail - 3 * (n - 1)) / n)));
+  const pairs = Math.min(Math.floor(n / 2), Math.floor(pmTabs.filter(x => x.pairId != null).length / 2));
+  const units = n - pairs;                                   // ordinary tabs and merged tabs
+  const eff = (n - 2 * pairs) + pairs * PM_PAIR_WIDTH_K;      // widths of an ordinary tab they take together
+  const w = Math.max(1, Math.min(TAB_MAX_W, Math.floor((avail - 3 * (units - 1)) / eff)));
   return isTouchDevice ? Math.max(PM_TOUCH_TAB_MIN_W, w) : w;
 }
 
@@ -39142,13 +39779,38 @@ function pmTabDragMove(e) {
     return;
   }
 
-  const { stride, n, els, isGroup, groupStart, groupSize, draggedEl, groupEls } = pmDrag;
-  const minDx = -groupStart * stride;
-  const maxDx = (n - groupSize - groupStart) * stride;
-  dx = Math.max(minDx, Math.min(maxDx, dx));
-
-  const targetStart = groupStart + Math.round(dx / stride);
+  const { n, els, isGroup, groupStart, groupSize, draggedEl, groupEls } = pmDrag;
+  // The tabs are not all of one width (the halves of a merged tab are narrower) and a merged tab goes
+  // as one piece: where the dragged block lands is worked out from the tabs' real edges, a merged tab
+  // counting as one tab whose middle the block has to pass.
+  const lefts = els.map(el => el.offsetLeft);
+  const rights = els.map(el => el.offsetLeft + el.offsetWidth);
+  const GAP = 3;
+  const blockLeft = lefts[groupStart], blockRight = rights[groupStart + groupSize - 1];
+  dx = Math.max(lefts[0] - blockLeft, Math.min(rights[n - 1] - blockRight, dx));
+  const joined = (i) => els.length === pmTabs.length && i >= 0 && i + 1 < n &&
+    pmTabs[i].pairId != null && pmTabs[i].pairId === pmTabs[i + 1].id;
+  const spanFrom = (i) => (i < n ? lefts[i] : rights[n - 1] + GAP);   // where tab i starts (the bar's end if none)
+  let targetStart = groupStart;
+  if (dx > 0) {
+    let end = groupStart + groupSize;
+    while (end < n) {
+      let last = end; while (joined(last)) last++;
+      if (blockRight + dx > (lefts[end] + rights[last]) / 2) end = last + 1; else break;
+    }
+    targetStart = end - groupSize;
+  } else if (dx < 0) {
+    let start = groupStart;
+    while (start > 0) {
+      let first = start - 1; while (joined(first - 1)) first--;
+      if (blockLeft + dx < (lefts[first] + rights[start - 1]) / 2) start = first; else break;
+    }
+    targetStart = start;
+  }
   pmDrag.targetStart = targetStart;
+  const blockSpan = spanFrom(groupStart + groupSize) - blockLeft;
+  pmDrag.finalDx = targetStart > groupStart ? spanFrom(targetStart + groupSize) - spanFrom(groupStart + groupSize)
+    : (targetStart < groupStart ? -(lefts[groupStart] - lefts[targetStart]) : 0);
 
   if (isGroup && groupEls && groupEls.length > 1) {
     groupEls.forEach(el => { el.style.transform = 'translateX(' + dx + 'px)'; });
@@ -39161,9 +39823,9 @@ function pmTabDragMove(e) {
     if (!isGroup && i === pmDrag.fromIndex) return;
     let shift = 0;
     if (groupStart < targetStart) {
-      if (i >= groupStart + groupSize && i < targetStart + groupSize) shift = -groupSize * stride;
+      if (i >= groupStart + groupSize && i < targetStart + groupSize) shift = -blockSpan;
     } else if (groupStart > targetStart) {
-      if (i >= targetStart && i < groupStart) shift = groupSize * stride;
+      if (i >= targetStart && i < groupStart) shift = blockSpan;
     }
     el.style.transform = shift ? ('translateX(' + shift + 'px)') : '';
   });
@@ -39187,8 +39849,8 @@ function pmTabDragEnd() {
     pmDragSuppressClick = true;
     setTimeout(() => { pmDragSuppressClick = false; }, 50);
 
-    const { isGroup, groupStart, groupSize, targetStart, stride, draggedEl, groupEls } = drag;
-    const finalDx = (targetStart - groupStart) * stride;
+    const { isGroup, groupStart, groupSize, targetStart, draggedEl, groupEls } = drag;
+    const finalDx = drag.finalDx || 0;
     const animateEls = (isGroup && groupEls && groupEls.length > 1) ? groupEls : [draggedEl];
     if (!animateEls[0]) { pmRenderBar(); return; }
 
@@ -39239,18 +39901,25 @@ function pmRenderBar() {
   tabBarEl.innerHTML = '';
   if (!pmTabs.length) { pmTabRename = null; return; }
   pmAlignBarLeft();
+  pmParNormalizePairs();
   const w = pmComputeWidth(pmTabs.length, pmAvailWidth());
   const tabNoNameLabel = t('tabNoName');
   // (touch: no tooltip - holding the cross would show it along with the tab's menu)
   const tabCloseTitle = isTouchDevice ? '' : ' title="' + escapeHtml(t('tabCloseTitle')) + '"';
-  pmTabs.forEach(tab => {
+  pmTabs.forEach((tab, tabIdx) => {
     const el = document.createElement('div');
     const sel = pmSelectedTabIds.has(tab.id);
-    el.className = 'pm-tab' + (tab.id === pmActiveId ? ' active' : '') + (sel ? ' pm-tab-selected' : '');
+    // The two tabs of a parallel view look like one: [name | name], the cross at the end.
+    const mate = tab.pairId != null ? pmTabs.find(x => x.id === tab.pairId) : null;
+    const pairSide = mate ? (pmTabs.indexOf(mate) > tabIdx ? 'l' : 'r') : null;
+    const pairActive = !!mate && (tab.id === pmActiveId || mate.id === pmActiveId);
+    el.className = 'pm-tab' + ((tab.id === pmActiveId || pairActive) ? ' active' : '') + (sel ? ' pm-tab-selected' : '') +
+      (pairSide ? ' pm-tab-pair-' + pairSide : '') + (pairActive && tab.id === pmActiveId ? ' pm-tab-half-focus' : '');
     // (touch: the active tab is a little wider - its close cross takes room)
-    el.style.width = (isTouchDevice && tab.id === pmActiveId ? Math.max(w, PM_TOUCH_TAB_MIN_W + 32) : w) + 'px';
-    el.title = tab.fileName || '';
+    el.style.width = (pairSide ? Math.round(w * PM_PAIR_WIDTH_K / 2) : (isTouchDevice && tab.id === pmActiveId ? Math.max(w, PM_TOUCH_TAB_MIN_W + 32) : w)) + 'px';
+    el.title = mate ? ((pairSide === 'l' ? tab : mate).fileName || '') + ' | ' + ((pairSide === 'l' ? mate : tab).fileName || '') : (tab.fileName || '');
     el.dataset.tabId = tab.id;
+    if (mate) el.dataset.pairId = mate.id;
     const dirty = (tab.id === pmActiveId) ? documentDirty : tab.dirty;
     // A drawn cross (not the × character, which sits on the text baseline
     // and came out a pixel or two above the centre of its hover circle).
@@ -39266,7 +39935,15 @@ function pmRenderBar() {
         return;
       }
       if (e.target && e.target.classList.contains('pm-tab-close')) {
-        e.stopPropagation(); pmCloseTab(tab.id); return;
+        e.stopPropagation();
+        if (mate) pmCloseTabIds([tab.id, mate.id]); else pmCloseTab(tab.id);
+        return;
+      }
+      // The right half of a parallel view is being asked for: this tab is it.
+      if (pmPar.pick) {
+        e.preventDefault(); e.stopPropagation();
+        if (!isLoading) pmParPickChoose(tab.id).catch(err => console.error(err));
+        return;
       }
       if (pmTabIsSelectModifier(e)) {
         e.preventDefault(); e.stopPropagation();
@@ -39281,14 +39958,26 @@ function pmRenderBar() {
     });
     el.addEventListener('mousedown', (e) => {
       pmTabSyncModifiers(e);
-      if (e.button === 1) { e.preventDefault(); pmCloseTab(tab.id); return; }
+      if (e.button === 1) {
+        e.preventDefault();
+        if (mate) pmCloseTabIds([tab.id, mate.id]); else pmCloseTab(tab.id);
+        return;
+      }
       if (e.button === 0 && pmTabIsSelectModifier(e)) {
         e.stopPropagation();
         return;
       }
       // (touch: the mouse events a tap ends with - the finger scrolls the
       // bar rather than dragging tabs along it)
-      if (e.button === 0 && !isTouchDevice) pmTabDragStart(e, tab.id);
+      if (e.button === 0 && !isTouchDevice && !pmPar.pick) {
+        // A pair is dragged as one: both of its tabs are the selection.
+        if (mate && !pmTabIsSelectModifier(e) && !(e.target && e.target.classList.contains('pm-tab-close'))) {
+          pmSelectedTabIds.clear();
+          pmSelectedTabIds.add(tab.id); pmSelectedTabIds.add(mate.id);
+          pmTabSelectAnchor = tab.id;
+        }
+        pmTabDragStart(e, tab.id);
+      }
     });
     el.addEventListener('contextmenu', (e) => {
       if (!pmTabsEnabled()) return;
@@ -39328,6 +40017,7 @@ function pmRenderBar() {
   if (typeof pmUpdatePageDragTabVisuals === 'function' && isDragActive) {
     pmUpdatePageDragTabVisuals();
   }
+  pmParRefreshHeads();
 }
 
 // Touch: the bar scrolls sideways. Back where the finger left it, with the
@@ -44846,7 +45536,7 @@ function peRestorePageSelectionSnapshot() {
   if (lastSelectedIndex != null && (lastSelectedIndex < 0 || lastSelectedIndex > maxIdx || !selectedPages.has(lastSelectedIndex))) {
     lastSelectedIndex = selectedPages.size ? [...selectedPages][0] : null;
   }
-  document.querySelectorAll('.page').forEach(p => {
+  pagesContainer.querySelectorAll('.page').forEach(p => {
     const i = parseInt(p.dataset.index, 10);
     if (!Number.isNaN(i)) p.classList.toggle('selected', selectedPages.has(i));
   });
@@ -45085,7 +45775,7 @@ function editSelectedPage() {
     const prevLast = lastSelectedIndex;
     const paintSelection = !(typeof readModeActive !== 'undefined' && readModeActive);
     selectedPages.clear();
-    document.querySelectorAll('.page').forEach(p => p.classList.remove('selected'));
+    pagesContainer.querySelectorAll('.page').forEach(p => p.classList.remove('selected'));
     selectedPages.add(idx);
     if (paintSelection) {
       const div = pagesContainer.querySelector(`.page[data-index="${idx}"]`);
@@ -45098,7 +45788,7 @@ function editSelectedPage() {
       await fn();
     } finally {
       selectedPages.clear();
-      document.querySelectorAll('.page').forEach(p => p.classList.remove('selected'));
+      pagesContainer.querySelectorAll('.page').forEach(p => p.classList.remove('selected'));
       prevSelected.forEach(i => {
         selectedPages.add(i);
         if (paintSelection) {
@@ -45517,7 +46207,7 @@ function editSelectedPage() {
       targets.every(i => selectedPages.has(i));
     if (same) return true;
     selectedPages.clear();
-    document.querySelectorAll('.page').forEach(p => p.classList.remove('selected'));
+    pagesContainer.querySelectorAll('.page').forEach(p => p.classList.remove('selected'));
     targets.forEach(i => {
       selectedPages.add(i);
       const div = pagesContainer.querySelector(`.page[data-index="${i}"]`);
@@ -46151,7 +46841,7 @@ function editSelectedPage() {
 
   function gridTextSelRangeToPdfRects(range, pageIdx) {
     if (!range || pageIdx == null || !pdfDoc) return [];
-    const pageDiv = document.querySelector('.page[data-index="' + pageIdx + '"]');
+    const pageDiv = pagesContainer.querySelector('.page[data-index="' + pageIdx + '"]');
     if (!pageDiv) return [];
     const layer = pageDiv.querySelector('.page-text-layer');
     const inner = layer && layer.querySelector('.page-text-layer-inner.textLayer');
@@ -46194,7 +46884,7 @@ function editSelectedPage() {
   /** Selection → page-fraction rects (same space as pe objects / peTextSelRangeToPageFracs). */
   function gridTextSelRangeToPageFracs(range, pageIdx) {
     if (!range || pageIdx == null) return [];
-    const pageDiv = document.querySelector('.page[data-index="' + pageIdx + '"]');
+    const pageDiv = pagesContainer.querySelector('.page[data-index="' + pageIdx + '"]');
     if (!pageDiv) return [];
     const layer = pageDiv.querySelector('.page-text-layer');
     const inner = layer && layer.querySelector('.page-text-layer-inner.textLayer');
@@ -46276,7 +46966,7 @@ function editSelectedPage() {
   /** Hit-test pe text-markup objects under a client point on a preview page. */
   function gridHitTestTextMarkups(pageIdx, clientX, clientY) {
     if (pageIdx == null || typeof peLoadPageEditorObjects !== 'function') return [];
-    const pageDiv = document.querySelector('.page[data-index="' + pageIdx + '"]');
+    const pageDiv = pagesContainer.querySelector('.page[data-index="' + pageIdx + '"]');
     if (!pageDiv) return [];
     const layer = pageDiv.querySelector('.page-text-layer')
       || pageDiv.querySelector('.img-wrapper')
@@ -46343,7 +47033,7 @@ function editSelectedPage() {
   // Dedicated preview refresh from known bytes (one pdf.js load for raster
   // + HQ cache + text layer). Avoids concurrent pdfDoc.save() with history.
   async function applyMarkupBytesToPreview(pageIdx, bytes) {
-    const div = document.querySelector('.page[data-index="' + pageIdx + '"]');
+    const div = pagesContainer.querySelector('.page[data-index="' + pageIdx + '"]');
     const img = div && div.querySelector('.img-wrapper img');
     if (!img || !bytes) return;
     let pj = null;
